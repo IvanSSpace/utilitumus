@@ -10,7 +10,7 @@ final class FanHelperInstaller: ObservableObject {
 
     enum Status: Equatable {
         case notInstalled
-        /// Стоит, но не совпадает с помощником внутри приложения (пересобрали).
+        /// Стоит, но версия старше помощника внутри приложения.
         case outdated
         case ready
     }
@@ -36,7 +36,27 @@ final class FanHelperInstaller: ObservableObject {
             status = .notInstalled
             return
         }
-        status = fm.contentsEqual(atPath: Self.installedPath, andPath: Self.bundledPath) ? .ready : .outdated
+        // По номеру версии, а не побайтово: байты меняются при каждой сборке
+        // (и всегда отличаются у сборки с GitHub), а просить пароль надо, только
+        // когда помощник действительно изменился.
+        let installed = Self.version(of: Self.installedPath)
+        status = installed != nil && installed == Self.version(of: Self.bundledPath) ? .ready : .outdated
+    }
+
+    /// `utilitumus-fan version`; nil — старый помощник без этой команды.
+    private static func version(of path: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["version"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text?.isEmpty == false ? text : nil
     }
 
     func install() {

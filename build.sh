@@ -11,6 +11,23 @@ APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 # Должна совпадать с LSMinimumSystemVersion в Info.plist.
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 
+# Подпись. macOS привязывает разрешения («Универсальный доступ», запись звука)
+# к подписи: ad-hoc подпись меняется с каждой сборкой, и разрешения слетают.
+# Постоянный сертификат «Utilitumus Signing» (локально — ~/.config/utilitumus,
+# в CI — из секретов) даёт одинаковую подпись у всех версий. Нет его — ad-hoc.
+SIGN_NAME="Utilitumus Signing"
+KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
+KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
+if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
+  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
+fi
+if security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
+  SIGN_ID="$SIGN_NAME"
+else
+  SIGN_ID="-"
+  echo "⚠️  Сертификата «$SIGN_NAME» нет — подпись ad-hoc, разрешения macOS слетят после пересборки."
+fi
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -25,14 +42,14 @@ swiftc -O -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/utilitumus-fan" \
   Sources/Shared/SMC.swift Sources/FanHelper/main.swift \
   -framework IOKit
-codesign --force --sign - "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
+codesign --force --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
 # Публичный lambscape для модуля «Нагрузка» (обновлять: scripts/update-lambscape.sh)
 cp -R Vendor/lambscape "$APP_BUNDLE/Contents/Resources/lambscape"
 
-codesign --force --deep --sign - "$APP_BUNDLE"
+codesign --force --sign "$SIGN_ID" "$APP_BUNDLE"
 
 echo "Собрано: $APP_BUNDLE"
 

@@ -149,6 +149,13 @@ final class Updater: ObservableObject {
             throw UpdateError("В архиве не та версия Utilitumus")
         }
         try run("/usr/bin/codesign", ["--verify", "--deep", app.path])
+        // Текущая версия подписана постоянным сертификатом — новая обязана быть
+        // подписана им же: иначе подменённый архив встал бы на место приложения.
+        // Ad-hoc подпись (сборка из исходников без сертификата) так не сверить.
+        let requirement = try designatedRequirement(of: target)
+        if requirement.contains("certificate leaf") {
+            try run("/usr/bin/codesign", ["--verify", "--test-requirement=\(requirement)", app.path])
+        }
 
         // Копия рядом с целью (тот же том) — тогда подмена атомарная.
         let staged = target.deletingLastPathComponent().appendingPathComponent("Utilitumus.app.new")
@@ -165,6 +172,23 @@ final class Updater: ObservableObject {
         shell.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", app.path]
         try? shell.run()
         NSApp.terminate(nil)
+    }
+
+    /// `codesign -d -r-` → строка вида `=identifier "…" and certificate leaf = H"…"`.
+    nonisolated private static func designatedRequirement(of app: URL) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        process.arguments = ["-d", "-r-", app.path]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard let line = text.split(separator: "\n").first(where: { $0.hasPrefix("designated => ") }) else {
+            throw UpdateError("Не удалось прочитать подпись текущей версии")
+        }
+        return "=" + line.dropFirst("designated => ".count)
     }
 
     nonisolated private static func run(_ tool: String, _ args: [String]) throws {

@@ -7,7 +7,12 @@ import Foundation
 // Поверхность намеренно узкая — ни путей, ни шелла, ни окружения:
 //   utilitumus-fan auto <fan>        вернуть вентилятор под управление системы
 //   utilitumus-fan set <fan> <rpm>   держать обороты (зажимается в Mn…Mx вентилятора)
+//   utilitumus-fan version           версия помощника (приложение сверяет её со своей)
 // <fan> = 0…FNum-1. Код выхода 0 — SMC принял запись и режим перечитан.
+
+/// Менять при КАЖДОМ изменении поведения помощника: по ней приложение решает,
+/// просить ли «Обновить доступ» (пароль). Сборка сама её не трогает.
+let helperVersion = "3"
 
 func fail(_ message: String) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -25,6 +30,10 @@ func waitUntil(_ condition: () -> Bool) -> Bool {
 }
 
 let args = CommandLine.arguments
+if args.count == 2 && args[1] == "version" {
+    print(helperVersion)
+    exit(0)
+}
 guard args.count >= 3, let fan = Int(args[2]), fan >= 0 else {
     fail("usage: utilitumus-fan auto <fan> | set <fan> <rpm>")
 }
