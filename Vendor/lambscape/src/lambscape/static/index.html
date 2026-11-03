@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru" data-theme="onedark" data-density="normal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="lambscape-token" content="{{TOKEN}}">
+<meta name="color-scheme" content="dark light">
+<title>lambscape</title>
+<link rel="icon" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+<!-- в <head> без defer: тема — до первой отрисовки -->
+<script src="/static/app.js"></script>
+</head>
+<body class="boot">
+<header class="top">
+  <div class="bar">
+    <a class="brand" href="#overview" aria-label="lambscape — обзор">
+      <svg class="logo" viewBox="0 0 20 20" aria-hidden="true"><path class="wool" d="M5.6 15.5a3.1 3.1 0 0 1-.5-6.1 3.6 3.6 0 0 1 6.8-2 3.1 3.1 0 0 1 4.6 3.4 2.6 2.6 0 0 1-1 4.7Z"/><circle class="eye" cx="7.4" cy="12" r="1"/></svg>
+      <span>lambscape</span>
+    </a>
+    <span class="when"><span class="fresh" id="h-fresh" hidden>обновлено только что</span><time class="clock mono" id="h-time" title="Время снимка">—</time></span>
+    <button type="button" class="btn" id="refresh-btn" aria-label="Обновить" title="Обновить: собрать данные заново, не дожидаясь опроса"><span class="ico" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8"/><path d="M13.2 2.6v3.2H10"/></svg></span><span class="t">Обновить</span></button>
+    <!-- чипы и вид: на широкой шапке — по своим местам, на узкой — второй строкой -->
+    <div class="row2">
+      <div class="meta">
+        <span class="chip st" id="h-pressure" title="Давление памяти macOS"><i class="dot"></i><span class="lbl">давление</span> <b>—</b></span>
+        <span class="chip line mono" id="h-swap" title="Своп: занято / всего">своп —</span>
+      </div>
+      <div class="seg" id="view-sw" role="group" aria-label="Вид панели"><button type="button" data-v="simple" title="Главное: сколько занято, кто ест память, что выключить">Просто</button><button type="button" data-v="full" title="Всё: карта памяти, процессы, история, диск">Подробно</button></div>
+    </div>
+    <button type="button" class="btn" id="theme-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="theme-pop"><span class="ico" aria-hidden="true"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path class="fill" d="M8 2.5a5.5 5.5 0 0 1 0 11Z"/></svg></span>Тема</button>
+  </div>
+  <div class="ram" id="h-ram" aria-hidden="true"></div>
+  <nav class="tabs" aria-label="Разделы">
+    <a href="#overview" data-tab="overview">Обзор</a>
+    <a href="#sessions" data-tab="sessions">Сессии <span class="n mono" id="n-sessions"></span></a>
+    <a href="#bots" data-tab="bots" hidden>Фоновое <span class="n mono" id="n-bots"></span></a>
+    <a href="#memory" data-tab="memory">Память</a>
+  </nav>
+</header>
+
+<main>
+  <section class="view two" id="v-overview" aria-label="Обзор"></section>
+  <section class="view" id="v-sessions" aria-label="Сессии" hidden></section>
+  <section class="view" id="v-bots" aria-label="Фоновое" hidden></section>
+  <section class="view two" id="v-memory" aria-label="Память" hidden>
+    <div class="col">
+      <div class="col" id="mem-a"></div>
+      <section class="card" id="hist">
+        <h2 class="h">Память за 24 ч <span class="r muted" id="hist-note"></span></h2>
+        <div id="hist-body"><p class="empty">Загружаю историю…</p></div>
+      </section>
+      <section class="card" id="disk" aria-label="Диск"></section>
+    </div>
+    <div class="col" id="mem-b"></div>
+  </section>
+</main>
+<div class="bulk" id="bulk" role="region" aria-label="Выбранное" hidden>
+  <span class="bk-n" id="bk-n" aria-live="polite"></span>
+  <button type="button" class="danger" id="bk-stop">Остановить</button>
+  <button type="button" id="bk-off" hidden>Остановить и убрать из автозапуска</button>
+  <button type="button" class="ghost" id="bk-clear">Снять выбор</button>
+</div>
+<footer class="foot mono" id="foot"></footer>
+
+<div class="pop" id="theme-pop" role="dialog" aria-label="Тема" hidden></div>
+
+<dialog class="confirm" id="confirm" aria-labelledby="cf-title" aria-describedby="cf-text">
+  <form method="dialog">
+    <div class="cf-head">
+      <span class="ico warn" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.3v.2"/></svg></span>
+      <strong id="cf-title"></strong>
+      <span class="cf-meta mono" id="cf-meta"></span>
+    </div>
+    <p class="cf-warn" id="cf-warn" hidden><span class="ico" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 2.5 14 13H2L8 2.5ZM8 6.5v3M8 11.3v.2"/></svg></span><span id="cf-warn-t"></span></p>
+    <p class="cf-text" id="cf-text"></p>
+    <div class="cf-cmd" id="cf-cmd" hidden><span class="lbl">Выполнит</span><code id="cf-cmd-t"></code></div>
+    <div class="cf-targets" id="cf-targets"></div>
+    <div class="cf-btns">
+      <button value="cancel" class="ghost" id="cf-cancel" autofocus>Отмена</button>
+      <button type="button" class="danger" id="cf-ok"><span class="spin" aria-hidden="true"></span><span id="cf-ok-t">Остановить</span></button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="mtip" id="mtip" role="tooltip" hidden></div>
+</body>
+</html>

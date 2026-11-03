@@ -1,0 +1,7 @@
+<svg xmlns="http&#58;//www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- двоеточие в xmlns — ссылкой &#58;: в статике нет адресов даже в тексте, а XML-парсер его раскроет -->
+  <rect width="32" height="32" rx="7" fill="#1e2023"/>
+  <rect x="6" y="17" width="5" height="9" rx="1.5" fill="#4ade80"/>
+  <rect x="13.5" y="11" width="5" height="15" rx="1.5" fill="#6b9bff"/>
+  <rect x="21" y="6" width="5" height="20" rx="1.5" fill="#fb923c"/>
+</svg>
