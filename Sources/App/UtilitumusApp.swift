@@ -3,7 +3,7 @@ import AppKit
 
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
-    case sound, load, stash, fans
+    case sound, load, stash, fans, mixer
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .load: return "Нагрузка"
         case .stash: return "Стеш программ"
         case .fans: return "Вентиляторы"
+        case .mixer: return "Микшер"
         }
     }
 
@@ -22,6 +23,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .load: return "gauge.with.dots.needle.67percent"
         case .stash: return "square.stack.3d.down.right.fill"
         case .fans: return "fan.fill"
+        case .mixer: return "slider.vertical.3"
         }
     }
 
@@ -34,6 +36,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .load: return ""
         case .stash: return ""
         case .fans: return ""
+        case .mixer: return ""
         }
     }
 }
@@ -51,6 +54,8 @@ struct ModuleDetail: View {
             LoadView()
         case .stash:
             StashView()
+        case .mixer:
+            MixerView()
         }
     }
 }
@@ -141,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MicGuardMigration.run()
         AudioMonitor.shared.start()
         FanController.shared.start()
+        MixerController.shared.start()
         LambscapePanel.shared.start()
         Updater.shared.check(quiet: true)
 
@@ -158,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             FanController.shared.restoreAutoBlocking()
+            MixerController.shared.stopAll()
             LambscapePanel.shared.stop()
         }
     }

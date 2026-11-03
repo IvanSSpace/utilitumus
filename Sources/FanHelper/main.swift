@@ -14,11 +14,11 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-/// SMC применяет режим не мгновенно: сразу после записи F<n>Md ещё читается
-/// старое значение. Ждём до секунды.
-func waitForMode(_ smc: SMC, fan: Int, _ mode: UInt8) -> Bool {
+/// SMC применяет запись не мгновенно: сразу после неё ещё читается старое
+/// значение. Ждём до секунды, пока условие не станет правдой.
+func waitUntil(_ condition: () -> Bool) -> Bool {
     for _ in 0..<20 {
-        if smc.uint8("F\(fan)Md") == mode { return true }
+        if condition() { return true }
         usleep(50_000)
     }
     return false
@@ -34,7 +34,7 @@ guard let count = smc.uint8("FNum"), fan < Int(count) else { fail("нет вен
 switch args[1] {
 case "auto" where args.count == 3:
     guard smc.setUInt8("F\(fan)Md", 0) else { fail("SMC отклонил запись (нужен root?)") }
-    guard waitForMode(smc, fan: fan, 0) else { fail("режим не сменился") }
+    guard waitUntil({ smc.uint8("F\(fan)Md") == 0 }) else { fail("режим не сменился") }
 
 case "set" where args.count == 4:
     guard let requested = Float(args[3]), requested.isFinite,
@@ -45,7 +45,11 @@ case "set" where args.count == 4:
     guard smc.setUInt8("F\(fan)Md", 1), smc.setFloat("F\(fan)Tg", rpm) else {
         fail("SMC отклонил запись (нужен root?)")
     }
-    guard waitForMode(smc, fan: fan, 1) else { fail("режим не сменился") }
+    // Ждём и режим, и цель: иначе приложение сразу перечитывает старую цель
+    // и шлёт команду снова и снова, пока SMC её не применит.
+    guard waitUntil({ smc.uint8("F\(fan)Md") == 1 && abs((smc.float("F\(fan)Tg") ?? -1) - rpm) < 1 }) else {
+        fail("режим или цель не применились")
+    }
 
 default:
     fail("usage: utilitumus-fan auto <fan> | set <fan> <rpm>")

@@ -34,6 +34,13 @@ private struct StashActionButton: View {
     }
 }
 
+private func usageText(_ usage: AppUsage) -> String {
+    let memory = usage.memoryMB >= 1024
+        ? String(format: "%.1f ГБ", usage.memoryMB / 1024)
+        : "\(Int(usage.memoryMB.rounded())) МБ"
+    return "\(memory) · \(Int(usage.cpu.rounded())) %"
+}
+
 private struct AppLabel: View {
     let icon: NSImage?
     let name: String
@@ -171,23 +178,53 @@ struct StashView: View {
                 if store.running.isEmpty {
                     Text("Нет запущенных программ").foregroundStyle(.secondary)
                 }
-                ForEach(store.running) { entry in
+                ForEach(store.runningByWeight) { entry in
                     Toggle(isOn: Binding(
                         get: { store.isClosing(entry.bundleID) },
                         set: { store.setClosing(entry.bundleID, $0) }
                     )) {
-                        AppLabel(icon: entry.icon, name: entry.name)
+                        HStack {
+                            AppLabel(icon: entry.icon, name: entry.name)
+                            if let usage = store.usage[entry.bundleID] {
+                                if usage.isHeavy {
+                                    Text("тяжёлая")
+                                        .font(.caption)
+                                        .padding(.horizontal, 6).padding(.vertical, 1)
+                                        .background(Color.orange.opacity(0.25), in: Capsule())
+                                }
+                                Spacer()
+                                Text(usageText(usage))
+                                    .font(.callout.monospacedDigit())
+                                    .foregroundStyle(usage.isHeavy ? .primary : .secondary)
+                            }
+                        }
                     }
                 }
             } header: {
-                Text("Закрывать")
+                HStack {
+                    Text("Закрывать")
+                    Spacer()
+                    if store.running.contains(where: { store.usage[$0.bundleID]?.isHeavy == true }) {
+                        Button("Только тяжёлые") { store.selectOnlyHeavy() }
+                            .buttonStyle(.link)
+                            .font(.callout)
+                            .help("Отметить к закрытию только программы от 1 ГБ памяти или от 25 % процессора")
+                    }
+                }
             } footer: {
-                Text("Finder и сам Utilitumus не закрываются. Новая программа по умолчанию отмечена.")
+                Text("Память и процессор — вместе со всеми процессами программы. Тяжёлая — от 1 ГБ или от 25 % процессора. Finder и сам Utilitumus не закрываются. Новая программа по умолчанию отмечена.")
             }
         }
         .formStyle(.grouped)
         .navigationTitle("Стеш программ")
         .navigationSubtitle(store.stashed.isEmpty ? "" : "В стеше: \(store.stashed.count)")
         .onAppear { store.start() }
+        // Замеры — только пока экран открыт.
+        .task {
+            while !Task.isCancelled {
+                await store.refreshUsage()
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
     }
 }

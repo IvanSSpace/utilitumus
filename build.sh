@@ -6,18 +6,22 @@ cd "$(dirname "$0")"
 APP_NAME="Utilitumus"
 BUILD_DIR="build"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
+# Явная минимальная версия: без -target swiftc берёт версию SDK машины
+# сборки (macOS 26), и на 14.x/15.x приложение не запускается вообще.
+# Должна совпадать с LSMinimumSystemVersion в Info.plist.
+TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-swiftc -O -parse-as-library \
+swiftc -O -parse-as-library -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*') \
-  -framework SwiftUI -framework AppKit -framework CoreAudio -framework IOKit -framework WebKit
+  -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit -framework WebKit
 
 # Root-помощник вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ».
-swiftc -O \
+swiftc -O -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/utilitumus-fan" \
   Sources/Shared/SMC.swift Sources/FanHelper/main.swift \
   -framework IOKit

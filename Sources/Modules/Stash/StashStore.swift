@@ -29,6 +29,14 @@ struct RunningEntry: Identifiable {
     var id: String { bundleID }
 }
 
+/// Сколько программа ест вместе со всеми своими процессами (у Chrome их десятки).
+struct AppUsage {
+    let memoryMB: Double
+    let cpu: Double
+    /// Порог «тяжёлой»: от 1 ГБ памяти или от четверти ядра процессора.
+    var isHeavy: Bool { memoryMB >= 1024 || cpu >= 25 }
+}
+
 /// Итог возврата — показывается на экране, чтобы пропавшее с диска не терялось молча.
 struct RestoreReport {
     var restored = 0
@@ -120,6 +128,8 @@ final class StashStore: ObservableObject {
     private static let protectedIDs: Set<String> = ["com.apple.finder"]
 
     @Published private(set) var running: [RunningEntry] = []
+    /// Память и процессор по bundle id — обновляется, пока экран открыт.
+    @Published private(set) var usage: [String: AppUsage] = [:]
     /// «Не закрывать». Храним исключённых, чтобы новая программа по умолчанию была отмечена.
     @Published private(set) var excluded: Set<String>
     @Published private(set) var stashed: [StashedApp]
@@ -189,6 +199,48 @@ final class StashStore: ObservableObject {
     }
 
     func isClosing(_ bundleID: String) -> Bool { !excluded.contains(bundleID) }
+
+    /// Самые тяжёлые сверху; пока замеров нет — по имени.
+    var runningByWeight: [RunningEntry] {
+        running.sorted { (usage[$0.bundleID]?.memoryMB ?? 0) > (usage[$1.bundleID]?.memoryMB ?? 0) }
+    }
+
+    /// Отметить к закрытию только тяжёлые, остальные — не закрывать.
+    func selectOnlyHeavy() {
+        for entry in running { setClosing(entry.bundleID, usage[entry.bundleID]?.isHeavy ?? false) }
+    }
+
+    /// Память и процессор каждой программы: все процессы, чей исполняемый файл
+    /// лежит внутри её .app (хелперы Chrome, рендереры и т. п.), суммируются.
+    /// Через `ps`, а не libproc: одна команда на все процессы, без прав.
+    func refreshUsage() async {
+        let bundles = running.compactMap { entry in
+            entry.app.bundleURL.map { ($0.path + "/", entry.bundleID) }
+        }
+        let result = await Task.detached { () -> [String: AppUsage] in
+            let ps = Process()
+            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+            ps.arguments = ["-axo", "rss=,pcpu=,comm="]
+            let out = Pipe()
+            ps.standardOutput = out
+            guard (try? ps.run()) != nil else { return [:] }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            ps.waitUntilExit()
+            var memoryKB: [String: Double] = [:], cpu: [String: Double] = [:]
+            for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+                let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+                guard parts.count == 3, let rss = Double(parts[0]), let pc = Double(parts[1]) else { continue }
+                let path = String(parts[2])
+                guard let id = bundles.first(where: { path.hasPrefix($0.0) })?.1 else { continue }
+                memoryKB[id, default: 0] += rss
+                cpu[id, default: 0] += pc
+            }
+            return memoryKB.reduce(into: [:]) { acc, item in
+                acc[item.key] = AppUsage(memoryMB: item.value / 1024, cpu: cpu[item.key] ?? 0)
+            }
+        }.value
+        usage = result
+    }
 
     func setClosing(_ bundleID: String, _ closing: Bool) {
         if closing { excluded.remove(bundleID) } else { excluded.insert(bundleID) }
