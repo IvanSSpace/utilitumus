@@ -37,20 +37,35 @@ final class Updater: ObservableObject {
         state = .checking
         Task {
             do {
-                let release = try await Self.latestRelease()
+                // Релизов на GitHub ещё нет — значит, и новее нечего.
+                guard let release = try await Self.latestRelease() else {
+                    state = quiet ? .idle : .upToDate
+                    return
+                }
                 let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
                 guard Self.isNewer(version, than: currentVersion) else {
                     state = quiet ? .idle : .upToDate
                     return
                 }
                 guard let asset = release.assets.first(where: { $0.name == Self.assetName }) else {
-                    state = quiet ? .idle : .failed("В релизе \(release.tagName) нет \(Self.assetName)")
+                    if quiet { state = .idle } else { fail("В релизе \(release.tagName) нет \(Self.assetName)") }
                     return
                 }
                 state = .available(version: version, notes: release.body ?? "", download: asset.browserDownloadURL)
             } catch {
-                state = quiet ? .idle : .failed(error.localizedDescription)
+                if !quiet { fail(error.localizedDescription) }
+                else { state = .idle }
             }
+        }
+    }
+
+    /// Ошибка видна несколько секунд и уходит сама — не висит до перезапуска.
+    private func fail(_ message: String) {
+        let failure = State.failed(message)
+        state = failure
+        Task {
+            try? await Task.sleep(for: .seconds(8))
+            if state == failure { state = .idle }
         }
     }
 
@@ -63,7 +78,7 @@ final class Updater: ObservableObject {
                                                   target: Bundle.main.bundleURL)
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
-                state = .failed(error.localizedDescription)
+                fail(error.localizedDescription)
             }
         }
     }
@@ -80,15 +95,15 @@ final class Updater: ObservableObject {
         let assets: [Asset]
     }
 
-    nonisolated static func latestRelease() async throws -> Release {
+    /// nil — релизов ещё нет (GitHub отвечает 404).
+    nonisolated static func latestRelease() async throws -> Release? {
         var request = URLRequest(url: URL(string: "https://api.github.com/repos/\(repo)/releases/latest")!)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Utilitumus-Updater", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status == 200 else {
-            throw UpdateError(status == 404 ? "Релизов пока нет" : "GitHub ответил \(status)")
-        }
+        if status == 404 { return nil }
+        guard status == 200 else { throw UpdateError("GitHub ответил \(status)") }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(Release.self, from: data)
