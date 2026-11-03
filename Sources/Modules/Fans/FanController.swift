@@ -38,7 +38,12 @@ struct FanReading: Identifiable {
     let min: Double
     let max: Double
     let isManual: Bool
+    /// Цель в ручном режиме (F<n>Tg); в «Авто» система держит тут своё.
+    let target: Double
     var id: Int { index }
+    /// Ручной режим, а до цели ещё далеко: с нуля вентилятор выходит на
+    /// максимум за 8–15 с — показываем, что он раскручивается, а не «не работает».
+    var isSpinningUp: Bool { isManual && actual < target - 300 }
 }
 
 struct SensorReading: Identifiable {
@@ -68,11 +73,17 @@ final class FanController: ObservableObject {
     /// «Полная мощность»: все вентиляторы на максимум поверх их настроек.
     /// Настройки не трогаем — выключил, и каждый вернулся к своему режиму.
     @Published var fullPower = false {
-        didSet { scheduleApply() }
+        didSet {
+            Self.log("fullPower → \(fullPower)")
+            scheduleApply()
+        }
     }
     @Published var configs: [FanConfig] {
         didSet {
             persist()
+            if configs != oldValue {
+                Self.log("настройки → " + configs.map { "\($0.mode.rawValue)/\(Int($0.rpm))" }.joined(separator: ", "))
+            }
             scheduleApply()
         }
     }
@@ -114,6 +125,16 @@ final class FanController: ObservableObject {
         cpuKeys = discover(["Tp0", "Tp1"])
         gpuKeys = discover(["Tg0", "Tg1"])
 
+        // После сна SMC мог сбросить режимы — выставить сразу, не дожидаясь такта.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                Self.log("пробуждение")
+                FanController.shared.tick()
+            }
+        }
+
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             Task { @MainActor in FanController.shared.tick() }
@@ -147,7 +168,8 @@ final class FanController: ObservableObject {
                   let lo = smc.float("F\(i)Mn"),
                   let hi = smc.float("F\(i)Mx") else { return nil }
             return FanReading(index: i, actual: Double(actual), min: Double(lo), max: Double(hi),
-                              isManual: smc.uint8("F\(i)Md") == 1)
+                              isManual: smc.uint8("F\(i)Md") == 1,
+                              target: Double(smc.float("F\(i)Tg") ?? 0))
         }
         if configs.count < count {
             configs += Array(repeating: FanConfig(), count: count - configs.count)
@@ -196,6 +218,7 @@ final class FanController: ObservableObject {
                 guard isManual else { continue }
                 args = ["auto", String(i)]
             }
+            Self.log("fan\(i) Md=\(smc.uint8("F\(i)Md").map(String.init) ?? "?") Tg=\(Int(target)) Ac=\(Int(fan.actual)) хотим=\(desired.map { String(Int($0)) } ?? "авто") fullPower=\(fullPower)")
             inFlight.insert(i)
             Self.helperQueue.async {
                 let error = Self.runHelper(args)
@@ -203,9 +226,10 @@ final class FanController: ObservableObject {
                     let me = FanController.shared
                     me.inFlight.remove(i)
                     me.lastError = error
-                    // Пока команда шла, настройку могли поменять — сверить сразу,
-                    // не дожидаясь тика.
-                    if error == nil { me.apply() }
+                    // Перечитать SMC сразу: экран не ждёт такта (до 2 с казалось,
+                    // что вентилятор не включился), а если настройку успели
+                    // поменять, пока шла команда, — tick тут же сверит заново.
+                    if error == nil { me.tick() }
                 }
             }
         }
@@ -248,6 +272,30 @@ final class FanController: ObservableObject {
 
     /// Возвращает текст ошибки или nil при успехе.
     private nonisolated static func runHelper(_ args: [String]) -> String? {
+        let error = runHelperUnlogged(args)
+        log("helper \(args.joined(separator: " ")) → \(error ?? "ok")")
+        return error
+    }
+
+    /// Журнал управления вентиляторами: что и когда отправили, что увидели в SMC.
+    /// ~/Library/Logs/Utilitumus/fans.log — разбирать «иногда не включается».
+    nonisolated static func log(_ line: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus/fans.log")
+        let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime, .withFractionalSeconds])
+        let data = Data("\(stamp) \(line)\n".utf8)
+        // Журнал не растёт бесконечно: больше 512 КБ — начать заново.
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 512_000 {
+            try? FileManager.default.removeItem(at: url)
+        }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url)
+        }
+    }
+
+    private nonisolated static func runHelperUnlogged(_ args: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: FanHelperInstaller.installedPath)
         process.arguments = args

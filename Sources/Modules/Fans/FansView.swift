@@ -7,6 +7,9 @@ private struct FanRow: View {
     let fan: FanReading
     @Binding var config: FanConfig
     let enabled: Bool
+    /// «Полная мощность» перебивает режим вентилятора — показываем это, а не
+    /// «Оборотами управляет macOS», которое тогда было бы неправдой.
+    let fullPower: Bool
 
     private var load: Double {
         guard fan.max > fan.min else { return 0 }
@@ -19,7 +22,15 @@ private struct FanRow: View {
                 Image(systemName: "fan.fill")
                     .foregroundStyle(fan.isManual ? Color.accentColor : .secondary)
                 Text("Вентилятор \(fan.index + 1)").font(.headline)
-                if fan.isManual {
+                if fan.isSpinningUp {
+                    HStack(spacing: 4) {
+                        ProgressView().controlSize(.mini)
+                        Text("раскручивается до \(rpm(fan.target))")
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Color.green.opacity(0.2), in: Capsule())
+                } else if fan.isManual {
                     Text("вручную")
                         .font(.caption)
                         .padding(.horizontal, 6).padding(.vertical, 1)
@@ -45,33 +56,41 @@ private struct FanRow: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .disabled(fullPower)
+            .opacity(fullPower ? 0.5 : 1)
 
-            switch config.mode {
-            case .auto:
-                Text("Оборотами управляет macOS.")
+            if fullPower {
+                Text("Сейчас на максимуме: включена «Полная мощность». Выключишь её — вернётся «\(config.mode.title)».")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.green)
+            } else {
+                switch config.mode {
+                case .auto:
+                    Text("Оборотами управляет macOS.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-            case .constant:
-                HStack {
-                    Slider(value: Binding(
-                        get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
-                        set: { config.rpm = $0 }
-                    ), in: fan.min...fan.max, step: 100)
-                    Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
-                        .monospacedDigit()
-                        .frame(width: 100, alignment: .trailing)
-                }
+                case .constant:
+                    HStack {
+                        Slider(value: Binding(
+                            get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
+                            set: { config.rpm = $0 }
+                        ), in: fan.min...fan.max, step: 100)
+                        Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
+                            .monospacedDigit()
+                            .frame(width: 100, alignment: .trailing)
+                    }
 
-            case .sensor:
-                Picker("Датчик", selection: $config.sensor) {
-                    ForEach(SensorSource.allCases) { Text($0.title).tag($0) }
+                case .sensor:
+                    Picker("Датчик", selection: $config.sensor) {
+                        ForEach(SensorSource.allCases) { Text($0.title).tag($0) }
+                    }
+                    TempSlider(title: "Начинать разгон с", value: $config.fromTemp, range: 30...(config.toTemp - 5))
+                    TempSlider(title: "Максимум при", value: $config.toTemp, range: (config.fromTemp + 5)...100)
+                    Text("Ниже \(Int(config.fromTemp)) °C — минимум, от \(Int(config.toTemp)) °C — максимум, между ними плавно.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                TempSlider(title: "Начинать разгон с", value: $config.fromTemp, range: 30...(config.toTemp - 5))
-                TempSlider(title: "Максимум при", value: $config.toTemp, range: (config.fromTemp + 5)...100)
-                Text("Ниже \(Int(config.fromTemp)) °C — минимум, от \(Int(config.toTemp)) °C — максимум, между ними плавно.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .disabled(!enabled)
@@ -231,7 +250,8 @@ struct FansView: View {
                 }
                 ForEach(controller.fans) { fan in
                     if fan.index < controller.configs.count {
-                        FanRow(fan: fan, config: $controller.configs[fan.index], enabled: canControl)
+                        FanRow(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
+                               fullPower: controller.fullPower)
                     }
                 }
             }
