@@ -39,12 +39,12 @@ final class Updater: ObservableObject {
             do {
                 // Релизов на GitHub ещё нет — значит, и новее нечего.
                 guard let release = try await Self.latestRelease() else {
-                    state = quiet ? .idle : .upToDate
+                    if quiet { state = .idle } else { show(.upToDate) }
                     return
                 }
                 let version = release.tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
                 guard Self.isNewer(version, than: currentVersion) else {
-                    state = quiet ? .idle : .upToDate
+                    if quiet { state = .idle } else { show(.upToDate) }
                     return
                 }
                 guard let asset = release.assets.first(where: { $0.name == Self.assetName }) else {
@@ -61,11 +61,15 @@ final class Updater: ObservableObject {
 
     /// Ошибка видна несколько секунд и уходит сама — не висит до перезапуска.
     private func fail(_ message: String) {
-        let failure = State.failed(message)
-        state = failure
+        show(.failed(message), for: 8)
+    }
+
+    /// Временный статус: если за это время ничего не поменялось — обратно в покой.
+    private func show(_ status: State, for seconds: Double = 5) {
+        state = status
         Task {
-            try? await Task.sleep(for: .seconds(8))
-            if state == failure { state = .idle }
+            try? await Task.sleep(for: .seconds(seconds))
+            if state == status { state = .idle }
         }
     }
 

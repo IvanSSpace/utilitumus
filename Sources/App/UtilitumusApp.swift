@@ -103,6 +103,10 @@ struct UpdateFooter: View {
                     .font(.caption2)
                     .foregroundStyle(.red)
                     .lineLimit(3)
+            case .upToDate:
+                Text("Обновлений нет")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             default:
                 EmptyView()
             }
