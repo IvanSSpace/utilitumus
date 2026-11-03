@@ -135,10 +135,16 @@ private struct FullPowerButton: View {
             isOn.toggle()
         } label: {
             HStack(spacing: 14) {
-                Image(systemName: isOn ? "wind" : "fan.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .symbolEffect(.pulse, isActive: isOn)
-                    .frame(width: 36)
+                // Включено — вентилятор крутится: оборот за 0.8 с. TimelineView,
+                // а не repeatForever-анимация: та при выключении дёргается и не
+                // останавливается чисто.
+                TimelineView(.animation(paused: !isOn)) { context in
+                    let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.8) / 0.8
+                    Image(systemName: "fan.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .rotationEffect(.degrees(isOn ? turn * 360 : 0))
+                }
+                .frame(width: 36)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(isOn ? "Полная мощность включена" : "Полная мощность")
                         .font(.title3.weight(.semibold))
@@ -152,7 +158,7 @@ private struct FullPowerButton: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
-            .background(isOn ? Color.orange : Color.secondary.opacity(0.12),
+            .background(isOn ? Color.green : Color.secondary.opacity(0.12),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(Rectangle())
         }

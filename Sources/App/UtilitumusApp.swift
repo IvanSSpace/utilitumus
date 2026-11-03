@@ -25,14 +25,14 @@ enum Module: String, CaseIterable, Identifiable {
         }
     }
 
-    var isReady: Bool { self != .stash }
+    var isReady: Bool { true }
 
     /// Что модуль будет делать — показывается на заглушке, пока он не готов.
     var plannedSummary: String {
         switch self {
         case .sound: return ""
         case .load: return ""
-        case .stash: return "Одной кнопкой закрыть все программы перед игрой и потом вернуть их на те же экраны — как git stash, только для окон."
+        case .stash: return ""
         case .fans: return ""
         }
     }
@@ -49,14 +49,8 @@ struct ModuleDetail: View {
             FansView()
         case .load:
             LoadView()
-        default:
-            ContentUnavailableView {
-                Label(module.title, systemImage: module.icon)
-            } description: {
-                Text(module.plannedSummary)
-            }
-            .navigationTitle(module.title)
-            .navigationSubtitle("Скоро")
+        case .stash:
+            StashView()
         }
     }
 }
