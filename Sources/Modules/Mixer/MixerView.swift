@@ -1,18 +1,36 @@
 import SwiftUI
 
+/// Разделитель между строками карточки — как в `DSRow`.
+private struct RowDivider: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(minHeight: 50)
+            .overlay(alignment: .top) {
+                Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 56)
+            }
+    }
+}
+
+private struct AppIcon: View {
+    let image: NSImage
+    var body: some View {
+        Image(nsImage: image).resizable().frame(width: 30, height: 30)
+    }
+}
+
 private struct MixerRow: View {
     let app: MixerApp
     @ObservedObject var controller: MixerController
+    @Environment(\.dsTint) private var tint
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(nsImage: app.icon)
-                .resizable()
-                .frame(width: 32, height: 32)
+            AppIcon(image: app.icon)
             VStack(alignment: .leading, spacing: 2) {
-                Text(app.name).lineLimit(1)
+                Text(app.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95)).lineLimit(1)
                 if app.muted {
-                    Text("без звука").font(.caption).foregroundStyle(.secondary)
+                    Text("без звука").font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
                 }
             }
             .frame(width: 150, alignment: .leading)
@@ -22,23 +40,29 @@ private struct MixerRow: View {
                 // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
                 set: { controller.setVolume(($0 * 100).rounded() / 100, for: app.id) }
             ), in: 0...1)
+            .tint(tint)
+            .controlSize(.small)
             .opacity(app.muted ? 0.4 : 1)
 
             Text("\(Int((app.volume * 100).rounded())) %")
-                .monospacedDigit()
-                .frame(width: 50, alignment: .trailing)
+                .font(.system(size: 12.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: 46, alignment: .trailing)
 
             Button {
                 controller.setMuted(!app.muted, for: app.id)
             } label: {
                 Image(systemName: app.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                    .foregroundStyle(app.muted ? Color.red : .secondary)
-                    .frame(width: 22)
+                    .font(.system(size: 13))
+                    .foregroundStyle(app.muted ? Color.red : .white.opacity(0.6))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
             .help(app.muted ? "Вернуть звук" : "Выключить звук")
         }
-        .padding(.vertical, 2)
+        .modifier(RowDivider())
     }
 }
 
@@ -49,17 +73,23 @@ private struct PresetRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(nsImage: app.icon)
-                .resizable()
-                .frame(width: 24, height: 24)
-            Text(app.name).lineLimit(1)
-            Spacer()
+            AppIcon(image: app.icon)
+            Text(app.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95)).lineLimit(1)
+            Spacer(minLength: 10)
             Text(app.muted ? "без звука" : "\(Int((app.volume * 100).rounded())) %")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Button("Сбросить") { controller.reset(app.id) }
-                .buttonStyle(.borderless)
+                .font(.system(size: 12.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.6))
+            DSButton("Сбросить", small: true) { controller.reset(app.id) }
         }
+        .modifier(RowDivider())
+    }
+}
+
+private struct Note: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.4)).padding(.horizontal, 6)
     }
 }
 
@@ -68,34 +98,29 @@ struct MixerView: View {
     @State private var showOthers = false
 
     var body: some View {
-        Form {
+        DSPage(
+            module: .mixer,
+            subtitle: controller.apps.isEmpty ? "Сейчас ничего не играет" : "Играют: \(controller.apps.count)"
+        ) {
             if controller.permissionProblem {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Нужно разрешение «Запись системного звука»", systemImage: "lock.shield")
-                            .font(.headline)
-                        Text("Без него громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button("Открыть настройки…") {
+                DSSection("Нужно разрешение") {
+                    DSRow(icon: "lock.shield", title: "Запись системного звука",
+                          subtitle: "Без неё громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.") {
+                        DSButton("Открыть настройки…", small: true) {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
                                 NSWorkspace.shared.open(url)
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        if let error = controller.lastError {
-                            Text(error).font(.caption).foregroundStyle(.red)
-                        }
                     }
-                    .padding(.vertical, 4)
+                    if let error = controller.lastError {
+                        DSRow(icon: "exclamationmark.triangle.fill", title: error)
+                    }
                 }
             }
 
-            Section("Сейчас играют") {
+            DSSection("Сейчас играют", trailing: controller.apps.isEmpty ? nil : "\(controller.apps.count)") {
                 if controller.apps.isEmpty {
-                    Text("Сейчас ничего не играет.")
-                        .foregroundStyle(.secondary)
+                    DSRow(title: "Сейчас ничего не играет")
                 }
                 ForEach(controller.apps) { app in
                     MixerRow(app: app, controller: controller)
@@ -103,64 +128,51 @@ struct MixerView: View {
             }
 
             if !controller.idleApps.isEmpty {
-                Section {
-                    ForEach(controller.idleApps) { app in
-                        MixerRow(app: app, controller: controller)
+                VStack(alignment: .leading, spacing: 8) {
+                    DSSection("Молчат сейчас", trailing: "\(controller.idleApps.count)") {
+                        ForEach(controller.idleApps) { app in
+                            MixerRow(app: app, controller: controller)
+                        }
                     }
-                } header: {
-                    Text("Молчат сейчас")
-                } footer: {
-                    Text("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать.")
+                    Note("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать.")
                 }
             }
 
             if !controller.otherApps.isEmpty {
-                Section {
-                    // Кликается вся строка, а не только стрелка.
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { showOthers.toggle() }
-                    } label: {
-                        HStack {
-                            Text("Остальные запущенные")
-                            Text("\(controller.otherApps.count)").foregroundStyle(.secondary)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .rotationEffect(.degrees(showOthers ? 90 : 0))
+                VStack(alignment: .leading, spacing: 8) {
+                    DSSection("Остальные запущенные", trailing: "\(controller.otherApps.count)") {
+                        // Кликается вся строка, а не только стрелка.
+                        Button {
+                            showOthers.toggle()
+                        } label: {
+                            DSRow(icon: "square.stack", title: showOthers ? "Скрыть" : "Показать",
+                                  subtitle: "Звука от них обычно нет. Зазвучат — переедут наверх.") {
+                                Image(systemName: showOthers ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.5))
+                            }
+                            .contentShape(Rectangle())
                         }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    if showOthers {
-                        ForEach(controller.otherApps) { app in
-                            MixerRow(app: app, controller: controller)
+                        .buttonStyle(.plain)
+                        .focusable(false)
+                        if showOthers {
+                            ForEach(controller.otherApps) { app in
+                                MixerRow(app: app, controller: controller)
+                            }
                         }
                     }
-                } footer: {
-                    Text("Звука от них обычно нет. Зазвучат — переедут наверх.")
                 }
             }
 
             if !controller.presetApps.isEmpty {
-                Section {
-                    DisclosureGroup("Настроены заранее (\(controller.presetApps.count))") {
-                        ForEach(controller.presetApps) { app in
-                            PresetRow(app: app, controller: controller)
-                        }
+                DSSection("Настроены заранее", trailing: "\(controller.presetApps.count)") {
+                    ForEach(controller.presetApps) { app in
+                        PresetRow(app: app, controller: controller)
                     }
                 }
             }
 
-            Section {
-                Text("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
         }
-        .formStyle(.grouped)
-        .navigationTitle("Микшер")
-        .navigationSubtitle(controller.apps.isEmpty ? "" : "Играют: \(controller.apps.count)")
     }
 }
