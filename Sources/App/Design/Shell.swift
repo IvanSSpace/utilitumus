@@ -4,9 +4,11 @@ import SwiftUI
 
 // MARK: - Фон
 
-/// Статичный градиент оттенка модуля. При смене модуля — кроссфейд 0.3 с (без пятен и таймеров).
+/// Статичный градиент оттенка модуля. При смене модуля — кроссфейд 0.2 с (без пятен и таймеров).
+/// `neutral` — страница без модуля (дашборд): нейтральный графитовый фон вместо цвета категории.
 struct DSBackground: View {
     let module: Module
+    var neutral = false
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
@@ -14,13 +16,16 @@ struct DSBackground: View {
             Color(white: 0.05)
             if theme.followsModule {
                 ForEach(Module.allCases) { m in
-                    gradient(m).opacity(m == module ? 1 : 0)
+                    gradient(m).opacity(m == module && !neutral ? 1 : 0)
                 }
+                LinearGradient(colors: DSTheme.graphite.background(module), startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .opacity(neutral ? 1 : 0)
             } else {
                 gradient(module)
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: module)
+        .animation(.easeInOut(duration: 0.2), value: module)
+        .animation(.easeInOut(duration: 0.2), value: neutral)
     }
 
     private func gradient(_ m: Module) -> some View {
@@ -37,41 +42,99 @@ extension DSTheme {
 
 struct DSSidebar: View {
     let current: Module?
+    @Binding var showDashboard: Bool
     @Binding var showAbout: Bool
     @Binding var peeked: Module?
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var live = DashboardLive.shared
+    /// Последний открытый модуль каждой категории: вкладка возвращает на него.
+    @State private var last: [String: Module] = [:]
+
+    /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
+    private var activeCategory: ModuleCategory? {
+        showDashboard && !showAbout ? nil : (peeked ?? current ?? selection).category
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
-            List {
-                ForEach(ModuleCategory.all) { category in
-                    let items = modules.shownModules.filter { $0.category == category }
-                    if !items.isEmpty {
-                        Section {
-                            ForEach(items) { module in row(module) }
-                                .onMove { move(items, from: $0, to: $1) }
-                        } header: {
-                            DSCategoryHeader(category: category)
-                        }
-                        .listSectionSeparator(.hidden)
-                    }
-                }
+            DSDashboardRow(selected: showDashboard && !showAbout) {
+                peeked = nil
+                showAbout = false
+                showDashboard = true
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .padding(.horizontal, 10).padding(.bottom, 8)
+            DSCategoryTabs(active: activeCategory, enabled: { !shownModules(in: $0).isEmpty }, pick: pick)
+                .padding(.horizontal, 10).padding(.bottom, 6)
+            ZStack {
+                list
+                    .id(activeCategory?.id ?? "all")
+                    .transition(.opacity.combined(with: .offset(x: 10)))
+            }
+            .animation(DS.sidebarAnimation, value: activeCategory?.id)
             DSSidebarFooter(showAbout: $showAbout, peeked: $peeked)
+        }
+        .onChange(of: current, initial: true) { _, module in
+            if let module { last[module.category.id] = module }
         }
     }
 
-    private func row(_ module: Module) -> some View {
-        DSSidebarRow(module: module, on: modules.isOn(module),
-                     selected: !showAbout && peeked == nil && current == module) {
+    private var list: some View {
+        List {
+            if let category = activeCategory {
+                Section {
+                    rows(category)
+                } header: {
+                    DSCategoryHeading(category: category)
+                }
+                .listSectionSeparator(.hidden)
+            } else {
+                // На дашборде — все модули подряд (без заголовков и статусов, чтобы влезли над футером),
+                // перетаскивать здесь нечего: порядок меняют внутри вкладки.
+                Section {
+                    ForEach(ModuleCategory.all.flatMap(shownModules(in:))) { row($0, withStatus: false) }
+                } header: {
+                    DSAllModulesHeading()
+                }
+                .listSectionSeparator(.hidden)
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+    }
+
+    private func shownModules(in category: ModuleCategory) -> [Module] {
+        modules.shownModules.filter { $0.category == category }
+    }
+
+    @ViewBuilder
+    private func rows(_ category: ModuleCategory) -> some View {
+        let items = shownModules(in: category)
+        ForEach(items) { module in row(module, withStatus: category.showsStatus) }
+            .onMove { move(items, from: $0, to: $1) }
+    }
+
+    /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
+    private func pick(_ category: ModuleCategory) {
+        if category == activeCategory && !showAbout && peeked == nil { return }
+        let shown = shownModules(in: category)
+        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else { return }
+        selection = target
+        peeked = nil
+        showAbout = false
+        showDashboard = false
+    }
+
+    private func row(_ module: Module, withStatus: Bool) -> some View {
+        let status = withStatus ? live.rowText(module) : nil
+        return DSSidebarRow(module: module, on: modules.isOn(module), status: status,
+                            selected: !showDashboard && !showAbout && peeked == nil && current == module) {
             selection = module
             peeked = nil
             showAbout = false
+            showDashboard = false
         }
         .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
         .listRowSeparator(.hidden)
@@ -94,22 +157,96 @@ struct DSSidebar: View {
     }
 }
 
-/// Заголовок категории: полоска её цвета и название капсом; подзаголовок — во всплывающей подсказке.
-private struct DSCategoryHeader: View {
-    let category: ModuleCategory
+/// Строка «Дашборд» над вкладками.
+private struct DSDashboardRow: View {
+    let selected: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 13.5, weight: .semibold)).frame(width: 24)
+                .foregroundStyle(.white.opacity(selected ? 0.95 : 0.6))
+            Text("Дашборд").font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+                .foregroundStyle(.white.opacity(selected ? 1 : 0.8))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
+            .fill(selected ? .white.opacity(0.13) : (hover ? .white.opacity(0.06) : .clear)))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .onHover { hover = $0 }
+        .help("Дашборд (⌘0)")
+        .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Три вкладки-пилюли: Фоном, Под рукой, С ИИ. Выбранная залита цветом категории.
+private struct DSCategoryTabs: View {
+    let active: ModuleCategory?
+    let enabled: (ModuleCategory) -> Bool
+    let pick: (ModuleCategory) -> Void
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
-        HStack(spacing: 7) {
-            Capsule().fill(theme.categoryColor(category)).frame(width: 3, height: 12)
-            Text(category.title.uppercased())
-                .font(DS.sectionTitle).tracking(0.8)
-                .foregroundStyle(.white.opacity(0.6))
-                .lineLimit(1)
-            Spacer(minLength: 0)
+        HStack(spacing: 3) {
+            ForEach(ModuleCategory.all) { category in
+                let selected = category == active
+                let tint = theme.categoryColor(category)
+                let available = enabled(category)
+                VStack(spacing: 4) {
+                    Image(systemName: category.icon).font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(tint.opacity(selected ? 1 : 0.65))
+                    Text(category.title).font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white.opacity(selected ? 0.95 : 0.5))
+                        .lineLimit(1).fixedSize()
+                }
+                .frame(maxWidth: .infinity).frame(height: 52)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(tint.opacity(0.18))
+                        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .stroke(tint.opacity(0.35), lineWidth: 0.6))
+                        .opacity(selected ? 1 : 0)
+                )
+                .opacity(available ? 1 : 0.4)
+                .contentShape(Rectangle())
+                .onTapGesture { if available { pick(category) } }
+                .help(category.subtitle)
+                .accessibilityAddTraits(.isButton)
+            }
         }
-        .padding(.leading, 16).padding(.top, 8).padding(.bottom, 2)
-        .help(category.subtitle)
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.05)))
+        .animation(.easeInOut(duration: 0.2), value: active)
+    }
+}
+
+/// Заголовок выбранной категории над её модулями: название и подпись.
+private struct DSCategoryHeading: View {
+    let category: ModuleCategory
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(category.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+            Text(category.subtitle).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 4)
+    }
+}
+
+/// Заголовок общего списка на дашборде: вкладки не выбраны, модули идут подряд.
+private struct DSAllModulesHeading: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Все модули").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+            Text("Вкладка выберется сама").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 4)
     }
 }
 
@@ -188,9 +325,11 @@ private struct TrafficLightProbe: NSViewRepresentable {
 }
 
 /// Строка модуля: значок, название, справа точка «включён» или «выкл». Выбранная залита оттенком.
+/// В категории со статусами вторая строка — живой статус вместо «выкл».
 private struct DSSidebarRow: View {
     let module: Module
     let on: Bool
+    var status: (text: String, attention: Bool)?
     let selected: Bool
     let action: () -> Void
     @Environment(\.dsTheme) private var theme
@@ -199,19 +338,29 @@ private struct DSSidebarRow: View {
     var body: some View {
         HStack(spacing: 10) {
             ModuleIconBadge(module: module, size: 24).opacity(on ? 1 : 0.45)
-            Text(module.title)
-                .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
-                .foregroundStyle(.white.opacity(on ? (selected ? 1 : 0.85) : 0.5))
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if on {
-                Circle().fill(theme.tone(module)).frame(width: 6, height: 6)
-            } else {
-                Text("выкл").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(module.title)
+                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(.white.opacity(on ? (selected ? 1 : 0.85) : 0.5))
+                    .lineLimit(1)
+                if let status {
+                    Text(status.text).font(.system(size: 11)).lineLimit(1)
+                        .foregroundStyle(status.attention ? AnyShapeStyle(Color.orange)
+                                                          : AnyShapeStyle(.white.opacity(on ? (selected ? 0.6 : 0.42) : 0.3)))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // У строки со статусом точки нет: статус сам говорит, включён модуль, а ширины ему и так мало.
+            if status == nil {
+                if on {
+                    Circle().fill(theme.tone(module)).frame(width: 6, height: 6)
+                } else {
+                    Text("выкл").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
+                }
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 38)
+        .frame(height: status == nil ? 38 : 46)
         .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
             .fill(selected ? theme.selection(module) : (hover ? .white.opacity(0.06) : .clear)))
         .contentShape(Rectangle())
