@@ -227,6 +227,15 @@ struct UpdateFooter: View {
                 EmptyView()
             }
             hiddenSection
+            // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
+            SettingsLink {
+                Label("Настроить модули", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+            .foregroundStyle(.primary)
             Button {
                 showAbout = true
             } label: {
