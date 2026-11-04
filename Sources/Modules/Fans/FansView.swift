@@ -131,7 +131,11 @@ private struct FanCard: View {
                     // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
                     Slider(value: Binding(
                         get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
-                        set: { config.rpm = min(max(($0 / 100).rounded() * 100, fan.min), fan.max) }
+                        set: {
+                            // Слайдер шлёт событие на каждый пиксель; присваивать — только при смене шага.
+                            let new = min(max(($0 / 100).rounded() * 100, fan.min), fan.max)
+                            if new != config.rpm { config.rpm = new }
+                        }
                     ), in: fan.min...fan.max)
                     .controlSize(.small).tint(tint)
                     Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
@@ -171,7 +175,7 @@ private struct TempSlider: View {
             Text(title).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8))
                 .lineLimit(1).fixedSize()
             // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
-            Slider(value: Binding(get: { value }, set: { value = $0.rounded() }), in: range)
+            Slider(value: Binding(get: { value }, set: { let new = $0.rounded(); if new != value { value = new } }), in: range)
                 .controlSize(.small).tint(tint)
             Text("\(Int(value)) °C").font(.system(size: 12, weight: .medium)).monospacedDigit()
                 .foregroundStyle(.white.opacity(0.85))
@@ -592,9 +596,16 @@ struct FansView: View {
             Banner(icon: "bolt.fill", color: .green, text: "Полная мощность включена",
                    detail: "Все вентиляторы на максимум, будет шумно.") { EmptyView() }
         } else if canControl, let name = gameName {
-            // Секунды считаем от срока, а не от счётчика: экран перерисуется раз в секунду сам.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                Banner(icon: "gamecontroller.fill", color: .green, text: statusText(name: name, now: context.date)) {
+            if case .leaving = game.phase {
+                // Секунды считаем от срока, а не от счётчика: экран перерисуется раз в секунду сам.
+                // Тикает только пока идёт обратный отсчёт; в игре текст статичный.
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Banner(icon: "gamecontroller.fill", color: .green, text: statusText(name: name, now: context.date)) {
+                        EmptyView()
+                    }
+                }
+            } else {
+                Banner(icon: "gamecontroller.fill", color: .green, text: statusText(name: name, now: .now)) {
                     EmptyView()
                 }
             }

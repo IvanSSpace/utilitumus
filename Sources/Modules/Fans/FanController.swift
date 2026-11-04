@@ -34,7 +34,7 @@ struct FanConfig: Codable, Equatable {
     var toTemp: Double = 80
 }
 
-struct FanReading: Identifiable {
+struct FanReading: Identifiable, Equatable {
     let index: Int
     let actual: Double
     let min: Double
@@ -48,7 +48,7 @@ struct FanReading: Identifiable {
     var isSpinningUp: Bool { isManual && actual < target - 300 }
 }
 
-struct SensorReading: Identifiable {
+struct SensorReading: Identifiable, Equatable {
     let key: String
     let value: Double
     var id: String { key }
@@ -82,10 +82,10 @@ final class FanController: ObservableObject {
     }
     @Published var configs: [FanConfig] {
         didSet {
-            persist()
-            if configs != oldValue {
-                Self.log("настройки → " + configs.map { "\($0.mode.rawValue)/\(Int($0.rpm))" }.joined(separator: ", "))
-            }
+            // Слайдер шлёт событие на каждый пиксель: без изменений — ни записи, ни публикации.
+            guard configs != oldValue else { return }
+            Self.log("настройки → " + configs.map { "\($0.mode.rawValue)/\(Int($0.rpm))" }.joined(separator: ", "))
+            schedulePersist()
             scheduleApply()
         }
     }
@@ -114,6 +114,7 @@ final class FanController: ObservableObject {
     /// иначе они снова взяли бы вентиляторы под ручное управление.
     private var isRunning = false
     private var pendingApply: DispatchWorkItem?
+    private var pendingPersist: DispatchWorkItem?
     /// Вентиляторы, для которых команда помощнику ещё выполняется.
     private var inFlight: Set<Int> = []
     /// Команды помощнику — строго по одной и по порядку: параллельные «макс» и
@@ -186,6 +187,7 @@ final class FanController: ObservableObject {
     /// Вызывается при выходе из приложения: отдать вентиляторы системе.
     /// Синхронно — иначе процесс завершится раньше помощника.
     func restoreAutoBlocking() {
+        if pendingPersist != nil { persist() }
         guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
         let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
@@ -198,6 +200,7 @@ final class FanController: ObservableObject {
     /// прекращаются. Повторный вызов и вызов без start() ничего не делают.
     func stop() {
         guard isRunning else { return }
+        persist()
         GameModeController.shared.stop()
         // Сначала вернуть «Авто» (синхронно, после уже отправленных команд),
         // и только потом гасить цикл: иначе нечем будет проверить, что вернулось.
@@ -233,11 +236,24 @@ final class FanController: ObservableObject {
 
     // MARK: - Цикл
 
-    private func tick() {
-        guard isRunning, let smc else { return }
+    /// Снимок SMC за один такт. Читается на фоновой очереди: десятки ключей —
+    /// это десятки системных вызовов, на главном потоке они давали заметный рывок.
+    private struct Sample {
+        var count: Int
+        var fans: [FanReading]
+        var cpu: [SensorReading]
+        var gpu: [SensorReading]
+    }
 
+    private nonisolated static let readQueue = DispatchQueue(label: "utilitumus.fans.read", qos: .userInitiated)
+    private var reading = false
+    /// Во время чтения попросили ещё одно (например, после команды помощнику):
+    /// то чтение могло начаться до команды, поэтому после него читаем заново.
+    private var rereadRequested = false
+
+    private nonisolated static func sample(_ smc: SMC, cpuKeys: [String], gpuKeys: [String]) -> Sample {
         let count = Int(smc.uint8("FNum") ?? 0)
-        fans = (0..<count).compactMap { i in
+        let fans: [FanReading] = (0..<count).compactMap { i in
             guard let actual = smc.float("F\(i)Ac"),
                   let lo = smc.float("F\(i)Mn"),
                   let hi = smc.float("F\(i)Mx") else { return nil }
@@ -245,21 +261,50 @@ final class FanController: ObservableObject {
                               isManual: smc.uint8("F\(i)Md") == 1,
                               target: Double(smc.float("F\(i)Tg") ?? 0))
         }
-        if configs.count < count {
-            configs += Array(repeating: FanConfig(), count: count - configs.count)
+        func read(_ keys: [String]) -> [SensorReading] {
+            keys.compactMap { key in
+                guard let v = smc.float(key).map(Double.init), isPlausible(Float(v)) else { return nil }
+                return SensorReading(key: key, value: v)
+            }
         }
+        return Sample(count: count, fans: fans, cpu: read(cpuKeys), gpu: read(gpuKeys))
+    }
 
-        cpuSensors = read(cpuKeys)
-        gpuSensors = read(gpuKeys)
+    private func tick() {
+        guard isRunning, let smc else { return }
+        guard !reading else { rereadRequested = true; return }
+        reading = true
+        let cpuKeys = self.cpuKeys, gpuKeys = self.gpuKeys
+        Self.readQueue.async {
+            let s = Self.sample(smc, cpuKeys: cpuKeys, gpuKeys: gpuKeys)
+            Task { @MainActor in FanController.shared.finishTick(s) }
+        }
+    }
+
+    private func finishTick(_ s: Sample) {
+        reading = false
+        defer {
+            if rereadRequested { rereadRequested = false; tick() }
+        }
+        // Модуль выключили, пока шло чтение, — снимок устарел.
+        guard isRunning else { return }
+
+        if s.fans != fans { fans = s.fans }
+        if configs.count < s.count {
+            configs += Array(repeating: FanConfig(), count: s.count - configs.count)
+        }
+        if s.cpu != cpuSensors { cpuSensors = s.cpu }
+        if s.gpu != gpuSensors { gpuSensors = s.gpu }
 
         if let cpu = cpuMax {
             if cpu >= Self.safetyTrip { safetyTripped = true }
             else if cpu < Self.safetyRelease { safetyTripped = false }
         }
 
-        conflictingApp = NSWorkspace.shared.runningApplications.first {
-            Self.conflictingBundleIDs.contains($0.bundleIdentifier ?? "")
-        }
+        let conflict = Self.conflictingBundleIDs.lazy
+            .compactMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first }
+            .first
+        if conflict?.processIdentifier != conflictingApp?.processIdentifier { conflictingApp = conflict }
 
         apply()
     }
@@ -336,16 +381,21 @@ final class FanController: ObservableObject {
 
     // MARK: - Вспомогательное
 
-    private func read(_ keys: [String]) -> [SensorReading] {
-        keys.compactMap { key in
-            guard let v = smc?.float(key).map(Double.init), Self.isPlausible(Float(v)) else { return nil }
-            return SensorReading(key: key, value: v)
-        }
-    }
-
     private nonisolated static func isPlausible(_ t: Float) -> Bool { t > 0 && t < 150 }
 
+    /// Запись в UserDefaults — не на каждое движение слайдера, а когда он затих.
+    private func schedulePersist() {
+        pendingPersist?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor in self?.persist() }
+        }
+        pendingPersist = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
     private func persist() {
+        pendingPersist?.cancel()
+        pendingPersist = nil
         if let data = try? JSONEncoder().encode(configs) {
             UserDefaults.standard.set(data, forKey: Self.configsKey)
         }

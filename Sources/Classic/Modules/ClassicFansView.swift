@@ -80,7 +80,7 @@ private struct ClassicFanRow: View {
                     HStack {
                         Slider(value: Binding(
                             get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
-                            set: { config.rpm = min(max(($0 / 100).rounded() * 100, fan.min), fan.max) }
+                            set: { let new = min(max(($0 / 100).rounded() * 100, fan.min), fan.max); if new != config.rpm { config.rpm = new } }
                         ), in: fan.min...fan.max)
                         Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
                             .monospacedDigit()
@@ -117,7 +117,7 @@ private struct ClassicTempSlider: View {
         HStack {
             Text(title).frame(width: 150, alignment: .leading)
             // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
-            Slider(value: Binding(get: { value }, set: { value = $0.rounded() }), in: range)
+            Slider(value: Binding(get: { value }, set: { let new = $0.rounded(); if new != value { value = new } }), in: range)
             Text("\(Int(value)) °C").monospacedDigit().frame(width: 50, alignment: .trailing)
         }
     }
