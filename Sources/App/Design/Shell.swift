@@ -300,6 +300,10 @@ private struct TrafficLightProbe: NSViewRepresentable {
     final class ProbeView: NSView {
         var onChange: ((CGPoint) -> Void)?
 
+        // Невидимый замерщик растянут на всё окно (из-за .position у кнопки) и лежит поверх
+        // страницы — без этого он забирал себе все клики, и интерфейс был «некликабельным».
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             NotificationCenter.default.removeObserver(self)
