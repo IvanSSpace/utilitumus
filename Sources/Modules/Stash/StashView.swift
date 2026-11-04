@@ -32,7 +32,7 @@ private struct ChipView: View {
     }
 }
 
-private func memoryText(_ mb: Double) -> String {
+func memoryText(_ mb: Double) -> String {
     let text = mb >= 1024
         ? String(format: "%.1f ГБ", mb / 1024)
         : "\(Int(mb.rounded())) МБ"
@@ -237,7 +237,8 @@ private struct FlowLayout: Layout {
     }
 }
 
-private func programs(_ n: Int) -> String {
+/// Число и слово «программа» в нужной форме; тот же текст и на дашборде в диалоге подтверждения.
+func programs(_ n: Int) -> String {
     let mod100 = n % 100, mod10 = n % 10
     if (11...14).contains(mod100) { return "\(n) программ" }
     switch mod10 {

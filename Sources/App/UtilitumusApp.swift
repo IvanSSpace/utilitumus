@@ -110,6 +110,8 @@ struct MainView: View {
     @AppStorage(DS.sidebarHiddenKey) private var sidebarHidden = false
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
+    /// Дашборд — страница по умолчанию при запуске; не сохраняем, как и «О проекте».
+    @State private var showDashboard = true
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
@@ -124,12 +126,14 @@ struct MainView: View {
         let detail = displayed == nil ? nil : (built ?? displayed)
         // Для фона и акцента на «О проекте» и пустой панели берём последний выбранный модуль.
         let tintModule = displayed ?? selection
-        let pageKey = showAbout ? "about" : (detail?.rawValue ?? "none")
+        let onDashboard = showDashboard && !showAbout
+        let pageKey = showAbout ? "about" : (showDashboard ? "dashboard" : (detail?.rawValue ?? "none"))
         ZStack {
-            DSBackground(module: tintModule)
+            DSBackground(module: tintModule, neutral: onDashboard)
             HStack(spacing: 0) {
                 if !sidebarHidden {
-                    DSSidebar(current: current, showAbout: $showAbout, peeked: $peeked, selection: $selection)
+                    DSSidebar(current: current, showDashboard: $showDashboard, showAbout: $showAbout,
+                              peeked: $peeked, selection: $selection)
                         .frame(width: DS.sidebarWidth)
                         .background(theme.sidebar)
                         .transition(.move(edge: .leading).combined(with: .opacity))
@@ -151,6 +155,10 @@ struct MainView: View {
             }
             DSSidebarToggle(hidden: $sidebarHidden)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // ⌘0 — на дашборд. Скрытая кнопка, чтобы сочетание работало и при скрытой панели.
+            Button("") { peeked = nil; showAbout = false; showDashboard = true }
+                .keyboardShortcut("0", modifiers: .command)
+                .opacity(0).frame(width: 0, height: 0)
         }
         .animation(DS.sidebarAnimation, value: sidebarHidden)
         .environment(\.dsTint, theme.accent(tintModule))
@@ -163,6 +171,8 @@ struct MainView: View {
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
+        // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
+        .onChange(of: peeked) { if peeked != nil { showDashboard = false } }
         .frame(minWidth: 840, minHeight: 540)
         .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
@@ -182,6 +192,12 @@ struct MainView: View {
                     peeked = module
                 }
                 self.showAbout = false
+                showDashboard = false
+            }
+        } else if showDashboard {
+            DashboardPage { module in
+                selection = module
+                showDashboard = false
             }
         } else if let detail {
             ModuleDetail(module: detail)

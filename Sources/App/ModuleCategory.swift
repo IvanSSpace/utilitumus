@@ -10,6 +10,10 @@ struct ModuleCategory: Identifiable, Hashable {
     let id: String
     let title: String
     let subtitle: String
+    /// Значок вкладки в боковой панели и секции дашборда.
+    let icon: String
+    /// Показывать ли у модулей категории в панели вторую строку — живой статус.
+    let showsStatus: Bool
     /// Средний оттенок гаммы (0…1).
     let hue: Double
     /// Разброс оттенков между соседними модулями категории.
@@ -17,15 +21,18 @@ struct ModuleCategory: Identifiable, Hashable {
     let modules: [Module]
 
     static let all: [ModuleCategory] = [
-        ModuleCategory(id: "fixes", title: "Исправления MacBook",
-                       subtitle: "То, что в macOS должно быть, но его нет",
-                       hue: 0.54, spread: 0.055, modules: [.sound, .fans, .mixer, .mouse]),
-        ModuleCategory(id: "tricks", title: "Утилиты с фишками",
-                       subtitle: "Мелочи, которые экономят время каждый день",
-                       hue: 0.81, spread: 0.08, modules: [.stash, .browser, .voice]),
-        ModuleCategory(id: "ai", title: "Для работы с ИИ",
+        ModuleCategory(id: "background", title: "Фоном",
+                       subtitle: "Настроил и забыл — работает само",
+                       icon: "moon.zzz.fill", showsStatus: true,
+                       hue: 0.55, spread: 0.03, modules: [.sound, .mouse, .fans, .browser]),
+        ModuleCategory(id: "handy", title: "Под рукой",
+                       subtitle: "Пользуешься каждый день",
+                       icon: "hand.point.up.fill", showsStatus: false,
+                       hue: 0.80, spread: 0.06, modules: [.stash, .voice, .mixer]),
+        ModuleCategory(id: "ai", title: "С ИИ",
                        subtitle: "Когда агенты съедают память",
-                       hue: 0.08, spread: 0.03, modules: [.load]),
+                       icon: "sparkles", showsStatus: false,
+                       hue: 0.11, spread: 0.03, modules: [.load]),
     ]
 
     /// Оттенок модуля внутри гаммы категории.
