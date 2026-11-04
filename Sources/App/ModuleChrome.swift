@@ -1,39 +1,44 @@
 import SwiftUI
 
 /// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить».
-/// (i) и переключатель — в строке заголовка окна, отдельной полосы над экраном нет.
+/// (i) и переключатель — в строке заголовка окна (`ModuleToolbar` в MainView), отдельной полосы нет.
 /// Выключенный модуль ничего не делает и экран его не запускает.
 struct ModuleScreen<Content: View>: View {
     let module: Module
     @ViewBuilder var content: Content
     @ObservedObject private var modules = ModuleManager.shared
-    @State private var showInfo = false
 
     var body: some View {
+        if modules.isOn(module) {
+            content
+        } else {
+            ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
+                .navigationTitle(module.title)
+        }
+    }
+}
+
+/// (i) и переключатель модуля в строке заголовка. Висят на всём окне, а не на экране модуля:
+/// иначе при каждом переключении вкладки macOS пересобирает панель инструментов (+30–40 мс).
+struct ModuleToolbar: ToolbarContent {
+    let module: Module
+    @ObservedObject var modules: ModuleManager
+
+    var body: some ToolbarContent {
         let on = modules.isOn(module)
-        Group {
-            if on {
-                content
-            } else {
-                ModuleOffView(module: module) { modules.setOn(module, true) } more: { showInfo = true }
-                    .navigationTitle(module.title)
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                modules.infoModule = module
+            } label: {
+                Label("Об инструменте", systemImage: "info.circle")
             }
+            .help("Об инструменте")
+            Toggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    showInfo = true
-                } label: {
-                    Label("Об инструменте", systemImage: "info.circle")
-                }
-                .help("Об инструменте")
-                Toggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
-            }
-        }
-        .sheet(isPresented: $showInfo) { ModuleInfoSheet(module: module) }
     }
 }
 

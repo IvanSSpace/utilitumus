@@ -1,30 +1,48 @@
 import SwiftUI
 
-/// Большая кнопка в стиле «Полной мощности»: заголовок, пояснение, цвет действия.
+/// Программа на плашке большой кнопки: значок, имя, сколько окон (если больше одного).
+struct StashChip: Identifiable {
+    let id: String
+    let icon: NSImage?
+    let name: String
+    var windows = 0
+}
+
+/// Большая кнопка в стиле «Полной мощности»: заголовок, пояснение и плашки программ,
+/// чтобы было видно, что именно закроется или вернётся.
 private struct StashActionButton: View {
     let icon: String
     let title: String
     let subtitle: String
     let tint: Color
+    var chips: [StashChip] = []
     let enabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 26, weight: .semibold))
-                    .frame(width: 36)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.weight(.semibold))
-                    Text(subtitle).font(.callout).opacity(0.8)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    Image(systemName: icon)
+                        .font(.system(size: 26, weight: .semibold))
+                        .frame(width: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title).font(.title3.weight(.semibold))
+                        Text(subtitle).font(.callout).opacity(0.8)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                if !chips.isEmpty {
+                    FlowLayout(spacing: 6) {
+                        ForEach(chips) { ChipView(chip: $0) }
+                    }
+                    .padding(.leading, 50)
+                }
             }
             .foregroundStyle(Color.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -32,6 +50,30 @@ private struct StashActionButton: View {
         .roundedFocusRing(10)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
+    }
+}
+
+private struct ChipView: View {
+    let chip: StashChip
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let icon = chip.icon {
+                Image(nsImage: icon).resizable().frame(width: 20, height: 20)
+            }
+            Text(chip.name).font(.callout.weight(.medium))
+            if chip.windows > 1 {
+                Text("\(chip.windows)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .padding(.horizontal, 5)
+                    .background(.white.opacity(0.25), in: Capsule())
+                    .help("Окон: \(chip.windows)")
+            }
+        }
+        .padding(.leading, 5)
+        .padding(.trailing, 9)
+        .padding(.vertical, 4)
+        .background(.white.opacity(0.18), in: Capsule())
     }
 }
 
@@ -65,52 +107,18 @@ private struct RestoreButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 14) {
-                    Image(systemName: "arrow.uturn.backward.circle.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .frame(width: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Вернуть \(programs(apps.count))").font(.title3.weight(.semibold))
-                        Text(windowsSummary).font(.callout).opacity(0.8)
-                    }
-                    Spacer()
-                }
-                FlowLayout(spacing: 6) {
-                    ForEach(apps) { app in
-                        HStack(spacing: 6) {
-                            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
-                                .resizable()
-                                .frame(width: 20, height: 20)
-                            Text(app.name).font(.callout.weight(.medium))
-                            if app.windows.count > 1 {
-                                Text("\(app.windows.count)")
-                                    .font(.caption.weight(.semibold).monospacedDigit())
-                                    .padding(.horizontal, 5)
-                                    .background(.white.opacity(0.25), in: Capsule())
-                                    .help("Окон: \(app.windows.count)")
-                            }
-                        }
-                        .padding(.leading, 5)
-                        .padding(.trailing, 9)
-                        .padding(.vertical, 4)
-                        .background(.white.opacity(0.18), in: Capsule())
-                    }
-                }
-                .padding(.leading, 50)
-            }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.green, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .roundedFocusRing(10)
-        .disabled(!enabled)
-        .opacity(enabled ? 1 : 0.5)
+        StashActionButton(
+            icon: "arrow.uturn.backward.circle.fill",
+            title: "Вернуть \(programs(apps.count))",
+            subtitle: windowsSummary,
+            tint: .green,
+            chips: apps.map {
+                StashChip(id: $0.bundleID, icon: NSWorkspace.shared.icon(forFile: $0.path),
+                          name: $0.name, windows: $0.windows.count)
+            },
+            enabled: enabled,
+            action: action
+        )
     }
 
     private var windowsSummary: String {
@@ -211,6 +219,10 @@ struct StashView: View {
                         ? "Отметь ниже, что закрывать"
                         : "Закрыть \(programs(selectedCount)) и запомнить, где стояли окна",
                     tint: .accentColor,
+                    chips: store.selected.map {
+                        StashChip(id: $0.bundleIdentifier ?? "\($0.processIdentifier)", icon: $0.icon,
+                                  name: $0.localizedName ?? "Программа")
+                    },
                     enabled: store.busy == nil && selectedCount > 0
                 ) {
                     confirmStash = true

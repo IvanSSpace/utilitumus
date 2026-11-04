@@ -105,11 +105,15 @@ struct MainView: View {
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
+    /// Модуль, чей экран сейчас построен. Догоняет `displayed` следующим кадром: так выделение
+    /// в боковой панели переключается сразу, а не ждёт 100–200 мс, пока соберётся экран модуля.
+    @State private var built: Module?
 
     var body: some View {
         // Выбранный модуль могли скрыть или выключить: показываем первый из показанных.
         let current = modules.resolve(selection)
         let displayed = peeked ?? current
+        let detail = displayed == nil ? nil : (built ?? displayed)
         NavigationSplitView {
             List(selection: Binding(
                 // На странице «О проекте» и при разовом показе скрытого выделение снято.
@@ -149,11 +153,16 @@ struct MainView: View {
                     }
                     showAbout = false
                 }
-            } else if let displayed {
-                ModuleDetail(module: displayed)
+            } else if let detail {
+                ModuleDetail(module: detail)
+                    .toolbar { ModuleToolbar(module: detail, modules: modules) }
             } else {
                 NoShownModules()
             }
+        }
+        .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0) }
+        .onChange(of: displayed) {
+            DispatchQueue.main.async { built = displayed }
         }
         .frame(minWidth: 680, minHeight: 460)
         .onChange(of: modules.hidden) {
