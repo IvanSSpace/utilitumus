@@ -219,10 +219,68 @@ private struct GameIcon: View {
     }
 }
 
+/// Плашка своей игры: иконка, имя, крестик.
+private struct GameChip: View {
+    let entry: GameEntry
+    let icon: NSImage?
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            GameIcon(icon: icon).scaleEffect(0.8).frame(width: 16, height: 16)
+            Text(entry.name).lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Убрать из списка")
+        }
+        .font(.callout)
+        .padding(.leading, 7).padding(.trailing, 5).padding(.vertical, 3)
+        .background(Color.secondary.opacity(0.14), in: Capsule())
+        .help(entry.key.hasPrefix("exe:") ? String(entry.key.dropFirst(4)) : entry.name)
+    }
+}
+
+/// Плашки переносятся на следующую строку, как слова в тексте.
+private struct ChipFlow: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(width: proposal.width ?? .infinity, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let r = arrange(width: bounds.width, subviews: subviews)
+        for (i, origin) in r.origins.enumerated() {
+            subviews[i].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
+        }
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0, maxW: CGFloat = 0
+        for v in subviews {
+            let sz = v.sizeThatFits(.unspecified)
+            if x > 0, x + sz.width > width { x = 0; y += rowH + spacing; rowH = 0 }
+            origins.append(CGPoint(x: x, y: y))
+            x += sz.width + spacing
+            rowH = max(rowH, sz.height)
+            maxW = max(maxW, x - spacing)
+        }
+        return (CGSize(width: maxW, height: y + rowH), origins)
+    }
+}
+
 /// «Максимум в играх»: переключатель, статус, список своих игр и лаунчеры-исключения.
 private struct GameModeSection: View {
     @ObservedObject var game: GameModeController
     let canControl: Bool
+    @State private var launchersOpen = false
+
+    private var excludedCount: Int {
+        GameRules.defaultLaunchers.filter { game.isLauncherExcluded($0.key) }.count
+    }
 
     var body: some View {
         Section {
@@ -245,7 +303,7 @@ private struct GameModeSection: View {
                 }
 
                 HStack {
-                    Text("Мои игры").font(.headline)
+                    Text("Мои игры")
                     Spacer()
                     Menu("Добавить…") {
                         if game.addable.isEmpty {
@@ -269,37 +327,44 @@ private struct GameModeSection: View {
                     Text("Игры определяются сами. Остальные, например из CrossOver, добавь сюда.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-                ForEach(game.myGames) { entry in
-                    HStack(spacing: 10) {
-                        GameIcon(icon: game.icon(for: entry))
-                        Text(entry.name)
-                        if entry.key.hasPrefix("exe:") {
-                            Text(String(entry.key.dropFirst(4)))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                } else {
+                    ChipFlow(spacing: 6) {
+                        ForEach(game.myGames) { entry in
+                            GameChip(entry: entry, icon: game.icon(for: entry)) { game.removeGame(entry) }
                         }
-                        Spacer()
-                        Button {
-                            game.removeGame(entry)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Убрать из списка")
                     }
                 }
 
-                Text("Лаунчеры — не игры").font(.headline).padding(.top, 4)
-                ForEach(GameRules.defaultLaunchers) { launcher in
-                    Toggle(launcher.name, isOn: Binding(
-                        get: { game.isLauncherExcluded(launcher.key) },
-                        set: { game.setLauncherExcluded(launcher.key, $0) }
-                    ))
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { launchersOpen.toggle() }
+                } label: {
+                    HStack {
+                        Text("Лаунчеры — не игры")
+                        Spacer()
+                        Text("\(excludedCount) из \(GameRules.defaultLaunchers.count)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(launchersOpen ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
                 }
-                Text("Лаунчер — не игра. Сними галочку, если нужно иначе.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .roundedFocusRing(6)
+
+                if launchersOpen {
+                    ForEach(GameRules.defaultLaunchers) { launcher in
+                        Toggle(launcher.name, isOn: Binding(
+                            get: { game.isLauncherExcluded(launcher.key) },
+                            set: { game.setLauncherExcluded(launcher.key, $0) }
+                        ))
+                    }
+                    Text("Лаунчер — не игра. Сними галочку, если нужно иначе.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .onAppear { game.refreshRunning() }
@@ -364,8 +429,6 @@ struct FansView: View {
                 FullPowerButton(isOn: $controller.fullPower, enabled: canControl)
             }
 
-            GameModeSection(game: game, canControl: canControl)
-
             if controller.safetyTripped && !controller.fullPower && !game.isActive {
                 Section {
                     Label("Процессор горячее \(Int(FanController.safetyTrip)) °C: вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.",
@@ -387,6 +450,8 @@ struct FansView: View {
                     }
                 }
             }
+
+            GameModeSection(game: game, canControl: canControl)
 
             Section("Температура") {
                 SensorGroup(title: "Процессор", sensors: controller.cpuSensors)
