@@ -19,6 +19,8 @@ final class ModuleManager: ObservableObject {
     @Published private(set) var hidden: Set<Module>
     /// Открытая страница «Об инструменте» (кнопка (i) или «Подробнее»).
     @Published var infoModule: Module?
+    /// Открыт лист «Модули» (настройки) поверх главного окна.
+    @Published var settingsShown = false
 
     private let defaults: UserDefaults
     private let hooks: (Module) -> ModuleHooks

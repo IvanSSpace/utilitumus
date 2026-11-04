@@ -96,7 +96,7 @@ struct AboutView: View {
             Text("Модулей: \(Module.allCases.count), включено: \(on).")
             Text("Открытый код — делай форк и предлагай свои модули.")
             Spacer()
-            SettingsLink { Text("Настроить модули") }
+            Button("Настроить модули") { modules.settingsShown = true }
                 .buttonStyle(.link)
         }
         .font(.caption)

@@ -1,12 +1,22 @@
 import SwiftUI
 
-/// Окно настроек (Cmd+,): модули. Один раздел — без вкладок, иначе сверху висит одинокая иконка.
+/// Настройки модулей (Cmd+, и «Настроить модули»): лист поверх главного окна.
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        ModulesSettings()
-            .frame(width: 580)
-            .fixedSize(horizontal: false, vertical: true)
-            .navigationTitle("Модули")
+        VStack(spacing: 0) {
+            ModulesSettings()
+            Divider()
+            HStack {
+                Spacer()
+                Button("Готово") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
+        }
+        .frame(width: 580)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

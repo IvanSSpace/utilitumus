@@ -100,7 +100,6 @@ struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var whatsNew = WhatsNew.shared
-    @Environment(\.openSettings) private var openSettings
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
@@ -136,7 +135,7 @@ struct MainView: View {
                             Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
                             Button("Скрыть из панели") { modules.setHidden(module, true) }
                             Divider()
-                            Button("Настроить модули…") { openSettings() }
+                            Button("Настроить модули…") { modules.settingsShown = true }
                         }
                 }
                 .onMove { modules.moveShown(from: $0, to: $1) }
@@ -163,6 +162,8 @@ struct MainView: View {
         }
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0) }
         .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet() }
+        // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
+        .sheet(isPresented: $modules.settingsShown) { SettingsView() }
         .onAppear { whatsNew.showIfUpdated() }
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
@@ -184,10 +185,8 @@ struct NoShownModules: View {
         } description: {
             Text("Нет модулей в панели — верни нужные в Настройках")
         } actions: {
-            SettingsLink {
-                Text("Открыть настройки")
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Открыть настройки") { ModuleManager.shared.settingsShown = true }
+                .buttonStyle(.borderedProminent)
         }
     }
 }
@@ -242,7 +241,9 @@ struct UpdateFooter: View {
             .font(.callout)
             .foregroundStyle(.primary)
             // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
-            SettingsLink {
+            Button {
+                modules.settingsShown = true
+            } label: {
                 Label("Настроить модули", systemImage: "slider.horizontal.3")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -395,15 +396,21 @@ struct UtilitumusApp: App {
             }
             // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
             CommandGroup(replacing: .appSettings) {
-                SettingsLink {
-                    Text("Настройки…")
-                }
-                .keyboardShortcut(",", modifiers: .command)
+                SettingsCommand()
             }
         }
+    }
+}
 
-        Settings {
-            SettingsView()
+/// Cmd+, — лист настроек в главном окне; если окно закрыто, сначала открываем его.
+private struct SettingsCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Настройки…") {
+            openWindow(id: "main")
+            ModuleManager.shared.settingsShown = true
         }
+        .keyboardShortcut(",", modifiers: .command)
     }
 }
