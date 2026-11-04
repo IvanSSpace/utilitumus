@@ -14,8 +14,8 @@ extension ModuleHooks {
             return ModuleHooks(start: { FanController.shared.start() },
                                stop: { FanController.shared.stop() })
         case .load:
-            return ModuleHooks(start: { LambscapePanel.shared.start() },
-                               stop: { LambscapePanel.shared.stop() })
+            return ModuleHooks(start: { LoadStore.shared.start() },
+                               stop: { LoadStore.shared.stop() })
         case .mixer:
             return ModuleHooks(start: { MixerController.shared.start() },
                                stop: { MixerController.shared.stop() })

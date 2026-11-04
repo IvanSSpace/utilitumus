@@ -62,7 +62,7 @@ struct ModuleDetail: View {
         case .fans:
             FansView()
         case .load:
-            LoadView()
+            LoadScreen()
         case .stash:
             StashView()
         case .mixer:

@@ -1,0 +1,130 @@
+import SwiftUI
+
+/// Экран модуля «Нагрузка»: шапка (давление, своп, «Просто / Подробно»), вкладки и содержимое.
+/// Заменяет веб-страницу lambscape в `ModuleDetail`.
+struct LoadScreen: View {
+    @ObservedObject var store: LoadStore
+    @AppStorage("LoadViewMode") private var modeRaw = LoadViewMode.full.rawValue
+    @AppStorage("LoadTab") private var tabRaw = LoadTab.overview.rawValue
+    @State private var drill: MemoryPart?
+
+    @MainActor init(store: LoadStore? = nil) { self.store = store ?? LoadStore.shared }
+
+    private var mode: LoadViewMode { LoadViewMode(rawValue: modeRaw) ?? .full }
+    private var tab: LoadTab { LoadTab(rawValue: tabRaw) ?? .overview }
+
+    static func pressureWord(_ p: MemoryPressure) -> String {
+        switch p {
+        case .normal: return "норма"
+        case .warn: return "высокое"
+        case .critical: return "критическое"
+        }
+    }
+
+    static func swapIsHot(_ m: MemoryTotals) -> Bool {
+        m.swapTotalMB > 0 && Double(m.swapUsedMB) / Double(m.swapTotalMB) > 0.7
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Picker("Раздел", selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) {
+                ForEach(LoadTab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 440)
+            .padding(.bottom, 8)
+            if let notice = store.notice { noticeBanner(notice) }
+            content
+        }
+        .navigationTitle("Нагрузка")
+        .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    store.refreshNow()
+                } label: {
+                    Label("Обновить", systemImage: "arrow.clockwise")
+                }
+                .help("Обновить: собрать данные заново, не дожидаясь опроса")
+            }
+        }
+        .onAppear { store.screenAppeared() }
+        .onDisappear { store.screenDisappeared() }
+        .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
+            StopConfirmSheet(store: store, plan: plan)
+        }
+    }
+
+    private var subtitle: String {
+        guard let h = store.snapshot?.host else { return "Память и процессы" }
+        return "\(h.chip) · \(Fmt.gb(Double(h.ramMB))) GB"
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            if let m = store.snapshot?.memory {
+                HStack(spacing: 6) {
+                    Circle().fill(color(m.pressure)).frame(width: 9, height: 9)
+                    Text("Давление: \(Self.pressureWord(m.pressure))")
+                }
+                .help("Давление памяти macOS")
+                HStack(spacing: 6) {
+                    if Self.swapIsHot(m) { Circle().fill(.orange).frame(width: 7, height: 7) }
+                    Text("Своп \(Fmt.gb(Double(m.swapUsedMB)))/\(Fmt.gb(Double(m.swapTotalMB))) GB").monospacedDigit()
+                }
+                .help("Своп: занято / всего")
+            } else {
+                Text("Считаю…").foregroundStyle(.secondary)
+            }
+            Spacer()
+            Picker("Вид", selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) {
+                ForEach(LoadViewMode.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 180)
+            .help("Просто — главное: сколько занято, кто ест память, что выключить. Подробно — карта памяти, процессы, история, диск")
+        }
+        .font(.callout)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    private func color(_ p: MemoryPressure) -> Color {
+        switch p {
+        case .normal: return .green
+        case .warn: return .orange
+        case .critical: return .red
+        }
+    }
+
+    private func noticeBanner(_ n: LoadNotice) -> some View {
+        HStack {
+            Label(n.text, systemImage: n.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(n.isError ? Color.orange : Color.green)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button("Закрыть") { store.notice = nil }.buttonStyle(.link)
+        }
+        .font(.callout)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 6)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch tab {
+        case .overview:
+            OverviewTab(store: store, mode: mode, drill: $drill) { modeRaw = LoadViewMode.full.rawValue; tabRaw = LoadTab.memory.rawValue }
+        case .sessions:
+            SessionsTab()
+        case .background:
+            BackgroundTab()
+        case .memory:
+            MemoryTab(store: store, mode: mode, drill: $drill) { modeRaw = LoadViewMode.full.rawValue }
+        }
+    }
+}
