@@ -22,6 +22,11 @@ extension ModuleHooks {
         case .mouse:
             return ModuleHooks(start: { MouseController.shared.start() },
                                stop: { MouseController.shared.stop() })
+        case .browser:
+            // Ссылки ведёт помощник «Utilitumus Links» и от модуля не зависит:
+            // выключенный модуль он видит в настройках и отправляет ссылки в основной браузер.
+            return ModuleHooks(start: { BrowserCatalog.shared.start() },
+                               stop: { BrowserCatalog.shared.stop() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })

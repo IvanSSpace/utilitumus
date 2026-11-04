@@ -34,7 +34,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 swiftc -O -parse-as-library -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*') \
+  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*') \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 # Root-помощник вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ».
@@ -43,6 +43,24 @@ swiftc -O -target "$TARGET" \
   Sources/Shared/SMC.swift Sources/FanHelper/main.swift \
   -framework IOKit
 codesign --force --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
+
+# Помощник ссылок «Utilitumus Links» — браузер по умолчанию для модуля «Браузер». Отдельное
+# приложение без окна и Dock: macOS активирует получателя ссылки, и будь им сам Utilitumus,
+# вперёд выходило бы главное окно.
+LINKS_APP="$APP_BUNDLE/Contents/Helpers/Utilitumus Links.app"
+mkdir -p "$LINKS_APP/Contents/MacOS" "$LINKS_APP/Contents/Resources"
+swiftc -O -target "$TARGET" \
+  -o "$LINKS_APP/Contents/MacOS/UtilitumusLinks" \
+  Sources/LinkHelper/main.swift \
+  Sources/Modules/Browser/BrowserCatalog.swift Sources/Modules/Browser/BrowserRules.swift \
+  Sources/Modules/Browser/BrowserPicker.swift Sources/Modules/Browser/BrowserRouter.swift \
+  -framework SwiftUI -framework AppKit
+cp Sources/LinkHelper/Info.plist "$LINKS_APP/Contents/Info.plist"
+for key in CFBundleShortVersionString CFBundleVersion; do
+  /usr/libexec/PlistBuddy -c "Set :$key $(/usr/libexec/PlistBuddy -c "Print :$key" Info.plist)" "$LINKS_APP/Contents/Info.plist"
+done
+[ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$LINKS_APP/Contents/Resources/"
+codesign --force --sign "$SIGN_ID" "$LINKS_APP"
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
@@ -60,6 +78,8 @@ INSTALLED="/Applications/$APP_NAME.app"
 pgrep -qf "$INSTALLED/Contents/MacOS/$APP_NAME" && osascript -e "quit app \"$APP_NAME\"" 2>/dev/null || true
 sleep 1
 pkill -f "$INSTALLED/Contents/MacOS/$APP_NAME" 2>/dev/null || true
+# Помощник ссылок живёт внутри бандла — его тоже, иначе работает старая копия.
+pkill -f "$INSTALLED/Contents/Helpers/" 2>/dev/null || true
 rm -rf "$INSTALLED"
 cp -R "$APP_BUNDLE" "$INSTALLED"
 echo "Установлено: $INSTALLED"

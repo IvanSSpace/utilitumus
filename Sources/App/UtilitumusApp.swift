@@ -3,7 +3,7 @@ import AppKit
 
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
-    case sound, load, stash, fans, mixer, mouse
+    case sound, load, stash, fans, mixer, mouse, browser
 
     var id: String { rawValue }
 
@@ -15,6 +15,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .fans: return "Вентиляторы"
         case .mixer: return "Микшер"
         case .mouse: return "Мышь"
+        case .browser: return "Браузер"
         }
     }
 
@@ -26,6 +27,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .fans: return "fan.fill"
         case .mixer: return "slider.vertical.3"
         case .mouse: return "computermouse"
+        case .browser: return "globe"
         }
     }
 
@@ -39,6 +41,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .fans: return .teal
         case .mixer: return .pink
         case .mouse: return Color(nsColor: .systemGray)
+        case .browser: return .indigo
         }
     }
 
@@ -51,6 +54,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .fans: return "Режимы Авто, Константа и По датчику, температура процессора и видеокарты"
         case .mixer: return "Громкость каждого приложения отдельно"
         case .mouse: return "Своё направление прокрутки для мыши и плавная прокрутка колеса"
+        case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
         }
     }
 
@@ -65,6 +69,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .fans: return ""
         case .mixer: return ""
         case .mouse: return ""
+        case .browser: return ""
         }
     }
 }
@@ -103,6 +108,8 @@ struct ModuleDetail: View {
             MixerView()
         case .mouse:
             MouseView()
+        case .browser:
+            BrowserView()
         }
     }
 }
@@ -341,6 +348,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.windows.forEach { $0.close() }
             }
         }
+        // Помощник ссылок лежит внутри приложения: регистрируем, чтобы macOS знала его как браузер
+        // (после обновления путь тот же, но регистрация освежается).
+        LSRegisterURL(BrowserHelper.appURL as CFURL, true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

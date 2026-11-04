@@ -144,8 +144,7 @@ struct EmptyNote: View {
 
 // MARK: Полоса памяти
 
-struct BarPart: Identifiable {
-    var id = UUID()
+struct BarPart {
     var weight: Double
     var color: Color
     var tip: String
@@ -157,45 +156,105 @@ struct BarSegment: Identifiable {
     var parts: [BarPart]
 }
 
-/// Полоса памяти: сегменты-категории, внутри — доли программ. Наведение — подсказка, клик — разбор.
+/// Полоса памяти: сегменты-категории, внутри — доли программ. Наведение — подсветка и подпись, клик — разбор.
+///
+/// Подпись своя, а не системная `.help`: экран обновляется каждые 3 с, полоса перерисовывается,
+/// и системная подсказка (ждёт ~1 с неподвижного курсора) почти никогда не успевала появиться.
+/// Под курсором храним только координату — подпись берётся из свежих данных и обновляется вместе с ними.
 struct MemoryBar: View {
     var segments: [BarSegment]
     var height: CGFloat = 16
     var onTap: ((String) -> Void)?
 
-    var body: some View {
-        GeometryReader { geo in
-            let gaps = CGFloat(max(segments.count - 1, 0)) * 2
-            let total = max(segments.reduce(0) { $0 + $1.weight }, 1)
-            HStack(spacing: 2) {
-                ForEach(segments) { seg in
-                    let w = max(2, (geo.size.width - gaps) * seg.weight / total)
-                    SegmentView(segment: seg, width: w, height: height)
-                        .onTapGesture { onTap?(seg.id) }
-                }
-            }
-        }
-        .frame(height: height)
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+    @State private var hoverX: CGFloat?
+    @State private var calloutSize: CGSize = .zero
+
+    private static let gap: CGFloat = 2
+
+    private struct Piece {
+        var segment: String
+        var x: CGFloat
+        var width: CGFloat
+        var color: Color
+        var tip: String
     }
 
-    private struct SegmentView: View {
-        let segment: BarSegment
-        let width: CGFloat
-        let height: CGFloat
+    private func layout(width: CGFloat) -> [Piece] {
+        let gaps = CGFloat(max(segments.count - 1, 0)) * Self.gap
+        let total = max(segments.reduce(0) { $0 + $1.weight }, 1)
+        var x: CGFloat = 0
+        var out: [Piece] = []
+        for seg in segments {
+            let w = max(2, (width - gaps) * seg.weight / total)
+            let partsTotal = max(seg.parts.reduce(0) { $0 + $1.weight }, 1)
+            var px = x
+            for part in seg.parts {
+                let pw = w * part.weight / partsTotal
+                out.append(Piece(segment: seg.id, x: px, width: pw, color: part.color, tip: part.tip))
+                px += pw
+            }
+            x += w + Self.gap
+        }
+        return out
+    }
 
-        var body: some View {
-            let total = max(segment.parts.reduce(0) { $0 + $1.weight }, 1)
-            HStack(spacing: 0) {
-                ForEach(segment.parts) { part in
-                    Rectangle().fill(part.color)
-                        .frame(width: width * part.weight / total, height: height)
-                        .help(part.tip)
+    /// Кусок под точкой; зазор между сегментами относим к левому — чтобы подпись не мигала.
+    private func piece(at x: CGFloat, in pieces: [Piece]) -> Piece? {
+        pieces.last { x >= $0.x } ?? pieces.first
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let pieces = layout(width: geo.size.width)
+            let hovered = hoverX.flatMap { piece(at: $0, in: pieces) }
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(pieces.enumerated()), id: \.offset) { _, p in
+                    Rectangle().fill(p.color)
+                        .frame(width: max(p.width, 0), height: height)
+                        .offset(x: p.x)
+                        .opacity(hovered == nil || (hovered?.x == p.x) ? 1 : 0.4)
                 }
             }
-            .frame(width: width, height: height, alignment: .leading)
+            .frame(width: geo.size.width, height: height, alignment: .topLeading)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point): hoverX = point.x
+                case .ended: hoverX = nil
+                }
+            }
+            .onTapGesture(coordinateSpace: .local) { point in
+                if let p = piece(at: point.x, in: pieces) { onTap?(p.segment) }
+            }
+            .overlay(alignment: .topLeading) {
+                if let hovered {
+                    callout(hovered.tip)
+                        .offset(x: calloutX(center: hovered.x + hovered.width / 2, width: geo.size.width),
+                                y: -calloutSize.height - 6)
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeOut(duration: 0.1), value: hovered?.x)
         }
+        .frame(height: height)
+    }
+
+    private func callout(_ tip: String) -> some View {
+        Text(tip)
+            .font(.caption)
+            .monospacedDigit()
+            .fixedSize()
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(.separator))
+            .shadow(color: .black.opacity(0.2), radius: 4, y: 1)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { calloutSize = $0 }
+    }
+
+    /// Подпись по центру над куском, но в пределах полосы.
+    private func calloutX(center: CGFloat, width: CGFloat) -> CGFloat {
+        min(max(0, center - calloutSize.width / 2), max(0, width - calloutSize.width))
     }
 }
 
