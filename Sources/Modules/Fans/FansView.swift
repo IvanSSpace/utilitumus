@@ -57,11 +57,7 @@ private struct FanRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            Picker("Режим", selection: $config.mode) {
-                ForEach(FanMode.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            SegmentedControl(FanMode.allCases, selection: $config.mode) { $0.title }
             .disabled(overridden)
             .opacity(overridden ? 0.5 : 1)
 

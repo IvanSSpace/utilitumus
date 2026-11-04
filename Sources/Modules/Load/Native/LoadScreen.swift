@@ -37,12 +37,9 @@ struct LoadScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Picker("Раздел", selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) {
-                ForEach(LoadTab.allCases.filter { $0 != .background || background.hasContent }) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 440)
+            SegmentedControl(LoadTab.allCases.filter { $0 != .background || background.hasContent },
+                             selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) { $0.title }
+                .frame(maxWidth: 440)
             .padding(.bottom, 8)
             if let notice = store.notice { noticeBanner(notice) }
             content
@@ -91,12 +88,7 @@ struct LoadScreen: View {
                 Text("Считаю…").foregroundStyle(.secondary)
             }
             Spacer()
-            Picker("Вид", selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) {
-                ForEach(LoadViewMode.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 180)
+            SegmentedControl(LoadViewMode.allCases, selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) { $0.title }
             .help("Просто — главное: сколько занято, кто ест память, что выключить. Подробно — карта памяти, процессы, история, диск")
         }
         .font(.callout)

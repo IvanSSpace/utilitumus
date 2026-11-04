@@ -69,10 +69,9 @@ struct MouseView: View {
     }
 
     private func directionPicker(_ title: String, _ selection: Binding<ScrollDirection>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(ScrollDirection.allCases) { Text($0.title).tag($0) }
+        LabeledContent(title) {
+            SegmentedControl(ScrollDirection.allCases, selection: selection) { $0.title }
         }
-        .pickerStyle(.segmented)
     }
 
     private var status: (text: String, icon: String, color: Color) {

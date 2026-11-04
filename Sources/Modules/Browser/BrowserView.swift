@@ -367,11 +367,11 @@ private struct AddRuleSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Picker("Условие", selection: $kind) {
-                    Text("Сайт").tag(BrowserRule.Kind.domain)
-                    Text("Приложение").tag(BrowserRule.Kind.app)
+                LabeledContent("Условие") {
+                    SegmentedControl([BrowserRule.Kind.domain, .app], selection: $kind) {
+                        $0 == .domain ? "Сайт" : "Приложение"
+                    }
                 }
-                .pickerStyle(.segmented)
 
                 if kind == .domain {
                     TextField("Домен", text: $domain, prompt: Text("google.com"))
