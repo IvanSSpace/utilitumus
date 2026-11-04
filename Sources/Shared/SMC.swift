@@ -9,7 +9,10 @@ import IOKit
 /// (80 байт). Swift кладёт поля в хвостовой padding вложенных структур, C —
 /// нет, поэтому в `KeyInfo` явный `pad`: без него `result` съезжает на 37-й
 /// байт вместо 40-го и все вызовы молча возвращают «ключа нет».
-final class SMC {
+///
+/// Вызывается из нескольких потоков (опрос — на фоновой очереди, запись — с главной):
+/// сам IOKit это допускает, а общий кэш `KeyInfo` закрыт замком.
+final class SMC: @unchecked Sendable {
     private struct Version { var major: UInt8 = 0, minor: UInt8 = 0, build: UInt8 = 0, reserved: UInt8 = 0, release: UInt16 = 0 }
     private struct PLimitData { var version: UInt16 = 0, length: UInt16 = 0, cpuPLimit: UInt32 = 0, gpuPLimit: UInt32 = 0, memPLimit: UInt32 = 0 }
     private struct KeyInfo { var dataSize: UInt32 = 0, dataType: UInt32 = 0, dataAttributes: UInt8 = 0, pad: (UInt8, UInt8, UInt8) = (0, 0, 0) }
@@ -35,6 +38,10 @@ final class SMC {
     }
 
     private var connection: io_connect_t = 0
+    /// Тип и размер ключа не меняются, пока машина включена: спрашивать их у SMC
+    /// на каждое чтение — лишний системный вызов. Кэшируем только удачные ответы.
+    private var infoCache: [String: KeyInfo] = [:]
+    private let cacheLock = NSLock()
 
     init?() {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -80,10 +87,18 @@ final class SMC {
     }
 
     private func info(_ key: String) -> KeyInfo? {
+        cacheLock.lock()
+        let cached = infoCache[key]
+        cacheLock.unlock()
+        if let cached { return cached }
         var input = KeyData()
         input.key = Self.fourCC(key)
         input.data8 = Command.keyInfo.rawValue
-        return call(&input)?.keyInfo
+        guard let found = call(&input)?.keyInfo else { return nil }
+        cacheLock.lock()
+        infoCache[key] = found
+        cacheLock.unlock()
+        return found
     }
 
     private func read(_ key: String) -> (type: String, bytes: [UInt8])? {

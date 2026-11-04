@@ -1,11 +1,13 @@
 import Foundation
 import AppKit
 
-struct RunningCandidate: Identifiable {
+struct RunningCandidate: Identifiable, Equatable {
     let key: String
     let name: String
     let icon: NSImage?
     var id: String { key }
+    // Иконка для сравнения не нужна: ключ и имя определяют строку меню.
+    static func == (a: RunningCandidate, b: RunningCandidate) -> Bool { a.key == b.key && a.name == b.name }
 }
 
 /// «Максимум в играх»: следит, какая программа на переднем плане, и решает,
@@ -74,9 +76,6 @@ final class GameModeController: ObservableObject {
                 let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
                 MainActor.assumeIsolated { GameModeController.shared.terminated(app) }
             },
-            center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { _ in
-                MainActor.assumeIsolated { GameModeController.shared.refreshRunning() }
-            },
         ]
         refreshRunning()
         if isEnabled { evaluateFrontmost() }
@@ -113,8 +112,11 @@ final class GameModeController: ObservableObject {
     }
 
     private func activated(_ app: NSRunningApplication?) {
-        guard isRunning, isEnabled, let app else { return }
-        refreshRunning()
+        guard isRunning, let app else { return }
+        // Список «Добавить…» нужен, только когда открыт наш экран; вернулся в
+        // приложение — обновить. На остальных переключениях обход всех процессов не нужен.
+        if app.bundleIdentifier == Bundle.main.bundleIdentifier { refreshRunning() }
+        guard isEnabled else { return }
         let info = Self.info(app)
         var entry: GameEntry?
         if rules.isGame(info), let key = info.key { entry = GameEntry(key: key, name: info.name) }
@@ -128,7 +130,6 @@ final class GameModeController: ObservableObject {
 
     private func terminated(_ app: NSRunningApplication?) {
         guard isRunning, let app else { return }
-        refreshRunning()
         guard isEnabled, let game = machine.game else { return }
         let key = app.processIdentifier == gamePID ? game.key : Self.info(app).key
         guard let key else { return }
@@ -206,13 +207,17 @@ final class GameModeController: ObservableObject {
     }
 
     func refreshRunning() {
-        running = NSWorkspace.shared.runningApplications.compactMap { app in
+        let list: [RunningCandidate] = NSWorkspace.shared.runningApplications.compactMap { app -> RunningCandidate? in
             guard app.activationPolicy == .regular, !app.isTerminated,
-                  app.bundleIdentifier != Bundle.main.bundleIdentifier,
-                  let key = Self.info(app).key else { return nil }
-            return RunningCandidate(key: key, name: Self.info(app).name, icon: app.icon.map(Self.smallIcon))
+                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+            let info = Self.info(app)
+            guard let key = info.key else { return nil }
+            let icon = Self.iconCache[key] ?? app.icon.map(Self.smallIcon)
+            if let icon { Self.iconCache[key] = icon }
+            return RunningCandidate(key: key, name: info.name, icon: icon)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        if list != running { running = list }
     }
 
     private func persistGames() {
@@ -223,11 +228,23 @@ final class GameModeController: ObservableObject {
 
     // MARK: - Вспомогательное
 
+    /// Категория из Info.plist — чтение с диска, поэтому один раз на bundle.
+    private static var categoryCache: [URL: String?] = [:]
+    /// Уменьшенные иконки по ключу программы: копия и ресайз не на каждое обновление списка.
+    private static var iconCache: [String: NSImage] = [:]
+
+    private static func category(of url: URL) -> String? {
+        if let hit = categoryCache[url] { return hit }
+        let value = Bundle(url: url)?.object(forInfoDictionaryKey: "LSApplicationCategoryType") as? String
+        categoryCache[url] = value
+        return value
+    }
+
     private static func info(_ app: NSRunningApplication) -> AppInfo {
         let exe = app.executableURL?.lastPathComponent
         var category: String?
         if let url = app.bundleURL, url.pathExtension == "app" {
-            category = Bundle(url: url)?.object(forInfoDictionaryKey: "LSApplicationCategoryType") as? String
+            category = Self.category(of: url)
         }
         let name = app.localizedName ?? exe ?? app.bundleIdentifier ?? "?"
         return AppInfo(bundleID: app.bundleIdentifier, executableName: exe, name: name, category: category)
