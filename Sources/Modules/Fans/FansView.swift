@@ -192,6 +192,7 @@ private struct FullPowerButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .roundedFocusRing(10)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
     }

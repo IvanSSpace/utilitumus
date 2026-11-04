@@ -29,6 +29,7 @@ private struct StashActionButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .roundedFocusRing(10)
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
     }
@@ -54,6 +55,115 @@ private struct AppLabel: View {
             }
             Text(name)
         }
+    }
+}
+
+/// «Вернуть»: что именно вернётся — значки программ и сколько окон встанет на место.
+private struct RestoreButton: View {
+    let apps: [StashedApp]
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    Image(systemName: "arrow.uturn.backward.circle.fill")
+                        .font(.system(size: 26, weight: .semibold))
+                        .frame(width: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Вернуть \(programs(apps.count))").font(.title3.weight(.semibold))
+                        Text(windowsSummary).font(.callout).opacity(0.8)
+                    }
+                    Spacer()
+                }
+                FlowLayout(spacing: 6) {
+                    ForEach(apps) { app in
+                        HStack(spacing: 6) {
+                            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+                                .resizable()
+                                .frame(width: 20, height: 20)
+                            Text(app.name).font(.callout.weight(.medium))
+                            if app.windows.count > 1 {
+                                Text("\(app.windows.count)")
+                                    .font(.caption.weight(.semibold).monospacedDigit())
+                                    .padding(.horizontal, 5)
+                                    .background(.white.opacity(0.25), in: Capsule())
+                                    .help("Окон: \(app.windows.count)")
+                            }
+                        }
+                        .padding(.leading, 5)
+                        .padding(.trailing, 9)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.18), in: Capsule())
+                    }
+                }
+                .padding(.leading, 50)
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.green, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .roundedFocusRing(10)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+    }
+
+    private var windowsSummary: String {
+        let windows = apps.reduce(0) { $0 + $1.windows.count }
+        let verb = apps.count == 1 ? "Откроется" : "Откроются"
+        guard windows > 0 else { return "\(verb) снова" }
+        let mod100 = windows % 100, mod10 = windows % 10
+        let word = (11...14).contains(mod100) ? "окон"
+            : mod10 == 1 ? "окно" : (2...4).contains(mod10) ? "окна" : "окон"
+        return "\(verb), и \(windows) \(word) \(word == "окно" ? "встанет" : "встанут") на своё место"
+    }
+}
+
+/// Строки слева направо с переносом — для значков программ.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map { $0.width }.max() ?? 0
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for i in row.items {
+                let size = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: .unspecified)
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = [Row()]
+        for i in subviews.indices {
+            let size = subviews[i].sizeThatFits(.unspecified)
+            let extra = rows[rows.count - 1].items.isEmpty ? size.width : size.width + spacing
+            if rows[rows.count - 1].width + extra > width, !rows[rows.count - 1].items.isEmpty {
+                rows.append(Row())
+            }
+            let added = rows[rows.count - 1].items.isEmpty ? size.width : size.width + spacing
+            rows[rows.count - 1].items.append(i)
+            rows[rows.count - 1].width += added
+            rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+        }
+        return rows.filter { !$0.items.isEmpty }
     }
 }
 
@@ -117,13 +227,7 @@ struct StashView: View {
                 }
 
                 if !store.stashed.isEmpty {
-                    StashActionButton(
-                        icon: "arrow.uturn.backward.circle.fill",
-                        title: "Вернуть \(programs(store.stashed.count))",
-                        subtitle: store.stashed.map(\.name).joined(separator: ", "),
-                        tint: .green,
-                        enabled: store.busy == nil
-                    ) {
+                    RestoreButton(apps: store.stashed, enabled: store.busy == nil) {
                         Task { await store.restore() }
                     }
                 }
