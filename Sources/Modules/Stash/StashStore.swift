@@ -40,6 +40,14 @@ struct AppUsage {
     var isHeavy: Bool { memoryMB >= 1024 || cpu >= 25 }
 }
 
+/// Сценарий: именованный набор программ, который прячется одним нажатием.
+/// Хранится в UserDefaults; формат менять только совместимо (новые поля — опциональные).
+struct StashScenario: Codable, Equatable, Identifiable {
+    var id: UUID
+    var name: String
+    var bundleIDs: [String]
+}
+
 /// Итог возврата — показывается на экране, чтобы пропавшее с диска не терялось молча.
 struct RestoreReport {
     var restored = 0
@@ -127,6 +135,7 @@ final class StashStore: ObservableObject {
 
     private static let stashKey = "StashedApps"
     private static let excludedKey = "StashExcludedBundleIDs"
+    private static let scenariosKey = "StashScenarios"
     /// Finder и сам Utilitumus не показываем и не закрываем никогда.
     private static let protectedIDs: Set<String> = ["com.apple.finder"]
 
@@ -136,6 +145,7 @@ final class StashStore: ObservableObject {
     /// «Не закрывать». Храним исключённых, чтобы новая программа по умолчанию была отмечена.
     @Published private(set) var excluded: Set<String>
     @Published private(set) var stashed: [StashedApp]
+    @Published private(set) var scenarios: [StashScenario]
     /// Не закрылись за `waitSeconds` — ждут решения пользователя.
     @Published private(set) var stubborn: [RunningEntry] = []
     @Published private(set) var busy: String?
@@ -148,6 +158,8 @@ final class StashStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         excluded = Set(defaults.stringArray(forKey: Self.excludedKey) ?? [])
+        scenarios = defaults.data(forKey: Self.scenariosKey)
+            .flatMap { try? JSONDecoder().decode([StashScenario].self, from: $0) } ?? []
         let data = defaults.data(forKey: Self.stashKey)
         if let data, let decoded = try? JSONDecoder().decode([StashedApp].self, from: data) {
             stashed = decoded
@@ -272,9 +284,71 @@ final class StashStore: ObservableObject {
         defaults.set(Array(excluded).sorted(), forKey: Self.excludedKey)
     }
 
-    /// Отмеченные запущенные программы — то, что закроет «Спрятать всё».
+    /// Отмеченные запущенные программы — то, что закроет «Спрятать выбранное».
     var selected: [NSRunningApplication] {
         running.filter { isClosing($0.bundleID) }.map(\.app)
+    }
+
+    // MARK: Сценарии
+
+    private func saveScenarios() {
+        if scenarios.isEmpty {
+            defaults.removeObject(forKey: Self.scenariosKey)
+        } else if let data = try? JSONEncoder().encode(scenarios) {
+            defaults.set(data, forKey: Self.scenariosKey)
+        }
+    }
+
+    private var selectedBundleIDs: [String] {
+        running.filter { isClosing($0.bundleID) }.map(\.bundleID)
+    }
+
+    @discardableResult
+    func addScenario(name: String) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !selectedBundleIDs.isEmpty else { return false }
+        scenarios.append(StashScenario(id: UUID(), name: name, bundleIDs: selectedBundleIDs))
+        saveScenarios()
+        return true
+    }
+
+    func updateScenario(_ id: UUID) {
+        guard !selectedBundleIDs.isEmpty, let i = scenarios.firstIndex(where: { $0.id == id }) else { return }
+        scenarios[i].bundleIDs = selectedBundleIDs
+        saveScenarios()
+    }
+
+    func renameScenario(_ id: UUID, to name: String) {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let i = scenarios.firstIndex(where: { $0.id == id }) else { return }
+        scenarios[i].name = name
+        saveScenarios()
+    }
+
+    func deleteScenario(_ id: UUID) {
+        scenarios.removeAll { $0.id == id }
+        saveScenarios()
+    }
+
+    /// Запущенные сейчас программы сценария.
+    func runningApps(of scenario: StashScenario) -> [RunningEntry] {
+        running.filter { scenario.bundleIDs.contains($0.bundleID) }
+    }
+
+    /// Поставить тумблеры: закрывать только программы сценария.
+    func select(_ scenario: StashScenario) {
+        for entry in running { setClosing(entry.bundleID, scenario.bundleIDs.contains(entry.bundleID)) }
+    }
+
+    func stash(_ scenario: StashScenario) async {
+        await stash(runningApps(of: scenario).map(\.app))
+    }
+
+    /// Значок программы, даже если она не запущена: по bundle id из сценария.
+    func icon(forBundleID id: String) -> NSImage? {
+        if let entry = running.first(where: { $0.bundleID == id }) { return entry.icon }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 
     // MARK: Доступ

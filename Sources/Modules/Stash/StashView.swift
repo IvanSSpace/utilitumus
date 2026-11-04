@@ -132,6 +132,52 @@ private struct RestoreButton: View {
     }
 }
 
+/// Карточка сценария: имя, значки программ и сколько из них запущено.
+private struct ScenarioCard: View {
+    let scenario: StashScenario
+    let runningCount: Int
+    let icons: [NSImage?]
+    let enabled: Bool
+    let action: () -> Void
+
+    private static let maxIcons = 5
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(scenario.name).font(.callout.weight(.semibold)).lineLimit(1)
+                HStack(spacing: -4) {
+                    ForEach(Array(icons.prefix(Self.maxIcons).enumerated()), id: \.offset) { _, icon in
+                        if let icon {
+                            Image(nsImage: icon).resizable().frame(width: 22, height: 22)
+                        } else {
+                            Image(systemName: "app").frame(width: 22, height: 22)
+                        }
+                    }
+                    if icons.count > Self.maxIcons {
+                        Text("+\(icons.count - Self.maxIcons)")
+                            .font(.caption.weight(.semibold))
+                            .padding(.leading, 8)
+                    }
+                }
+                Text("Запущено \(runningCount) из \(scenario.bundleIDs.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(minWidth: 130, alignment: .leading)
+            .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .roundedFocusRing(10)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .help(enabled ? "Спрятать запущенные программы сценария" : "Ни одна программа сценария не запущена")
+    }
+}
+
 /// Строки слева направо с переносом — для значков программ.
 private struct FlowLayout: Layout {
     var spacing: CGFloat
@@ -189,8 +235,84 @@ private func programs(_ n: Int) -> String {
 struct StashView: View {
     @ObservedObject var store = StashStore.shared
     @State private var confirmStash = false
+    @State private var pendingScenario: StashScenario?
+    @State private var namePrompt: NamePrompt?
+    @State private var nameText = ""
+
+    private enum NamePrompt: Identifiable {
+        case new
+        case rename(StashScenario)
+        var id: String {
+            switch self {
+            case .new: return "new"
+            case .rename(let s): return s.id.uuidString
+            }
+        }
+    }
 
     private var selectedCount: Int { store.selected.count }
+
+    private var namePromptTitle: String {
+        if case .rename = namePrompt { return "Новое имя сценария" }
+        return "Сохранить как сценарий"
+    }
+
+    private func commitName() {
+        switch namePrompt {
+        case .new: store.addScenario(name: nameText)
+        case .rename(let scenario): store.renameScenario(scenario.id, to: nameText)
+        case nil: break
+        }
+        namePrompt = nil
+    }
+
+    private func ask(_ prompt: NamePrompt) {
+        if case .rename(let scenario) = prompt { nameText = scenario.name } else { nameText = "" }
+        namePrompt = prompt
+    }
+
+    private var scenariosSection: some View {
+        Section {
+            if !store.scenarios.isEmpty {
+                FlowLayout(spacing: 8) {
+                    ForEach(store.scenarios) { scenario in
+                        let alive = store.runningApps(of: scenario).count
+                        ScenarioCard(
+                            scenario: scenario,
+                            runningCount: alive,
+                            icons: scenario.bundleIDs.map { store.icon(forBundleID: $0) },
+                            enabled: store.busy == nil && alive > 0
+                        ) {
+                            pendingScenario = scenario
+                        }
+                        .contextMenu {
+                            Button("Выбрать эти программы") { store.select(scenario) }
+                            Button("Обновить из текущего выбора") { store.updateScenario(scenario.id) }
+                                .disabled(selectedCount == 0)
+                            Button("Переименовать…") { ask(.rename(scenario)) }
+                            Divider()
+                            Button("Удалить", role: .destructive) { store.deleteScenario(scenario.id) }
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            } else {
+                Text("Сохрани набор программ и прячь его одним нажатием.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            HStack {
+                Text("Сценарии")
+                Spacer()
+                Button("Сохранить как сценарий…") { ask(.new) }
+                    .buttonStyle(.link)
+                    .font(.callout)
+                    .disabled(selectedCount == 0)
+                    .help(selectedCount == 0 ? "Сначала отметь программы ниже" : "Запомнить отмеченные программы под именем")
+            }
+        }
+    }
 
     var body: some View {
         Form {
@@ -214,8 +336,9 @@ struct StashView: View {
             Section {
                 StashActionButton(
                     icon: "square.stack.3d.down.right.fill",
-                    title: store.busy ?? "Спрятать всё",
-                    subtitle: selectedCount == 0
+                    title: store.busy ?? "Спрятать выбранное",
+                    subtitle: store.running.isEmpty ? "Нечего прятать"
+                        : selectedCount == 0
                         ? "Отметь ниже, что закрывать"
                         : "Закрыть \(programs(selectedCount)) и запомнить, где стояли окна",
                     tint: .accentColor,
@@ -244,6 +367,8 @@ struct StashView: View {
                     }
                 }
             }
+
+            scenariosSection
 
             if !store.stubborn.isEmpty {
                 Section {
@@ -332,6 +457,24 @@ struct StashView: View {
             }
         }
         .formStyle(.grouped)
+        .confirmationDialog(
+            "Закрыть \(programs(pendingScenario.map { store.runningApps(of: $0).count } ?? 0))?",
+            isPresented: Binding(get: { pendingScenario != nil }, set: { if !$0 { pendingScenario = nil } }),
+            presenting: pendingScenario
+        ) { scenario in
+            Button("Закрыть и спрятать", role: .destructive) {
+                Task { await store.stash(scenario) }
+            }
+            Button("Отмена", role: .cancel) {}
+        } message: { scenario in
+            Text(store.runningApps(of: scenario).map(\.name).joined(separator: ", ")
+                 + "\n\nНесохранённое программы спросят сами.")
+        }
+        .alert(namePromptTitle, isPresented: Binding(get: { namePrompt != nil }, set: { if !$0 { namePrompt = nil } })) {
+            TextField("Название", text: $nameText)
+            Button("Сохранить") { commitName() }
+            Button("Отмена", role: .cancel) {}
+        }
         .navigationTitle("Стеш программ")
         .navigationSubtitle(store.stashed.isEmpty ? "" : "В стеше: \(store.stashed.count)")
         .onAppear { store.start() }
