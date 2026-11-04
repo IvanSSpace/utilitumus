@@ -80,8 +80,8 @@ private struct FanRow: View {
                     HStack {
                         Slider(value: Binding(
                             get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
-                            set: { config.rpm = $0 }
-                        ), in: fan.min...fan.max, step: 100)
+                            set: { config.rpm = min(max(($0 / 100).rounded() * 100, fan.min), fan.max) }
+                        ), in: fan.min...fan.max)
                         Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
                             .monospacedDigit()
                             .frame(width: 100, alignment: .trailing)
@@ -116,7 +116,8 @@ private struct TempSlider: View {
     var body: some View {
         HStack {
             Text(title).frame(width: 150, alignment: .leading)
-            Slider(value: $value, in: range, step: 1)
+            // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
+            Slider(value: Binding(get: { value }, set: { value = $0.rounded() }), in: range)
             Text("\(Int(value)) °C").monospacedDigit().frame(width: 50, alignment: .trailing)
         }
     }

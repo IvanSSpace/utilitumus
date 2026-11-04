@@ -19,8 +19,9 @@ private struct MixerRow: View {
 
             Slider(value: Binding(
                 get: { app.volume },
-                set: { controller.setVolume($0, for: app.id) }
-            ), in: 0...1, step: 0.01)
+                // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
+                set: { controller.setVolume(($0 * 100).rounded() / 100, for: app.id) }
+            ), in: 0...1)
             .opacity(app.muted ? 0.4 : 1)
 
             Text("\(Int((app.volume * 100).rounded())) %")
@@ -64,6 +65,7 @@ private struct PresetRow: View {
 
 struct MixerView: View {
     @ObservedObject private var controller = MixerController.shared
+    @State private var showOthers = false
 
     var body: some View {
         Form {
@@ -109,6 +111,35 @@ struct MixerView: View {
                     Text("Молчат сейчас")
                 } footer: {
                     Text("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать.")
+                }
+            }
+
+            if !controller.otherApps.isEmpty {
+                Section {
+                    // Кликается вся строка, а не только стрелка.
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { showOthers.toggle() }
+                    } label: {
+                        HStack {
+                            Text("Остальные запущенные")
+                            Text("\(controller.otherApps.count)").foregroundStyle(.secondary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(showOthers ? 90 : 0))
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    if showOthers {
+                        ForEach(controller.otherApps) { app in
+                            MixerRow(app: app, controller: controller)
+                        }
+                    }
+                } footer: {
+                    Text("Звука от них обычно нет. Зазвучат — переедут наверх.")
                 }
             }
 

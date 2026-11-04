@@ -102,7 +102,8 @@ struct HistoryChart: View {
             if let p = nearest {
                 RuleMark(x: .value("Время", Date(timeIntervalSince1970: TimeInterval(p.ts))))
                     .foregroundStyle(.secondary.opacity(0.6))
-                    .annotation(position: .top, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) { tip(p) }
+                    // Подсказка внутри графика: над ним её срезал край карточки.
+                    .annotation(position: .top, spacing: 0, overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))) { tip(p) }
             }
         }
         .chartForegroundStyleScale(domain: window.series.map(\.key), range: colors)

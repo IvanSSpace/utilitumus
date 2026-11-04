@@ -51,7 +51,9 @@ struct MouseView: View {
                 Toggle("Плавная прокрутка", isOn: $controller.settings.smoothEnabled)
                 LabeledContent("Скорость") {
                     HStack {
-                        Slider(value: $controller.settings.speed, in: MouseSettings.speedRange, step: 0.1)
+                        Slider(value: Binding(get: { controller.settings.speed },
+                                              set: { controller.settings.speed = ($0 * 10).rounded() / 10 }),
+                               in: MouseSettings.speedRange)
                         Text(String(format: "%.1f×", controller.settings.speed))
                             .monospacedDigit()
                             .frame(width: 44, alignment: .trailing)

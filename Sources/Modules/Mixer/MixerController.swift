@@ -37,6 +37,10 @@ final class MixerController: ObservableObject {
     @Published private(set) var idleApps: [MixerApp] = []
     /// Громкость или «без звука» заданы, а приложение не запущено.
     @Published private(set) var presetApps: [MixerApp] = []
+    /// Запущены и молчат, но звука от них не ждём (Finder, редакторы): прячутся под «Остальные».
+    @Published private(set) var otherApps: [MixerApp] = []
+    /// Кто хоть раз звучал: таких показываем в «Молчат сейчас», даже если они не из списка медиа.
+    private var heard: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "MixerHeard") ?? [])
     /// Тап не получил данных или система отказала: почти всегда нет разрешения
     /// «Запись системного звука».
     @Published private(set) var permissionProblem = false
@@ -128,6 +132,7 @@ final class MixerController: ObservableObject {
         apps = []
         idleApps = []
         presetApps = []
+        otherApps = []
         permissionProblem = false
         lastError = nil
     }
@@ -162,6 +167,9 @@ final class MixerController: ObservableObject {
             let session = sessions[key] ?? Session(name: group.name, icon: group.icon)
             sessions[key] = session
             session.objectIDs = group.ids
+            if group.playing, !key.hasPrefix("exe:"), heard.insert(key).inserted {
+                UserDefaults.standard.set(Array(heard).sorted(), forKey: "MixerHeard")
+            }
             if group.playing { session.lastPlaying = now }
         }
 
@@ -182,8 +190,12 @@ final class MixerController: ObservableObject {
         // Публикуем только изменения, иначе SwiftUI перерисовывает экран раз в секунду зря.
         if Self.signature(list) != Self.signature(apps) { apps = list }
 
-        let (idle, preset) = quietApps(excluding: Set(sessions.keys), me: me)
-        if Self.signature(idle) != Self.signature(idleApps) { idleApps = idle }
+        let (quiet, preset) = quietApps(excluding: Set(sessions.keys), me: me)
+        let configured = Set(volumes.keys).union(muted)
+        let likely = quiet.filter { heard.contains($0.id) || configured.contains($0.id) || Self.isMediaApp($0.id) }
+        let other = quiet.filter { !likely.map(\.id).contains($0.id) }
+        if Self.signature(likely) != Self.signature(idleApps) { idleApps = likely }
+        if Self.signature(other) != Self.signature(otherApps) { otherApps = other }
         if Self.signature(preset) != Self.signature(presetApps) { presetApps = preset }
     }
 
@@ -218,6 +230,20 @@ final class MixerController: ObservableObject {
                             volume: volume(for: id), muted: muted.contains(id))
         }
         return (idle.sorted(by: Self.byName), preset.sorted(by: Self.byName))
+    }
+
+    /// Приложения, от которых обычно ждут звука: браузеры, мессенджеры, созвоны, плееры.
+    private static let mediaPrefixes = [
+        "com.google.Chrome", "company.thebrowser.", "com.apple.Safari", "org.mozilla.", "com.microsoft.edgemac",
+        "com.brave.", "com.operasoftware.", "ru.yandex.", "com.vivaldi.", "org.chromium.",
+        "ru.keepcoder.Telegram", "com.tdesktop.", "com.hnc.Discord", "com.tinyspeck.slackmacgap", "us.zoom.",
+        "com.microsoft.teams", "com.skype.", "net.whatsapp.", "desktop.WhatsApp", "com.apple.FaceTime",
+        "com.spotify.", "com.apple.Music", "com.apple.podcasts", "com.apple.TV", "org.videolan.", "com.colliderli.iina",
+        "com.apple.QuickTimePlayerX", "com.apple.iWork.Keynote", "tv.twitch.", "com.valvesoftware.",
+    ]
+
+    private static func isMediaApp(_ id: String) -> Bool {
+        mediaPrefixes.contains { id.hasPrefix($0) }
     }
 
     private static var genericIcon: NSImage {
