@@ -417,9 +417,11 @@ struct FansView: View {
                 Button {
                     controller.setAllAuto()
                 } label: {
+                    // С подписью: голая стрелка читалась как «отменить».
                     Label("Всё авто", systemImage: "arrow.uturn.backward")
+                        .labelStyle(.titleAndIcon)
                 }
-                .help("Вернуть все вентиляторы системе")
+                .help("Вернуть все вентиляторы в «Авто»: оборотами управляет macOS")
                 .disabled(!canControl)
             }
         }

@@ -53,6 +53,10 @@ struct ModuleToolbar: ToolbarContent {
             .padding(.leading, 6)
             .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }
+        // Кнопки самого модуля («Всё авто», «Обновить») — своей капсулой, не слипаются с переключателем.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
     }
 }
 
