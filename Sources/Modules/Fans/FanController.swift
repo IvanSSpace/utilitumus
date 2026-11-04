@@ -28,10 +28,10 @@ struct FanConfig: Codable, Equatable {
     var sensor: SensorSource = .cpu
     /// Для `.sensor`: до `fromTemp` — минимум оборотов, от `toTemp` — максимум,
     /// между ними линейно.
-    // По самому горячему из датчиков: в простое у M1 Pro он держит 55–65 °C,
-    // поэтому нижняя граница 50 °C не отпускала вентиляторы никогда.
-    var fromTemp: Double = 70
-    var toTemp: Double = 90
+    // По самому горячему из датчиков: в простое у M1 Pro он держит 53–66 °C,
+    // поэтому нижняя граница 50 °C не отпускала вентиляторы никогда. 60/80 — выбор пользователя.
+    var fromTemp: Double = 60
+    var toTemp: Double = 80
 }
 
 struct FanReading: Identifiable {
@@ -123,10 +123,10 @@ final class FanController: ObservableObject {
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.configsKey),
            let saved = try? JSONDecoder().decode([FanConfig].self, from: data) {
-            // Старые умолчания 50/85, которые пользователь не трогал, — на новые 70/90.
+            // Прежние умолчания (50/85, 70/90), которые пользователь не трогал, — на новые 60/80.
             configs = saved.map { c in
-                guard c.fromTemp == 50, c.toTemp == 85 else { return c }
-                var n = c; n.fromTemp = 70; n.toTemp = 90; return n
+                guard (c.fromTemp == 50 && c.toTemp == 85) || (c.fromTemp == 70 && c.toTemp == 90) else { return c }
+                var n = c; n.fromTemp = 60; n.toTemp = 80; return n
             }
             if configs != saved { persist() }
         } else {
