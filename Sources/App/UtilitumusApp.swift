@@ -3,7 +3,7 @@ import AppKit
 
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
-    case sound, load, stash, fans, mixer
+    case sound, load, stash, fans, mixer, mouse
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .stash: return "Стеш программ"
         case .fans: return "Вентиляторы"
         case .mixer: return "Микшер"
+        case .mouse: return "Мышь"
         }
     }
 
@@ -24,6 +25,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .stash: return "square.stack.3d.down.right.fill"
         case .fans: return "fan.fill"
         case .mixer: return "slider.vertical.3"
+        case .mouse: return "computermouse"
         }
     }
 
@@ -35,6 +37,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .stash: return "Закрывает отмеченные программы перед игрой и возвращает их с окнами на места"
         case .fans: return "Режимы Авто, Константа и По датчику, температура процессора и видеокарты"
         case .mixer: return "Громкость каждого приложения отдельно"
+        case .mouse: return "Своё направление прокрутки для мыши и плавная прокрутка колеса"
         }
     }
 
@@ -48,6 +51,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .stash: return ""
         case .fans: return ""
         case .mixer: return ""
+        case .mouse: return ""
         }
     }
 }
@@ -67,6 +71,8 @@ struct ModuleDetail: View {
             StashView()
         case .mixer:
             MixerView()
+        case .mouse:
+            MouseView()
         }
     }
 }

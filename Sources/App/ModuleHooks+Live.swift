@@ -19,6 +19,9 @@ extension ModuleHooks {
         case .mixer:
             return ModuleHooks(start: { MixerController.shared.start() },
                                stop: { MixerController.shared.stop() })
+        case .mouse:
+            return ModuleHooks(start: { MouseController.shared.start() },
+                               stop: { MouseController.shared.stop() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })
