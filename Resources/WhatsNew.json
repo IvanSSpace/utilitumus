@@ -3,7 +3,7 @@
     "version": "0.4.4",
     "items": [
       {
-        "icon": "slider.horizontal.3",
+        "icon": "gearshape.fill",
         "text": "Настройки модулей открываются поверх приложения, а не отдельным окном"
       }
     ]
