@@ -41,6 +41,27 @@ private struct MixerRow: View {
     }
 }
 
+/// Приложение не запущено, но для него задана громкость: можно только сбросить.
+private struct PresetRow: View {
+    let app: MixerApp
+    @ObservedObject var controller: MixerController
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: app.icon)
+                .resizable()
+                .frame(width: 24, height: 24)
+            Text(app.name).lineLimit(1)
+            Spacer()
+            Text(app.muted ? "без звука" : "\(Int((app.volume * 100).rounded())) %")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Button("Сбросить") { controller.reset(app.id) }
+                .buttonStyle(.borderless)
+        }
+    }
+}
+
 struct MixerView: View {
     @ObservedObject private var controller = MixerController.shared
 
@@ -71,11 +92,33 @@ struct MixerView: View {
 
             Section("Сейчас играют") {
                 if controller.apps.isEmpty {
-                    Text("Ничего не играет. Приложение появится, когда начнёт воспроизводить звук.")
+                    Text("Сейчас ничего не играет.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(controller.apps) { app in
                     MixerRow(app: app, controller: controller)
+                }
+            }
+
+            if !controller.idleApps.isEmpty {
+                Section {
+                    ForEach(controller.idleApps) { app in
+                        MixerRow(app: app, controller: controller)
+                    }
+                } header: {
+                    Text("Молчат сейчас")
+                } footer: {
+                    Text("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать.")
+                }
+            }
+
+            if !controller.presetApps.isEmpty {
+                Section {
+                    DisclosureGroup("Настроены заранее (\(controller.presetApps.count))") {
+                        ForEach(controller.presetApps) { app in
+                            PresetRow(app: app, controller: controller)
+                        }
+                    }
                 }
             }
 
