@@ -30,7 +30,13 @@ final class MixerController: ObservableObject {
     private static let volumesKey = "MixerVolumes"
     private static let mutedKey = "MixerMuted"
 
+    /// Играют сейчас (или играли только что).
     @Published private(set) var apps: [MixerApp] = []
+    /// Запущены, но молчат. Тапа у них нет: громкость только запоминается и
+    /// применится в `apply`, когда приложение появится в `sessions`.
+    @Published private(set) var idleApps: [MixerApp] = []
+    /// Громкость или «без звука» заданы, а приложение не запущено.
+    @Published private(set) var presetApps: [MixerApp] = []
     /// Тап не получил данных или система отказала: почти всегда нет разрешения
     /// «Запись системного звука».
     @Published private(set) var permissionProblem = false
@@ -50,6 +56,8 @@ final class MixerController: ObservableObject {
     private var volumes: [String: Double]
     private var muted: Set<String>
     private var timer: Timer?
+    /// Имя и иконка незапущенных приложений: ищутся по bundle id один раз.
+    private var presetMeta: [String: (name: String, icon: NSImage)] = [:]
     private var unlisten: [() -> Void] = []
 
     private init() {
@@ -91,6 +99,15 @@ final class MixerController: ObservableObject {
         refresh()
     }
 
+    /// Вернуть приложению 100 % и звук (кнопка в «Настроены заранее»).
+    func reset(_ id: String) {
+        volumes[id] = nil
+        muted.remove(id)
+        persist()
+        sessions[id]?.failedAt = nil
+        refresh()
+    }
+
     private func persist() {
         UserDefaults.standard.set(volumes, forKey: Self.volumesKey)
         UserDefaults.standard.set(Array(muted), forKey: Self.mutedKey)
@@ -109,6 +126,8 @@ final class MixerController: ObservableObject {
         }
         sessions = [:]
         apps = []
+        idleApps = []
+        presetApps = []
         permissionProblem = false
         lastError = nil
     }
@@ -159,11 +178,58 @@ final class MixerController: ObservableObject {
         let list = sessions.map { key, session in
             MixerApp(id: key, name: session.name, icon: session.icon,
                      volume: volume(for: key), muted: muted.contains(key))
-        }.sorted { ($0.name.localizedLowercase, $0.id) < ($1.name.localizedLowercase, $1.id) }
+        }.sorted(by: Self.byName)
         // Публикуем только изменения, иначе SwiftUI перерисовывает экран раз в секунду зря.
-        if list.map({ [$0.id, "\($0.volume)", "\($0.muted)"] }) != apps.map({ [$0.id, "\($0.volume)", "\($0.muted)"] }) {
-            apps = list
+        if Self.signature(list) != Self.signature(apps) { apps = list }
+
+        let (idle, preset) = quietApps(excluding: Set(sessions.keys), me: me)
+        if Self.signature(idle) != Self.signature(idleApps) { idleApps = idle }
+        if Self.signature(preset) != Self.signature(presetApps) { presetApps = preset }
+    }
+
+    private static func byName(_ a: MixerApp, _ b: MixerApp) -> Bool {
+        (a.name.localizedLowercase, a.id) < (b.name.localizedLowercase, b.id)
+    }
+
+    private static func signature(_ list: [MixerApp]) -> [[String]] {
+        list.map { [$0.id, "\($0.volume)", "\($0.muted)"] }
+    }
+
+    /// Молчащие приложения: запущенные обычные (idle) и те, для кого что-то
+    /// настроено, а среди запущенных обычных их нет (preset). Тапы им не нужны:
+    /// громкость лежит в `volumes`, и `apply` возьмёт её, когда появится звук.
+    private func quietApps(excluding active: Set<String>, me: pid_t) -> (idle: [MixerApp], preset: [MixerApp]) {
+        var idle: [MixerApp] = []
+        var running: Set<String> = []
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular && app.processIdentifier != me {
+            guard let id = app.bundleIdentifier else { continue }
+            running.insert(id)
+            guard !active.contains(id), !idle.contains(where: { $0.id == id }) else { continue }
+            idle.append(MixerApp(id: id, name: app.localizedName ?? id,
+                                 icon: app.icon ?? Self.genericIcon,
+                                 volume: volume(for: id), muted: muted.contains(id)))
         }
+
+        let configured = Set(volumes.keys).union(muted)
+        let preset = configured.subtracting(active).subtracting(running).map { id in
+            let meta = presetMeta[id] ?? Self.lookupMeta(id)
+            presetMeta[id] = meta
+            return MixerApp(id: id, name: meta.name, icon: meta.icon,
+                            volume: volume(for: id), muted: muted.contains(id))
+        }
+        return (idle.sorted(by: Self.byName), preset.sorted(by: Self.byName))
+    }
+
+    private static var genericIcon: NSImage {
+        NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) ?? NSImage()
+    }
+
+    private static func lookupMeta(_ id: String) -> (name: String, icon: NSImage) {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            let name = FileManager.default.displayName(atPath: url.path)
+            return (name.hasSuffix(".app") ? String(name.dropLast(4)) : name, NSWorkspace.shared.icon(forFile: url.path))
+        }
+        return (id.hasPrefix("exe:") ? String(id.dropFirst(4)) : id, genericIcon)
     }
 
     private func apply(_ key: String, _ session: Session, outputUID: String?, now: Date) {
