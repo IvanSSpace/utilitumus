@@ -27,6 +27,17 @@ enum Module: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Одна строка о модуле — для списка в настройках.
+    var summary: String {
+        switch self {
+        case .sound: return "Держит основной микрофон по приоритету, не даёт Bluetooth-наушникам стать входом"
+        case .load: return "Куда уходит память, сессии Claude Code, фоновые агенты"
+        case .stash: return "Закрывает отмеченные программы перед игрой и возвращает их с окнами на места"
+        case .fans: return "Режимы Авто, Константа и По датчику, температура процессора и видеокарты"
+        case .mixer: return "Громкость каждого приложения отдельно"
+        }
+    }
+
     var isReady: Bool { true }
 
     /// Что модуль будет делать — показывается на заглушке, пока он не готов.
@@ -62,11 +73,14 @@ struct ModuleDetail: View {
 
 struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
+    @ObservedObject private var modules = ModuleManager.shared
 
     var body: some View {
+        // Выбранный модуль могли выключить: показываем первый из включённых.
+        let current = modules.resolve(selection)
         NavigationSplitView {
-            List(Module.allCases, selection: Binding(
-                get: { selection },
+            List(modules.enabledModules, selection: Binding(
+                get: { current },
                 set: { if let new = $0 { selection = new } }
             )) { module in
                 Label(module.title, systemImage: module.icon)
@@ -76,9 +90,32 @@ struct MainView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
             .safeAreaInset(edge: .bottom) { UpdateFooter() }
         } detail: {
-            ModuleDetail(module: selection)
+            if let current {
+                ModuleDetail(module: current)
+            } else {
+                AllModulesOff()
+            }
         }
         .frame(minWidth: 680, minHeight: 460)
+        .onChange(of: modules.enabled) {
+            if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
+        }
+    }
+}
+
+/// Все модули выключены: подсказка и быстрый переход в настройки.
+struct AllModulesOff: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("Нет включённых модулей",systemImage: "square.grid.2x2")
+        } description: {
+            Text("Все модули выключены — включи нужные в Настройках")
+        } actions: {
+            SettingsLink {
+                Text("Открыть настройки")
+            }
+            .buttonStyle(.borderedProminent)
+        }
     }
 }
 
@@ -144,10 +181,7 @@ struct UpdateFooter: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MicGuardMigration.run()
-        AudioMonitor.shared.start()
-        FanController.shared.start()
-        MixerController.shared.start()
-        LambscapePanel.shared.start()
+        ModuleManager.shared.startEnabled()
         Updater.shared.check(quiet: true)
 
         // Запуск из LaunchAgent при входе в систему передаёт `--background`:
@@ -163,9 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
-            FanController.shared.restoreAutoBlocking()
-            MixerController.shared.stopAll()
-            LambscapePanel.shared.stop()
+            ModuleManager.shared.stopAll()
         }
     }
 
@@ -190,6 +222,17 @@ struct UtilitumusApp: App {
             CommandGroup(after: .appInfo) {
                 Button("Проверить обновления…") { Updater.shared.check() }
             }
+            // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
+            CommandGroup(replacing: .appSettings) {
+                SettingsLink {
+                    Text("Настройки…")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
+
+        Settings {
+            SettingsView()
         }
     }
 }

@@ -98,6 +98,10 @@ final class FanController: ObservableObject {
     private var cpuKeys: [String] = []
     private var gpuKeys: [String] = []
     private var timer: Timer?
+    private var wakeObserver: NSObjectProtocol?
+    /// Между start() и stop(). Отложенные tick/apply после stop() ничего не делают,
+    /// иначе они снова взяли бы вентиляторы под ручное управление.
+    private var isRunning = false
     private var pendingApply: DispatchWorkItem?
     /// Вентиляторы, для которых команда помощнику ещё выполняется.
     private var inFlight: Set<Int> = []
@@ -115,7 +119,8 @@ final class FanController: ObservableObject {
     }
 
     func start() {
-        guard let smc, timer == nil else { return }
+        guard let smc, !isRunning else { return }
+        isRunning = true
         // Набор датчиков у каждого чипа свой — находим, какие есть, один раз.
         let suffixes = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         func discover(_ prefixes: [String]) -> [String] {
@@ -126,7 +131,7 @@ final class FanController: ObservableObject {
         gpuKeys = discover(["Tg0", "Tg1"])
 
         // После сна SMC мог сбросить режимы — выставить сразу, не дожидаясь такта.
-        NSWorkspace.shared.notificationCenter.addObserver(
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated {
@@ -152,6 +157,30 @@ final class FanController: ObservableObject {
         }
     }
 
+    /// Выключение модуля или выход: вентиляторы системе, опрос и управление
+    /// прекращаются. Повторный вызов и вызов без start() ничего не делают.
+    func stop() {
+        guard isRunning else { return }
+        // Сначала вернуть «Авто» (синхронно, после уже отправленных команд),
+        // и только потом гасить цикл: иначе нечем будет проверить, что вернулось.
+        restoreAutoBlocking()
+        isRunning = false
+        timer?.invalidate()
+        timer = nil
+        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        wakeObserver = nil
+        pendingApply?.cancel()
+        pendingApply = nil
+        // «Полная мощность» не должна сама включиться при возврате модуля.
+        fullPower = false
+        fans = []
+        cpuSensors = []
+        gpuSensors = []
+        conflictingApp = nil
+        safetyTripped = false
+        lastError = nil
+    }
+
     func setAllAuto() {
         fullPower = false
         configs = configs.map { var c = $0; c.mode = .auto; return c }
@@ -160,7 +189,7 @@ final class FanController: ObservableObject {
     // MARK: - Цикл
 
     private func tick() {
-        guard let smc else { return }
+        guard isRunning, let smc else { return }
 
         let count = Int(smc.uint8("FNum") ?? 0)
         fans = (0..<count).compactMap { i in
@@ -203,7 +232,7 @@ final class FanController: ObservableObject {
     /// приложения — такое расхождение само больше не исправилось бы.
     private func apply() {
         // Пока вентиляторами рулит другая программа — не воюем с ней.
-        guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
+        guard isRunning, FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
         for fan in fans where fan.index < configs.count && !inFlight.contains(fan.index) {
             let i = fan.index
             let desired = desiredRPM(for: fan, config: configs[i])

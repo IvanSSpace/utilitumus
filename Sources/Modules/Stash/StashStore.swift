@@ -169,6 +169,17 @@ final class StashStore: ObservableObject {
         refresh()
     }
 
+    /// Выключение модуля: снять подписки на запуск и выход программ. Запись
+    /// стеша не трогаем — она нужна, чтобы вернуть программы после включения.
+    func stop() {
+        let center = NSWorkspace.shared.notificationCenter
+        observers.forEach {
+            center.removeObserver($0)
+            NotificationCenter.default.removeObserver($0)
+        }
+        observers = []
+    }
+
     // MARK: Список программ
 
     static func isEligible(_ app: NSRunningApplication) -> Bool {

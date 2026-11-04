@@ -22,14 +22,32 @@ final class AudioMonitor {
     private var inputThrottle = CorrectionThrottle()
     private var outputThrottle = CorrectionThrottle()
 
+    // Слушатели и флаг работы: start/stop зовут с main, а читает флаг `queue`.
+    private let stateLock = NSLock()
+    private var active = false
+    private var listeners: [(address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
+
+    private var isActive: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return active
+    }
+
     func start() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !active else { return }
+        active = true
+
+        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.enforcePolicyOnQueue()
+        }
         for selector in [kAudioHardwarePropertyDefaultInputDevice,
                          kAudioHardwarePropertyDefaultOutputDevice,
                          kAudioHardwarePropertyDevices] {
             var addr = address(selector)
-            AudioObjectAddPropertyListenerBlock(systemObjectID, &addr, queue) { [weak self] _, _ in
-                self?.enforcePolicyOnQueue()
-            }
+            AudioObjectAddPropertyListenerBlock(systemObjectID, &addr, queue, listener)
+            listeners.append((addr, listener))
         }
 
         enforcePolicy()
@@ -48,6 +66,26 @@ final class AudioMonitor {
         refreshTimer = timer
     }
 
+    /// Выключение модуля: снять слушатели и таймер, устройства больше не трогаем.
+    func stop() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard active else { return }
+        active = false
+
+        for var listener in listeners {
+            AudioObjectRemovePropertyListenerBlock(systemObjectID, &listener.address, queue, listener.block)
+        }
+        listeners = []
+        refreshTimer?.cancel()
+        refreshTimer = nil
+        // Счётчики отката живут на `queue`; после повторного включения паузы быть не должно.
+        queue.async { [weak self] in
+            self?.inputThrottle = CorrectionThrottle()
+            self?.outputThrottle = CorrectionThrottle()
+        }
+    }
+
     /// Безопасно вызывать с любого потока (в т.ч. main — например после смены
     /// основного устройства в UI): всегда уходит на фоновую очередь первым делом.
     func enforcePolicy() {
@@ -59,6 +97,8 @@ final class AudioMonitor {
     // MARK: - Policy (выполняется только на `queue`)
 
     private func enforcePolicyOnQueue() {
+        // Событие могло встать в очередь до stop() — после него устройства не трогаем.
+        guard isActive else { return }
         let inputs = allDevices(scope: kAudioObjectPropertyScopeInput)
         let outputs = allDevices(scope: kAudioObjectPropertyScopeOutput)
         let currentInputID = defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice)

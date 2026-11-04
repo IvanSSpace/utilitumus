@@ -96,9 +96,9 @@ final class MixerController: ObservableObject {
         UserDefaults.standard.set(Array(muted), forKey: Self.mutedKey)
     }
 
-    /// Выход из приложения: снести все тапы и агрегаты, чтобы звук приложений
-    /// вернулся как был.
-    func stopAll() {
+    /// Выключение модуля или выход: снести все тапы и агрегаты, чтобы звук
+    /// приложений вернулся как был.
+    func stop() {
         timer?.invalidate()
         timer = nil
         unlisten.forEach { $0() }
@@ -109,11 +109,15 @@ final class MixerController: ObservableObject {
         }
         sessions = [:]
         apps = []
+        permissionProblem = false
+        lastError = nil
     }
 
     // MARK: - Обновление
 
     private func refresh() {
+        // Уже поставленный в очередь вызов после stop() не должен снова создать тапы.
+        guard timer != nil else { return }
         let now = Date()
         let me = ProcessInfo.processInfo.processIdentifier
         var groups: [String: (name: String, icon: NSImage, ids: Set<AudioObjectID>, playing: Bool)] = [:]

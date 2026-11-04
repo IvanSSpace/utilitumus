@@ -34,6 +34,7 @@ final class LambscapePanel: ObservableObject {
     }()
 
     private var process: Process?
+    private var startTask: Task<Void, Never>?
 
     private static let home = FileManager.default.homeDirectoryForCurrentUser
     private static let logURL = home.appendingPathComponent("Library/Logs/Utilitumus/lambscape.log")
@@ -41,13 +42,17 @@ final class LambscapePanel: ObservableObject {
     private init() {}
 
     func start() {
+        // Уже запускается или запущен — второй сервер не нужен.
+        guard startTask == nil, process == nil else { return }
         state = .starting
-        Task {
+        startTask = Task {
+            defer { if !Task.isCancelled { startTask = nil } }
             // Сервер уже отвечает — например, остался от упавшего прошлого запуска.
             if await Self.isAlive() {
-                becameRunning()
+                if !Task.isCancelled { becameRunning() }
                 return
             }
+            if Task.isCancelled { return }
             do {
                 try launch()
             } catch {
@@ -56,6 +61,8 @@ final class LambscapePanel: ObservableObject {
             }
             for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(250))
+                // stop() во время запуска: сервер уже погашен, состояние не трогаем.
+                if Task.isCancelled { return }
                 if process?.isRunning == false { break }
                 if await Self.isAlive() {
                     becameRunning()
@@ -67,6 +74,8 @@ final class LambscapePanel: ObservableObject {
     }
 
     func stop() {
+        startTask?.cancel()
+        startTask = nil
         let running = process
         process = nil
         running?.terminate()
