@@ -1,11 +1,15 @@
-# Тег v* → сборка .app на macOS и релиз с Utilitumus.zip.
+# Запасной путь релиза — сборка на macOS-раннере GitHub, запускается вручную
+# (Actions → Release → Run workflow, тег вида v0.3.0). Основной путь —
+# ./scripts/release.sh на своём Mac: без очереди на раннеры.
 # Приложение само находит последний релиз (Sources/App/Updater.swift).
-#   git tag v0.3.0 && git push origin v0.3.0
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег релиза, например v0.3.0"
+        required: true
 
 permissions:
   contents: write
@@ -15,10 +19,14 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: Версия из тега
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" Info.plist
 
@@ -50,4 +58,5 @@ jobs:
       - name: Релиз
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" Utilitumus.zip --title "Utilitumus $GITHUB_REF_NAME" --generate-notes
+          TAG: ${{ inputs.tag }}
+        run: gh release create "$TAG" Utilitumus.zip --title "Utilitumus $TAG" --generate-notes

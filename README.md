@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/IvanSSpace/utilitumus/main/install.
 
 После обновления модуль «Вентиляторы» попросит «Обновить доступ», потому что помощник тоже обновляется.
 
-Выпустить версию: `git tag v0.3.0 && git push origin v0.3.0`. GitHub Actions соберёт приложение и выложит `Utilitumus.zip` в релиз (`.github/workflows/release.yml`).
+Выпустить версию: `./scripts/release.sh 0.3.0`. Скрипт соберёт приложение на этом Mac, подпишет его сертификатом «Utilitumus Signing», поставит тег и выложит `Utilitumus.zip` в релиз. Запасной путь — собрать на GitHub: Actions → Release → Run workflow (`.github/workflows/release.yml`).
 
 ## Сборка из исходников
 
