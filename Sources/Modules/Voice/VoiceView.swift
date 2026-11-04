@@ -9,22 +9,31 @@ struct VoiceView: View {
     @StateObject private var recorder = HotKeyRecorder()
     @State private var devices: [VoiceRecorder.InputDevice] = []
     @State private var testText = ""
+    @FocusState private var testFocused: Bool
 
     private var noneInstalled: Bool {
         !VoiceModel.allCases.contains { store.status($0) == .installed }
     }
 
+    /// Главная кнопка: без моделей — скачать GigaAM, иначе — перейти в поле проверки.
+    private var primary: DSAction {
+        if noneInstalled {
+            return DSAction("Скачать GigaAM", icon: "arrow.down.circle.fill") {
+                if !isBusy(.gigaam) { store.download(.gigaam) }
+            }
+        }
+        return DSAction("Проверить", icon: "mic.fill") { testFocused = true }
+    }
+
     var body: some View {
-        Form {
-            if noneInstalled { hintSection }
+        DSPage(module: .voice, subtitle: "Голосовой ввод в любом приложении", primary: primary) {
             modelsSection
             controlSection
-            testSection
-            permissionsSection
+            HStack(alignment: .top, spacing: DS.blockSpacing) {
+                testSection.frame(maxWidth: .infinity)
+                permissionsSection.frame(maxWidth: .infinity)
+            }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Голос")
-        .navigationSubtitle("Голосовой ввод в любом приложении")
         .onAppear {
             devices = VoiceRecorder.inputDevices()
             controller.refreshPermissions()
@@ -43,29 +52,6 @@ struct VoiceView: View {
         }
     }
 
-    // MARK: - Подсказка
-
-    private var hintSection: some View {
-        Section {
-            HStack(spacing: 12) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Скачай GigaAM, чтобы начать").font(.headline)
-                    Text("Без модели распознавать нечего. Скачивается один раз, дальше работает без интернета.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                Button("Скачать") { store.download(.gigaam) }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isBusy(.gigaam))
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
     private func isBusy(_ model: VoiceModel) -> Bool {
         switch store.status(model) {
         case .downloading, .verifying: return true
@@ -76,159 +62,158 @@ struct VoiceView: View {
     // MARK: - Модели
 
     private var modelsSection: some View {
-        Section {
-            ForEach(VoiceModel.allCases) { model in
-                modelRow(model)
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Модели распознавания",
+                      trailing: noneInstalled ? "Скачай одну, чтобы начать" : "Всё считается на этом Mac") {
+                ForEach(VoiceModel.allCases) { model in
+                    modelRow(model)
+                }
             }
-        } header: {
-            Text("Модели")
-        } footer: {
-            Text("Распознавание идёт на этом Mac. Звук нигде не сохраняется и никуда не уходит.")
+            Text("Звук нигде не сохраняется и никуда не уходит. Модель скачивается один раз, дальше интернет не нужен.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.white.opacity(0.4))
+                .padding(.horizontal, 6)
         }
     }
 
     private func modelRow(_ model: VoiceModel) -> some View {
         let status = store.status(model)
-        let installed = status == .installed
-        return HStack(spacing: 10) {
-            Button {
-                store.selected = model
-            } label: {
-                Image(systemName: store.selected == model && installed ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 16))
-                    .foregroundStyle(installed ? Color.accentColor : Color.secondary.opacity(0.5))
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .disabled(!installed)
-            .help(installed ? "Использовать эту модель" : "Сначала скачай")
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.title)
-                Text(model.subtitle).font(.caption).foregroundStyle(.secondary)
-                if case let .failed(message) = status {
-                    Text(message).font(.caption).foregroundStyle(.red).lineLimit(2)
-                }
-            }
-            Spacer(minLength: 8)
+        var subtitle = model.subtitle
+        if case let .failed(message) = status { subtitle = message }
+        return DSRow(icon: "cpu", title: model.title, subtitle: subtitle) {
             switch status {
-            case .notInstalled, .failed:
-                Button(status == .notInstalled ? "Скачать" : "Повторить") { store.download(model) }
+            case .notInstalled:
+                DSButton("Скачать", icon: "arrow.down.circle.fill", small: true) { store.download(model) }
+            case .failed:
+                DSChip("Ошибка", color: .red, icon: "exclamationmark.triangle.fill")
+                DSButton("Повторить", icon: "arrow.clockwise", small: true) { store.download(model) }
             case let .downloading(progress):
-                ProgressView(value: progress).frame(width: 90)
+                TintedProgress(value: progress)
                 Text("\(Int(progress * 100)) %")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.5))
                     .frame(width: 36, alignment: .trailing)
-                Button("Отмена") { store.cancel(model) }
+                DSButton("Отмена", small: true) { store.cancel(model) }
             case .verifying:
                 ProgressView().controlSize(.small)
-                Text("Проверяю…").font(.caption).foregroundStyle(.secondary)
+                Text("Проверяю…").font(.caption).foregroundStyle(.white.opacity(0.5))
             case .installed:
-                Text("Установлена").font(.caption).foregroundStyle(.secondary)
-                Button("Удалить", role: .destructive) { store.delete(model) }
+                if store.selected == model {
+                    ActiveChip()
+                } else {
+                    DSButton("Выбрать", small: true) { store.selected = model }
+                }
+                DSButton("Удалить", style: .plain, small: true) { store.delete(model) }
             }
         }
-        .padding(.vertical, 2)
     }
 
     // MARK: - Управление
 
     private var controlSection: some View {
-        Section {
-            LabeledContent("Горячая клавиша") {
-                Button {
-                    if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
-                } label: {
-                    Text(recorder.isRecording ? "Нажми сочетание…" : controller.hotKeyLabel)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .frame(minWidth: 96)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .foregroundStyle(recorder.isRecording ? Color.white : .primary)
-                        .background(recorder.isRecording ? Color.accentColor : .clear,
-                                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(recorder.isRecording ? Color.accentColor : Color.primary.opacity(0.3), lineWidth: 1)
-                        )
+        DSSection("Управление") {
+            DSRow(icon: "command", title: "Горячая клавиша",
+                  subtitle: recorder.isRecording ? "Esc — отмена, Delete — вернуть ⌃⌥Space" : nil) {
+                if recorder.isRecording {
+                    TintedChip(text: "Нажми сочетание…")
+                } else {
+                    DSKeyCaps(controller.hotKeyLabel)
                 }
-                .buttonStyle(.plain)
+                DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
+                    if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
+                }
                 .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
             }
             if let error = controller.hotKeyError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                DSRow(icon: "exclamationmark.triangle.fill", title: error)
             }
-            LabeledContent("Режим") {
-                SegmentedControl(VoiceController.Mode.allCases, selection: $controller.mode, title: \.title)
-                    .fixedSize()
+            DSRow(icon: "hand.tap.fill", title: "Режим",
+                  subtitle: controller.mode == .toggle
+                      ? "Нажал, сказал, нажал ещё раз. Esc — отмена"
+                      : "Говори, пока держишь. Отпустил — текст вставится. Esc — отмена") {
+                DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
             }
-            Picker("Микрофон", selection: micBinding) {
-                Text("Системный").tag("")
-                ForEach(devices) { device in
-                    Text(device.name).tag(device.uid)
-                }
-                // Выбранный микрофон сейчас отключён: оставляем его в списке, чтобы выбор не потерялся.
-                if let uid = controller.micUID, !devices.contains(where: { $0.uid == uid }) {
-                    Text("Отключён").tag(uid)
-                }
+            DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
+                micMenu
             }
-        } header: {
-            Text("Управление")
-        } footer: {
-            Text(controller.mode == .toggle
-                 ? "Нажми сочетание, скажи фразу, нажми ещё раз. Esc во время записи — отмена."
-                 : "Говори, пока держишь сочетание. Отпустил — текст вставится. Esc во время записи — отмена.")
         }
     }
 
-    private var micBinding: Binding<String> {
-        Binding(get: { controller.micUID ?? "" }, set: { controller.micUID = $0.isEmpty ? nil : $0 })
+    private var micName: String {
+        guard let uid = controller.micUID else { return "Системный" }
+        return devices.first(where: { $0.uid == uid })?.name ?? "Отключён"
+    }
+
+    private var micMenu: some View {
+        Menu {
+            Button { controller.micUID = nil } label: {
+                Label("Системный", systemImage: controller.micUID == nil ? "checkmark" : "")
+            }
+            ForEach(devices) { device in
+                Button { controller.micUID = device.uid } label: {
+                    Label(device.name, systemImage: controller.micUID == device.uid ? "checkmark" : "")
+                }
+            }
+            // Выбранный микрофон сейчас отключён: оставляем его в списке, чтобы выбор не потерялся.
+            if let uid = controller.micUID, !devices.contains(where: { $0.uid == uid }) {
+                Button { controller.micUID = uid } label: { Label("Отключён", systemImage: "checkmark") }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold))
+                Text("Сменить").font(.system(size: 12, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 11).frame(height: 26)
+            .background(Capsule().fill(.white.opacity(0.1)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     // MARK: - Проверить
 
     private var testSection: some View {
-        Section {
-            TextEditor(text: $testText)
-                .font(.body)
-                .frame(minHeight: 80)
-                .scrollContentBackground(.hidden)
-        } header: {
-            Text("Проверить")
-        } footer: {
-            Text("Кликни в поле и надиктуй: текст появится здесь.")
+        DSSection("Проверить") {
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $testText)
+                    .font(.system(size: 13.5))
+                    .scrollContentBackground(.hidden)
+                    .focused($testFocused)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                if testText.isEmpty {
+                    Text("Кликни сюда и надиктуй: текст появится здесь.")
+                        .font(.system(size: 13.5))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .padding(.horizontal, 15).padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(height: 100)
         }
     }
 
     // MARK: - Разрешения
 
     private var permissionsSection: some View {
-        Section {
-            LabeledContent("Микрофон") {
-                HStack(spacing: 8) {
-                    Text(micText)
-                        .foregroundStyle(controller.micStatus == .authorized ? Color.green : .secondary)
-                    if controller.micStatus != .authorized {
-                        Button("Разрешить…") { controller.requestMic() }
-                    }
+        DSSection("Разрешения") {
+            DSRow(title: "Микрофон", subtitle: controller.micStatus == .authorized ? nil : micText) {
+                if controller.micStatus == .authorized {
+                    DSChip("Разрешён", color: .green, icon: "checkmark")
+                } else {
+                    DSButton("Разрешить…", small: true) { controller.requestMic() }
                 }
             }
-            LabeledContent("Универсальный доступ") {
-                HStack(spacing: 8) {
-                    Text(controller.axTrusted ? "Разрешён" : "Не разрешён")
-                        .foregroundStyle(controller.axTrusted ? Color.green : .secondary)
-                    if !controller.axTrusted {
-                        Button("Разрешить…") { controller.requestAccessibility() }
-                    }
+            DSRow(title: "Универсальный доступ",
+                  subtitle: controller.axTrusted ? nil : "Без него текст копируется, остаётся нажать ⌘V") {
+                if controller.axTrusted {
+                    DSChip("Разрешён", color: .green, icon: "checkmark")
+                } else {
+                    DSButton("Разрешить…", small: true) { controller.requestAccessibility() }
                 }
             }
-        } header: {
-            Text("Разрешения")
-        } footer: {
-            Text("Универсальный доступ нужен, чтобы текст вставлялся сам. Без него он копируется в буфер, и остаётся нажать ⌘V.")
+            .help("Нужен, чтобы текст вставлялся сам")
         }
     }
 
@@ -239,6 +224,25 @@ struct VoiceView: View {
         default: return "Запрещён"
         }
     }
+}
+
+// Акцент модуля задаёт `DSPage`, поэтому читать его надо ниже страницы — в этих мелких видах.
+
+private struct TintedProgress: View {
+    let value: Double
+    @Environment(\.dsTint) private var tint
+    var body: some View { ProgressView(value: value).tint(tint).frame(width: 90) }
+}
+
+private struct ActiveChip: View {
+    @Environment(\.dsTint) private var tint
+    var body: some View { DSChip("Активна", color: tint, icon: "checkmark") }
+}
+
+private struct TintedChip: View {
+    let text: String
+    @Environment(\.dsTint) private var tint
+    var body: some View { DSChip(text, color: tint) }
 }
 
 /// Запись сочетания клавиш: пока идёт, следующее нажатое сочетание назначается, остальное глотается.
