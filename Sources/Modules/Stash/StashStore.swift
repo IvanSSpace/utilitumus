@@ -12,6 +12,9 @@ struct StashedWindow: Codable, Equatable {
 }
 
 /// Запись стеша: чем была программа и где стояли её окна.
+/// Хранится в UserDefaults и переживает обновления приложения. Формат менять
+/// только совместимо: новые поля — опциональные, старые не переименовывать,
+/// иначе стеш, сделанный до обновления, не вернётся.
 struct StashedApp: Codable, Equatable, Identifiable {
     var bundleID: String
     var path: String
@@ -145,8 +148,19 @@ final class StashStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         excluded = Set(defaults.stringArray(forKey: Self.excludedKey) ?? [])
-        stashed = defaults.data(forKey: Self.stashKey)
-            .flatMap { try? JSONDecoder().decode([StashedApp].self, from: $0) } ?? []
+        let data = defaults.data(forKey: Self.stashKey)
+        if let data, let decoded = try? JSONDecoder().decode([StashedApp].self, from: data) {
+            stashed = decoded
+        } else {
+            stashed = []
+            // Запись не читается (формат сменился в новой версии) — не выбрасываем
+            // её: следующий save() затёр бы стеш навсегда. Откладываем под отдельный
+            // ключ, чтобы можно было восстановить вручную или миграцией.
+            if let data {
+                defaults.set(data, forKey: Self.stashKey + ".unreadable")
+                defaults.removeObject(forKey: Self.stashKey)
+            }
+        }
     }
 
     func start() {
