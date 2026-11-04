@@ -434,19 +434,15 @@ struct FansView: View {
     }
 
     @ViewBuilder private var banners: some View {
-        if installer.status != .ready {
-            Banner(icon: "lock.shield", color: .orange,
-                   text: installer.status == .outdated ? "Доступ нужно обновить" : "Нужен доступ к вентиляторам",
-                   detail: installer.status == .outdated
-                    ? "Помощник устарел. macOS один раз спросит пароль администратора."
-                    : "Менять обороты может только администратор. macOS один раз спросит пароль или Touch ID.") {
-                DSButton(installer.status == .outdated ? "Обновить доступ…" : "Дать доступ…", icon: "key.fill") {
-                    installer.install()
-                }
+        // «Нужен доступ» теперь на экране «Осталось дать доступ»; здесь только устаревший помощник и ошибка.
+        if installer.status == .outdated {
+            Banner(icon: "lock.shield", color: .orange, text: "Доступ нужно обновить",
+                   detail: "Помощник устарел. macOS один раз спросит пароль администратора.") {
+                DSButton("Обновить доступ…", icon: "key.fill") { installer.install() }
             }
-            if let error = installer.lastError {
-                Text(error).font(.system(size: 11.5)).foregroundStyle(.red).padding(.horizontal, 6)
-            }
+        }
+        if let error = installer.lastError {
+            Text(error).font(.system(size: 11.5)).foregroundStyle(.red).padding(.horizontal, 6)
         }
 
         if let app = controller.conflictingApp {

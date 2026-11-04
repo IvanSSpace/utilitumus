@@ -36,14 +36,6 @@ struct MouseView: View {
             }
 
             DSSection("Состояние") {
-                DSRow(icon: "lock.shield.fill", title: "Универсальный доступ",
-                      subtitle: controller.axTrusted ? nil : "Без доступа прокрутка остаётся такой, как в macOS") {
-                    if controller.axTrusted {
-                        DSChip("Разрешён", color: .green, icon: "checkmark")
-                    } else {
-                        DSButton("Дать доступ…", style: .primary, small: true) { controller.requestAccess() }
-                    }
-                }
                 DSRow(title: status.text) {
                     Image(systemName: status.icon).foregroundStyle(status.color)
                 }
