@@ -16,7 +16,7 @@ final class FanHelperInstaller: ObservableObject {
     }
 
     nonisolated static let installedPath = "/Library/PrivilegedHelperTools/local.utilitumus.fan"
-    private static var bundledPath: String {
+    private nonisolated static var bundledPath: String {
         Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/utilitumus-fan").path
     }
 
@@ -39,12 +39,24 @@ final class FanHelperInstaller: ObservableObject {
         // По номеру версии, а не побайтово: байты меняются при каждой сборке
         // (и всегда отличаются у сборки с GitHub), а просить пароль надо, только
         // когда помощник действительно изменился.
-        let installed = Self.version(of: Self.installedPath)
-        status = installed != nil && installed == Self.version(of: Self.bundledPath) ? .ready : .outdated
+        //
+        // В фоне, не на главном потоке: waitUntilExit крутит run loop, и пока
+        // shared ещё создаётся, SwiftUI успевал отрисовать FansView, тот лез в
+        // недосозданный shared — падение «dispatch_once: lock recursively».
+        // До ответа считаем установленный помощник рабочим — без мигания плашки.
+        if status == .notInstalled { status = .ready }
+        let installedPath = Self.installedPath, bundledPath = Self.bundledPath
+        Task { [weak self] in
+            let ready = await Task.detached {
+                let installed = Self.version(of: installedPath)
+                return installed != nil && installed == Self.version(of: bundledPath)
+            }.value
+            self?.status = ready ? .ready : .outdated
+        }
     }
 
     /// `utilitumus-fan version`; nil — старый помощник без этой команды.
-    private static func version(of path: String) -> String? {
+    private nonisolated static func version(of path: String) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = ["version"]
