@@ -65,6 +65,54 @@ enum MemoryPart: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: Нажимаемые строки
+
+/// Подсветка нажимаемой строки: при наведении — серый фон-скругление, как у строк списка macOS;
+/// выбранная (`selected`) — акцентный фон и тонкая обводка. Раскладку не двигает: отступы компенсируются.
+struct HoverRow: ViewModifier {
+    var selected = false
+    var enabled = true
+    @State private var hovering = false
+
+    private static let hPad: CGFloat = 6
+    private static let vPad: CGFloat = 3
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        content
+            .padding(.horizontal, Self.hPad).padding(.vertical, Self.vPad)
+            .background(shape.fill(fill))
+            .overlay(shape.strokeBorder(Color.accentColor.opacity(selected && enabled ? 0.5 : 0), lineWidth: 1))
+            .padding(.horizontal, -Self.hPad).padding(.vertical, -Self.vPad)
+            .onHover { hovering = $0 && enabled }
+    }
+
+    private var fill: Color {
+        guard enabled else { return .clear }
+        if selected { return Color.accentColor.opacity(hovering ? 0.22 : 0.15) }
+        return hovering ? Color.primary.opacity(0.09) : .clear
+    }
+}
+
+extension View {
+    /// Делает строку заметно нажимаемой: подсветка при наведении, `selected` — выделение выбранной.
+    func hoverRow(selected: Bool = false, enabled: Bool = true) -> some View {
+        modifier(HoverRow(selected: selected, enabled: enabled))
+    }
+}
+
+/// Шеврон «откроется подробнее»: заметный, фиксированной ширины — выравнивается по правому краю.
+struct DisclosureChevron: View {
+    var open: Bool
+
+    var body: some View {
+        Image(systemName: open ? "chevron.down" : "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 12, alignment: .trailing)
+    }
+}
+
 // MARK: Мелкие элементы
 
 /// Плитка-итог: подпись, крупное число, пояснение. Цифры монохромные, цвет — только у индикатора.
@@ -374,11 +422,10 @@ struct MemoryCard: View {
                         Text(p.title)
                         Spacer(minLength: 4)
                         Text(Fmt.mb(p.mb(m))).fontWeight(.semibold).monospacedDigit()
-                        if mode == .full {
-                            Image(systemName: drill == p ? "chevron.down" : "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                        }
+                        if mode == .full { DisclosureChevron(open: drill == p) }
                     }
                     .contentShape(Rectangle())
+                    .hoverRow(selected: drill == p, enabled: mode == .full)
                 }
                 .buttonStyle(.plain)
                 .help(p == .wired ? "Ядро macOS, драйверы, видеопамять" : p.title)

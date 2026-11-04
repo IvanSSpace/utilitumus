@@ -267,8 +267,10 @@ struct SessionsCompactSection: View {
                         Text(Fmt.mb(s.memMB)).monospacedDigit()
                         Text(Fmt.duration(max(0, now - s.startedAt))).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                             .frame(width: 44, alignment: .trailing)
+                        DisclosureChevron(open: false)
                     }
                     .contentShape(Rectangle())
+                    .hoverRow()
                 }
                 .buttonStyle(.plain)
                 .help(s.name + (s.activity.lastAction.isEmpty ? "" : "\n" + s.activity.lastAction))
@@ -393,10 +395,9 @@ struct AIMemoryKPI: View {
         } label: {
             KPITile(title: "ИИ", value: Fmt.gb(ai.totalMB), unit: "GB",
                     subtitle: Fmt.plural(ai.count, "процесс", "процесса", "процессов"))
-                .overlay(alignment: .topTrailing) {
-                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2).foregroundStyle(.tertiary)
-                }
+                .overlay(alignment: .topTrailing) { DisclosureChevron(open: open) }
                 .contentShape(Rectangle())
+                .hoverRow(selected: open)
         }
         .buttonStyle(.plain)
         .help("Сколько памяти ест ИИ — нажми, чтобы разобрать")
