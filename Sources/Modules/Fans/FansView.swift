@@ -10,6 +10,10 @@ private struct FanRow: View {
     /// «Полная мощность» перебивает режим вентилятора — показываем это, а не
     /// «Оборотами управляет macOS», которое тогда было бы неправдой.
     let fullPower: Bool
+    /// «Максимум в играх» перебивает режим так же; в подписи — во что играем.
+    let gameName: String?
+
+    private var overridden: Bool { fullPower || gameName != nil }
 
     private var load: Double {
         guard fan.max > fan.min else { return 0 }
@@ -56,11 +60,15 @@ private struct FanRow: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .disabled(fullPower)
-            .opacity(fullPower ? 0.5 : 1)
+            .disabled(overridden)
+            .opacity(overridden ? 0.5 : 1)
 
             if fullPower {
                 Text("Сейчас на максимуме: включена «Полная мощность». Выключишь её — вернётся «\(config.mode.title)».")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            } else if let gameName {
+                Text("Сейчас на максимуме: «Максимум в играх», играешь в \(gameName). Когда игра закончится — вернётся «\(config.mode.title)».")
                     .font(.caption)
                     .foregroundStyle(.green)
             } else {
@@ -187,10 +195,127 @@ private struct FullPowerButton: View {
     }
 }
 
+extension GameModeMachine.Phase {
+    var gameName: String? {
+        switch self {
+        case .idle: return nil
+        case .playing(let g), .leaving(let g, _): return g.name
+        }
+    }
+}
+
+private struct GameIcon: View {
+    let icon: NSImage?
+
+    var body: some View {
+        if let icon {
+            Image(nsImage: icon).resizable().frame(width: 20, height: 20)
+        } else {
+            Image(systemName: "gamecontroller").frame(width: 20, height: 20)
+        }
+    }
+}
+
+/// «Максимум в играх»: переключатель, статус, список своих игр и лаунчеры-исключения.
+private struct GameModeSection: View {
+    @ObservedObject var game: GameModeController
+    let canControl: Bool
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $game.isEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Максимум в играх")
+                    Text("Когда игра на переднем плане, вентиляторы сами идут на максимум")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if game.isEnabled {
+                if canControl, let name = game.phase.gameName {
+                    // Секунды считаем от срока, а не от счётчика: экран перерисуется раз в секунду сам.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Label(statusText(name: name, now: context.date), systemImage: "gamecontroller.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+
+                HStack {
+                    Text("Мои игры").font(.headline)
+                    Spacer()
+                    Menu("Добавить…") {
+                        if game.addable.isEmpty {
+                            Text("Нет запущенных программ")
+                        }
+                        ForEach(game.addable) { app in
+                            Button {
+                                game.addGame(app)
+                            } label: {
+                                if let icon = app.icon {
+                                    Label { Text(app.name) } icon: { Image(nsImage: icon) }
+                                } else {
+                                    Text(app.name)
+                                }
+                            }
+                        }
+                    }
+                    .fixedSize()
+                }
+                if game.myGames.isEmpty {
+                    Text("Игры с категорией «Игры» в Info.plist определяются сами. Остальное, например игры из CrossOver, добавь сюда — сначала запусти их.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(game.myGames) { entry in
+                    HStack(spacing: 10) {
+                        GameIcon(icon: game.icon(for: entry))
+                        Text(entry.name)
+                        if entry.key.hasPrefix("exe:") {
+                            Text(String(entry.key.dropFirst(4)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            game.removeGame(entry)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Убрать из списка")
+                    }
+                }
+
+                Text("Лаунчеры — не игры").font(.headline).padding(.top, 4)
+                ForEach(GameRules.defaultLaunchers) { launcher in
+                    Toggle(launcher.name, isOn: Binding(
+                        get: { game.isLauncherExcluded(launcher.key) },
+                        set: { game.setLauncherExcluded(launcher.key, $0) }
+                    ))
+                }
+                Text("У лаунчеров обычно категория «Игры», но сидеть в них не значит играть. Сними галочку, если нужно иначе.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { game.refreshRunning() }
+    }
+
+    private func statusText(name: String, now: Date) -> String {
+        if case .leaving(_, let until) = game.phase {
+            let left = max(Int(until.timeIntervalSince(now).rounded(.up)), 0)
+            return "Максимум: играл в \(name), вернётся через \(left) с"
+        }
+        return "Максимум: играешь в \(name)"
+    }
+}
+
 /// Экран модуля «Вентиляторы» — аналог Macs Fan Control.
 struct FansView: View {
     @ObservedObject var controller = FanController.shared
     @ObservedObject var installer = FanHelperInstaller.shared
+    @ObservedObject var game = GameModeController.shared
 
     private var canControl: Bool { installer.status != .notInstalled && controller.conflictingApp == nil }
 
@@ -236,7 +361,9 @@ struct FansView: View {
                 FullPowerButton(isOn: $controller.fullPower, enabled: canControl)
             }
 
-            if controller.safetyTripped && !controller.fullPower {
+            GameModeSection(game: game, canControl: canControl)
+
+            if controller.safetyTripped && !controller.fullPower && !game.isActive {
                 Section {
                     Label("Процессор горячее \(Int(FanController.safetyTrip)) °C — вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.",
                           systemImage: "flame.fill")
@@ -251,7 +378,8 @@ struct FansView: View {
                 ForEach(controller.fans) { fan in
                     if fan.index < controller.configs.count {
                         FanRow(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
-                               fullPower: controller.fullPower)
+                               fullPower: controller.fullPower,
+                               gameName: game.isActive ? game.phase.gameName : nil)
                     }
                 }
             }

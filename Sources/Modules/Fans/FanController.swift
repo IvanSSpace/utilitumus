@@ -140,6 +140,7 @@ final class FanController: ObservableObject {
             }
         }
 
+        GameModeController.shared.start()
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
             Task { @MainActor in FanController.shared.tick() }
@@ -161,6 +162,7 @@ final class FanController: ObservableObject {
     /// прекращаются. Повторный вызов и вызов без start() ничего не делают.
     func stop() {
         guard isRunning else { return }
+        GameModeController.shared.stop()
         // Сначала вернуть «Авто» (синхронно, после уже отправленных команд),
         // и только потом гасить цикл: иначе нечем будет проверить, что вернулось.
         restoreAutoBlocking()
@@ -181,8 +183,12 @@ final class FanController: ObservableObject {
         lastError = nil
     }
 
+    /// Режим «Максимум в играх» включился или выключился.
+    func gameModeChanged() { scheduleApply() }
+
     func setAllAuto() {
         fullPower = false
+        GameModeController.shared.cancelCurrent()
         configs = configs.map { var c = $0; c.mode = .auto; return c }
     }
 
@@ -267,7 +273,7 @@ final class FanController: ObservableObject {
     /// nil — отдать системе.
     private func desiredRPM(for fan: FanReading, config: FanConfig) -> Double? {
         // Максимум охлаждает сильнее системы — перегрев ему не помеха.
-        if fullPower { return fan.max }
+        if fullPower || GameModeController.shared.isActive { return fan.max }
         if safetyTripped { return nil }
         switch config.mode {
         case .auto:
