@@ -114,7 +114,7 @@ enum Exec {
 // MARK: Журнал действий
 
 /// Журнал действий: по строке JSON на действие в `~/Library/Logs/Utilitumus/actions.log`
-/// (что остановлено, отключено, включено и когда). Пишется и для отказов.
+/// (что остановлено, отключено, включено и когда). Пишется и для отказов. Права 0600.
 enum ActionLog {
     struct Entry: Identifiable, Sendable {
         var id = UUID()
@@ -125,28 +125,42 @@ enum ActionLog {
         var message: String
     }
 
+    /// Путь не переопределяется переменной окружения (раньше был UTILITUMUS_LOGS): иначе
+    /// журнал можно перенаправить в произвольное место.
     static var directory: URL {
-        if let p = ProcessInfo.processInfo.environment["UTILITUMUS_LOGS"], !p.isEmpty {
-            return URL(fileURLWithPath: (p as NSString).expandingTildeInPath)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus")
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus")
     }
 
     static var file: URL { directory.appendingPathComponent("actions.log") }
 
     private static let lock = NSLock()
 
+    /// Журнал личный: каталог 0700, файл 0600 (в нём имена процессов и ботов). Права
+    /// ставим и на уже существующие, созданные старой версией с 0644.
+    static func preparePrivate(file: URL) {
+        let fm = FileManager.default
+        let dir = file.deletingLastPathComponent()
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        if fm.fileExists(atPath: file.path) {
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        } else {
+            fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        }
+    }
+
+    /// В журнал — только что за действие, над кем и чем кончилось. Полный argv и вывод
+    /// команд (stdout/stderr ботов) не пишем: там бывают токены и пути. Поэтому у ботов
+    /// и текст результата общий — подробности остаются только в окне панели.
     static func write(kind: String, label: String, targets: [[String: Any]], ok: Bool, message: String,
-                      command: String? = nil, output: String? = nil, id: String = "") {
-        var line: [String: Any] = ["ts": Int(Date().timeIntervalSince1970), "action_id": String(id.prefix(200)), "kind": kind,
+                      id: String = "") {
+        let message = kind == "bot" ? (ok ? "выполнено" : "ошибка") : message
+        let line: [String: Any] = ["ts": Int(Date().timeIntervalSince1970), "action_id": String(id.prefix(200)), "kind": kind,
                                    "label": label, "targets": targets, "result": ok ? "ok" : "error", "message": message]
-        if let command { line["command"] = command }
-        if let output, !output.isEmpty { line["output"] = output }
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }
         lock.lock()
         defer { lock.unlock() }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
+        preparePrivate(file: file)
         guard let h = try? FileHandle(forWritingTo: file) else { return }
         defer { try? h.close() }
         _ = try? h.seekToEnd()
@@ -286,11 +300,11 @@ final class BackgroundExecutor: @unchecked Sendable {
                 result = try bot(verb, spec, command: &command, output: &output)
             }
             ActionLog.write(kind: kind, label: label, targets: targets, ok: true, message: result.message,
-                            command: command.isEmpty ? nil : command, output: output, id: plan.id.uuidString)
+                            id: plan.id.uuidString)
             return result
         } catch let e as BackgroundActionError {
             ActionLog.write(kind: kind, label: label, targets: targets, ok: false, message: e.message,
-                            command: command.isEmpty ? nil : command, output: output, id: plan.id.uuidString)
+                            id: plan.id.uuidString)
             return StopResult(ok: false, message: e.message, freedMB: 0)
         } catch {
             return StopResult(ok: false, message: "внутренняя ошибка", freedMB: 0)

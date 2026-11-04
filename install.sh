@@ -27,7 +27,25 @@ echo "Скачиваю последнюю версию…"
 curl -fsSL -o "$WORK/Utilitumus.zip" "$URL"
 ditto -x -k "$WORK/Utilitumus.zip" "$WORK"
 APP="$WORK/Utilitumus.app"
-codesign --verify --deep "$APP"
+
+# GitHub — недоверенный источник: проверяем подпись автора по вшитому здесь хэшу
+# листового сертификата, а не просто «подпись цела» (самоподписанную подделку
+# codesign --verify без требования пропустил бы). Хэш — тот же, что в Updater.swift.
+echo "SHA-256 архива: $(shasum -a 256 "$WORK/Utilitumus.zip" | cut -d' ' -f1)"
+TRUSTED_LEAF_HASH="31e93f4b9e4ada7f6de82066c2194b35d92f7db4"
+refuse() {
+  echo "Подпись $1 не совпала с подписью автора Utilitumus — установка отменена." >&2
+  echo "Архив не от автора (или повреждён); ничего не установлено." >&2
+  exit 1
+}
+verify_signature() { # путь, identifier
+  codesign --verify --deep --strict -R="identifier \"$2\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$1" >/dev/null 2>&1
+}
+verify_signature "$APP" "local.utilitumus" || refuse "Utilitumus.app"
+LINKS="$APP/Contents/Helpers/Utilitumus Links.app"
+if [ -d "$LINKS" ]; then
+  verify_signature "$LINKS" "local.utilitumus.links" || refuse "Utilitumus Links.app"
+fi
 VERSION=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)
 
 # Запущенную версию закрываем штатно: она вернёт вентиляторы в «Авто».

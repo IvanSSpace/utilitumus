@@ -45,13 +45,15 @@ final class FanHelperInstaller: ObservableObject {
         // недосозданный shared — падение «dispatch_once: lock recursively».
         // До ответа считаем установленный помощник рабочим — без мигания плашки.
         if status == .notInstalled { status = .ready }
+        // Права 4755 от старых установок — тоже «устарел»: переустановка даст 4750 root:admin.
+        let modeOK = perms & 0o7777 == 0o4750
         let installedPath = Self.installedPath, bundledPath = Self.bundledPath
         Task { [weak self] in
             let ready = await Task.detached {
                 let installed = Self.version(of: installedPath)
                 return installed != nil && installed == Self.version(of: bundledPath)
             }.value
-            self?.status = ready ? .ready : .outdated
+            self?.status = ready && modeOK ? .ready : .outdated
         }
     }
 
@@ -73,17 +75,53 @@ final class FanHelperInstaller: ObservableObject {
 
     func install() {
         let src = Self.bundledPath
+        let dir = "/Library/PrivilegedHelperTools"
         let dst = Self.installedPath
-        run(admin: "mkdir -p /Library/PrivilegedHelperTools && cp '\(src)' '\(dst)' && chown root:wheel '\(dst)' && chmod 4755 '\(dst)'")
+        let id = "local.utilitumus.fan"
+        // Проверка подписи — ВНУТРИ root-скрипта и на копии, которую пользователь уже
+        // не может подменить: иначе между проверкой и установкой (TOCTOU) обычный
+        // процесс успел бы подсунуть другой бинарь, и он получил бы root (setuid).
+        // Временный каталог создаётся в /Library/PrivilegedHelperTools (пишет только root,
+        // тот же том — mv атомарный) с правами 0700.
+        let verify = Updater.trustedLeafHashes.map {
+            "/usr/bin/codesign --verify " + Self.shQuote("-R=" + Updater.requirement(identifier: id, leafHash: $0)) + " \"$T\""
+        }.joined(separator: " || ")
+        let script = [
+            "set -e",
+            "/bin/mkdir -p \(Self.shQuote(dir))",
+            "D=$(/usr/bin/mktemp -d \(Self.shQuote(dir + "/.install.XXXXXX")))",
+            "trap '/bin/rm -rf \"$D\"' EXIT",
+            "T=\"$D/helper\"",
+            "/bin/cp \(Self.shQuote(src)) \"$T\"",
+            "/usr/sbin/chown root:wheel \"$T\"",
+            "/bin/chmod 0755 \"$T\"",
+            "(\(verify)) || { echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
+            // 4750 root:admin — запускать помощника могут только администраторы мака,
+            // а не любой локальный пользователь.
+            "/usr/sbin/chown root:admin \"$T\"",
+            "/bin/chmod 4750 \"$T\"",
+            "/bin/mv -f \"$T\" \(Self.shQuote(dst))",
+        ].joined(separator: "; ")
+        run(admin: script)
     }
 
     func uninstall() {
-        run(admin: "rm -f '\(Self.installedPath)'")
+        run(admin: "/bin/rm -f \(Self.shQuote(Self.installedPath))")
+    }
+
+    /// Строка в одинарных кавычках для sh: внутренняя `'` → `'\''`.
+    private nonisolated static func shQuote(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Строка для AppleScript в двойных кавычках: экранируем `\` и `"`.
+    private nonisolated static func appleScriptQuote(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
     private func run(admin shell: String) {
         lastError = nil
-        let source = "do shell script \"\(shell)\" with administrator privileges"
+        let source = "do shell script \(Self.appleScriptQuote(shell)) with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)
         // -128 — пользователь нажал «Отменить», это не ошибка.

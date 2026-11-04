@@ -244,11 +244,10 @@ struct BotSpec: Sendable, Equatable {
 }
 
 enum BotRegistry {
-    /// `bots.toml` лежит в папке данных приложения; нет файла — нет ботов. UTILITUMUS_BOTS — для проверок.
+    /// `bots.toml` лежит в папке данных приложения; нет файла — нет ботов. Путь не
+    /// переопределяется переменной окружения: bots.toml задаёт команды, которые
+    /// запускает панель, и подсунуть другой файл через окружение нельзя.
     static var url: URL {
-        if let p = ProcessInfo.processInfo.environment["UTILITUMUS_BOTS"], !p.isEmpty {
-            return URL(fileURLWithPath: (p as NSString).expandingTildeInPath)
-        }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Utilitumus/bots.toml")
     }
