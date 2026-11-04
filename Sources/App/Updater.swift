@@ -185,11 +185,28 @@ final class Updater: ObservableObject {
     /// Открыть новую версию после выхода текущей. Выход штатный —
     /// applicationWillTerminate вернёт вентиляторы в «Авто».
     static func relaunch(_ app: URL) {
+        // Новый экземпляр открываем только после того, как этот процесс действительно
+        // завершился: иначе `open` просто активирует ещё живое старое окно.
+        let pid = ProcessInfo.processInfo.processIdentifier
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
-        shell.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", app.path]
+        shell.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"",
+                           app.path, String(pid)]
         try? shell.run()
-        NSApp.terminate(nil)
+        // Открытый лист (например, настройки, откуда нажали «Перезапустить») мешает
+        // завершению: сначала закрываем листы, затем выходим.
+        for window in NSApp.windows {
+            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.terminate(nil)
+            // Если что-то всё же отменило выход — выходим принудительно через секунду;
+            // модули останавливаем сами, как в applicationWillTerminate.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                ModuleManager.shared.stopAll()  // вентиляторы в «Авто» и т.п., как при обычном выходе
+                exit(0)
+            }
+        }
     }
 
     /// SHA-1 листовых сертификатов, которыми разрешено подписывать релизы. Список
