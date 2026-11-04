@@ -44,37 +44,146 @@ struct DSSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Место под светофоры.
+            // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
-            Text("УТИЛИТЫ")
-                .font(DS.sectionTitle).tracking(0.8)
-                .foregroundStyle(.white.opacity(0.38))
-                .padding(.horizontal, 20).padding(.bottom, 4)
             List {
-                ForEach(modules.shownModules) { module in
-                    DSSidebarRow(module: module, on: modules.isOn(module),
-                                 selected: !showAbout && peeked == nil && current == module) {
-                        selection = module
-                        peeked = nil
-                        showAbout = false
-                    }
-                    .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .contextMenu {
-                        let on = modules.isOn(module)
-                        Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
-                        Button("Скрыть из панели") { modules.setHidden(module, true) }
-                        Divider()
-                        Button("Настроить модули…") { modules.settingsShown = true }
+                ForEach(ModuleCategory.all) { category in
+                    let items = modules.shownModules.filter { $0.category == category }
+                    if !items.isEmpty {
+                        Section {
+                            ForEach(items) { module in row(module) }
+                                .onMove { move(items, from: $0, to: $1) }
+                        } header: {
+                            DSCategoryHeader(category: category)
+                        }
+                        .listSectionSeparator(.hidden)
                     }
                 }
-                .onMove { modules.moveShown(from: $0, to: $1) }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             DSSidebarFooter(showAbout: $showAbout, peeked: $peeked)
         }
+    }
+
+    private func row(_ module: Module) -> some View {
+        DSSidebarRow(module: module, on: modules.isOn(module),
+                     selected: !showAbout && peeked == nil && current == module) {
+            selection = module
+            peeked = nil
+            showAbout = false
+        }
+        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .contextMenu {
+            let on = modules.isOn(module)
+            Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
+            Button("Скрыть из панели") { modules.setHidden(module, true) }
+            Divider()
+            Button("Настроить модули…") { modules.settingsShown = true }
+        }
+    }
+
+    /// Перетаскивание только внутри категории: индексы категории переводим в индексы общего списка панели.
+    private func move(_ items: [Module], from source: IndexSet, to destination: Int) {
+        let shown = modules.shownModules
+        let global = items.compactMap { shown.firstIndex(of: $0) }
+        let to = destination < global.count ? global[destination] : (global.last ?? 0) + 1
+        modules.moveShown(from: IndexSet(source.map { global[$0] }), to: to)
+    }
+}
+
+/// Заголовок категории: полоска её цвета и название капсом; подзаголовок — во всплывающей подсказке.
+private struct DSCategoryHeader: View {
+    let category: ModuleCategory
+    @Environment(\.dsTheme) private var theme
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Capsule().fill(theme.categoryColor(category)).frame(width: 3, height: 12)
+            Text(category.title.uppercased())
+                .font(DS.sectionTitle).tracking(0.8)
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 16).padding(.top, 8).padding(.bottom, 2)
+        .help(category.subtitle)
+    }
+}
+
+// MARK: - Скрытие панели
+
+extension DS {
+    /// Ключ `@AppStorage`: скрыта ли боковая панель.
+    static let sidebarHiddenKey = "Design.SidebarHidden"
+    static let sidebarAnimation = Animation.easeInOut(duration: 0.2)
+}
+
+/// Кнопка скрытия/показа панели рядом со светофорами. Остаётся видна и при скрытой панели.
+/// Положение берём у настоящей кнопки «зелёный» окна, чтобы не гадать с отступами системы.
+struct DSSidebarToggle: View {
+    @Binding var hidden: Bool
+    @State private var anchor = CGPoint(x: 86, y: 20)
+    @State private var hover = false
+
+    var body: some View {
+        Button { withAnimation(DS.sidebarAnimation) { hidden.toggle() } } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.white.opacity(hover ? 0.95 : 0.65))
+                .frame(width: 28, height: 24)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(hover ? .white.opacity(0.1) : .clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(hidden ? "Показать боковую панель (⌃⌘S)" : "Скрыть боковую панель (⌃⌘S)")
+        .position(x: anchor.x + 14, y: anchor.y)
+        .background(TrafficLightProbe(anchor: $anchor))
+    }
+}
+
+/// Читает положение кнопки «zoom» окна: справа от неё ставим переключатель панели.
+private struct TrafficLightProbe: NSViewRepresentable {
+    @Binding var anchor: CGPoint
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.onChange = { point in
+            if point != anchor { DispatchQueue.main.async { anchor = point } }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: ProbeView, context: Context) {}
+
+    final class ProbeView: NSView {
+        var onChange: ((CGPoint) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            for name in [NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(measure), name: name, object: window)
+            }
+            DispatchQueue.main.async { [weak self] in self?.measure() }
+        }
+
+        @objc private func measure() {
+            guard let window, let zoom = window.standardWindowButton(.zoomButton),
+                  let superview = zoom.superview, let content = window.contentView else { return }
+            let frame = superview.convert(zoom.frame, to: content)
+            // Координаты содержимого — от нижнего края; SwiftUI считает от верхнего.
+            let y = content.isFlipped ? frame.midY : content.bounds.height - frame.midY
+            guard frame.maxX > 0, y > 0 else { return }
+            onChange?(CGPoint(x: frame.maxX + 8, y: y))
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
     }
 }
 
@@ -96,7 +205,7 @@ private struct DSSidebarRow: View {
                 .lineLimit(1)
             Spacer(minLength: 4)
             if on {
-                Circle().fill(theme.accent(module)).frame(width: 6, height: 6)
+                Circle().fill(theme.tone(module)).frame(width: 6, height: 6)
             } else {
                 Text("выкл").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
             }

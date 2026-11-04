@@ -107,6 +107,7 @@ struct MainView: View {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var whatsNew = WhatsNew.shared
     @Environment(\.dsTheme) private var theme
+    @AppStorage(DS.sidebarHiddenKey) private var sidebarHidden = false
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
@@ -127,9 +128,12 @@ struct MainView: View {
         ZStack {
             DSBackground(module: tintModule)
             HStack(spacing: 0) {
-                DSSidebar(current: current, showAbout: $showAbout, peeked: $peeked, selection: $selection)
-                    .frame(width: DS.sidebarWidth)
-                    .background(theme.sidebar)
+                if !sidebarHidden {
+                    DSSidebar(current: current, showAbout: $showAbout, peeked: $peeked, selection: $selection)
+                        .frame(width: DS.sidebarWidth)
+                        .background(theme.sidebar)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
                 ZStack {
                     page(showAbout: showAbout, detail: detail)
                         // Переход страницы: только прозрачность и сдвиг на 12 pt, без пружин и масштаба.
@@ -142,9 +146,13 @@ struct MainView: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                     .stroke(.white.opacity(0.08), lineWidth: 0.7))
                 .clipShape(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous))
-                .padding(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 10))
+                // Панель скрыта: карточка уходит ниже светофоров и кнопки панели, чтобы не лечь под них.
+                .padding(EdgeInsets(top: sidebarHidden ? 44 : 10, leading: sidebarHidden ? 10 : 0, bottom: 10, trailing: 10))
             }
+            DSSidebarToggle(hidden: $sidebarHidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .animation(DS.sidebarAnimation, value: sidebarHidden)
         .environment(\.dsTint, theme.accent(tintModule))
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
@@ -248,11 +256,26 @@ struct UtilitumusApp: App {
                 Button("Проверить обновления…") { Updater.shared.check() }
                 Button("Что нового…") { WhatsNew.shared.isShown = true }
             }
+            CommandGroup(after: .sidebar) {
+                SidebarCommand()
+            }
             // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand()
             }
         }
+    }
+}
+
+/// ⌃⌘S — скрыть или показать боковую панель (то же делает кнопка в шапке окна).
+private struct SidebarCommand: View {
+    @AppStorage(DS.sidebarHiddenKey) private var hidden = false
+
+    var body: some View {
+        Button(hidden ? "Показать боковую панель" : "Скрыть боковую панель") {
+            withAnimation(DS.sidebarAnimation) { hidden.toggle() }
+        }
+        .keyboardShortcut("s", modifiers: [.control, .command])
     }
 }
 

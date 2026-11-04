@@ -214,20 +214,26 @@ struct DSKeyCaps: View {
 struct DSSection<Content: View>: View {
     let title: String
     var trailing: String?
+    /// Цвет категории: метка перед названием (страница «О проекте»).
+    var mark: Color?
     @ViewBuilder var content: Content
     @Environment(\.dsTheme) private var theme
 
-    init(_ title: String, trailing: String? = nil, @ViewBuilder content: () -> Content) {
+    init(_ title: String, trailing: String? = nil, mark: Color? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.trailing = trailing
+        self.mark = mark
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 7) {
+                if let mark {
+                    Capsule().fill(mark).frame(width: 3, height: 12)
+                }
                 Text(title.uppercased()).font(DS.sectionTitle).tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.42))
+                    .foregroundStyle(mark == nil ? .white.opacity(0.42) : .white.opacity(0.7))
                 Spacer()
                 if let trailing {
                     Text(trailing).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.5))
@@ -251,15 +257,21 @@ struct DSRow<Trailing: View>: View {
     var icon: String?
     let title: String
     var subtitle: String?
+    /// Свой цвет значка (гамма категории); без него — акцент текущего модуля.
+    var iconTint: Color?
     @ViewBuilder var trailing: Trailing
-    @Environment(\.dsTint) private var tint
+    @Environment(\.dsTint) private var envTint
 
-    init(icon: String? = nil, title: String, subtitle: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+    init(icon: String? = nil, title: String, subtitle: String? = nil, iconTint: Color? = nil,
+         @ViewBuilder trailing: () -> Trailing) {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
+        self.iconTint = iconTint
         self.trailing = trailing()
     }
+
+    private var tint: Color { iconTint ?? envTint }
 
     var body: some View {
         HStack(spacing: 12) {

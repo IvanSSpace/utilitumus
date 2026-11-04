@@ -7,21 +7,18 @@ struct AboutView: View {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var updater = Updater.shared
 
-    private static let groups: [(title: String, subtitle: String, modules: [Module])] = [
-        ("Исправления MacBook", "То, что в macOS должно быть, но его нет", [.sound, .fans, .mixer, .mouse]),
-        ("Утилиты с фишками", "Мелочи, которые экономят время каждый день", [.stash, .browser, .voice]),
-        ("Для работы с ИИ", "Когда агенты съедают память", [.load]),
-    ]
+    @Environment(\.dsTheme) private var theme
 
     var body: some View {
         DSPlainPage(icon: "info.circle", title: "О проекте",
                     subtitle: "Тонкая настройка MacBook там, где macOS её не даёт. Одно лёгкое приложение вместо россыпи утилит.") {
             hero
-            ForEach(Self.groups, id: \.title) { group in
-                DSSection(group.title, trailing: group.subtitle) {
+            ForEach(ModuleCategory.all) { group in
+                DSSection(group.title, trailing: group.subtitle, mark: theme.categoryColor(group)) {
                     ForEach(group.modules) { module in
                         Button { open(module) } label: {
-                            DSRow(icon: module.icon, title: module.title, subtitle: module.info.tagline) {
+                            DSRow(icon: module.icon, title: module.title, subtitle: module.info.tagline,
+                                  iconTint: theme.tone(module)) {
                                 status(module)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 10, weight: .semibold))

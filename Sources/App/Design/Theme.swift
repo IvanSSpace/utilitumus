@@ -36,7 +36,7 @@ enum DSTheme: String, CaseIterable, Identifiable {
     // MARK: Параметры
 
     /// Насыщенность и яркость акцента модуля.
-    private var accentSB: (s: Double, b: Double) {
+    fileprivate var accentSB: (s: Double, b: Double) {
         switch self {
         case .calm: return (0.50, 0.82)
         case .graphite: return (0.20, 0.72)
@@ -86,7 +86,7 @@ enum DSTheme: String, CaseIterable, Identifiable {
     /// Плашка значка модуля: у «Графита» приглушена, чтобы значки не пестрили.
     func badge(_ m: Module) -> Color {
         switch self {
-        case .graphite: return m.hsb(0.22, 0.62)
+        case .graphite: return m.hsb(0.36, 0.64)
         case .midnight, .calm: return m.hsb(0.50, 0.78)
         case .vivid: return m.hsb(0.75, 0.95)
         }
@@ -100,23 +100,24 @@ enum DSTheme: String, CaseIterable, Identifiable {
 }
 
 extension Module {
-    /// Базовый оттенок модуля (0…1) и множитель насыщенности для серых.
-    fileprivate var dsHue: (h: Double, k: Double) {
-        switch self {
-        case .sound: return (0.58, 1)
-        case .load: return (0.07, 1)
-        case .stash: return (0.76, 1)
-        case .fans: return (0.51, 1)
-        case .mixer: return (0.92, 1)
-        case .mouse: return (0.60, 0.18)
-        case .browser: return (0.66, 1)
-        case .voice: return (0.39, 1)
-        }
-    }
+    /// Оттенок модуля (0…1) берётся из таблицы `ModuleCategory.all`.
+    fileprivate var dsHue: Double { category.hue(of: self) }
 
     fileprivate func hsb(_ s: Double, _ b: Double) -> Color {
-        let p = dsHue
-        return Color(hue: p.h, saturation: s * p.k, brightness: b)
+        Color(hue: dsHue, saturation: s, brightness: b)
+    }
+}
+
+extension DSTheme {
+    /// Цвет категории: метка у заголовка в панели и в «О проекте». У «Графита» приглушён, но отличим.
+    func categoryColor(_ c: ModuleCategory) -> Color {
+        let p: (s: Double, b: Double) = self == .graphite ? (0.42, 0.80) : accentSB
+        return Color(hue: c.hue, saturation: p.s, brightness: p.b)
+    }
+
+    /// Цвет модуля там, где «Графит» всё равно должен выдать категорию (точка «включён» в панели).
+    func tone(_ m: Module) -> Color {
+        self == .graphite ? m.hsb(0.40, 0.80) : accent(m)
     }
 }
 
