@@ -7,7 +7,7 @@ struct SettingsView: View {
             ModulesSettings()
                 .tabItem { Label("Модули", systemImage: "square.grid.2x2") }
         }
-        .frame(width: 520)
+        .frame(width: 560)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -18,8 +18,11 @@ private struct ModulesSettings: View {
     var body: some View {
         Form {
             Section {
-                ForEach(Module.allCases) { module in
+                ForEach(manager.order) { module in
                     HStack(spacing: 12) {
+                        // Ручка: строку можно перетащить, порядок общий с боковой панелью.
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary)
                         Image(systemName: module.icon)
                             .font(.title3)
                             .frame(width: 28)
@@ -31,16 +34,24 @@ private struct ModulesSettings: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Toggle(module.title, isOn: Binding(
-                            get: { manager.isEnabled(module) },
-                            set: { manager.setEnabled(module, $0) }
-                        ))
-                        .toggleStyle(.switch)
+                        Picker(module.title, selection: Binding(
+                            get: { manager.state(of: module) },
+                            set: { manager.setState(module, $0) }
+                        )) {
+                            ForEach(ModuleState.allCases) { Text($0.title).tag($0) }
+                        }
+                        .pickerStyle(.menu)
                         .labelsHidden()
+                        .fixedSize()
                     }
                 }
+                .onMove { manager.move(from: $0, to: $1) }
             } footer: {
-                Text("Выключенный модуль пропадает из боковой панели и перестаёт работать в фоне.")
+                Text("Порядок можно менять перетаскиванием, здесь и в боковой панели. Скрытый модуль пропадает из панели, но работает в фоне. Выключенный остановлен полностью.")
+            }
+
+            Section {
+                Button("Сбросить порядок и показать всё") { manager.resetAll() }
             }
         }
         .formStyle(.grouped)

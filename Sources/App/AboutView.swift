@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Страница «О проекте». Не `Module`: она не включается и не выключается в настройках.
+/// Страница «О проекте». Не `Module`: у неё нет состояния в настройках.
 struct AboutView: View {
-    /// Открыть модуль в основном окне (вызывается только для включённых).
+    /// Открыть модуль в основном окне (для показанных и скрытых; выключенные не открываются).
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
 
@@ -44,7 +44,7 @@ struct AboutView: View {
                          destination: URL(string: "https://github.com/IvanSSpace/utilitumus")!)
                 }
                 HStack(spacing: 4) {
-                    Text("Ненужные модули можно выключить в")
+                    Text("Порядок, скрытие и выключение модулей — в")
                     SettingsLink {
                         Text("Настройках (Cmd+,)")
                     }
@@ -58,7 +58,8 @@ struct AboutView: View {
 
     @ViewBuilder
     private func moduleRow(_ module: Module, _ text: String) -> some View {
-        let on = modules.isEnabled(module)
+        let state = modules.state(of: module)
+        let on = state != .disabled
         Button {
             open(module)
         } label: {
@@ -68,7 +69,11 @@ struct AboutView: View {
                     .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(Text(module.title).fontWeight(.semibold)) — \(text)")
-                    if !on {
+                    if state == .hidden {
+                        Text("скрыт — работает в фоне")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if state == .disabled {
                         Text("выключен в Настройках")
                             .font(.caption)
                     }
@@ -80,7 +85,7 @@ struct AboutView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Выключенный модуль открыть нельзя: его нет в боковой панели.
+        // Выключенный модуль открыть нельзя: он остановлен. Скрытый открывается разово.
         .disabled(!on)
     }
 }

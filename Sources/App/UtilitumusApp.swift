@@ -80,50 +80,71 @@ struct ModuleDetail: View {
 struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
+    @Environment(\.openSettings) private var openSettings
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
+    /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
+    /// состояние не меняем, в панели его по-прежнему нет.
+    @State private var peeked: Module?
 
     var body: some View {
-        // Выбранный модуль могли выключить: показываем первый из включённых.
+        // Выбранный модуль могли скрыть или выключить: показываем первый из показанных.
         let current = modules.resolve(selection)
+        let displayed = peeked ?? current
         NavigationSplitView {
-            List(modules.enabledModules, selection: Binding(
-                // На странице «О проекте» выделение в списке снято.
-                get: { showAbout ? nil : current },
-                set: { if let new = $0 { selection = new; showAbout = false } }
-            )) { module in
-                Label(module.title, systemImage: module.icon)
-                    .foregroundStyle(module.isReady ? .primary : .secondary)
-                    .tag(module)
+            List(selection: Binding(
+                // На странице «О проекте» и при разовом показе скрытого выделение снято.
+                get: { showAbout || peeked != nil ? nil : current },
+                set: { if let new = $0 { selection = new; peeked = nil; showAbout = false } }
+            )) {
+                ForEach(modules.shownModules) { module in
+                    Label(module.title, systemImage: module.icon)
+                        .foregroundStyle(module.isReady ? .primary : .secondary)
+                        .tag(module)
+                        .contextMenu {
+                            Button("Скрыть из панели") { modules.setState(module, .hidden) }
+                            Button("Выключить модуль") { modules.setState(module, .disabled) }
+                            Divider()
+                            Button("Настроить модули…") { openSettings() }
+                        }
+                }
+                .onMove { modules.moveShown(from: $0, to: $1) }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
             .safeAreaInset(edge: .bottom) { UpdateFooter(showAbout: $showAbout) }
         } detail: {
             if showAbout {
                 AboutView { module in
-                    selection = module
+                    if modules.state(of: module) == .shown {
+                        selection = module
+                        peeked = nil
+                    } else {
+                        peeked = module
+                    }
                     showAbout = false
                 }
-            } else if let current {
-                ModuleDetail(module: current)
+            } else if let displayed {
+                ModuleDetail(module: displayed)
             } else {
-                AllModulesOff()
+                NoShownModules()
             }
         }
         .frame(minWidth: 680, minHeight: 460)
-        .onChange(of: modules.enabled) {
+        .onChange(of: modules.states) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
+            // Разовый показ имеет смысл только пока модуль скрыт: выключили или показали — сбрасываем.
+            if let peeked, modules.state(of: peeked) != .hidden { self.peeked = nil }
         }
     }
 }
 
-/// Все модули выключены: подсказка и быстрый переход в настройки.
-struct AllModulesOff: View {
+/// В панели нет ни одного модуля: подсказка и быстрый переход в настройки.
+struct NoShownModules: View {
     var body: some View {
         ContentUnavailableView {
-            Label("Нет включённых модулей",systemImage: "square.grid.2x2")
+            Label("Панель пуста", systemImage: "square.grid.2x2")
         } description: {
-            Text("Все модули выключены — включи нужные в Настройках")
+            Text("Нет модулей в панели — верни нужные в Настройках")
         } actions: {
             SettingsLink {
                 Text("Открыть настройки")
