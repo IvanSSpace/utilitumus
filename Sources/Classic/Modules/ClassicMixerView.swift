@@ -1,8 +1,12 @@
 import SwiftUI
 
-private struct ClassicMixerRow: View {
+private struct ClassicMixerRow: View, Equatable {
     let app: MixerApp
-    @ObservedObject var controller: MixerController
+    let controller: MixerController
+    /// Значение под пальцем: список публикуется позже, а слайдер должен идти сразу.
+    @State private var dragging: Double?
+
+    static func == (a: ClassicMixerRow, b: ClassicMixerRow) -> Bool { a.app == b.app }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -18,13 +22,19 @@ private struct ClassicMixerRow: View {
             .frame(width: 150, alignment: .leading)
 
             Slider(value: Binding(
-                get: { app.volume },
+                get: { dragging ?? app.volume },
                 // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
-                set: { controller.setVolume(($0 * 100).rounded() / 100, for: app.id) }
-            ), in: 0...1)
+                set: {
+                    let value = ($0 * 100).rounded() / 100
+                    dragging = value
+                    controller.setVolume(value, for: app.id)
+                }
+            ), in: 0...1, onEditingChanged: { editing in
+                if !editing { controller.commitVolumes(); dragging = nil }
+            })
             .opacity(app.muted ? 0.4 : 1)
 
-            Text("\(Int((app.volume * 100).rounded())) %")
+            Text("\(Int(((dragging ?? app.volume) * 100).rounded())) %")
                 .monospacedDigit()
                 .frame(width: 50, alignment: .trailing)
 
@@ -39,13 +49,14 @@ private struct ClassicMixerRow: View {
             .help(app.muted ? "Вернуть звук" : "Выключить звук")
         }
         .padding(.vertical, 2)
+        .onChange(of: app.volume) { dragging = nil }
     }
 }
 
 /// Приложение не запущено, но для него задана громкость: можно только сбросить.
 private struct ClassicPresetRow: View {
     let app: MixerApp
-    @ObservedObject var controller: MixerController
+    let controller: MixerController
 
     var body: some View {
         HStack(spacing: 12) {
@@ -98,14 +109,14 @@ struct ClassicMixerView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(controller.apps) { app in
-                    ClassicMixerRow(app: app, controller: controller)
+                    ClassicMixerRow(app: app, controller: controller).equatable()
                 }
             }
 
             if !controller.idleApps.isEmpty {
                 Section {
                     ForEach(controller.idleApps) { app in
-                        ClassicMixerRow(app: app, controller: controller)
+                        ClassicMixerRow(app: app, controller: controller).equatable()
                     }
                 } header: {
                     Text("Молчат сейчас")
@@ -135,7 +146,7 @@ struct ClassicMixerView: View {
                     .focusable(false)
                     if showOthers {
                         ForEach(controller.otherApps) { app in
-                            ClassicMixerRow(app: app, controller: controller)
+                            ClassicMixerRow(app: app, controller: controller).equatable()
                         }
                     }
                 } footer: {
@@ -162,5 +173,7 @@ struct ClassicMixerView: View {
         .formStyle(.grouped)
         .navigationTitle("Микшер")
         .navigationSubtitle(controller.apps.isEmpty ? "" : "Играют: \(controller.apps.count)")
+        .onAppear { controller.setScreenVisible(true) }
+        .onDisappear { controller.setScreenVisible(false) }
     }
 }

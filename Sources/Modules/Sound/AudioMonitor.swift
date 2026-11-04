@@ -109,20 +109,24 @@ final class AudioMonitor {
         // @Published свойства между потоками.
         let (bluetoothLocked, primaryUID, outputChoice) = DispatchQueue.main.sync { () -> (Bool, String?, OutputChoice) in
             let state = MonitorState.shared
-            let currentInput = inputs.first { $0.id == currentInputID }
-            if let currentInput {
-                state.currentInputName = currentInput.name
-                state.currentInputIsBluetooth = currentInput.transport == .bluetooth
+            // @Published шлёт objectWillChange и при равном значении — присваиваем только изменённое,
+            // иначе экран «Звук» перерисовывается каждые 5 с зря.
+            func assign<T: Equatable>(_ keyPath: ReferenceWritableKeyPath<MonitorState, T>, _ value: T) {
+                if state[keyPath: keyPath] != value { state[keyPath: keyPath] = value }
+            }
+            if let currentInput = inputs.first(where: { $0.id == currentInputID }) {
+                assign(\.currentInputName, currentInput.name)
+                assign(\.currentInputIsBluetooth, currentInput.transport == .bluetooth)
             }
             if let current = outputs.first(where: { $0.id == currentOutputID }) {
-                state.currentOutputName = current.name
+                assign(\.currentOutputName, current.name)
             }
             let locked = LockState.shared.isLocked
             PrimaryInputStore.shared.migrateIfNeeded(connected: inputs, bluetoothLocked: locked)
             KnownDeviceStore.inputs.sync(from: inputs)
             KnownDeviceStore.outputs.sync(from: outputs)
-            state.displayInputs = KnownDeviceStore.inputs.displayList(available: inputs)
-            state.displayOutputs = KnownDeviceStore.outputs.displayList(available: outputs)
+            assign(\.displayInputs, KnownDeviceStore.inputs.displayList(available: inputs))
+            assign(\.displayOutputs, KnownDeviceStore.outputs.displayList(available: outputs))
             return (locked, PrimaryInputStore.shared.primaryUID, PrimaryOutputStore.shared.choice)
         }
 

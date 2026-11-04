@@ -3,7 +3,7 @@ import CoreAudio
 import Foundation
 
 /// Приложение в списке микшера.
-struct MixerApp: Identifiable {
+struct MixerApp: Identifiable, Equatable {
     /// Bundle id приложения (или `exe:<имя>` у программ без бандла) — по нему
     /// запоминается громкость.
     let id: String
@@ -11,6 +11,11 @@ struct MixerApp: Identifiable {
     let icon: NSImage
     var volume: Double
     var muted: Bool
+
+    /// Иконка в сравнение не входит: она не меняется, а сравнивать картинки дорого.
+    static func == (a: MixerApp, b: MixerApp) -> Bool {
+        a.id == b.id && a.name == b.name && a.volume == b.volume && a.muted == b.muted
+    }
 }
 
 /// Громкость каждого приложения отдельно. Тап создаётся только для приложений,
@@ -63,6 +68,11 @@ final class MixerController: ObservableObject {
     /// Имя и иконка незапущенных приложений: ищутся по bundle id один раз.
     private var presetMeta: [String: (name: String, icon: NSImage)] = [:]
     private var unlisten: [() -> Void] = []
+    /// Экран «Микшер» открыт. Пока нет, молчащие приложения и пресеты не считаются:
+    /// в фоне нужны только сессии и тапы.
+    private var screenVisible = false
+    /// Отложенная запись громкостей в UserDefaults (слайдер шлёт десятки значений в секунду).
+    private var persistTask: Task<Void, Never>?
 
     private init() {
         volumes = UserDefaults.standard.dictionary(forKey: Self.volumesKey) as? [String: Double] ?? [:]
@@ -87,32 +97,104 @@ final class MixerController: ObservableObject {
     }
 
     func volume(for id: String) -> Double { volumes[id] ?? 1 }
+    func isMuted(_ id: String) -> Bool { muted.contains(id) }
 
+    /// Экран показан или скрыт (`onAppear` / `onDisappear`). При показе сразу
+    /// досчитываем списки молчащих.
+    func setScreenVisible(_ value: Bool) {
+        guard screenVisible != value else { return }
+        screenVisible = value
+        if value { refresh() }
+    }
+
+    /// Шаг слайдера: громкость и gain тапа меняются сразу, без обхода HAL. Полный
+    /// `refresh` нужен, только когда тап надо создать или убрать.
     func setVolume(_ value: Double, for id: String) {
         let clamped = min(max(value, 0), 1)
+        let before = wantsTap(id)
         if clamped == 1 { volumes[id] = nil } else { volumes[id] = clamped }
-        persist()
-        sessions[id]?.failedAt = nil
-        refresh()
+        applyChange(id, wantsTapBefore: before)
+        schedulePersist()
     }
 
     func setMuted(_ value: Bool, for id: String) {
+        let before = wantsTap(id)
         if value { muted.insert(id) } else { muted.remove(id) }
+        applyChange(id, wantsTapBefore: before)
+        publishValues()
         persist()
-        sessions[id]?.failedAt = nil
-        refresh()
     }
 
     /// Вернуть приложению 100 % и звук (кнопка в «Настроены заранее»).
     func reset(_ id: String) {
+        let before = wantsTap(id)
         volumes[id] = nil
         muted.remove(id)
+        applyChange(id, wantsTapBefore: before)
+        publishValues()
         persist()
-        sessions[id]?.failedAt = nil
-        refresh()
+    }
+
+    /// Слайдер отпущен: публикуем итоговые значения и пишем на диск сразу.
+    func commitVolumes() {
+        publishValues()
+        persist()
+    }
+
+    private func wantsTap(_ id: String) -> Bool { volume(for: id) != 1 || muted.contains(id) }
+
+    private func applyChange(_ id: String, wantsTapBefore: Bool) {
+        let wants = wantsTap(id)
+        guard let session = sessions[id] else {
+            // Приложения нет в сессиях: тапа нет, громкость применится, когда оно зазвучит.
+            // Но строки в «Настроены заранее» и «Молчат» могли поменять состав.
+            if wants != wantsTapBefore { refresh() }
+            return
+        }
+        if wants != wantsTapBefore { session.failedAt = nil }
+        if let tap = session.tap, wants {
+            tap.setGain(muted.contains(id) ? 0 : Float(volume(for: id)))
+        } else if (session.tap != nil) != wants, wants != wantsTapBefore || session.failedAt == nil {
+            // Тап нужно создать или убрать: это уже работа для полного прохода.
+            refresh()
+        }
+    }
+
+    /// Точечно обновить громкость и «без звука» в уже опубликованных списках,
+    /// не пересобирая их.
+    private func publishValues() {
+        func synced(_ list: [MixerApp]) -> [MixerApp]? {
+            var result = list
+            var changed = false
+            for i in result.indices {
+                let v = volume(for: result[i].id), m = muted.contains(result[i].id)
+                if result[i].volume != v || result[i].muted != m {
+                    result[i].volume = v
+                    result[i].muted = m
+                    changed = true
+                }
+            }
+            return changed ? result : nil
+        }
+        if let l = synced(apps) { apps = l }
+        if let l = synced(idleApps) { idleApps = l }
+        if let l = synced(otherApps) { otherApps = l }
+        if let l = synced(presetApps) { presetApps = l }
+    }
+
+    private func schedulePersist() {
+        persistTask?.cancel()
+        persistTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            self?.publishValues()
+            self?.persist()
+        }
     }
 
     private func persist() {
+        persistTask?.cancel()
+        persistTask = nil
         UserDefaults.standard.set(volumes, forKey: Self.volumesKey)
         UserDefaults.standard.set(Array(muted), forKey: Self.mutedKey)
     }
@@ -120,6 +202,7 @@ final class MixerController: ObservableObject {
     /// Выключение модуля или выход: снести все тапы и агрегаты, чтобы звук
     /// приложений вернулся как был.
     func stop() {
+        if persistTask != nil { persist() }
         timer?.invalidate()
         timer = nil
         unlisten.forEach { $0() }
@@ -188,23 +271,22 @@ final class MixerController: ObservableObject {
                      volume: volume(for: key), muted: muted.contains(key))
         }.sorted(by: Self.byName)
         // Публикуем только изменения, иначе SwiftUI перерисовывает экран раз в секунду зря.
-        if Self.signature(list) != Self.signature(apps) { apps = list }
+        if list != apps { apps = list }
 
+        // Молчащие и пресеты нужны только открытому экрану.
+        guard screenVisible else { return }
         let (quiet, preset) = quietApps(excluding: Set(sessions.keys), me: me)
         let configured = Set(volumes.keys).union(muted)
         let likely = quiet.filter { heard.contains($0.id) || configured.contains($0.id) || Self.isMediaApp($0.id) }
-        let other = quiet.filter { !likely.map(\.id).contains($0.id) }
-        if Self.signature(likely) != Self.signature(idleApps) { idleApps = likely }
-        if Self.signature(other) != Self.signature(otherApps) { otherApps = other }
-        if Self.signature(preset) != Self.signature(presetApps) { presetApps = preset }
+        let likelyIDs = Set(likely.map(\.id))
+        let other = quiet.filter { !likelyIDs.contains($0.id) }
+        if likely != idleApps { idleApps = likely }
+        if other != otherApps { otherApps = other }
+        if preset != presetApps { presetApps = preset }
     }
 
     private static func byName(_ a: MixerApp, _ b: MixerApp) -> Bool {
         (a.name.localizedLowercase, a.id) < (b.name.localizedLowercase, b.id)
-    }
-
-    private static func signature(_ list: [MixerApp]) -> [[String]] {
-        list.map { [$0.id, "\($0.volume)", "\($0.muted)"] }
     }
 
     /// Молчащие приложения: запущенные обычные (idle) и те, для кого что-то
@@ -212,11 +294,12 @@ final class MixerController: ObservableObject {
     /// громкость лежит в `volumes`, и `apply` возьмёт её, когда появится звук.
     private func quietApps(excluding active: Set<String>, me: pid_t) -> (idle: [MixerApp], preset: [MixerApp]) {
         var idle: [MixerApp] = []
+        var seen: Set<String> = []
         var running: Set<String> = []
         for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular && app.processIdentifier != me {
             guard let id = app.bundleIdentifier else { continue }
             running.insert(id)
-            guard !active.contains(id), !idle.contains(where: { $0.id == id }) else { continue }
+            guard !active.contains(id), seen.insert(id).inserted else { continue }
             idle.append(MixerApp(id: id, name: app.localizedName ?? id,
                                  icon: app.icon ?? Self.genericIcon,
                                  volume: volume(for: id), muted: muted.contains(id)))
