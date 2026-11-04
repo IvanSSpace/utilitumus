@@ -28,6 +28,10 @@ else
   echo "⚠️  Сертификата «$SIGN_NAME» нет — подпись ad-hoc, разрешения macOS слетят после пересборки."
 fi
 
+# Движок голосового ввода (sherpa-onnx, статически): скачивается один раз, хэши сверяются.
+# Без интернета и без Vendor/ сборка останавливается здесь с понятной ошибкой.
+scripts/fetch-sherpa.sh
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -44,6 +48,23 @@ swiftc -O -target "$TARGET" \
   -framework IOKit
 # --options runtime (hardened runtime): в процесс нельзя внедрить чужой код через DYLD_* и подменённые библиотеки.
 codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
+
+# Помощник голосового ввода: отдельный процесс, sherpa-onnx влинкован статически.
+# Динамическую библиотеку под hardened runtime с нашим сертификатом загрузить нельзя
+# (нужен disable-library-validation) — поэтому процесс, а не dylib. Без entitlements.
+SHERPA="Vendor/sherpa-onnx"
+clang -O2 -Wall -target "$TARGET" \
+  -I "$SHERPA/include" \
+  -o "$APP_BUNDLE/Contents/MacOS/utilitumus-voice" \
+  Sources/VoiceHelper/main.c \
+  "$SHERPA/lib/libsherpa-onnx-c-api.a" "$SHERPA/lib/libsherpa-onnx-core.a" \
+  "$SHERPA/lib/libonnxruntime.a" "$SHERPA/lib/libkaldi-decoder-core.a" \
+  "$SHERPA/lib/libkaldi-native-fbank-core.a" "$SHERPA/lib/libkissfft-float.a" \
+  "$SHERPA/lib/libsherpa-onnx-fst.a" "$SHERPA/lib/libsherpa-onnx-fstfar.a" \
+  "$SHERPA/lib/libsherpa-onnx-kaldifst-core.a" "$SHERPA/lib/libssentencepiece_core.a" \
+  "$SHERPA/lib/libutf8proc.a" \
+  -lc++ -framework Foundation -framework Accelerate -Wl,-dead_strip
+codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.voice "$APP_BUNDLE/Contents/MacOS/utilitumus-voice"
 
 # Помощник ссылок «Utilitumus Links» — браузер по умолчанию для модуля «Браузер». Отдельное
 # приложение без окна и Dock: macOS активирует получателя ссылки, и будь им сам Utilitumus,
