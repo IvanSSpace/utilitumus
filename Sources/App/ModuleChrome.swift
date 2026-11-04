@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Экран модуля: шапка (что это, (i), переключатель) и содержимое — или, пока модуль выключен,
-/// описание с кнопкой «Включить». Выключенный модуль ничего не делает и экран его не запускает.
+/// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить».
+/// (i) и переключатель — в строке заголовка окна, отдельной полосы над экраном нет.
+/// Выключенный модуль ничего не делает и экран его не запускает.
 struct ModuleScreen<Content: View>: View {
     let module: Module
     @ViewBuilder var content: Content
@@ -10,10 +11,7 @@ struct ModuleScreen<Content: View>: View {
 
     var body: some View {
         let on = modules.isOn(module)
-        VStack(spacing: 0) {
-            ModuleHeader(module: module, isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }),
-                         showInfo: $showInfo)
-            Divider()
+        Group {
             if on {
                 content
             } else {
@@ -21,45 +19,21 @@ struct ModuleScreen<Content: View>: View {
                     .navigationTitle(module.title)
             }
         }
-        .sheet(isPresented: $showInfo) { ModuleInfoSheet(module: module) }
-    }
-}
-
-/// Полоса над экраном модуля: значок, строка о модуле, (i) и переключатель.
-struct ModuleHeader: View {
-    let module: Module
-    @Binding var isOn: Bool
-    @Binding var showInfo: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ModuleIconBadge(module: module, size: 28)
-                .opacity(isOn ? 1 : 0.5)
-            Text(module.info.tagline)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            Button {
-                showInfo = true
-            } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 15))
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showInfo = true
+                } label: {
+                    Label("Об инструменте", systemImage: "info.circle")
+                }
+                .help("Об инструменте")
+                Toggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            // Без квадратной обводки фокуса: окно открывается с фокусом на первой кнопке.
-            .focusable(false)
-            .help("Об инструменте")
-            Spacer(minLength: 12)
-            Toggle(isOn ? "Включён" : "Выключен", isOn: $isOn)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .focusable(false)
-                .help(isOn ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        .sheet(isPresented: $showInfo) { ModuleInfoSheet(module: module) }
     }
 }
 
@@ -76,8 +50,9 @@ struct ModuleOffView: View {
             Text(module.info.lead)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                // Без fixedSize(vertical:): при узкой ширине на одном из проходов раскладки
+                // NavigationSplitView текст вытягивался в тысячи точек и раздувал всё окно.
                 .frame(maxWidth: 440)
-                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 Button("Включить", action: enable)
                     .buttonStyle(.borderedProminent)
@@ -107,7 +82,10 @@ struct ModuleInfoSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack(spacing: 12) {
                         ModuleIconBadge(module: module, size: 40)
-                        Text(module.title).font(.title2.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(module.title).font(.title2.weight(.semibold))
+                            Text(info.tagline).font(.callout).foregroundStyle(.secondary)
+                        }
                     }
                     Text(info.lead)
                         .fixedSize(horizontal: false, vertical: true)
