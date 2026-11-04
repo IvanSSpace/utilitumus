@@ -1,20 +1,63 @@
 import SwiftUI
 
-private func icon(for transport: Transport) -> String {
-    switch transport {
-    case .builtIn: return "laptopcomputer"
-    case .usb: return "cable.connector"
-    case .bluetooth: return "wave.3.right"
-    case .airplay: return "airplayaudio"
-    case .display: return "display"
-    case .virtual, .other: return "questionmark.circle"
+/// Цветной значок устройства: белый символ на скруглённой плашке с градиентом,
+/// как у значков модулей. Цвет и символ — по типу подключения, а наушники
+/// узнаём по названию (по транспорту они неотличимы от колонок).
+private struct DeviceStyle {
+    let symbol: String
+    let tint: Color
+
+    private static let headphoneWords = ["airpods", "wh-", "wf-", "buds", "headphone", "headset",
+                                         "наушник", "beats", "major", "jabra"]
+
+    init(name: String, transport: Transport) {
+        let lower = name.lowercased()
+        let isHeadphones = Self.headphoneWords.contains { lower.contains($0) }
+        switch transport {
+        case .builtIn:
+            self.init(symbol: isHeadphones ? "headphones" : "laptopcomputer", tint: .blue)
+        case .usb:
+            self.init(symbol: isHeadphones ? "headphones" : "cable.connector", tint: .orange)
+        case .bluetooth:
+            self.init(symbol: isHeadphones ? "headphones" : "wave.3.right", tint: .indigo)
+        case .airplay:
+            self.init(symbol: "airplayaudio", tint: .pink)
+        case .display:
+            self.init(symbol: "display", tint: .teal)
+        case .virtual, .other:
+            self.init(symbol: "waveform", tint: .gray)
+        }
+    }
+
+    init(symbol: String, tint: Color) {
+        self.symbol = symbol
+        self.tint = tint
+    }
+}
+
+private struct SymbolBadge: View {
+    let style: DeviceStyle
+    var size: CGFloat = 24
+    var dimmed = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+            .fill(style.tint.gradient)
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: style.symbol)
+                    .font(.system(size: size * 0.52, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .saturation(dimmed ? 0 : 1)
+            .opacity(dimmed ? 0.45 : 1)
     }
 }
 
 /// Строка выбора, как радиокнопка: отметка слева, серая и с подписью, если
 /// устройство не подключено, с замком, если выбрать нельзя.
 private struct ChoiceRow: View {
-    let icon: String
+    let style: DeviceStyle
     let title: String
     let note: String?
     let isSelected: Bool
@@ -29,9 +72,7 @@ private struct ChoiceRow: View {
                     .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                     .frame(width: 18)
 
-                Image(systemName: icon)
-                    .foregroundStyle(isConnected && !isLocked ? .primary : .secondary)
-                    .frame(width: 18)
+                SymbolBadge(style: style, dimmed: !isConnected || isLocked)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
@@ -60,14 +101,21 @@ private struct ChoiceRow: View {
     }
 }
 
-private func deviceCountLabel(_ n: Int) -> String {
-    let mod100 = n % 100
-    let mod10 = n % 10
-    if (11...14).contains(mod100) { return "Ещё \(n) устройств" }
-    switch mod10 {
-    case 1: return "Ещё \(n) устройство"
-    case 2, 3, 4: return "Ещё \(n) устройства"
-    default: return "Ещё \(n) устройств"
+/// Короткое объяснение вверху экрана: что модуль делает на практике.
+private struct ExplainerBlock: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            SymbolBadge(style: DeviceStyle(symbol: "arrow.uturn.backward", tint: .green), size: 34)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Подключил наушники — macOS сменила микрофон — вернём твой.")
+                    .font(.headline)
+                Text("Если выбранный микрофон отключён, входом станет микрофон MacBook. Другие устройства сами входом не станут.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -77,17 +125,10 @@ struct SoundView: View {
     @ObservedObject var monitorState = MonitorState.shared
     @ObservedObject var inputStore = PrimaryInputStore.shared
     @ObservedObject var outputStore = PrimaryOutputStore.shared
-    @State private var showOtherDevices = false
-
+    
     /// Реальные микрофоны — то, что физически выбирают как вход.
     private var physicalInputs: [DisplayDevice] {
         monitorState.displayInputs.filter { $0.transport.isPhysical }
-    }
-
-    /// Виртуальные/неопознанные устройства (Loopback, Screaming Bee, Zoom и т.п.) —
-    /// шум от других приложений, а не то, что реально выбирают руками. Сворачиваем.
-    private var otherInputs: [DisplayDevice] {
-        monitorState.displayInputs.filter { !$0.transport.isPhysical }
     }
 
     private var physicalOutputs: [DisplayDevice] {
@@ -107,7 +148,7 @@ struct SoundView: View {
         let selectedUID = inputStore.primaryUID ?? builtInInput?.uid
         let isBluetoothBlocked = device.transport == .bluetooth && lockState.isLocked
         return ChoiceRow(
-            icon: icon(for: device.transport),
+            style: DeviceStyle(name: device.name, transport: device.transport),
             title: isBuiltIn ? "Микрофон MacBook" : device.name,
             note: device.isConnected ? nil : "не подключён",
             isSelected: device.uid == selectedUID,
@@ -128,7 +169,7 @@ struct SoundView: View {
         case .system: isSelected = false
         }
         return ChoiceRow(
-            icon: icon(for: device.transport),
+            style: DeviceStyle(name: device.name, transport: device.transport),
             title: isBuiltIn ? "Динамики MacBook" : device.name,
             note: device.isConnected ? nil : "не подключён",
             isSelected: isSelected,
@@ -142,16 +183,20 @@ struct SoundView: View {
 
     var body: some View {
         Form {
+            Section {
+                ExplainerBlock()
+            }
+            .listRowBackground(Color.green.opacity(0.10))
+
             Section("Сейчас") {
-                Label {
+                HStack(spacing: 10) {
+                    SymbolBadge(style: DeviceStyle(symbol: "mic.fill",
+                                                   tint: monitorState.currentInputIsBluetooth ? .indigo : .blue))
                     Text(monitorState.currentInputName)
-                } icon: {
-                    Image(systemName: monitorState.currentInputIsBluetooth ? "wave.3.right.circle.fill" : "mic.circle.fill")
                 }
-                Label {
+                HStack(spacing: 10) {
+                    SymbolBadge(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue))
                     Text(monitorState.currentOutputName)
-                } icon: {
-                    Image(systemName: "speaker.wave.2.circle.fill")
                 }
             }
 
@@ -160,7 +205,7 @@ struct SoundView: View {
             } header: {
                 Text("Основной микрофон")
             } footer: {
-                Text("Если основной микрофон отключён, входом будет микрофон MacBook. Другие сами входом не станут.")
+                Text("Виртуальные устройства (Loopback, Zoom и т.п.) тут не показаны: основными они не бывают, а выбранные тобой вручную Utilitumus не трогает.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -179,25 +224,10 @@ struct SoundView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if !otherInputs.isEmpty {
-                Section {
-                    DisclosureGroup(deviceCountLabel(otherInputs.count), isExpanded: $showOtherDevices) {
-                        ForEach(otherInputs, id: \.uid) { device in
-                            Label(device.name, systemImage: icon(for: device.transport))
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } footer: {
-                    Text("Виртуальные устройства (Loopback, Zoom) основными не бывают; выбранные вручную Utilitumus не трогает.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
             Section {
                 ForEach(physicalOutputs, id: \.uid) { outputRow($0) }
                 ChoiceRow(
-                    icon: "questionmark.circle",
+                    style: DeviceStyle(symbol: "gearshape.fill", tint: .gray),
                     title: "Как решит macOS",
                     note: nil,
                     isSelected: outputStore.choice == .system,
