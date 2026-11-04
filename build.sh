@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME="Utilitumus"
-BUILD_DIR="build"
+BUILD_DIR="${BUILD_DIR:-build}"  # своя папка — для параллельных сборок
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 # Явная минимальная версия: без -target swiftc берёт версию SDK машины
 # сборки (macOS 26), и на 14.x/15.x приложение не запускается вообще.
