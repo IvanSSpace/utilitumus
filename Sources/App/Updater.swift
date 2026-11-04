@@ -90,13 +90,23 @@ final class Updater: ObservableObject {
     // MARK: - Шаги (nonisolated — и для тестов)
 
     struct Release: Decodable {
+        // Имена полей явно: convertFromSnakeCase превращает browser_download_url
+        // в browserDownloadUrl (Url, не URL) — поле не находилось, и обновление
+        // падало с «The data couldn't be read because it is missing».
         struct Asset: Decodable {
             let name: String
             let browserDownloadURL: URL
+            enum CodingKeys: String, CodingKey {
+                case name
+                case browserDownloadURL = "browser_download_url"
+            }
         }
         let tagName: String
         let body: String?
         let assets: [Asset]
+        enum CodingKeys: String, CodingKey {
+            case tagName = "tag_name", body, assets
+        }
     }
 
     /// nil — релизов ещё нет (GitHub отвечает 404).
@@ -108,9 +118,7 @@ final class Updater: ObservableObject {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         if status == 404 { return nil }
         guard status == 200 else { throw UpdateError("GitHub ответил \(status)") }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        return try decoder.decode(Release.self, from: data)
+        return try JSONDecoder().decode(Release.self, from: data)
     }
 
     /// Сравнение по числам: 0.10.0 новее 0.9.1.

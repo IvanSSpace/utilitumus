@@ -222,6 +222,8 @@ struct StashView: View {
         // Замеры — только пока экран открыт.
         .task {
             while !Task.isCancelled {
+                // Доступ дают в Системных настройках — заметить без возврата в окно.
+                store.refreshAccess()
                 await store.refreshUsage()
                 try? await Task.sleep(for: .seconds(5))
             }
