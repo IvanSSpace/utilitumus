@@ -9,7 +9,7 @@ struct AboutView: View {
 
     private static let groups: [(title: String, subtitle: String, modules: [Module])] = [
         ("Исправления MacBook", "То, что в macOS должно быть, но его нет", [.sound, .fans, .mixer, .mouse]),
-        ("Утилиты с фишками", "Мелочи, которые экономят время каждый день", [.stash, .browser]),
+        ("Утилиты с фишками", "Мелочи, которые экономят время каждый день", [.stash, .browser, .voice]),
         ("Для работы с ИИ", "Когда агенты съедают память", [.load]),
     ]
 

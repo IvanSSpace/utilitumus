@@ -3,7 +3,7 @@ import AppKit
 
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
-    case sound, load, stash, fans, mixer, mouse, browser
+    case sound, load, stash, fans, mixer, mouse, browser, voice
 
     var id: String { rawValue }
 
@@ -16,6 +16,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mixer: return "Микшер"
         case .mouse: return "Мышь"
         case .browser: return "Браузер"
+        case .voice: return "Голос"
         }
     }
 
@@ -28,6 +29,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mixer: return "slider.vertical.3"
         case .mouse: return "computermouse"
         case .browser: return "globe"
+        case .voice: return "waveform"
         }
     }
 
@@ -42,6 +44,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mixer: return .pink
         case .mouse: return Color(nsColor: .systemGray)
         case .browser: return .indigo
+        case .voice: return .green
         }
     }
 
@@ -55,6 +58,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mixer: return "Громкость каждого приложения отдельно"
         case .mouse: return "Своё направление прокрутки для мыши и плавная прокрутка колеса"
         case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
+        case .voice: return "Голосовой ввод по горячей клавише: надиктовал — текст вставился туда, где курсор. Всё распознаётся на этом Mac"
         }
     }
 }
@@ -89,6 +93,7 @@ struct ModuleDetail: View {
             case .mixer: MixerView()
             case .mouse: MouseView()
             case .browser: BrowserView()
+            case .voice: VoiceView()
             }
         }
         // Свой экран на каждый модуль: состояние (лист «Об инструменте») не переезжает между ними.

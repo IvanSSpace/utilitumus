@@ -24,6 +24,8 @@
 	<string>14.2</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Микшеру нужно перехватывать звук выбранного приложения, чтобы менять его громкость отдельно от остальных. Звук остаётся на этом Mac и нигде не сохраняется.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Голосовой ввод: речь распознаётся на этом Mac и никуда не отправляется.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

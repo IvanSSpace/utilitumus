@@ -27,6 +27,9 @@ extension ModuleHooks {
             // выключенный модуль он видит в настройках и отправляет ссылки в основной браузер.
             return ModuleHooks(start: { BrowserCatalog.shared.start() },
                                stop: { BrowserCatalog.shared.stop() })
+        case .voice:
+            return ModuleHooks(start: { VoiceController.shared.start() },
+                               stop: { VoiceController.shared.stop() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })
