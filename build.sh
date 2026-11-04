@@ -42,7 +42,8 @@ swiftc -O -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/utilitumus-fan" \
   Sources/Shared/SMC.swift Sources/FanHelper/main.swift \
   -framework IOKit
-codesign --force --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
+# --options runtime (hardened runtime): в процесс нельзя внедрить чужой код через DYLD_* и подменённые библиотеки.
+codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
 
 # Помощник ссылок «Utilitumus Links» — браузер по умолчанию для модуля «Браузер». Отдельное
 # приложение без окна и Dock: macOS активирует получателя ссылки, и будь им сам Utilitumus,
@@ -60,13 +61,13 @@ for key in CFBundleShortVersionString CFBundleVersion; do
   /usr/libexec/PlistBuddy -c "Set :$key $(/usr/libexec/PlistBuddy -c "Print :$key" Info.plist)" "$LINKS_APP/Contents/Info.plist"
 done
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$LINKS_APP/Contents/Resources/"
-codesign --force --sign "$SIGN_ID" "$LINKS_APP"
+codesign --force --options runtime --sign "$SIGN_ID" "$LINKS_APP"
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
 cp Resources/WhatsNew.json "$APP_BUNDLE/Contents/Resources/"
 
-codesign --force --sign "$SIGN_ID" "$APP_BUNDLE"
+codesign --force --options runtime --entitlements Utilitumus.entitlements --sign "$SIGN_ID" "$APP_BUNDLE"
 
 echo "Собрано: $APP_BUNDLE"
 
