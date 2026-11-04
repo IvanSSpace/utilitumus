@@ -42,7 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/IvanSSpace/utilitumus/main/install.
 
 Если скачать кнопкой выше, распакуй архив и перетащи `Utilitumus.app` в «Программы». При первом запуске macOS его заблокирует, потому что приложение не подписано сертификатом Apple. Открой его правым кликом и выбери «Открыть», либо сними карантин командой `xattr -dr com.apple.quarantine /Applications/Utilitumus.app`. Команда установки выше этого шага не требует.
 
-Нужна macOS 14.2 или новее на Mac с Apple Silicon. Для модуля «Нагрузка» нужен Python 3.13 или новее.
+Нужна macOS 14.2 или новее на Mac с Apple Silicon. Для модуля «Нагрузка» нужен Python 3.11 или новее (лучше 3.13).
 
 При первом запуске каждое разрешение даётся один раз: доступ к вентиляторам (пароль), «Универсальный доступ» для стеша, запись звука для микшера. Обновления подписаны тем же сертификатом, поэтому выданные разрешения после них сохраняются.
 
@@ -79,7 +79,11 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.utilitumus.plist
 
 Публичная версия lambscape лежит снимком в `Vendor/lambscape` и при сборке копируется в `.app`. Обновить снимок: `./scripts/update-lambscape.sh [путь-к-клону] [ref]`, по умолчанию `../lambscape` и `public/main`.
 
-Сервер Utilitumus запускает сам на `127.0.0.1:5263`, а при выходе останавливает. Данные лежат в `~/Library/Application Support/Utilitumus/lambscape`, лог в `~/Library/Logs/Utilitumus/lambscape.log`. С отдельно установленным lambscape (порт 5262) он не пересекается. Для работы нужен Python 3.13 или новее.
+Сервер Utilitumus запускает сам на `127.0.0.1:5263`, а при выходе останавливает. Данные лежат в `~/Library/Application Support/Utilitumus/lambscape`, лог в `~/Library/Logs/Utilitumus/lambscape.log`. С отдельно установленным lambscape (порт 5262) он не пересекается. Для работы нужен Python 3.11 или новее (проверено на 3.11 и 3.13).
+
+Python ищется в python.org, Homebrew (`/opt/homebrew`, `/usr/local`), pyenv, asdf, mise и uv. Каждый кандидат проверяется настоящим `import lambscape.server`, поэтому сломанная сборка (например, Homebrew-Python, у которого не грузится pyexpat) отсеивается, а не роняет сервер. Лежит в необычном месте: `defaults write local.utilitumus lambscapePython /путь/к/python3`.
+
+Если порт 5263 занят чужой программой, сервер встаёт на ближайший свободный. Если модуль не открылся, на экране написано, что случилось и что сделать. Кнопка «Скопировать диагностику» кладёт в буфер путь к Python и его версию, версию macOS, код выхода сервера и хвост лога: этот текст можно прислать.
 
 Тема подмешивается через CSSOM (`Sources/Modules/Load/LambscapeTheme.swift`): цвета macOS, системный акцент, светлая или тёмная вслед за системой.
 
