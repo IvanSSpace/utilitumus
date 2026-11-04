@@ -41,8 +41,8 @@ enum BrowserHelper {
         Bundle.main.bundleIdentifier == defaultsDomain ? .standard : (UserDefaults(suiteName: defaultsDomain) ?? .standard)
     }
 
-    /// Состояние модуля пишет ModuleManager Utilitumus (`ModuleState.browser`).
-    static var moduleDisabled: Bool { defaults.string(forKey: "ModuleState.browser") == "disabled" }
+    /// Включённость модуля пишет ModuleManager Utilitumus (`ModuleOn.browser`); нет ключа — выключен.
+    static var moduleDisabled: Bool { !defaults.bool(forKey: "ModuleOn.browser") }
 
     /// Помощник внутри Utilitumus.app (из самого помощника — он сам).
     static var appURL: URL {

@@ -33,15 +33,22 @@ private struct ModulesSettings: View {
                                 .lineLimit(2)
                         }
                         Spacer()
-                        Picker(module.title, selection: Binding(
-                            get: { manager.state(of: module) },
-                            set: { manager.setState(module, $0) }
-                        )) {
-                            ForEach(ModuleState.allCases) { Text($0.title).tag($0) }
+                        Button {
+                            manager.setHidden(module, !manager.isHidden(module))
+                        } label: {
+                            Image(systemName: manager.isHidden(module) ? "eye.slash" : "eye")
+                                .frame(width: 20)
                         }
-                        .pickerStyle(.menu)
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(manager.isHidden(module) ? .secondary : .primary)
+                        .help(manager.isHidden(module) ? "Скрыт из боковой панели — показать" : "В боковой панели — скрыть")
+                        Toggle(module.title, isOn: Binding(
+                            get: { manager.isOn(module) },
+                            set: { manager.setOn(module, $0) }
+                        ))
+                        .toggleStyle(.switch)
                         .labelsHidden()
-                        .fixedSize()
+                        .help(manager.isOn(module) ? "Включён — выключить" : "Выключен — включить")
                     }
                     .frame(height: rowHeight)
                 }
@@ -53,7 +60,7 @@ private struct ModulesSettings: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
 
-            Text("Порядок можно менять перетаскиванием строки, здесь и в боковой панели. Скрытый модуль пропадает из панели, но работает в фоне; открыть его можно по строке «Скрытые» внизу панели. Выключенный остановлен полностью.")
+            Text("Переключатель включает и выключает модуль: выключенный ничего не делает. Глаз — показывать ли модуль в боковой панели; скрытый, но включённый работает в фоне, открыть его можно по строке «Скрытые» внизу панели. Порядок меняется перетаскиванием, здесь и в боковой панели.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

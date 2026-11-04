@@ -57,21 +57,6 @@ enum Module: String, CaseIterable, Identifiable {
         case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
         }
     }
-
-    var isReady: Bool { true }
-
-    /// Что модуль будет делать — показывается на заглушке, пока он не готов.
-    var plannedSummary: String {
-        switch self {
-        case .sound: return ""
-        case .load: return ""
-        case .stash: return ""
-        case .fans: return ""
-        case .mixer: return ""
-        case .mouse: return ""
-        case .browser: return ""
-        }
-    }
 }
 
 /// Белый значок на цветной скруглённой плашке — один вид везде, где показан модуль.
@@ -95,22 +80,19 @@ struct ModuleDetail: View {
     let module: Module
 
     var body: some View {
-        switch module {
-        case .sound:
-            SoundView()
-        case .fans:
-            FansView()
-        case .load:
-            LoadScreen()
-        case .stash:
-            StashView()
-        case .mixer:
-            MixerView()
-        case .mouse:
-            MouseView()
-        case .browser:
-            BrowserView()
+        ModuleScreen(module: module) {
+            switch module {
+            case .sound: SoundView()
+            case .fans: FansView()
+            case .load: LoadScreen()
+            case .stash: StashView()
+            case .mixer: MixerView()
+            case .mouse: MouseView()
+            case .browser: BrowserView()
+            }
         }
+        // Свой экран на каждый модуль: состояние (лист «Об инструменте») не переезжает между ними.
+        .id(module)
     }
 }
 
@@ -135,16 +117,19 @@ struct MainView: View {
                 set: { if let new = $0 { selection = new; peeked = nil; showAbout = false } }
             )) {
                 ForEach(modules.shownModules) { module in
+                    let on = modules.isOn(module)
                     Label {
                         Text(module.title)
                     } icon: {
                         ModuleIconBadge(module: module, size: 20)
+                            .opacity(on ? 1 : 0.4)
                     }
-                        .foregroundStyle(module.isReady ? .primary : .secondary)
+                        .foregroundStyle(on ? .primary : .secondary)
+                        .help(on ? "" : "Выключен — открой, чтобы включить")
                         .tag(module)
                         .contextMenu {
-                            Button("Скрыть из панели") { modules.setState(module, .hidden) }
-                            Button("Выключить модуль") { modules.setState(module, .disabled) }
+                            Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
+                            Button("Скрыть из панели") { modules.setHidden(module, true) }
                             Divider()
                             Button("Настроить модули…") { openSettings() }
                         }
@@ -156,7 +141,7 @@ struct MainView: View {
         } detail: {
             if showAbout {
                 AboutView { module in
-                    if modules.state(of: module) == .shown {
+                    if !modules.isHidden(module) {
                         selection = module
                         peeked = nil
                     } else {
@@ -171,10 +156,10 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 680, minHeight: 460)
-        .onChange(of: modules.states) {
+        .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
-            // Разовый показ имеет смысл только пока модуль скрыт: выключили или показали — сбрасываем.
-            if let peeked, modules.state(of: peeked) != .hidden { self.peeked = nil }
+            // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
+            if let peeked, !modules.isHidden(peeked) { self.peeked = nil }
         }
     }
 }
@@ -322,8 +307,10 @@ extension UpdateFooter {
                         .font(.callout)
                         .foregroundStyle(peeked == module && !showAbout ? Color.accentColor : .secondary)
                         .contextMenu {
-                            Button("Показать в панели") { modules.setState(module, .shown) }
-                            Button("Выключить модуль") { modules.setState(module, .disabled) }
+                            Button("Показать в панели") { modules.setHidden(module, false) }
+                            Button(modules.isOn(module) ? "Выключить модуль" : "Включить модуль") {
+                                modules.setOn(module, !modules.isOn(module))
+                            }
                         }
                     }
                 }

@@ -6,58 +6,70 @@ struct ModuleHooks {
     let stop: @MainActor () -> Void
 }
 
-/// Состояние модуля. «Скрыт» и «Выключен» — разные вещи: скрытый не виден в
-/// боковой панели, но работает; выключенный остановлен полностью.
-enum ModuleState: String, CaseIterable, Identifiable {
-    case shown, hidden, disabled
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .shown: return "Показан"
-        case .hidden: return "Скрыт (работает в фоне)"
-        case .disabled: return "Выключен"
-        }
-    }
-}
-
-/// Порядок и состояние модулей, запуск/остановка их фоновых частей. Всё
-/// хранится в UserDefaults, по умолчанию все показаны в порядке `Module.allCases`.
+/// Порядок модулей, включён ли каждый и виден ли в боковой панели; запуск/остановка их фоновых частей.
+///
+/// «Включён» и «в панели» — независимы: выключенный модуль виден (серым) и открывается — на его
+/// экране описание и кнопка «Включить»; скрытый может работать в фоне. На новой установке всё
+/// выключено: модуль начинает что-то делать, только когда его включили.
 @MainActor
 final class ModuleManager: ObservableObject {
-    /// Все модули в порядке боковой панели и настроек, включая скрытые и выключенные.
+    /// Все модули в порядке боковой панели и настроек.
     @Published private(set) var order: [Module]
-    @Published private(set) var states: [Module: ModuleState]
+    @Published private(set) var enabled: Set<Module>
+    @Published private(set) var hidden: Set<Module>
 
     private let defaults: UserDefaults
     private let hooks: (Module) -> ModuleHooks
     /// Модули, у которых сейчас вызван start без парного stop.
     private var running: Set<Module> = []
-    /// Пока приложение не запустило модули (или уже гасит их), смена состояния
+    /// Пока приложение не запустило модули (или уже гасит их), переключение
     /// только меняет настройку и ничего не стартует.
     private var isActive = false
 
     private static let orderKey = "ModuleOrder"
+    private static let migratedKey = "ModulesV2"
+    static func onKey(_ module: Module) -> String { "ModuleOn.\(module.rawValue)" }
+    private static func hiddenKey(_ module: Module) -> String { "ModuleHidden.\(module.rawValue)" }
 
     init(defaults: UserDefaults = .standard, hooks: @escaping (Module) -> ModuleHooks) {
         self.defaults = defaults
         self.hooks = hooks
+        if defaults.object(forKey: Self.migratedKey) == nil {
+            Self.migrate(defaults)
+            defaults.set(true, forKey: Self.migratedKey)
+        }
         order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
-        states = Dictionary(uniqueKeysWithValues: Module.allCases.map { ($0, Self.stored($0, in: defaults)) })
+        enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
+        hidden = Set(Module.allCases.filter { defaults.bool(forKey: Self.hiddenKey($0)) })
     }
 
-    private static func stateKey(_ module: Module) -> String { "ModuleState.\(module.rawValue)" }
-    /// Прежний флаг «включён» — читаем один раз для миграции.
-    private static func legacyKey(_ module: Module) -> String { "ModuleEnabled.\(module.rawValue)" }
+    // MARK: Переход со старого формата
 
-    private static func stored(_ module: Module, in defaults: UserDefaults) -> ModuleState {
-        if let raw = defaults.string(forKey: stateKey(module)), let state = ModuleState(rawValue: raw) {
-            return state
+    /// Признаки того, что приложение уже запускали до этой версии.
+    private static let existingInstallPrefixes = [
+        "ModuleOrder", "ModuleState.", "ModuleEnabled.", "SelectedModule", "FanConfigs", "MicGuard",
+        "UtilitumusKnown", "UtilitumusPrimary", "Stash", "Mixer", "GameMode", "LoadTab", "LoadViewMode",
+    ]
+
+    /// Раньше модуль по умолчанию работал, а состояние было одно из трёх: показан / скрыт (работает) /
+    /// выключен (и не виден). У тех, кто уже пользуется, всё остаётся как было — пишем это явно.
+    /// Новая установка ничего не пишет: все модули выключены и видны. Модули, добавленные в будущих
+    /// версиях, без ключа — тоже выключены, пока их не включат.
+    private static func migrate(_ defaults: UserDefaults) {
+        let keys = defaults.dictionaryRepresentation().keys
+        guard keys.contains(where: { key in existingInstallPrefixes.contains { key.hasPrefix($0) } }) else { return }
+        for module in Module.allCases {
+            let old: String
+            if let raw = defaults.string(forKey: "ModuleState.\(module.rawValue)") {
+                old = raw
+            } else if defaults.object(forKey: "ModuleEnabled.\(module.rawValue)") as? Bool == false {
+                old = "disabled"
+            } else {
+                old = "shown"
+            }
+            defaults.set(old != "disabled", forKey: onKey(module))
+            defaults.set(old != "shown", forKey: hiddenKey(module))
         }
-        // Раньше модуль был только включён или выключен: выключенный остаётся выключенным.
-        if defaults.object(forKey: legacyKey(module)) as? Bool == false { return .disabled }
-        return .shown
     }
 
     /// Сохранённый порядок: неизвестные id (модуль убрали) и повторы отбрасываются,
@@ -70,18 +82,26 @@ final class ModuleManager: ObservableObject {
         return result + Module.allCases.filter { !result.contains($0) }
     }
 
-    func state(of module: Module) -> ModuleState { states[module] ?? .shown }
+    // MARK: Состояние
 
-    /// Модули, которые видны в боковой панели, в нужном порядке.
-    var shownModules: [Module] { order.filter { state(of: $0) == .shown } }
+    func isOn(_ module: Module) -> Bool { enabled.contains(module) }
+    func isHidden(_ module: Module) -> Bool { hidden.contains(module) }
+
+    /// Модули в боковой панели (включённые и выключенные), в нужном порядке.
+    var shownModules: [Module] { order.filter { !hidden.contains($0) } }
 
     /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели.
-    var hiddenModules: [Module] { order.filter { state(of: $0) == .hidden } }
+    var hiddenModules: [Module] { order.filter { hidden.contains($0) } }
 
-    func setState(_ module: Module, _ state: ModuleState) {
-        defaults.set(state.rawValue, forKey: Self.stateKey(module))
-        states[module] = state
+    func setOn(_ module: Module, _ on: Bool) {
+        defaults.set(on, forKey: Self.onKey(module))
+        if on { enabled.insert(module) } else { enabled.remove(module) }
         if isActive { sync(module) }
+    }
+
+    func setHidden(_ module: Module, _ isHidden: Bool) {
+        defaults.set(isHidden, forKey: Self.hiddenKey(module))
+        if isHidden { hidden.insert(module) } else { hidden.remove(module) }
     }
 
     /// Перетаскивание в настройках: там виден весь список.
@@ -91,22 +111,22 @@ final class ModuleManager: ObservableObject {
         setOrder(new)
     }
 
-    /// Перетаскивание в боковой панели: там только показанные. Скрытые и выключенные
-    /// остаются на своих местах, переставляются лишь места, занятые показанными.
+    /// Перетаскивание в боковой панели: там только видимые. Скрытые остаются на своих местах,
+    /// переставляются лишь места, занятые видимыми.
     func moveShown(from source: IndexSet, to destination: Int) {
         var shown = shownModules
         shown.moveItems(from: source, to: destination)
         var new = order
-        let slots = new.indices.filter { state(of: new[$0]) == .shown }
+        let slots = new.indices.filter { !hidden.contains(new[$0]) }
         for (slot, module) in zip(slots, shown) { new[slot] = module }
         setOrder(new)
     }
 
-    /// Порядок по умолчанию и все модули показаны (выключенные снова запускаются).
+    /// Порядок по умолчанию и все модули в панели. Включённость не трогаем.
     func resetAll() {
         defaults.removeObject(forKey: Self.orderKey)
         order = Module.allCases
-        for module in Module.allCases { setState(module, .shown) }
+        for module in Module.allCases { setHidden(module, false) }
     }
 
     private func setOrder(_ new: [Module]) {
@@ -115,12 +135,12 @@ final class ModuleManager: ObservableObject {
         defaults.set(new.map(\.rawValue), forKey: Self.orderKey)
     }
 
-    /// Выбранный модуль, если он показан; иначе первый показанный; иначе nil.
+    /// Выбранный модуль, если он в панели; иначе первый в панели; иначе nil.
     func resolve(_ selection: Module) -> Module? {
-        state(of: selection) == .shown ? selection : shownModules.first
+        hidden.contains(selection) ? shownModules.first : selection
     }
 
-    /// Запуск приложения: стартуют все, кроме выключенных (скрытые работают).
+    /// Запуск приложения: стартуют включённые (скрытые тоже работают).
     func startEnabled() {
         isActive = true
         Module.allCases.forEach(sync)
@@ -135,9 +155,8 @@ final class ModuleManager: ObservableObject {
         }
     }
 
-    /// Работает всё, что не выключено: скрытие на работу не влияет.
     private func sync(_ module: Module) {
-        let wanted = state(of: module) != .disabled
+        let wanted = enabled.contains(module)
         guard wanted != running.contains(module) else { return }
         if wanted {
             running.insert(module)

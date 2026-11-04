@@ -59,8 +59,8 @@ struct AboutView: View {
 
     @ViewBuilder
     private func moduleRow(_ module: Module, _ text: String) -> some View {
-        let state = modules.state(of: module)
-        let on = state != .disabled
+        let on = modules.isOn(module)
+        let hidden = modules.isHidden(module)
         Button {
             open(module)
         } label: {
@@ -69,13 +69,13 @@ struct AboutView: View {
                     .opacity(on ? 1 : 0.4)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(Text(module.title).fontWeight(.semibold)) — \(text)")
-                    if state == .hidden {
-                        Text("скрыт — работает в фоне")
+                    if !on {
+                        Text("выключен — открой, чтобы включить")
+                            .font(.caption)
+                    } else if hidden {
+                        Text("скрыт из панели — работает в фоне")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else if state == .disabled {
-                        Text("выключен в Настройках")
-                            .font(.caption)
                     }
                 }
                 .multilineTextAlignment(.leading)
@@ -85,7 +85,5 @@ struct AboutView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        // Выключенный модуль открыть нельзя: он остановлен. Скрытый открывается разово.
-        .disabled(!on)
     }
 }
