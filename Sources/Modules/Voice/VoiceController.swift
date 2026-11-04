@@ -258,7 +258,7 @@ final class VoiceController: ObservableObject {
         VoiceHUD.shared.showListening()
         NotificationCenter.default.addObserver(self, selector: #selector(audioConfigChanged),
                                                name: .AVAudioEngineConfigurationChange, object: nil)
-        levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
@@ -273,7 +273,9 @@ final class VoiceController: ObservableObject {
 
     private func tick() {
         guard phase == .recording else { return }
-        VoiceHUD.shared.model.level = recorder.level
+        // Полоска меньше чем на 2 % не заметна — не будим SwiftUI ради неё.
+        let level = recorder.level
+        if abs(level - VoiceHUD.shared.model.level) >= 0.02 { VoiceHUD.shared.model.level = level }
         if recorder.count >= VoiceRecorder.maxSamples { finishRecording() }
     }
 

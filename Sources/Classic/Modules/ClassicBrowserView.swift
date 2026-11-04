@@ -345,8 +345,8 @@ struct ClassicBrowserView: View {
             Label(rule.value, systemImage: "globe")
         case .app:
             HStack(spacing: 6) {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.value) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 20, height: 20)
+                if let icon = catalog.appIcon(bundleID: rule.value) {
+                    Image(nsImage: icon).resizable().frame(width: 20, height: 20)
                 } else {
                     Image(systemName: "app").frame(width: 20, height: 20)
                 }
@@ -378,6 +378,7 @@ private struct ClassicAddRuleSheet: View {
     @State private var kind: BrowserRule.Kind = .domain
     @State private var domain = ""
     @State private var app: (id: String, name: String, icon: NSImage)?
+    @State private var runningApps: [(id: String, name: String, icon: NSImage)] = []
     @State private var browserID = ""
     @State private var isPrivate = false
 
@@ -458,6 +459,7 @@ private struct ClassicAddRuleSheet: View {
         }
         .frame(width: 440)
         .onAppear {
+            if runningApps.isEmpty { runningApps = Self.loadRunningApps() }
             if browserID.isEmpty { browserID = catalog.fallbackID ?? catalog.pickerBrowsers.first?.id ?? "" }
         }
         .onChange(of: browserID) {
@@ -466,7 +468,7 @@ private struct ClassicAddRuleSheet: View {
     }
 
     /// Запущенные обычные программы: именно из них чаще всего приходят ссылки.
-    private var runningApps: [(id: String, name: String, icon: NSImage)] {
+    private static func loadRunningApps() -> [(id: String, name: String, icon: NSImage)] {
         let own = Bundle.main.bundleIdentifier
         return NSWorkspace.shared.runningApplications.compactMap { running in
             guard running.activationPolicy == .regular, let id = running.bundleIdentifier, id != own,

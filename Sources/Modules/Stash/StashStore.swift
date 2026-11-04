@@ -33,7 +33,7 @@ struct RunningEntry: Identifiable {
 }
 
 /// Сколько программа ест вместе со всеми своими процессами (у Chrome их десятки).
-struct AppUsage {
+struct AppUsage: Equatable {
     let memoryMB: Double
     let cpu: Double
     /// Порог «тяжёлой»: от 1 ГБ памяти или от четверти ядра процессора.
@@ -153,6 +153,11 @@ final class StashStore: ObservableObject {
     @Published private(set) var axTrusted = AXIsProcessTrusted()
 
     private let defaults: UserDefaults
+    /// Значки по bundle id и по пути. Не @Published: чтение из body не должно
+    /// ходить в NSWorkspace каждый раз, а запись в кэш не должна перерисовывать экран.
+    private var iconByBundleID: [String: NSImage] = [:]
+    private var iconByPath: [String: NSImage] = [:]
+    private var missingBundleIDs: Set<String> = []
     private var observers: [NSObjectProtocol] = []
 
     init(defaults: UserDefaults = .standard) {
@@ -251,8 +256,10 @@ final class StashStore: ObservableObject {
     /// лежит внутри её .app (хелперы Chrome, рендереры и т. п.), суммируются.
     /// Через `ps`, а не libproc: одна команда на все процессы, без прав.
     func refreshUsage() async {
-        let bundles = running.compactMap { entry in
-            entry.app.bundleURL.map { ($0.path + "/", entry.bundleID) }
+        // Окно скрыто или свёрнуто — запускать ps незачем.
+        guard Self.windowIsVisible() else { return }
+        let bundles: [String: String] = running.reduce(into: [:]) { acc, entry in
+            if let url = entry.app.bundleURL { acc[url.path + "/"] = entry.bundleID }
         }
         let result = await Task.detached { () -> [String: AppUsage] in
             let ps = Process()
@@ -268,15 +275,34 @@ final class StashStore: ObservableObject {
                 let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
                 guard parts.count == 3, let rss = Double(parts[0]), let pc = Double(parts[1]) else { continue }
                 let path = String(parts[2])
-                guard let id = bundles.first(where: { path.hasPrefix($0.0) })?.1 else { continue }
+                guard let id = Self.bundleID(forExecutable: path, in: bundles) else { continue }
                 memoryKB[id, default: 0] += rss
                 cpu[id, default: 0] += pc
             }
+            // Округляем до МБ и процента: иначе каждый замер отличается в дробной части
+            // и экран перерисовывается зря.
             return memoryKB.reduce(into: [:]) { acc, item in
-                acc[item.key] = AppUsage(memoryMB: item.value / 1024, cpu: cpu[item.key] ?? 0)
+                acc[item.key] = AppUsage(memoryMB: (item.value / 1024).rounded(), cpu: (cpu[item.key] ?? 0).rounded())
             }
         }.value
-        usage = result
+        if result != usage { usage = result }
+    }
+
+    /// Программа, внутри чьего .app лежит исполняемый файл: ищем префиксы по границам
+    /// «.app/», внешний первым (хелперы вложены в .app основной программы).
+    nonisolated private static func bundleID(forExecutable path: String, in bundles: [String: String]) -> String? {
+        var searchStart = path.startIndex
+        while let range = path.range(of: ".app/", range: searchStart..<path.endIndex) {
+            if let id = bundles[String(path[..<range.upperBound])] { return id }
+            searchStart = range.upperBound
+        }
+        return nil
+    }
+
+    /// Окно скрыто или свёрнуто — замерять нечего.
+    private static func windowIsVisible() -> Bool {
+        guard NSApp != nil else { return true }
+        return NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
     }
 
     func setClosing(_ bundleID: String, _ closing: Bool) {
@@ -346,9 +372,27 @@ final class StashStore: ObservableObject {
 
     /// Значок программы, даже если она не запущена: по bundle id из сценария.
     func icon(forBundleID id: String) -> NSImage? {
-        if let entry = running.first(where: { $0.bundleID == id }) { return entry.icon }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else { return nil }
-        return NSWorkspace.shared.icon(forFile: url.path)
+        if let cached = iconByBundleID[id] { return cached }
+        if let icon = running.first(where: { $0.bundleID == id })?.icon {
+            iconByBundleID[id] = icon
+            return icon
+        }
+        guard !missingBundleIDs.contains(id) else { return nil }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) else {
+            missingBundleIDs.insert(id)
+            return nil
+        }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        iconByBundleID[id] = icon
+        return icon
+    }
+
+    /// Значок по пути к .app (для плашек «Вернуть»): один запрос к NSWorkspace на путь.
+    func icon(forPath path: String) -> NSImage {
+        if let cached = iconByPath[path] { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        iconByPath[path] = icon
+        return icon
     }
 
     // MARK: Доступ

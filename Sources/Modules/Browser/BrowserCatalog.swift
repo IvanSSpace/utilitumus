@@ -246,6 +246,23 @@ final class BrowserCatalog: ObservableObject {
 
     func browser(id: String) -> InstalledBrowser? { browsers.first { $0.id == id } }
 
+    /// Значок программы по bundle id (для правил «из программы»). Один запрос к
+    /// NSWorkspace на id, дальше — из кэша; body читает только его.
+    private var appIconCache: [String: NSImage] = [:]
+    private var appIconMisses: Set<String> = []
+
+    func appIcon(bundleID: String) -> NSImage? {
+        if let cached = appIconCache[bundleID] { return cached }
+        guard !appIconMisses.contains(bundleID) else { return nil }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            appIconMisses.insert(bundleID)
+            return nil
+        }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        appIconCache[bundleID] = image
+        return image
+    }
+
     private func icon(id: String, url: URL) -> NSImage {
         let key = id + "|" + url.path
         if let cached = iconCache[key] { return cached }

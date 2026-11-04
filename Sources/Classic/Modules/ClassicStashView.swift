@@ -95,6 +95,7 @@ private struct ClassicAppLabel: View {
 /// «Вернуть»: что именно вернётся — значки программ и сколько окон встанет на место.
 private struct ClassicRestoreButton: View {
     let apps: [StashedApp]
+    let icons: [String: NSImage]
     let enabled: Bool
     let action: () -> Void
 
@@ -105,7 +106,7 @@ private struct ClassicRestoreButton: View {
             subtitle: windowsSummary,
             tint: .green,
             chips: apps.map {
-                StashChip(id: $0.bundleID, icon: NSWorkspace.shared.icon(forFile: $0.path),
+                StashChip(id: $0.bundleID, icon: icons[$0.bundleID],
                           name: $0.name, windows: $0.windows.count)
             },
             enabled: enabled,
@@ -327,7 +328,7 @@ struct ClassicStashView: View {
                         : "Закрыть \(programs(selectedCount)) и запомнить, где стояли окна",
                     tint: .accentColor,
                     chips: store.selected.map {
-                        StashChip(id: $0.bundleIdentifier ?? "\($0.processIdentifier)", icon: $0.icon,
+                        StashChip(id: $0.bundleIdentifier ?? "\($0.processIdentifier)", icon: $0.bundleIdentifier.flatMap { store.icon(forBundleID: $0) },
                                   name: $0.localizedName ?? "Программа")
                     },
                     enabled: store.busy == nil && selectedCount > 0
@@ -346,7 +347,9 @@ struct ClassicStashView: View {
                 }
 
                 if !store.stashed.isEmpty {
-                    ClassicRestoreButton(apps: store.stashed, enabled: store.busy == nil) {
+                    ClassicRestoreButton(apps: store.stashed,
+                                     icons: Dictionary(uniqueKeysWithValues: store.stashed.map { ($0.bundleID, store.icon(forPath: $0.path)) }),
+                                     enabled: store.busy == nil) {
                         Task { await store.restore() }
                     }
                 }
@@ -468,7 +471,7 @@ struct ClassicStashView: View {
                 // Доступ дают в Системных настройках — заметить без возврата в окно.
                 store.refreshAccess()
                 await store.refreshUsage()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }

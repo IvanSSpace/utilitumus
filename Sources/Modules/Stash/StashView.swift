@@ -95,6 +95,7 @@ private struct StashAppRow: View {
 /// Карточка «Вернуть»: что именно вернётся — плашки программ и сколько окон встанет на место.
 private struct RestoreCard: View {
     let apps: [StashedApp]
+    let icons: [String: NSImage]
     let enabled: Bool
     let action: () -> Void
 
@@ -126,7 +127,7 @@ private struct RestoreCard: View {
             }
             FlowLayout(spacing: 6) {
                 ForEach(apps) {
-                    ChipView(chip: StashChip(id: $0.bundleID, icon: NSWorkspace.shared.icon(forFile: $0.path),
+                    ChipView(chip: StashChip(id: $0.bundleID, icon: icons[$0.bundleID],
                                              name: $0.name, windows: $0.windows.count))
                 }
             }
@@ -372,7 +373,9 @@ struct StashView: View {
             }
         ) {
             if !store.stashed.isEmpty {
-                RestoreCard(apps: store.stashed, enabled: store.busy == nil) {
+                RestoreCard(apps: store.stashed,
+                            icons: Dictionary(uniqueKeysWithValues: store.stashed.map { ($0.bundleID, store.icon(forPath: $0.path)) }),
+                            enabled: store.busy == nil) {
                     Task { await store.restore() }
                 }
             }
@@ -462,7 +465,7 @@ struct StashView: View {
                 // Доступ дают в Системных настройках — заметить без возврата в окно.
                 store.refreshAccess()
                 await store.refreshUsage()
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(10))
             }
         }
     }
