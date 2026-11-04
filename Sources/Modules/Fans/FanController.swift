@@ -28,8 +28,10 @@ struct FanConfig: Codable, Equatable {
     var sensor: SensorSource = .cpu
     /// Для `.sensor`: до `fromTemp` — минимум оборотов, от `toTemp` — максимум,
     /// между ними линейно.
-    var fromTemp: Double = 50
-    var toTemp: Double = 85
+    // По самому горячему из датчиков: в простое у M1 Pro он держит 55–65 °C,
+    // поэтому нижняя граница 50 °C не отпускала вентиляторы никогда.
+    var fromTemp: Double = 70
+    var toTemp: Double = 90
 }
 
 struct FanReading: Identifiable {
@@ -98,7 +100,16 @@ final class FanController: ObservableObject {
     private var cpuKeys: [String] = []
     private var gpuKeys: [String] = []
     private var timer: Timer?
-    private var wakeObserver: NSObjectProtocol?
+    private var powerObservers: [NSObjectProtocol] = []
+    /// Мак спит или экран погас — им никто не пользуется: вентиляторы отдаём
+    /// системе. Иначе ручной режим держит обороты и во сне — SMC сам их не сбросит.
+    private var asleep = false
+    private var screensAsleep = false
+    private var isIdle: Bool { asleep || screensAsleep }
+    /// «По датчику»: вентиляторы, которые сейчас на кривой. Ниже нижней
+    /// температуры отдаём их системе (она умеет их останавливать); с запасом
+    /// 3 °C, чтобы на границе не дёргать режим туда-сюда.
+    private var sensorEngaged: Set<Int> = []
     /// Между start() и stop(). Отложенные tick/apply после stop() ничего не делают,
     /// иначе они снова взяли бы вентиляторы под ручное управление.
     private var isRunning = false
@@ -112,7 +123,12 @@ final class FanController: ObservableObject {
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.configsKey),
            let saved = try? JSONDecoder().decode([FanConfig].self, from: data) {
-            configs = saved
+            // Старые умолчания 50/85, которые пользователь не трогал, — на новые 70/90.
+            configs = saved.map { c in
+                guard c.fromTemp == 50, c.toTemp == 85 else { return c }
+                var n = c; n.fromTemp = 70; n.toTemp = 90; return n
+            }
+            if configs != saved { persist() }
         } else {
             configs = []
         }
@@ -130,14 +146,34 @@ final class FanController: ObservableObject {
         cpuKeys = discover(["Tp0", "Tp1"])
         gpuKeys = discover(["Tg0", "Tg1"])
 
+        let center = NSWorkspace.shared.notificationCenter
+        func observe(_ name: Notification.Name, _ handler: @escaping @MainActor (FanController) -> Void) {
+            powerObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { handler(FanController.shared) }
+            })
+        }
+        // Перед сном — «Авто» синхронно: после засыпания приложение уже ничего
+        // не сможет отправить, а ручной режим SMC держит и во сне.
+        observe(NSWorkspace.willSleepNotification) { me in
+            Self.log("сон → вентиляторы системе")
+            me.asleep = true
+            me.restoreAutoBlocking()
+        }
         // После сна SMC мог сбросить режимы — выставить сразу, не дожидаясь такта.
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
-        ) { _ in
-            MainActor.assumeIsolated {
-                Self.log("пробуждение")
-                FanController.shared.tick()
-            }
+        observe(NSWorkspace.didWakeNotification) { me in
+            Self.log("пробуждение")
+            me.asleep = false
+            me.tick()
+        }
+        observe(NSWorkspace.screensDidSleepNotification) { me in
+            Self.log("экран погас → вентиляторы системе")
+            me.screensAsleep = true
+            me.apply()
+        }
+        observe(NSWorkspace.screensDidWakeNotification) { me in
+            Self.log("экран включился")
+            me.screensAsleep = false
+            me.tick()
         }
 
         GameModeController.shared.start()
@@ -169,8 +205,11 @@ final class FanController: ObservableObject {
         isRunning = false
         timer?.invalidate()
         timer = nil
-        if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
-        wakeObserver = nil
+        powerObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        powerObservers = []
+        asleep = false
+        screensAsleep = false
+        sensorEngaged = []
         pendingApply?.cancel()
         pendingApply = nil
         // «Полная мощность» не должна сама включиться при возврате модуля.
@@ -272,6 +311,8 @@ final class FanController: ObservableObject {
 
     /// nil — отдать системе.
     private func desiredRPM(for fan: FanReading, config: FanConfig) -> Double? {
+        // Маком не пользуются — никакие режимы не держат вентиляторы.
+        if isIdle { return nil }
         // Максимум охлаждает сильнее системы — перегрев ему не помеха.
         if fullPower || GameModeController.shared.isActive { return fan.max }
         if safetyTripped { return nil }
@@ -283,6 +324,11 @@ final class FanController: ObservableObject {
         case .sensor:
             guard let temp = (config.sensor == .cpu ? cpuMax : gpuMax),
                   config.toTemp > config.fromTemp else { return nil }
+            // Холодно — решает система: в простое она останавливает вентиляторы,
+            // а минимум кривой держал бы их крутиться всегда.
+            if temp >= config.fromTemp { sensorEngaged.insert(fan.index) }
+            else if temp < config.fromTemp - 3 { sensorEngaged.remove(fan.index) }
+            guard sensorEngaged.contains(fan.index) else { return nil }
             let t = min(max((temp - config.fromTemp) / (config.toTemp - config.fromTemp), 0), 1)
             return fan.min + (fan.max - fan.min) * t
         }

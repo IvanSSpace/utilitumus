@@ -10,6 +10,8 @@ private struct FanRow: View {
     /// «Полная мощность» перебивает режим вентилятора — показываем это, а не
     /// «Оборотами управляет macOS», которое тогда было бы неправдой.
     let fullPower: Bool
+    let cpuTemp: Double?
+    let gpuTemp: Double?
     /// «Максимум в играх» перебивает режим так же; в подписи — во что играем.
     let gameName: String?
 
@@ -95,7 +97,11 @@ private struct FanRow: View {
                     }
                     TempSlider(title: "Начинать разгон с", value: $config.fromTemp, range: 30...(config.toTemp - 5))
                     TempSlider(title: "Максимум при", value: $config.toTemp, range: (config.fromTemp + 5)...100)
-                    Text("Ниже \(Int(config.fromTemp)) °C — минимум, от \(Int(config.toTemp)) °C — максимум, между ними плавно.")
+                    if let now = (config.sensor == .cpu ? cpuTemp : gpuTemp) {
+                        Text("Сейчас: \(Int(now.rounded())) °C (самый горячий датчик)")
+                            .font(.caption.monospacedDigit())
+                    }
+                    Text("Ниже \(Int(config.fromTemp)) °C решает macOS — в простое вентиляторы могут остановиться. Выше — от минимума до максимума к \(Int(config.toTemp)) °C, плавно.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -379,6 +385,7 @@ struct FansView: View {
                     if fan.index < controller.configs.count {
                         FanRow(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
                                fullPower: controller.fullPower,
+                               cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax,
                                gameName: game.isActive ? game.phase.gameName : nil)
                     }
                 }
