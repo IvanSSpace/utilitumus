@@ -33,6 +33,8 @@ struct ModuleToolbar: ToolbarContent {
             } label: {
                 Label("Как это работает", systemImage: "info.circle")
                     .labelStyle(.titleAndIcon)
+                    // Системная капсула даёт тексту справа меньше воздуха, чем значку слева.
+                    .padding(.trailing, 3)
             }
             .help("Что умеет модуль и как им пользоваться")
         }
@@ -50,9 +52,10 @@ struct ModuleToolbar: ToolbarContent {
                     .controlSize(.small)
                     .labelsHidden()
             }
+            // Поровну слева и справа: у капсулы свой внутренний отступ слева больше, чем справа.
             .padding(.leading, 6)
-            // Иначе переключатель прижат к правому краю капсулы.
-            .padding(.trailing, 4)
+            .padding(.trailing, 9)
+            .frame(height: 28)
             .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }
         // Кнопки самого модуля («Всё авто», «Обновить») — своей капсулой, не слипаются с переключателем.
@@ -72,6 +75,14 @@ struct ModuleOffView: View {
         VStack(spacing: 14) {
             ModuleIconBadge(module: module, size: 56)
             Text(module.title).font(.title2.weight(.semibold))
+            if module == .mouse {
+                Label("На доработке", systemImage: "hammer.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(.orange.opacity(0.14), in: Capsule())
+            }
             Text(module.info.lead)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)

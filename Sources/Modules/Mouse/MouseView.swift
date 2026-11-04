@@ -6,6 +6,21 @@ struct MouseView: View {
 
     var body: some View {
         Form {
+            // Модуль работает, но интерфейс и возможности ещё будут переделаны.
+            Section {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("На доработке").fontWeight(.semibold)
+                        Text("Работает, но скоро станет удобнее.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } icon: {
+                    Image(systemName: "hammer.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+
             if !controller.axTrusted {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
