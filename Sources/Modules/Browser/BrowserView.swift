@@ -37,7 +37,6 @@ private struct BRow<Leading: View, Trailing: View>: View {
 
 /// Экран модуля «Браузер».
 struct BrowserView: View {
-    @Environment(\.pageActive) private var pageActive
     @ObservedObject var catalog = BrowserCatalog.shared
     @State private var defaultID: String?
     @State private var busy = false
@@ -75,16 +74,12 @@ struct BrowserView: View {
                 }
             }
         }
-        .onPageActive { active in
-            if active {
-                catalog.refresh()
-                refreshDefault()
-            } else {
-                recorder.stop()
-            }
+        .onAppear {
+            catalog.refresh()
+            refreshDefault()
         }
+        .onDisappear { recorder.stop() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            guard pageActive else { return }
             catalog.refresh()
             refreshDefault()
         }

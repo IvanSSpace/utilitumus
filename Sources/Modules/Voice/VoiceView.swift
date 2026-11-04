@@ -4,7 +4,6 @@ import AVFoundation
 
 /// Экран модуля «Голос».
 struct VoiceView: View {
-    @Environment(\.pageActive) private var pageActive
     @ObservedObject private var store = VoiceModelStore.shared
     @ObservedObject private var controller = VoiceController.shared
     @StateObject private var recorder = HotKeyRecorder()
@@ -33,16 +32,12 @@ struct VoiceView: View {
             testSection
             accessibilityHint
         }
-        .onPageActive { active in
-            if active {
-                devices = VoiceRecorder.inputDevices()
-                controller.refreshPermissions()
-            } else {
-                recorder.stop()
-            }
+        .onAppear {
+            devices = VoiceRecorder.inputDevices()
+            controller.refreshPermissions()
         }
+        .onDisappear { recorder.stop() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            guard pageActive else { return }
             devices = VoiceRecorder.inputDevices()
             controller.refreshPermissions()
         }

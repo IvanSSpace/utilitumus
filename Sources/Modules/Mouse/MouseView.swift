@@ -41,7 +41,7 @@ struct MouseView: View {
                 }
             }
         }
-        .onPageActive { if $0 { controller.refreshAccess() } }
+        .onAppear { controller.refreshAccess() }
     }
 
     private func directionRow(_ title: String, icon: String, _ selection: Binding<ScrollDirection>) -> some View {

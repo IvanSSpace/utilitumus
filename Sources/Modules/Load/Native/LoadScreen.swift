@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Экран модуля «Нагрузка»: шапка `DSPage` (давление и своп в строке, «Обновить»), вкладки, «Просто / Подробно» и содержимое.
 struct LoadScreen: View {
-    @Environment(\.pageActive) private var pageActive
     @ObservedObject var store: LoadStore
     @ObservedObject var background: BackgroundStore
     @AppStorage("LoadViewMode") private var modeRaw = LoadViewMode.full.rawValue
@@ -43,15 +42,9 @@ struct LoadScreen: View {
         }
         // Страница длиннее окна: открываться должна с шапки, а не с прокрученного места.
         .defaultScrollAnchor(.top)
-        // Живой опрос идёт только пока страница показана (не в кэше страниц).
-        .onPageActive { active in
-            if active {
-                store.screenAppeared(); background.setTabOpen(tab == .background)
-            } else {
-                store.screenDisappeared(); background.setTabOpen(false)
-            }
-        }
-        .onChange(of: tab) { background.setTabOpen(pageActive && $1 == .background) }
+        .onAppear { store.screenAppeared(); background.setTabOpen(tab == .background) }
+        .onDisappear { store.screenDisappeared(); background.setTabOpen(false) }
+        .onChange(of: tab) { background.setTabOpen($1 == .background) }
         .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
             StopConfirmSheet(store: store, plan: plan).dsThemed()
         }

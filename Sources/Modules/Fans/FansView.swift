@@ -451,7 +451,7 @@ private struct GameModeCard: View {
                 .padding(.horizontal, 14).padding(.vertical, 7)
             }
         }
-        .onPageActive { if $0 { game.refreshRunning() } }
+        .onAppear { game.refreshRunning() }
     }
 
     private var addMenu: some View {
@@ -561,7 +561,7 @@ struct FansView: View {
                 footer
             }
         }
-        .onPageActive { if $0 { installer.refresh() } }
+        .onAppear { installer.refresh() }
     }
 
     @ViewBuilder private var banners: some View {

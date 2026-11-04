@@ -140,7 +140,6 @@ final class AccessState: ObservableObject {
 /// и после нажатия кнопки (короткий опрос, пока система не ответит). Как только всё выдано, `onChange`
 /// просит `ModuleScreen` показать сам модуль. Постоянного таймера нет.
 struct ModuleSetupView: View {
-    @Environment(\.pageActive) private var pageActive
     let module: Module
     let onChange: () -> Void
     /// Подмена списка нужна только для предпросмотра экрана; в приложении берётся `module.requirements`.
@@ -184,13 +183,11 @@ struct ModuleSetupView: View {
             DSButton("Подробнее", icon: "info.circle", style: .plain) { ModuleManager.shared.infoModule = module }
         }
         .environment(\.dsTint, theme.accent(module))
-        .onPageActive { if $0 { refresh() } }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            if pageActive { refresh() }
-        }
+        .onAppear { refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
         // Системные окна доступа не всегда возвращают фокус приложению: после нажатия секунд 30 переспрашиваем раз в секунду.
         .task(id: pollToken) {
-            guard pollToken > 0, pageActive else { return }
+            guard pollToken > 0 else { return }
             for _ in 0..<30 {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if Task.isCancelled { return }
