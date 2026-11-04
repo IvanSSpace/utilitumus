@@ -11,10 +11,9 @@ struct BackgroundTab: View {
     var openFull: () -> Void
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if mode == .full { full } else { simple }
         }
-        .formStyle(.grouped)
         .onAppear { background.reloadJournal() }
     }
 
@@ -25,32 +24,22 @@ struct BackgroundTab: View {
     @ViewBuilder
     private var full: some View {
         if !data.bots.isEmpty {
-            Section("Боты") {
+            DSSection("Боты") {
                 ForEach(data.bots) { bot in
                     BotRow(bot: bot, busy: background.running) { background.request(bot, $0) }
                 }
             }
         }
-        Section {
+        DSSection("Фоновые агенты",
+                  trailing: "\(data.agents.count) · " + Fmt.mb(data.agents.filter { !$0.verbs.isEmpty }.reduce(0) { $0 + $1.memMB })) {
             if data.agents.isEmpty {
-                EmptyNote(text: "Сторонних агентов launchd нет.")
+                LoadEmpty(text: "Сторонних агентов launchd нет.")
             } else {
                 ForEach(data.agents) { agent in
                     AgentRow(agent: agent, busy: background.running) { background.request(agent, $0) }
                 }
+                LoadNote(text: "«Остановить» — до следующего входа. «Не запускать при входе» убирает автозапуск; «Вернуть» — обратно. Память в итоге — только у агентов, которые можно остановить отсюда.")
             }
-        } header: {
-            HStack {
-                Text("Фоновые агенты")
-                Text("\(data.agents.count)").foregroundStyle(.secondary).monospacedDigit()
-                Spacer()
-                Text(Fmt.mb(data.agents.filter { !$0.verbs.isEmpty }.reduce(0) { $0 + $1.memMB }))
-                    .foregroundStyle(.secondary).monospacedDigit()
-                    .help("Память агентов, которые можно остановить отсюда")
-            }
-        } footer: {
-            Text("«Остановить» — до следующего входа. «Не запускать при входе» убирает автозапуск; «Вернуть» — обратно.")
-                .font(.caption)
         }
         if !background.journal.isEmpty { JournalSection(entries: background.journal) }
     }
@@ -59,28 +48,24 @@ struct BackgroundTab: View {
 
     @ViewBuilder
     private var simple: some View {
-        Section {
+        DSSection("Боты и агенты", trailing: String(data.bots.count + data.agents.count)) {
             ForEach(data.bots) { bot in
                 let verb: BotVerb = bot.isOn ? .stop : .start
                 SimpleLine(dot: bot.isOn ? .green : .secondary, name: bot.name,
                            state: bot.isOn && bot.memMB > 0 ? Fmt.mb(bot.memMB) : bot.state.title.lowercased(),
-                           button: bot.actions.contains(verb) ? (verb.title, verb == .start) : nil,
+                           button: bot.actions.contains(verb) ? verb.title : nil,
                            busy: background.running) { background.request(bot, verb) }
             }
             ForEach(data.agents) { agent in
                 let verb: AgentVerb = agent.isRunning ? .stop : .enable
                 SimpleLine(dot: agent.isRunning ? .green : .secondary, name: agent.title, state: agent.stateText,
-                           button: agent.verbs.contains(verb) ? (agent.verbTitle(verb), verb == .enable) : nil,
+                           button: agent.verbs.contains(verb) ? agent.verbTitle(verb) : nil,
                            busy: background.running) { background.request(agent, verb) }
             }
-        } header: {
-            HStack {
-                Text("Боты и агенты")
-                Text("\(data.bots.count + data.agents.count)").foregroundStyle(.secondary).monospacedDigit()
-            }
         }
-        Section {
-            Button("Подробности: описание агентов, команды, журнал…", action: openFull).buttonStyle(.link)
+        HStack {
+            DSButton("Подробности: описание агентов, команды, журнал", icon: "chevron.right", style: .plain, small: true, action: openFull)
+            Spacer()
         }
     }
 }
@@ -90,21 +75,19 @@ private struct SimpleLine: View {
     let dot: Color
     let name: String
     let state: String
-    let button: (title: String, primary: Bool)?
+    let button: String?
     let busy: Bool
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(dot.opacity(dot == .secondary ? 0.4 : 1)).frame(width: 9, height: 9)
-            Text(name).lineLimit(1).truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text(state).foregroundStyle(.secondary).monospacedDigit()
-            if let button {
-                if button.primary {
-                    Button(button.title, action: action).buttonStyle(.borderedProminent).controlSize(.small).disabled(busy)
-                } else {
-                    Button(button.title, action: action).buttonStyle(.bordered).controlSize(.small).disabled(busy)
+        LoadLine {
+            HStack(spacing: 8) {
+                Circle().fill(dot.opacity(dot == .secondary ? 0.4 : 1)).frame(width: 9, height: 9)
+                Text(name).font(DS.rowTitle).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                Text(state).foregroundStyle(.secondary).monospacedDigit()
+                if let button {
+                    DSButton(button, small: true, action: action).disabled(busy)
                 }
             }
         }
@@ -119,36 +102,35 @@ struct BackgroundCompactSection: View {
     var body: some View {
         let bots = background.data.bots, agents = background.data.agents
         if !bots.isEmpty || !agents.isEmpty {
-            Section {
+            DSSection("Фоновое", trailing: String(bots.count + agents.count)) {
                 ForEach(bots) { bot in
-                    HStack(spacing: 8) {
-                        Circle().fill(bot.isOn ? Color.green : Color.secondary.opacity(0.4)).frame(width: 9, height: 9)
-                        Text(bot.name).lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 8)
-                        Text(bot.state.title).foregroundStyle(.secondary)
-                        if !bot.useText.isEmpty { Text(bot.useText).foregroundStyle(.secondary).monospacedDigit() }
-                        BotButtons(bot: bot, busy: background.running) { background.request(bot, $0) }
+                    LoadLine {
+                        HStack(spacing: 8) {
+                            Circle().fill(bot.isOn ? Color.green : Color.secondary.opacity(0.4)).frame(width: 9, height: 9)
+                            Text(bot.name).font(DS.rowTitle).lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(bot.state.title).foregroundStyle(.secondary)
+                            if !bot.useText.isEmpty { Text(bot.useText).foregroundStyle(.secondary).monospacedDigit() }
+                            BotButtons(bot: bot, busy: background.running) { background.request(bot, $0) }
+                        }
                     }
                 }
                 if !agents.isEmpty {
                     let live = agents.filter(\.isRunning)
-                    HStack(spacing: 8) {
-                        Circle().fill(live.isEmpty ? Color.secondary.opacity(0.4) : Color.green).frame(width: 9, height: 9)
-                        Text("Фоновые агенты")
-                        Spacer(minLength: 8)
-                        Text("работают \(live.count) из \(agents.count)").foregroundStyle(.secondary).monospacedDigit()
-                        Text(Fmt.mb(agents.filter { !$0.verbs.isEmpty }.reduce(0) { $0 + $1.memMB }))
-                            .foregroundStyle(.secondary).monospacedDigit()
-                            .help("Память агентов, которые можно остановить отсюда")
-                        Button("разобрать", action: open).buttonStyle(.link)
+                    LoadLine {
+                        HStack(spacing: 8) {
+                            Circle().fill(live.isEmpty ? Color.secondary.opacity(0.4) : Color.green).frame(width: 9, height: 9)
+                            Text("Фоновые агенты").font(DS.rowTitle)
+                            Spacer(minLength: 8)
+                            Text("работают \(live.count) из \(agents.count)").foregroundStyle(.secondary).monospacedDigit()
+                            Text(Fmt.mb(agents.filter { !$0.verbs.isEmpty }.reduce(0) { $0 + $1.memMB }))
+                                .foregroundStyle(.secondary).monospacedDigit()
+                                .help("Память агентов, которые можно остановить отсюда")
+                            DSButton("Разобрать", small: true, action: open)
+                        }
                     }
-                }
-            } header: {
-                HStack {
-                    Text("Фоновое")
-                    Text("\(bots.count + agents.count)").foregroundStyle(.secondary).monospacedDigit()
-                    Spacer()
-                    Button("подробнее", action: open).buttonStyle(.link).font(.caption)
+                } else {
+                    LoadLine { DSButton("Подробнее", icon: "chevron.right", style: .plain, small: true, action: open) }
                 }
             }
         }

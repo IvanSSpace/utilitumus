@@ -73,6 +73,7 @@ struct HoverRow: ViewModifier {
     var selected = false
     var enabled = true
     @State private var hovering = false
+    @Environment(\.dsTint) private var tint
 
     private static let hPad: CGFloat = 6
     private static let vPad: CGFloat = 3
@@ -82,14 +83,14 @@ struct HoverRow: ViewModifier {
         content
             .padding(.horizontal, Self.hPad).padding(.vertical, Self.vPad)
             .background(shape.fill(fill))
-            .overlay(shape.strokeBorder(Color.accentColor.opacity(selected && enabled ? 0.5 : 0), lineWidth: 1))
+            .overlay(shape.strokeBorder(tint.opacity(selected && enabled ? 0.5 : 0), lineWidth: 1))
             .padding(.horizontal, -Self.hPad).padding(.vertical, -Self.vPad)
             .onHover { hovering = $0 && enabled }
     }
 
     private var fill: Color {
         guard enabled else { return .clear }
-        if selected { return Color.accentColor.opacity(hovering ? 0.22 : 0.15) }
+        if selected { return tint.opacity(hovering ? 0.22 : 0.15) }
         return hovering ? Color.primary.opacity(0.09) : .clear
     }
 }
@@ -143,10 +144,13 @@ struct KPITile: View {
 struct ShareBar: View {
     var values: [Double]
     var maximum: Double
-    var colors: [Color] = [.accentColor, .orange]
+    /// nil — акцент модуля и оранжевый.
+    var colors: [Color]?
     var width: CGFloat = 70
+    @Environment(\.dsTint) private var tint
 
     var body: some View {
+        let colors = colors ?? [tint, .orange]
         GeometryReader { geo in
             HStack(spacing: 0) {
                 ForEach(Array(values.enumerated()), id: \.offset) { i, v in
@@ -157,7 +161,7 @@ struct ShareBar: View {
             }
         }
         .frame(width: width, height: 5)
-        .background(.quaternary)
+        .background(.white.opacity(0.1))
         .clipShape(Capsule())
     }
 }
@@ -170,16 +174,12 @@ struct SeverityBadge: View {
         switch severity {
         case .high: return ("важно", .red)
         case .med: return ("совет", .orange)
-        case .low: return ("инфо", .secondary)
+        case .low: return ("инфо", .gray)
         }
     }
 
     var body: some View {
-        Text(style.0)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(style.1.opacity(0.18), in: Capsule())
-            .foregroundStyle(style.1)
+        DSChip(style.0, color: style.1)
     }
 }
 
@@ -412,7 +412,7 @@ struct MemoryCard: View {
     }
 
     private var legend: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 4) {
+        FlowGrid(minWidth: 200, spacing: 8, rowSpacing: 4) {
             ForEach(MemoryPart.allCases.filter { $0.mb(m) > 0 }) { p in
                 Button {
                     if mode == .full { drill = drill == p ? nil : p }
@@ -439,7 +439,7 @@ struct MemoryCard: View {
         let entries = palette.legend(for: map).filter { $0.mb > 0 }
         return VStack(alignment: .leading, spacing: 4) {
             Text("кто держит:").font(.caption).foregroundStyle(.secondary)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 4) {
+            FlowGrid(minWidth: 170, spacing: 8, rowSpacing: 4) {
                 ForEach(entries) { e in
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2).fill(e.color).frame(width: 10, height: 10)
@@ -539,14 +539,93 @@ struct DrillPanel: View {
 
 /// Маленькая кнопка «Остановить» в строке.
 struct StopButton: View {
+    /// Ширина кнопки: на месте отсутствующей ставят `StopButton.gap`, чтобы колонки не плясали.
+    static let slot: CGFloat = 34
+    static var gap: some View { Color.clear.frame(width: slot, height: 1) }
+
     var help: String
     var action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "stop.circle")
+        DSButton("", icon: "stop.circle", style: .plain, small: true, action: action)
+            .frame(width: Self.slot)
+            .help(help)
+            .accessibilityLabel(help)
+    }
+}
+
+// MARK: Строки в стиле DSRow
+
+/// Строка с произвольным содержимым внутри `DSSection`: отступы и тонкий разделитель как у `DSRow`.
+/// `divider: false` — продолжение предыдущей строки (раскрытое тело группы).
+struct LoadLine<Content: View>: View {
+    var divider = true
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .overlay(alignment: .top) {
+                if divider { Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14) }
+            }
+    }
+}
+
+/// Пустая секция: заметка в строке.
+struct LoadEmpty: View {
+    let text: String
+    var body: some View { LoadLine { EmptyNote(text: text) } }
+}
+
+/// Подпись мелким под строками секции.
+struct LoadNote: View {
+    let text: String
+    var body: some View {
+        LoadLine { Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+    }
+}
+
+// MARK: Сетка колонок
+
+/// Адаптивная сетка: сколько колонок влезет по `minWidth`, столько и будет, колонки одной ширины.
+/// Не ленивая: `LazyVGrid` внутри прокрутки с якорем сверху не рисовал содержимое до первой прокрутки.
+struct FlowGrid: Layout {
+    var minWidth: CGFloat
+    var spacing: CGFloat = 8
+    var rowSpacing: CGFloat = 4
+
+    private func columns(for width: CGFloat) -> Int {
+        // При неопределённой ширине (бесконечность) — одна колонка.
+        guard width.isFinite else { return 1 }
+        return max(1, Int(((width + spacing) / (minWidth + spacing)).rounded(.down)))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minWidth
+        let cols = columns(for: width)
+        let colWidth = max(0, (width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+        var height: CGFloat = 0
+        for start in stride(from: 0, to: subviews.count, by: cols) {
+            let row = subviews[start..<min(start + cols, subviews.count)]
+            height += row.map { $0.sizeThatFits(.init(width: colWidth, height: nil)).height }.max() ?? 0
+            height += rowSpacing
         }
-        .buttonStyle(.borderless)
-        .help(help)
+        return CGSize(width: width, height: max(0, height - rowSpacing))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let cols = columns(for: bounds.width)
+        let colWidth = max(0, (bounds.width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+        var y = bounds.minY
+        for start in stride(from: 0, to: subviews.count, by: cols) {
+            let row = subviews[start..<min(start + cols, subviews.count)]
+            let rowHeight = row.map { $0.sizeThatFits(.init(width: colWidth, height: nil)).height }.max() ?? 0
+            for (i, view) in row.enumerated() {
+                view.place(at: CGPoint(x: bounds.minX + CGFloat(i) * (colWidth + spacing), y: y),
+                           anchor: .topLeading, proposal: .init(width: colWidth, height: rowHeight))
+            }
+            y += rowHeight + rowSpacing
+        }
     }
 }

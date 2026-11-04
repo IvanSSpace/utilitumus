@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Экран модуля «Нагрузка»: шапка (давление, своп, «Просто / Подробно»), вкладки и содержимое.
-/// Заменяет веб-страницу lambscape в `ModuleDetail`.
+/// Экран модуля «Нагрузка»: шапка `DSPage` (давление и своп в строке, «Обновить»), вкладки, «Просто / Подробно» и содержимое.
 struct LoadScreen: View {
     @ObservedObject var store: LoadStore
     @ObservedObject var background: BackgroundStore
@@ -35,87 +34,51 @@ struct LoadScreen: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            SegmentedControl(LoadTab.allCases.filter { $0 != .background || background.hasContent },
-                             selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) { $0.title }
-                .frame(maxWidth: 440)
-            .padding(.bottom, 8)
+        DSPage(module: .load, subtitle: subtitle,
+               primary: DSAction("Обновить", icon: "arrow.clockwise") { store.refreshNow() }) {
+            controls
             if let notice = store.notice { noticeBanner(notice) }
             content
         }
-        .navigationTitle("Нагрузка")
-        .navigationSubtitle(subtitle)
-        .toolbar {
-            ToolbarItem {
-                Button {
-                    store.refreshNow()
-                } label: {
-                    Label("Обновить", systemImage: "arrow.clockwise")
-                }
-                .help("Обновить: собрать данные заново, не дожидаясь опроса")
-            }
-        }
+        // Страница длиннее окна: открываться должна с шапки, а не с прокрученного места.
+        .defaultScrollAnchor(.top)
         .onAppear { store.screenAppeared() }
         .onDisappear { store.screenDisappeared() }
         .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
-            StopConfirmSheet(store: store, plan: plan)
+            StopConfirmSheet(store: store, plan: plan).dsThemed()
         }
         .sheet(item: Binding(get: { background.pending }, set: { if $0 == nil { background.cancel() } })) { plan in
-            BackgroundConfirmSheet(background: background, plan: plan)
+            BackgroundConfirmSheet(background: background, plan: plan).dsThemed()
         }
     }
 
+    /// «Давление: норма · Своп 2.1/4 GB» — строка под названием.
     private var subtitle: String {
-        guard let h = store.snapshot?.host else { return "Память и процессы" }
-        return "\(h.chip) · \(Fmt.gb(Double(h.ramMB))) GB"
+        guard let m = store.snapshot?.memory else { return "Считаю…" }
+        return "Давление: \(Self.pressureWord(m.pressure)) · Своп \(Fmt.gb(Double(m.swapUsedMB)))/\(Fmt.gb(Double(m.swapTotalMB))) GB"
+            + (Self.swapIsHot(m) ? " · много" : "")
     }
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            if let m = store.snapshot?.memory {
-                HStack(spacing: 6) {
-                    Circle().fill(color(m.pressure)).frame(width: 9, height: 9)
-                    Text("Давление: \(Self.pressureWord(m.pressure))")
-                }
-                .help("Давление памяти macOS")
-                HStack(spacing: 6) {
-                    if Self.swapIsHot(m) { Circle().fill(.orange).frame(width: 7, height: 7) }
-                    Text("Своп \(Fmt.gb(Double(m.swapUsedMB)))/\(Fmt.gb(Double(m.swapTotalMB))) GB").monospacedDigit()
-                }
-                .help("Своп: занято / всего")
-            } else {
-                Text("Считаю…").foregroundStyle(.secondary)
-            }
-            Spacer()
-            SegmentedControl(LoadViewMode.allCases, selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) { $0.title }
-            .help("Просто — главное. Подробно — карта памяти, процессы, история, диск")
-        }
-        .font(.callout)
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-    }
-
-    private func color(_ p: MemoryPressure) -> Color {
-        switch p {
-        case .normal: return .green
-        case .warn: return .orange
-        case .critical: return .red
+    /// Вкладки и «Просто / Подробно».
+    private var controls: some View {
+        HStack(spacing: 12) {
+            DSSegmented(LoadTab.allCases.filter { $0 != .background || background.hasContent },
+                        selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) { $0.title }
+            Spacer(minLength: 8)
+            DSSegmented(LoadViewMode.allCases, selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) { $0.title }
+                .help("Просто — главное. Подробно — карта памяти, процессы, история, диск")
         }
     }
 
     private func noticeBanner(_ n: LoadNotice) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Label(n.text, systemImage: n.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
                 .foregroundStyle(n.isError ? Color.orange : Color.green)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button("Закрыть") { store.notice = nil }.buttonStyle(.link)
+            DSButton("Закрыть", style: .plain, small: true) { store.notice = nil }
         }
         .font(.callout)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 6)
     }
 
     @ViewBuilder

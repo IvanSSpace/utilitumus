@@ -13,7 +13,7 @@ private struct StateDot: View {
             switch kind {
             case .on: Circle().fill(.green)
             case .warn: Circle().fill(.orange)
-            case .off: Circle().fill(.quaternary)
+            case .off: Circle().fill(Color.white.opacity(0.18))
             case .hollow: Circle().strokeBorder(.secondary, lineWidth: 1.2)
             }
         }
@@ -31,7 +31,7 @@ private struct TagLabel: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(.quaternary, in: Capsule())
+            .background(Color.white.opacity(0.1), in: Capsule())
             .help(help)
     }
 }
@@ -79,10 +79,14 @@ struct AgentRow: View {
     let onAction: (AgentVerb) -> Void
 
     var body: some View {
+        LoadLine { content }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 StateDot(kind: agent.dotKind).help(agent.disabled ? "выключен" : agent.isRunning ? "работает" : "не запущен")
-                Text(agent.title).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                Text(agent.title).font(DS.rowTitle).lineLimit(1).truncationMode(.middle)
                 if agent.domain == "system" { TagLabel(text: "root", help: "Системный демон: нужен sudo") }
                 if agent.runAtLoad, !agent.disabled { TagLabel(text: "автозапуск", help: "Запускается при входе") }
                 if agent.keepalive, !agent.disabled {
@@ -100,29 +104,23 @@ struct AgentRow: View {
                     .lineLimit(1).truncationMode(.middle).help(agent.plist ?? agent.label)
                 Spacer(minLength: 8)
                 ForEach(agent.verbs, id: \.self) { verb in
-                    if verb == .enable {
-                        Button(agent.verbTitle(verb)) { onAction(verb) }.buttonStyle(.borderedProminent)
-                    } else {
-                        Button(agent.verbTitle(verb)) { onAction(verb) }.buttonStyle(.bordered)
-                    }
+                    DSButton(agent.verbTitle(verb), small: true) { onAction(verb) }
                 }
             }
-            .controlSize(.small)
             .disabled(busy)
             if let hint = agent.sudoHint {
                 HStack(spacing: 6) {
                     Text(hint).font(.caption.monospaced()).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     Spacer(minLength: 8)
-                    Button {
+                    DSButton("", icon: "doc.on.doc", style: .plain, small: true) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(hint, forType: .string)
-                    } label: { Image(systemName: "doc.on.doc") }
-                        .buttonStyle(.borderless).help("Скопировать команду")
+                    }
+                    .help("Скопировать команду").accessibilityLabel("Скопировать команду")
                 }
             }
         }
-        .padding(.vertical, 2)
     }
 }
 
@@ -136,14 +134,13 @@ struct BotButtons: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if bot.actions.contains(.start) { Button(BotVerb.start.title) { onAction(.start) }.buttonStyle(.borderedProminent) }
-            if bot.actions.contains(.stop) { Button(BotVerb.stop.title) { onAction(.stop) }.buttonStyle(.bordered) }
+            if bot.actions.contains(.start) { DSButton(BotVerb.start.title, small: true) { onAction(.start) } }
+            if bot.actions.contains(.stop) { DSButton(BotVerb.stop.title, small: true) { onAction(.stop) } }
             if bot.actions.contains(.restart) {
-                Button { onAction(.restart) } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.bordered).help("Перезапустить").accessibilityLabel("Перезапустить")
+                DSButton("", icon: "arrow.clockwise", small: true) { onAction(.restart) }
+                    .help("Перезапустить").accessibilityLabel("Перезапустить")
             }
         }
-        .controlSize(.small)
         .disabled(busy)
     }
 }
@@ -159,10 +156,14 @@ struct BotRow: View {
     }
 
     var body: some View {
+        LoadLine { content }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 StateDot(kind: bot.dotKind)
-                Text(bot.name).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                Text(bot.name).font(DS.rowTitle).lineLimit(1).truncationMode(.middle)
                 if let link {
                     Link(destination: link) {
                         Label(link.absoluteString.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""),
@@ -188,7 +189,6 @@ struct BotRow: View {
                 BotButtons(bot: bot, busy: busy, onAction: onAction)
             }
         }
-        .padding(.vertical, 2)
     }
 
     /// «порт 8765 · PID 27252 32086 +1»
@@ -206,22 +206,21 @@ struct JournalSection: View {
     let entries: [ActionLog.Entry]
 
     var body: some View {
-        Section {
+        DSSection("Журнал действий") {
             ForEach(entries) { e in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: e.ok ? "checkmark.circle" : "xmark.circle")
-                        .foregroundStyle(e.ok ? Color.green : Color.orange)
-                    Text(e.message).lineLimit(2).truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    Text(e.time, format: .dateTime.day().month().hour().minute())
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                LoadLine {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: e.ok ? "checkmark.circle" : "xmark.circle")
+                            .foregroundStyle(e.ok ? Color.green : Color.orange)
+                        Text(e.message).lineLimit(2).truncationMode(.middle)
+                        Spacer(minLength: 8)
+                        Text(e.time, format: .dateTime.day().month().hour().minute())
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .font(.callout)
                 }
-                .font(.callout)
             }
-        } header: {
-            Text("Журнал действий")
-        } footer: {
-            Text("Полный журнал — файл ~/Library/Logs/Utilitumus/actions.log").font(.caption)
+            LoadNote(text: "Полный журнал — файл ~/Library/Logs/Utilitumus/actions.log")
         }
     }
 }
@@ -238,7 +237,7 @@ struct BackgroundConfirmSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Image(systemName: plan.destructive ? "exclamationmark.triangle.fill" : "questionmark.circle.fill")
-                    .foregroundStyle(plan.destructive ? Color.orange : Color.accentColor)
+                    .foregroundStyle(plan.destructive ? Color.orange : Color.blue)
                 Text(plan.title).font(.title3.weight(.semibold)).lineLimit(2)
                 Spacer()
                 if !plan.targets.isEmpty {

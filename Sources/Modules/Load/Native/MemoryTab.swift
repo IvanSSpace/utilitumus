@@ -11,7 +11,7 @@ struct MemoryTab: View {
     @State private var showAll: Set<String> = []
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if let s = store.snapshot {
                 if mode == .full { full(s) } else { simple(s) }
                 FooterSection(snapshot: s)
@@ -19,34 +19,23 @@ struct MemoryTab: View {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }
         }
-        .formStyle(.grouped)
     }
 
     @ViewBuilder
     private func full(_ s: LoadSnapshot) -> some View {
-        Section {
-            MemoryCard(snapshot: s, palette: store.palette, mode: .full, big: true, drill: $drill) { store.requestStop(process: $0) }
-        } header: {
-            HStack {
-                Text("Память")
-                Text("\(Fmt.gb(Double(s.memory.totalMB))) GB").foregroundStyle(.secondary).monospacedDigit()
+        DSSection("Память", trailing: "\(Fmt.gb(Double(s.memory.totalMB))) GB") {
+            LoadLine(divider: false) {
+                MemoryCard(snapshot: s, palette: store.palette, mode: .full, big: true, drill: $drill) { store.requestStop(process: $0) }
             }
         }
         AdviceSection(items: s.advice, limit: nil, onStop: { store.requestStop(process: $0) })
-        Section {
-            if let h = store.history, !h.points.isEmpty {
-                HistoryChart(window: h, ramMB: s.memory.totalMB, swapTotalMB: s.memory.swapTotalMB,
-                             colors: store.palette.colors(forSeries: h.series))
-            } else {
-                EmptyNote(text: "Пока пусто: точка пишется раз в минуту.")
-            }
-        } header: {
-            HStack {
-                Text("Память за 24 ч")
-                Spacer()
-                if let first = store.history?.firstSample, Double(first) > Double((store.history?.from ?? 0) + 300) {
-                    Text("данные копятся с \(Date(timeIntervalSince1970: TimeInterval(first)), format: .dateTime.hour().minute())")
-                        .font(.caption).foregroundStyle(.secondary)
+        DSSection("Память за 24 ч", trailing: historyNote) {
+            LoadLine(divider: false) {
+                if let h = store.history, !h.points.isEmpty {
+                    HistoryChart(window: h, ramMB: s.memory.totalMB, swapTotalMB: s.memory.swapTotalMB,
+                                 colors: store.palette.colors(forSeries: h.series))
+                } else {
+                    EmptyNote(text: "Пока пусто: точка пишется раз в минуту.")
                 }
             }
         }
@@ -61,16 +50,25 @@ struct MemoryTab: View {
         }
     }
 
+    /// «с 14:05» — если данные за сутки ещё копятся.
+    private var historyNote: String? {
+        guard let h = store.history, let first = h.firstSample, Double(first) > Double(h.from + 300) else { return nil }
+        return "копится с " + Date(timeIntervalSince1970: TimeInterval(first)).formatted(.dateTime.hour().minute())
+    }
+
     @ViewBuilder
     private func simple(_ s: LoadSnapshot) -> some View {
-        Section("Память") {
-            MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }
-            if let h = store.history { HistorySpark(window: h) }
-            Text(simpleDiskLine(s.disk)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        DSSection("Память") {
+            LoadLine(divider: false) {
+                MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }
+            }
+            if let h = store.history { LoadLine { HistorySpark(window: h) } }
+            LoadLine { Text(simpleDiskLine(s.disk)).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
         TopProgramsSection(map: s.map)
-        Section {
-            Button("Подробности: карта памяти, процессы, история…", action: openFull).buttonStyle(.link)
+        HStack {
+            DSButton("Подробности: карта памяти, процессы, история", icon: "chevron.right", style: .plain, small: true, action: openFull)
+            Spacer()
         }
     }
 }

@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-// Мелкие элементы и секции вкладки «Сессии». Стиль — как у «Обзора» и «Памяти»: строки в `Section`,
-// системные цвета и шрифты, цифры моноширинные.
+// Мелкие элементы и секции вкладки «Сессии». Стиль — как у «Обзора» и «Памяти»: строки в `DSSection`
+// (`LoadLine` / `DSRow`), цифры моноширинные.
 
 /// Точка статуса сессии; со словом — `SessionStatusLabel`.
 struct SessionStatusDot: View {
@@ -39,7 +39,7 @@ struct SessionChip: View {
             .font(.caption)
             .lineLimit(1)
             .padding(.horizontal, 7).padding(.vertical, 1)
-            .background(tint.map { AnyShapeStyle($0.opacity(0.18)) } ?? AnyShapeStyle(.quaternary), in: Capsule())
+            .background(tint.map { AnyShapeStyle($0.opacity(0.18)) } ?? AnyShapeStyle(Color.white.opacity(0.1)), in: Capsule())
             .foregroundStyle(tint ?? .secondary)
     }
 }
@@ -87,7 +87,7 @@ struct SessionChildRow: View {
             if child.stoppable {
                 StopButton(help: "Остановить \(child.name)", action: onStop)
             } else {
-                Color.clear.frame(width: 18, height: 1)
+                StopButton.gap
             }
         }
         .padding(.vertical, 1)
@@ -96,6 +96,7 @@ struct SessionChildRow: View {
 
 // MARK: Карточка сессии
 
+/// Сессия Claude Code одной строкой секции: состояние, последний шаг, потомки, команда resume, «Остановить…».
 struct SessionCard: View {
     let session: ClaudeSession
     let now: TimeInterval
@@ -105,73 +106,83 @@ struct SessionCard: View {
 
     var body: some View {
         let s = session
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                SessionStatusDot(status: s.status)
-                Text(s.name).font(.headline).lineLimit(1).help(s.name)
-                // Имя вида «my-project-b9» уже с проектом — чип прячем.
-                if let project = s.project, !s.name.hasPrefix(project) {
-                    SessionChip(text: project).help(s.cwd)
-                }
-                SessionStatusLabel(status: s.status)
-                Spacer()
-                Text(Fmt.mb(s.memMB)).fontWeight(.semibold).monospacedDigit().help("вместе с потомками")
-            }
-            // Последний шаг и запрос — из хвоста транскрипта.
-            if !s.activity.lastAction.isEmpty {
-                HStack(spacing: 4) {
-                    Text(s.status.isWorking ? "Сейчас:" : "Последнее:").foregroundStyle(.secondary)
-                    Text(s.activity.lastAction).lineLimit(1).truncationMode(.tail).help(s.activity.lastAction)
-                    if let ago = since(s.activity.lastActionTS, now: now) {
-                        Text("· \(ago) назад").foregroundStyle(.secondary).monospacedDigit().fixedSize()
+        LoadLine {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    SessionStatusDot(status: s.status)
+                    Text(s.name).font(DS.rowTitle).lineLimit(1).help(s.name)
+                    // Имя вида «my-project-b9» уже с проектом — чип прячем.
+                    if let project = s.project, !s.name.hasPrefix(project) {
+                        SessionChip(text: project).help(s.cwd)
                     }
+                    SessionStatusLabel(status: s.status)
+                    Spacer()
+                    Text(Fmt.mb(s.memMB)).fontWeight(.semibold).monospacedDigit().help("вместе с потомками")
                 }
-                .font(.callout)
-            }
-            if !s.activity.lastPrompt.isEmpty {
-                Text("Запрос: \(s.activity.lastPrompt)").font(.callout).foregroundStyle(.secondary)
-                    .lineLimit(2).help(s.activity.lastPrompt)
-            }
-            Text(meta).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
-            if !s.children.isEmpty {
-                DisclosureGroup(isExpanded: $expanded) {
-                    VStack(spacing: 0) {
-                        ForEach(s.children) { c in SessionChildRow(child: c) { onStopChild(c) } }
+                // Последний шаг и запрос — из хвоста транскрипта.
+                if !s.activity.lastAction.isEmpty {
+                    HStack(spacing: 4) {
+                        Text(s.status.isWorking ? "Сейчас:" : "Последнее:").foregroundStyle(.secondary)
+                        Text(s.activity.lastAction).lineLimit(1).truncationMode(.tail).help(s.activity.lastAction)
+                        if let ago = since(s.activity.lastActionTS, now: now) {
+                            Text("· \(ago) назад").foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                        }
                     }
-                    .padding(.top, 2)
-                } label: {
-                    HStack(spacing: 8) {
-                        Text("Потомки").font(.callout)
-                        Text("\(s.children.count)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                        if let hot = hotLabel(s.children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
-                        Spacer()
-                        Text(Fmt.mb(s.kidsMB)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                    }
+                    .font(.callout)
                 }
-            }
-            HStack(spacing: 8) {
-                // Команду копируют в терминал — повторная проверка sessionId даже при готовой строке.
-                if !s.resumeCommand.isEmpty, s.sessionID.map(TranscriptReader.isSafeID) == true {
-                    Text(s.resumeCommand).font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(s.resumeCommand, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Скопировать команду")
-                } else {
-                    Text(s.hostApp == nil ? "продолжить нельзя: нет файла сессии" : "продолжает \(s.hostApp!).app")
-                        .font(.caption).foregroundStyle(.secondary)
+                if !s.activity.lastPrompt.isEmpty {
+                    Text("Запрос: \(s.activity.lastPrompt)").font(.callout).foregroundStyle(.secondary)
+                        .lineLimit(2).help(s.activity.lastPrompt)
                 }
-                Spacer()
-                control
+                Text(meta).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                if !s.children.isEmpty { children }
+                HStack(spacing: 8) {
+                    // Команду копируют в терминал — повторная проверка sessionId даже при готовой строке.
+                    if !s.resumeCommand.isEmpty, s.sessionID.map(TranscriptReader.isSafeID) == true {
+                        Text(s.resumeCommand).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        DSButton("", icon: "doc.on.doc", style: .plain, small: true) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(s.resumeCommand, forType: .string)
+                        }
+                        .help("Скопировать команду")
+                        .accessibilityLabel("Скопировать команду")
+                    } else {
+                        Text(s.hostApp == nil ? "продолжить нельзя: нет файла сессии" : "продолжает \(s.hostApp!).app")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    control
+                }
+                .padding(.top, 2)
             }
-            .padding(.top, 2)
         }
-        .padding(.vertical, 4)
+    }
+
+    /// «Потомки» со своим шевроном: раскрывается нажатием на строку.
+    @ViewBuilder
+    private var children: some View {
+        let s = session
+        Button {
+            expanded.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Text("Потомки").font(.callout)
+                Text("\(s.children.count)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                if let hot = hotLabel(s.children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
+                Spacer()
+                Text(Fmt.mb(s.kidsMB)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                DisclosureChevron(open: expanded)
+            }
+            .contentShape(Rectangle())
+            .hoverRow(selected: expanded)
+        }
+        .buttonStyle(.plain)
+        if expanded {
+            VStack(spacing: 0) {
+                ForEach(s.children) { c in SessionChildRow(child: c) { onStopChild(c) } }
+            }
+        }
     }
 
     private var meta: String {
@@ -189,7 +200,7 @@ struct SessionCard: View {
         if session.isSelf {
             SessionChip(text: "это текущая сессия")
         } else if session.stoppable {
-            Button("Остановить…", action: onStop)
+            DSButton("Остановить…", small: true, action: onStop)
         } else if let app = session.hostApp {
             Text("сессией управляет \(app).app").font(.caption).foregroundStyle(.secondary)
         } else {
@@ -205,40 +216,33 @@ struct SessionsSimpleSection: View {
     var onStop: (ClaudeSession) -> Void
 
     var body: some View {
-        Section {
-            if sessions.isEmpty { EmptyNote(text: "Сессий Claude нет.") }
+        DSSection("Сессии Claude", trailing: SessionsHeader.summary(count: sessions.count, mb: sessions.reduce(0) { $0 + $1.memMB })) {
+            if sessions.isEmpty { LoadEmpty(text: "Сессий Claude нет.") }
             ForEach(sessions) { s in
-                HStack(spacing: 10) {
-                    SessionStatusDot(status: s.status)
-                    Text(s.name).lineLimit(1).help(s.isSelf ? "это текущая сессия — её отсюда не останавливают" : s.name)
-                    Spacer()
-                    SessionStatusLabel(status: s.status)
-                    Text(Fmt.mb(s.memMB)).monospacedDigit()
-                    if s.stoppable && !s.isSelf {
-                        StopButton(help: "Остановить \(s.name)") { onStop(s) }
-                    } else {
-                        Color.clear.frame(width: 18, height: 1)
+                LoadLine {
+                    HStack(spacing: 10) {
+                        SessionStatusDot(status: s.status)
+                        Text(s.name).font(DS.rowTitle).lineLimit(1).help(s.isSelf ? "это текущая сессия — её отсюда не останавливают" : s.name)
+                        Spacer()
+                        SessionStatusLabel(status: s.status)
+                        Text(Fmt.mb(s.memMB)).monospacedDigit()
+                        if s.stoppable && !s.isSelf {
+                            StopButton(help: "Остановить \(s.name)") { onStop(s) }
+                        } else {
+                            StopButton.gap
+                        }
                     }
                 }
             }
-        } header: {
-            SessionsHeader(title: "Сессии Claude", count: sessions.count, mb: sessions.reduce(0) { $0 + $1.memMB })
         }
     }
 }
 
-struct SessionsHeader: View {
-    let title: String
-    let count: Int
-    var mb: Double?
-
-    var body: some View {
-        HStack {
-            Text(title)
-            Text("\(count)").foregroundStyle(.secondary).monospacedDigit()
-            Spacer()
-            if let mb, count > 0 { Text(Fmt.mb(mb)).monospacedDigit() }
-        }
+/// Подпись справа в заголовке секции: «3 · 4.2 GB».
+enum SessionsHeader {
+    static func summary(count: Int, mb: Double? = nil) -> String {
+        if let mb, count > 0 { return "\(count) · \(Fmt.mb(mb))" }
+        return String(count)
     }
 }
 
@@ -249,35 +253,35 @@ struct SessionsCompactSection: View {
     @AppStorage("LoadTab") private var tabRaw = LoadTab.overview.rawValue
 
     var body: some View {
-        Section {
-            if sessions.isEmpty { EmptyNote(text: "Сессий Claude нет.") }
+        DSSection("Сессии Claude", trailing: SessionsHeader.summary(count: sessions.count, mb: sessions.reduce(0) { $0 + $1.memMB })) {
+            if sessions.isEmpty { LoadEmpty(text: "Сессий Claude нет.") }
             ForEach(sessions) { s in
-                Button {
-                    tabRaw = LoadTab.sessions.rawValue
-                } label: {
-                    HStack(spacing: 10) {
-                        SessionStatusDot(status: s.status)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(s.name).lineLimit(1)
-                            if !s.activity.lastAction.isEmpty {
-                                Text(s.activity.lastAction).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                LoadLine {
+                    Button {
+                        tabRaw = LoadTab.sessions.rawValue
+                    } label: {
+                        HStack(spacing: 10) {
+                            SessionStatusDot(status: s.status)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(s.name).font(DS.rowTitle).lineLimit(1)
+                                if !s.activity.lastAction.isEmpty {
+                                    Text(s.activity.lastAction).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
                             }
+                            Spacer()
+                            if let hot = hotLabel(s.children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
+                            Text(Fmt.mb(s.memMB)).monospacedDigit()
+                            Text(Fmt.duration(max(0, now - s.startedAt))).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                .frame(width: 44, alignment: .trailing)
+                            DisclosureChevron(open: false)
                         }
-                        Spacer()
-                        if let hot = hotLabel(s.children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
-                        Text(Fmt.mb(s.memMB)).monospacedDigit()
-                        Text(Fmt.duration(max(0, now - s.startedAt))).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                            .frame(width: 44, alignment: .trailing)
-                        DisclosureChevron(open: false)
+                        .contentShape(Rectangle())
+                        .hoverRow()
                     }
-                    .contentShape(Rectangle())
-                    .hoverRow()
+                    .buttonStyle(.plain)
+                    .help(s.name + (s.activity.lastAction.isEmpty ? "" : "\n" + s.activity.lastAction))
                 }
-                .buttonStyle(.plain)
-                .help(s.name + (s.activity.lastAction.isEmpty ? "" : "\n" + s.activity.lastAction))
             }
-        } header: {
-            SessionsHeader(title: "Сессии Claude", count: sessions.count, mb: sessions.reduce(0) { $0 + $1.memMB })
         }
     }
 }
@@ -289,40 +293,41 @@ struct TerminalsSection: View {
 
     var body: some View {
         let n = hosts.reduce(0) { $0 + $1.shells.count }
-        Section {
-            if n == 0 { EmptyNote(text: "Открытых шеллов нет.") }
+        DSSection("Терминалы", trailing: SessionsHeader.summary(count: n)) {
+            if n == 0 { LoadEmpty(text: "Открытых шеллов нет.") }
             ForEach(hosts) { h in
-                Text("\(h.app) · host \(String(h.hostPid))").font(.caption).foregroundStyle(.secondary)
+                LoadLine {
+                    Text("\(h.app) · host \(String(h.hostPid))").font(.caption).foregroundStyle(.secondary)
+                }
                 ForEach(h.shells) { sh in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 8) {
-                            Text(sh.tty ?? "—").font(.caption.monospaced()).foregroundStyle(.secondary).frame(width: 68, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(sh.project ?? homeShort(sh.cwd) ?? "—").lineLimit(1)
-                                if sh.project != nil, let cwd = homeShort(sh.cwd) {
-                                    Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    LoadLine {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 8) {
+                                Text(sh.tty ?? "—").font(.caption.monospaced()).foregroundStyle(.secondary).frame(width: 68, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(sh.project ?? homeShort(sh.cwd) ?? "—").lineLimit(1)
+                                    if sh.project != nil, let cwd = homeShort(sh.cwd) {
+                                        Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    }
+                                }
+                                .help(sh.cwd ?? "")
+                                Spacer()
+                                if !sh.foreground.isEmpty {
+                                    SessionChip(text: sh.foreground).help("на переднем плане")
+                                }
+                                if sh.stoppable {
+                                    StopButton(help: "Закрыть шелл \(sh.tty ?? String(sh.pid))") { onStopShell(sh) }
+                                } else {
+                                    StopButton.gap
                                 }
                             }
-                            .help(sh.cwd ?? "")
-                            Spacer()
-                            if !sh.foreground.isEmpty {
-                                SessionChip(text: sh.foreground).help("на переднем плане")
+                            ForEach(sh.children) { c in
+                                SessionChildRow(child: c) { onStopChild(sh, c) }.padding(.leading, 24)
                             }
-                            if sh.stoppable {
-                                StopButton(help: "Закрыть шелл \(sh.tty ?? String(sh.pid))") { onStopShell(sh) }
-                            } else {
-                                Color.clear.frame(width: 18, height: 1)
-                            }
-                        }
-                        ForEach(sh.children) { c in
-                            SessionChildRow(child: c) { onStopChild(sh, c) }.padding(.leading, 24)
                         }
                     }
-                    .padding(.vertical, 1)
                 }
             }
-        } header: {
-            SessionsHeader(title: "Терминалы", count: n)
         }
     }
 }
@@ -332,7 +337,7 @@ struct MuxSection: View {
     let docker: DockerInfo
 
     var body: some View {
-        Section("tmux · Docker") {
+        DSSection("tmux · Docker") {
             line("tmux", on: tmux.running, items: tmux.sessions.map { $0.name + ($0.attached ? " (подключён)" : "") })
             line("Docker", on: docker.running, items: docker.containers.map { c in
                 let st = c.status.isEmpty ? c.state : c.status
@@ -342,12 +347,14 @@ struct MuxSection: View {
     }
 
     private func line(_ name: String, on: Bool, items: [String]) -> some View {
-        HStack(spacing: 8) {
-            Circle().fill(on ? Color.green : Color.secondary.opacity(0.4)).frame(width: 8, height: 8)
-            Text(name)
-            Text(!on ? "не запущен" : items.isEmpty ? "запущен, пусто" : items.joined(separator: " · "))
-                .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
-            Spacer(minLength: 0)
+        LoadLine {
+            HStack(spacing: 8) {
+                Circle().fill(on ? Color.green : Color.secondary.opacity(0.4)).frame(width: 8, height: 8)
+                Text(name).font(DS.rowTitle)
+                Text(!on ? "не запущен" : items.isEmpty ? "запущен, пусто" : items.joined(separator: " · "))
+                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
         }
     }
 }
@@ -358,27 +365,27 @@ struct OrphansSection: View {
     var onStop: (Advice.Orphan) -> Void
 
     var body: some View {
-        Section {
-            if orphans.isEmpty { EmptyNote(text: "Сирот нет.") }
+        DSSection("Сироты", trailing: SessionsHeader.summary(count: orphans.count, mb: orphans.reduce(0) { $0 + $1.memMB })) {
+            if orphans.isEmpty { LoadEmpty(text: "Сирот нет.") }
             ForEach(orphans) { o in
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(o.name).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
-                        Text("PID \(String(o.pid)) · родитель завершился, launchd им не управляет")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Spacer()
-                    Text(Fmt.mb(o.memMB)).monospacedDigit()
-                    Text(Fmt.duration(o.age)).font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 44, alignment: .trailing)
-                    if stoppable.contains(o.pid) {
-                        StopButton(help: "Остановить \(o.name)") { onStop(o) }
-                    } else {
-                        Color.clear.frame(width: 18, height: 1)
+                LoadLine {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(o.name).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
+                            Text("PID \(String(o.pid)) · родитель завершился, launchd им не управляет")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Text(Fmt.mb(o.memMB)).monospacedDigit()
+                        Text(Fmt.duration(o.age)).font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 44, alignment: .trailing)
+                        if stoppable.contains(o.pid) {
+                            StopButton(help: "Остановить \(o.name)") { onStop(o) }
+                        } else {
+                            StopButton.gap
+                        }
                     }
                 }
             }
-        } header: {
-            SessionsHeader(title: "Сироты", count: orphans.count, mb: orphans.reduce(0) { $0 + $1.memMB })
         }
     }
 }
@@ -423,7 +430,7 @@ struct AIDrillPanel: View {
                     Text(p.count > 0 ? "\(p.count) проц." : "не запущено").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     Spacer()
                     Text(Fmt.mb(p.memMB)).monospacedDigit()
-                    ShareBar(values: [p.memMB], maximum: total, colors: [.accentColor], width: 60)
+                    ShareBar(values: [p.memMB], maximum: total, width: 60)
                 }
                 .opacity(p.memMB > 0 ? 1 : 0.55)
             }
