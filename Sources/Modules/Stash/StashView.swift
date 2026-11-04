@@ -197,13 +197,13 @@ struct StashView: View {
             if !store.axTrusted {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
-                        Label("Чтобы окна вернулись на свои места и экраны, дай Utilitumus «Универсальный доступ»",
+                        Label("Чтобы окна вернулись на места, дай Utilitumus «Универсальный доступ»",
                               systemImage: "lock.shield")
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                         Button("Дать доступ…") { store.requestAccess() }
                             .buttonStyle(.borderedProminent)
-                        Text("Без доступа стеш и возврат работают, просто без запоминания окон.")
+                        Text("Без доступа окна не запоминаются, остальное работает.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -235,7 +235,7 @@ struct StashView: View {
                     Button("Отмена", role: .cancel) {}
                 } message: {
                     Text(store.selected.compactMap(\.localizedName).joined(separator: ", ")
-                         + "\n\nНесохранённое программы спросят сами. Вернуть можно кнопкой «Вернуть».")
+                         + "\n\nНесохранённое программы спросят сами.")
                 }
 
                 if !store.stashed.isEmpty {
@@ -255,7 +255,7 @@ struct StashView: View {
                         }
                     }
                     HStack {
-                        Text("Возможно, там несохранённые документы. Закрою только если нажмёшь.")
+                        Text("Несохранённое пропадёт. Закроется только по кнопке.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -274,7 +274,7 @@ struct StashView: View {
                     if report.hadAccess {
                         Text("Окон возвращено на место: \(report.windowsPlaced)")
                     } else {
-                        Text("Окна на места не возвращались: нет доступа «Универсальный доступ».")
+                        Text("Окна на места не вернулись: нет «Универсального доступа».")
                             .foregroundStyle(.secondary)
                     }
                     if !report.missing.isEmpty {
@@ -324,11 +324,11 @@ struct StashView: View {
                         Button("Только тяжёлые") { store.selectOnlyHeavy() }
                             .buttonStyle(.link)
                             .font(.callout)
-                            .help("Отметить к закрытию только программы от 1 ГБ памяти или от 25 % процессора")
+                            .help("Отметить программы от 1 ГБ памяти или 25 % процессора")
                     }
                 }
             } footer: {
-                Text("Память и процессор — вместе со всеми процессами программы. Тяжёлая — от 1 ГБ или от 25 % процессора. Finder и сам Utilitumus не закрываются. Новая программа по умолчанию отмечена.")
+                Text("Тяжёлая — от 1 ГБ памяти или 25 % процессора. Finder и Utilitumus не закрываются.")
             }
         }
         .formStyle(.grouped)

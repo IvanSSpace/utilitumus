@@ -62,11 +62,11 @@ private struct FanRow: View {
             .opacity(overridden ? 0.5 : 1)
 
             if fullPower {
-                Text("Сейчас на максимуме: включена «Полная мощность». Выключишь её — вернётся «\(config.mode.title)».")
+                Text("На максимуме: «Полная мощность». После неё вернётся «\(config.mode.title)».")
                     .font(.caption)
                     .foregroundStyle(.green)
             } else if let gameName {
-                Text("Сейчас на максимуме: «Максимум в играх», играешь в \(gameName). Когда игра закончится — вернётся «\(config.mode.title)».")
+                Text("На максимуме: играешь в \(gameName). После игры вернётся «\(config.mode.title)».")
                     .font(.caption)
                     .foregroundStyle(.green)
             } else {
@@ -97,7 +97,7 @@ private struct FanRow: View {
                         Text("Сейчас: \(Int(now.rounded())) °C (самый горячий датчик)")
                             .font(.caption.monospacedDigit())
                     }
-                    Text("Ниже \(Int(config.fromTemp)) °C решает macOS — в простое вентиляторы могут остановиться. Выше — от минимума до максимума к \(Int(config.toTemp)) °C, плавно.")
+                    Text("Ниже \(Int(config.fromTemp)) °C решает macOS, вентиляторы могут стоять. К \(Int(config.toTemp)) °C — максимум.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -266,7 +266,7 @@ private struct GameModeSection: View {
                     .fixedSize()
                 }
                 if game.myGames.isEmpty {
-                    Text("Игры с категорией «Игры» в Info.plist определяются сами. Остальное, например игры из CrossOver, добавь сюда — сначала запусти их.")
+                    Text("Игры определяются сами. Остальные, например из CrossOver, добавь сюда.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -297,7 +297,7 @@ private struct GameModeSection: View {
                         set: { game.setLauncherExcluded(launcher.key, $0) }
                     ))
                 }
-                Text("У лаунчеров обычно категория «Игры», но сидеть в них не значит играть. Сними галочку, если нужно иначе.")
+                Text("Лаунчер — не игра. Сними галочку, если нужно иначе.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -331,8 +331,8 @@ struct FansView: View {
                               systemImage: "lock.shield")
                             .font(.headline)
                         Text(installer.status == .outdated
-                             ? "Приложение обновилось, помощник для вентиляторов — ещё нет. macOS спросит пароль администратора один раз."
-                             : "Смотреть обороты и температуру можно и так, а менять обороты macOS разрешает только администратору. Utilitumus поставит маленького помощника — macOS спросит пароль или Touch ID один раз.")
+                             ? "Помощник для вентиляторов устарел. macOS один раз спросит пароль администратора."
+                             : "Менять обороты может только администратор. Utilitumus поставит помощника: macOS один раз спросит пароль или Touch ID.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -351,7 +351,7 @@ struct FansView: View {
             if let app = controller.conflictingApp {
                 Section {
                     HStack {
-                        Label("\(app.localizedName ?? "Другая программа") сейчас управляет вентиляторами. Пока она открыта, Utilitumus не вмешивается.",
+                        Label("\(app.localizedName ?? "Другая программа") управляет вентиляторами. Пока она открыта, Utilitumus не вмешивается.",
                               systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                         Spacer()
@@ -368,7 +368,7 @@ struct FansView: View {
 
             if controller.safetyTripped && !controller.fullPower && !game.isActive {
                 Section {
-                    Label("Процессор горячее \(Int(FanController.safetyTrip)) °C — вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.",
+                    Label("Процессор горячее \(Int(FanController.safetyTrip)) °C: вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.",
                           systemImage: "flame.fill")
                         .foregroundStyle(.red)
                 }

@@ -115,7 +115,7 @@ struct BrowserPickerView: View {
                     }
                     .toggleStyle(.checkbox)
                     .controlSize(.small)
-                    .help("Дальше ссылки с этого сайта сразу открываются в выбранном браузере (то же делает ⇧ при выборе)")
+                    .help("Ссылки с этого сайта дальше открываются в этом браузере (⇧ при выборе — то же)")
                 }
                 Spacer(minLength: 0)
                 if model.optionHeld {

@@ -60,7 +60,7 @@ private struct ModulesSettings: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
 
-            Text("Переключатель включает и выключает модуль: выключенный ничего не делает. Глаз — показывать ли модуль в боковой панели; скрытый, но включённый работает в фоне, открыть его можно по строке «Скрытые» внизу панели. Порядок меняется перетаскиванием, здесь и в боковой панели.")
+            Text("Переключатель включает модуль, глаз — показывает в боковой панели (скрытый работает в фоне). Порядок — перетаскиванием.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

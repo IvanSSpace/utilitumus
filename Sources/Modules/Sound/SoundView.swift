@@ -160,7 +160,7 @@ struct SoundView: View {
             } header: {
                 Text("Основной микрофон")
             } footer: {
-                Text("Если основной микрофон подключён, он и будет входом. Если нет — микрофон MacBook. Любой другой микрофон, например случайно подключённый провод, сам входом не станет.")
+                Text("Если основной микрофон отключён, входом будет микрофон MacBook. Другие сами входом не станут.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -173,7 +173,7 @@ struct SoundView: View {
                     }
             } footer: {
                 Text(lockState.isLocked
-                     ? "Bluetooth-наушники не станут входом и не выбираются основным микрофоном."
+                     ? "Bluetooth-микрофон не станет входом."
                      : "Bluetooth-микрофон можно выбрать основным.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -188,7 +188,7 @@ struct SoundView: View {
                         }
                     }
                 } footer: {
-                    Text("Виртуальные устройства (Loopback, Zoom и т.п.) основными не бывают. Если такое выбрано входом вручную, Utilitumus его не трогает.")
+                    Text("Виртуальные устройства (Loopback, Zoom) основными не бывают; выбранные вручную Utilitumus не трогает.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -210,7 +210,7 @@ struct SoundView: View {
             } header: {
                 Text("Основной выход")
             } footer: {
-                Text("Если macOS переключит звук на другое устройство, вернём выбранное. Не перебиваем, когда ты сам выбрал в системе Bluetooth-наушники или AirPlay. Если основной выход отключён, звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
+                Text("Если macOS переключит звук, вернём выбранный выход. Отключён — звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

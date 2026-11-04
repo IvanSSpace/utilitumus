@@ -51,7 +51,7 @@ struct MixerView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Нужно разрешение «Запись системного звука»", systemImage: "lock.shield")
                             .font(.headline)
-                        Text("Без него macOS не даёт перехватить звук приложения, и громкость не меняется. Открой «Системные настройки → Конфиденциальность и безопасность → Запись экрана и системного звука», включи Utilitumus в разделе «Только запись системного звука» и перезапусти Utilitumus.")
+                        Text("Без него громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -71,7 +71,7 @@ struct MixerView: View {
 
             Section("Сейчас играют") {
                 if controller.apps.isEmpty {
-                    Text("Ничего не играет. Приложение появится здесь, как только начнёт воспроизводить звук.")
+                    Text("Ничего не играет. Приложение появится, когда начнёт воспроизводить звук.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(controller.apps) { app in
@@ -80,7 +80,7 @@ struct MixerView: View {
             }
 
             Section {
-                Text("Пока у приложения 100 % и звук включён, Utilitumus его не трогает. Громкость выше 100 % не поддерживается. Звук идёт на устройство вывода по умолчанию. При выходе из Utilitumus всё возвращается как было.")
+                Text("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

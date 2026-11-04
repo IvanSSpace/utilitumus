@@ -89,7 +89,7 @@ struct LoadScreen: View {
             }
             Spacer()
             SegmentedControl(LoadViewMode.allCases, selection: Binding(get: { mode }, set: { modeRaw = $0.rawValue })) { $0.title }
-            .help("Просто — главное: сколько занято, кто ест память, что выключить. Подробно — карта памяти, процессы, история, диск")
+            .help("Просто — главное. Подробно — карта памяти, процессы, история, диск")
         }
         .font(.callout)
         .padding(.horizontal, 20)

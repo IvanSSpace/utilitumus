@@ -145,7 +145,7 @@ enum Advice {
         return [AdviceItem(
             id: "adv:mcp", severity: .low,
             title: "MCP \(names.prefix(3).joined(separator: ", "))\(more) запущены в \(sessions) сессиях — \(Fmt.mb(total))",
-            detail: "Подключай их только в нужных проектах (.mcp.json проекта), а не глобально — тогда остальные сессии не будут поднимать свои копии",
+            detail: "Подключай их в .mcp.json нужных проектов, а не глобально",
             savesMB: Int(extra.rounded()), stopPid: nil)]
     }
 
@@ -183,7 +183,7 @@ enum Advice {
         let title = "\(n) \(Fmt.word(n, "осиротевший процесс держит", "осиротевших процесса держат", "осиротевших процессов держат")) \(Fmt.mb(total))"
         return [AdviceItem(
             id: "adv:orphans", severity: .forMB(big.memMB), title: title,
-            detail: "Родитель завершился, launchd ими не управляет. Кнопка — для самого большого: \(big.name) (\(Fmt.mb(big.memMB)))",
+            detail: "Родитель завершился. Кнопка — для самого большого: \(big.name) (\(Fmt.mb(big.memMB)))",
             savesMB: Int(big.memMB), stopPid: big.pid)]
     }
 

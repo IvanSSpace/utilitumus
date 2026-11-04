@@ -132,7 +132,7 @@ struct DiskSection: View {
                     Text("копится").foregroundStyle(.secondary)
                 }
             }
-            Text("Износ не страшен — своп опасен скоростью, а не ресурсом: пока мак пишет и читает своп, всё тормозит.")
+            Text("Своп опасен не износом диска, а тормозами.")
                 .font(.caption).foregroundStyle(.secondary)
         } header: {
             HStack {

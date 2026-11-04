@@ -52,7 +52,7 @@ extension LoadStore {
 
     func requestStop(orphan o: Advice.Orphan) {
         requestStop(process: o.pid, title: "Остановить \(o.name)",
-                    head: "Остановит \(o.name) — сирота: родитель завершился, launchd им не управляет, работает \(Fmt.age(o.age))")
+                    head: "Остановит \(o.name): родитель завершился, работает \(Fmt.age(o.age))")
     }
 
     private func appendNote(_ s: String) {

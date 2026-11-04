@@ -88,22 +88,22 @@ enum Grouping {
         var hints: [SystemHint] = []
         if let finder = by["Finder"], finder > finderBase {
             hints.append(SystemHint(title: "Перезапусти Finder",
-                                    how: "Option + правый клик по Finder в Dock → «Перезапустить»: окна Finder закроются, файлы не пострадают",
+                                    how: "Option + правый клик по Finder в Dock → «Перезапустить». Окна закроются, файлы целы",
                                     savesMB: Int((finder - finderBase).rounded())))
         }
         if let wallpaper = by["WallpaperDynamicExtension"] {
             hints.append(SystemHint(title: "Статичные обои вместо динамических",
-                                    how: "Системные настройки → Обои: выбери обычную картинку — динамическим обоям нужен отдельный процесс",
+                                    how: "Системные настройки → Обои: выбери обычную картинку",
                                     savesMB: Int(wallpaper.rounded())))
         }
         if spotlight > spotlightLimit {
             hints.append(SystemHint(title: "Spotlight индексирует код",
-                                    how: "Системные настройки → Spotlight → Конфиденциальность: добавь папки с проектами и node_modules",
+                                    how: "Системные настройки → Spotlight → Конфиденциальность: добавь папки с проектами",
                                     savesMB: Int((spotlight - spotlightLimit).rounded())))
         }
         if by["WindowServer"] != nil {
             hints.append(SystemHint(title: "Меньше окон — меньше WindowServer",
-                                    how: "Его память растёт с числом окон и экранов: закрой лишние окна, особенно браузерные, и отключи ненужный монитор",
+                                    how: "Память растёт с числом окон и экранов: закрой лишние окна и ненужный монитор",
                                     savesMB: 0))
         }
         return hints

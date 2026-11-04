@@ -61,24 +61,24 @@ enum LaunchAgents {
     private static let catalog: [(prefixes: [String], vendor: String, note: String)] = [
         (["com.logi.optionsplus.updater"], "Logitech", "перестанут приходить обновления Logi Options+"),
         (["com.logi.", "com.logitech."], "Logitech",
-         "перестанут работать настройки кнопок/жестов Logitech, базовая работа мыши останется"),
+         "перестанут работать кнопки и жесты Logitech, мышь останется работать"),
         (["com.google.keystone", "com.google.googleupdater"], "Google",
-         "программы Google не будут обновляться в фоне — Chrome проверит обновления сам, когда его откроешь"),
-        (["us.zoom."], "Zoom", "Zoom не будет проверять обновления в фоне — звонки работают как раньше"),
+         "программы Google не будут обновляться в фоне, Chrome обновится при запуске"),
+        (["us.zoom."], "Zoom", "Zoom не будет обновляться в фоне, звонки работают"),
         (["com.valvesoftware."], "Steam",
-         "фоновые службы Steam: сам Steam и игры работают, при запуске Steam поднимет их сам"),
+         "службы Steam: Steam и игры работают, службы поднимутся при запуске"),
         (["com.adobe."], "Adobe",
-         "фоновые службы Creative Cloud: синхронизация и обновления — только пока открыт Creative Cloud"),
+         "службы Creative Cloud: синхронизация и обновления только при открытом Creative Cloud"),
         (["com.microsoft.update", "com.microsoft.autoupdate"], "Microsoft",
-         "Office не будет обновляться в фоне — обновить можно вручную: «Справка → Проверить наличие обновлений»"),
+         "Office не будет обновляться в фоне, только вручную"),
         (["com.rogueamoeba."], "Rogue Amoeba",
-         "перестанут работать Loopback, Audio Hijack и SoundSource: их виртуальные звуковые устройства пропадут"),
+         "перестанут работать Loopback, Audio Hijack и SoundSource, их звуковые устройства пропадут"),
     ]
-    static let unknown = "что перестанет работать — неизвестно, вернуть можно кнопкой «Вернуть»"
+    static let unknown = "что перестанет работать, неизвестно; вернуть можно кнопкой"
     /// У служб root кнопок нет — и «вернуть кнопкой» тоже.
     static let unknownRoot = "что перестанет работать — неизвестно"
     static let rootNote = "системная служба (нужен sudo)"
-    static let terminalNote = "хост вкладок терминала — закроются все вкладки и сессии Claude в них"
+    static let terminalNote = "хост вкладок терминала: закроются все вкладки и сессии Claude"
 
     static func vendor(of label: String) -> (vendor: String, note: String) {
         let low = label.lowercased()

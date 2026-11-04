@@ -66,9 +66,9 @@ struct MemoryMap: Sendable {
     var heldMB = 0
     var swappedMB = 0
 
-    static let wiredNote = "Ядро macOS, драйверы и видеопамять GPU — на Apple Silicon память общая. Напрямую не освобождается; уменьшается, если закрыть тяжёлые графические приложения"
-    static let cachedNote = "Недавно прочитанные файлы. macOS сама отдаст эту память, когда понадобится — это не потеря"
-    static let freeNote = "Ничем не занятая память. Мало свободной — это нормально: macOS сразу отдаёт лишнее под кэш файлов."
+    static let wiredNote = "Ядро, драйверы и видеопамять GPU. Уменьшится, если закрыть тяжёлые графические приложения"
+    static let cachedNote = "Недавно прочитанные файлы. macOS отдаст эту память, когда понадобится"
+    static let freeNote = "Не занята ничем. Мало свободной — нормально: macOS отдаёт её под кэш файлов."
 
     private static let splitTop = 8
     private static let candidates = 12
@@ -76,17 +76,17 @@ struct MemoryMap: Sendable {
 
     private static func hint(gid: String, kind: GroupKind, name: String) -> String {
         if gid == "system" {
-            return "Это сама macOS: WindowServer, Spotlight, Finder и службы. Напрямую не освободить — что помогает, смотри в подсказках группы «Система»"
+            return "Сама macOS: WindowServer, Spotlight, Finder и службы. Что помогает — в подсказках группы «Система»"
         }
         switch kind {
         case .app:
             return Kinds.browsers.contains(Kinds.shortAppName(name))
-                ? "Закрой лишние вкладки: каждая — отдельный процесс «вкладка». В Chrome помогает «Экономия памяти» (Настройки → Производительность), тяжёлую вкладку видно в «Окно → Диспетчер задач»"
+                ? "Закрой лишние вкладки: каждая — отдельный процесс. В Chrome помогает «Экономия памяти» в настройках"
                 : "Закрой приложение, если оно сейчас не нужно (⌘Q)"
         case .project:
-            return "Процессы проекта без кнопки: останови их там, где запускал, — в терминале или IDE"
+            return "Останови процессы проекта там, где запускал: в терминале или IDE"
         default:
-            return "Процессы без проекта и приложения — полный список по кнопке «показать все» в группе"
+            return "Остальные процессы — по кнопке «показать все» в группе"
         }
     }
 

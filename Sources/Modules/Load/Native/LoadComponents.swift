@@ -442,10 +442,10 @@ struct DrillPanel: View {
                             ShareBar(values: [Double(r.ramMB), Double(r.swappedMB)], maximum: maxV, colors: [.blue, .orange], width: 60)
                         }
                     }
-                    note("В RAM процесса входят и общие с другими страницы — сумма строк бывает больше «Приложений».")
+                    note("Общие страницы считаются в каждом процессе, поэтому сумма может быть больше «Приложений».")
                 }
             case .compressed:
-                note("Сколько у процесса сжато или выгружено в своп: footprint минус то, что в RAM.")
+                note("Сжато или в свопе: footprint минус RAM.")
                 if map.compressedBreakdown.isEmpty { EmptyNote(text: "Сжатого и выгруженного в своп почти нет.") }
                 ForEach(map.compressedBreakdown) { r in
                     HStack {

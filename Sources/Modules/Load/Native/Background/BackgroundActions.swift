@@ -212,21 +212,21 @@ struct BackgroundPlan: Identifiable, Sendable {
         case .stop:
             title = "Остановить \(a.name)"
             button = "Остановить"
-            message = "Остановит фоновый агент \(what) до следующего входа в систему (launchctl bootout).\(freed) \(note)."
+            message = "Остановит \(what) до следующего входа.\(freed) \(note)."
                 + (a.runAtLoad || a.keepalive ? " После перезагрузки запустится снова." : "")
         case .disable:
             title = "Убрать \(a.name) из автозапуска"
             button = "Не запускать при входе"
             let head: String
             if a.isRunning {
-                head = "Остановит \(what) и уберёт из автозапуска (launchctl bootout и disable).\(freed)"
+                head = "Остановит \(what) и уберёт из автозапуска.\(freed)"
             } else if a.loaded {
                 // Загружен, ждёт запуска: остановить нечего, но выгрузить надо — иначе запустится сам.
-                head = "Уберёт \(what) из автозапуска (launchctl bootout и disable): сейчас он не запущен, а теперь не запустится ни сам, ни при следующем входе."
+                head = "Уберёт \(what) из автозапуска: сам не запустится и при входе."
             } else {
-                head = "Уберёт \(what) из автозапуска (launchctl disable): при следующем входе не запустится."
+                head = "Уберёт \(what) из автозапуска: при входе не запустится."
             }
-            message = head + " \(note). Вернуть — кнопкой «Вернуть» во вкладке «Фоновое»."
+            message = head + " \(note). Вернуть можно на вкладке «Фоновое»."
         case .enable:
             title = "Вернуть \(a.name)"
             button = "Вернуть"

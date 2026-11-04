@@ -425,7 +425,7 @@ struct AIDrillPanel: View {
                 }
                 .opacity(p.memMB > 0 ? 1 : 0.55)
             }
-            Text("Dev-серверы, запущенные из сессий (webpack, vite…), сюда не входят — это не ИИ.")
+            Text("Dev-серверы (webpack, vite…) сюда не входят — это не ИИ.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 4)

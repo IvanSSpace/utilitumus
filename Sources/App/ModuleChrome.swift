@@ -26,18 +26,32 @@ struct ModuleToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         let on = modules.isOn(module)
-        ToolbarItemGroup(placement: .primaryAction) {
+        // Подписанная кнопка, а не голый значок (i): так видно, что на неё можно нажать и что там.
+        ToolbarItem(placement: .primaryAction) {
             Button {
                 modules.infoModule = module
             } label: {
-                Label("Об инструменте", systemImage: "info.circle")
+                Label("Как это работает", systemImage: "info.circle")
+                    .labelStyle(.titleAndIcon)
             }
-            .help("Об инструменте")
-            Toggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
+            .help("Что умеет модуль и как им пользоваться")
+        }
+        // Отдельной капсулой: переключатель не должен сливаться с кнопкой справки.
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            // Подпись отдельным Text: у Toggle в панели инструментов macOS прячет label.
+            HStack(spacing: 8) {
+                Text(on ? "Включён" : "Выключен")
+                    .foregroundStyle(on ? .primary : .secondary)
+                Toggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+            }
+            .padding(.leading, 6)
+            .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }
     }
 }
