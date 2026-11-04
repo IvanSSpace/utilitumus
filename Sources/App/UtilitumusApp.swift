@@ -113,19 +113,14 @@ struct MainView: View {
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
-    /// Модуль, чей экран сейчас построен. Догоняет `displayed` следующим кадром: так выделение
-    /// в боковой панели переключается сразу, а не ждёт 100–200 мс, пока соберётся экран модуля.
-    @State private var built: Module?
-
     var body: some View {
         // Выбранный модуль могли скрыть или выключить: показываем первый из показанных.
         let current = modules.resolve(selection)
         let displayed = peeked ?? current
-        let detail = displayed == nil ? nil : (built ?? displayed)
         // Для фона и акцента на «О проекте» и пустой панели берём последний выбранный модуль.
         let tintModule = displayed ?? selection
         let onDashboard = showDashboard && !showAbout
-        let pageKey = showAbout ? "about" : (showDashboard ? "dashboard" : (detail?.rawValue ?? "none"))
+        let pageKey: PageKey = showAbout ? .about : (showDashboard ? .dashboard : (displayed.map { .module($0) } ?? .empty))
         ZStack {
             DSBackground(module: tintModule, neutral: onDashboard)
             HStack(spacing: 0) {
@@ -135,10 +130,9 @@ struct MainView: View {
                         .frame(width: DS.sidebarWidth)
                         .background(theme.sidebar)
                 }
-                // Страница меняется мгновенно, без перехода. Свой `id` на страницу: состояние
-                // (лист «Об инструменте», прокрутка) не переезжает между модулями.
-                page(showAbout: showAbout, detail: detail)
-                    .id(pageKey)
+                // Живой кэш страниц: открытые остаются в иерархии (состояние и прокрутка у каждой свои),
+                // смена — это opacity/offset готовых слоёв. Без `.id`: страницы не пересоздаются.
+                PageStack(target: pageKey) { page($0) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(theme.card))
                 .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
@@ -160,9 +154,6 @@ struct MainView: View {
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
         .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
         .onAppear { whatsNew.showIfUpdated() }
-        .onChange(of: displayed) {
-            DispatchQueue.main.async { built = displayed }
-        }
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false } }
         // Минимальный размер окна задаёт `WindowMinSize`: `.frame(minWidth:)` на корне заставлял
@@ -176,8 +167,9 @@ struct MainView: View {
     }
 
     @ViewBuilder
-    private func page(showAbout: Bool, detail: Module?) -> some View {
-        if showAbout {
+    private func page(_ key: PageKey) -> some View {
+        switch key {
+        case .about:
             AboutView { module in
                 if !modules.isHidden(module) {
                     selection = module
@@ -188,14 +180,18 @@ struct MainView: View {
                 self.showAbout = false
                 showDashboard = false
             }
-        } else if showDashboard {
+            .equatable()
+        case .dashboard:
+            // `.equatable()`: замыкание не сравнивается, и страница пересчитывалась бы при каждой смене
+            // страницы, хотя ничего не изменилось. Захваченное состояние (State, AppStorage) — ссылки.
             DashboardPage { module in
                 selection = module
                 showDashboard = false
             }
-        } else if let detail {
-            ModuleDetail(module: detail)
-        } else {
+            .equatable()
+        case .module(let module):
+            ModuleDetail(module: module)
+        case .empty:
             NoShownModules()
         }
     }
