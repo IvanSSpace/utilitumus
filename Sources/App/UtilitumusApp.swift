@@ -239,7 +239,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// Точка входа. Стиль окна задаётся сценой `App` и на лету не меняется, поэтому интерфейс
+/// выбирается при запуске (`UIStyle.launched`): запускаем одно из двух приложений-сцен.
+/// Смену в настройках применяет перезапуск.
 @main
+enum Launcher {
+    @MainActor
+    static func main() {
+        switch UIStyle.launched {
+        case .new: UtilitumusApp.main()
+        case .classic: ClassicApp.main()
+        }
+    }
+}
+
+/// Новый интерфейс.
 struct UtilitumusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
@@ -251,18 +265,25 @@ struct UtilitumusApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 980, height: 680)
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .appInfo) {
-                Button("Проверить обновления…") { Updater.shared.check() }
-                Button("Что нового…") { WhatsNew.shared.isShown = true }
-            }
+            AppCommands()
             CommandGroup(after: .sidebar) {
                 SidebarCommand()
             }
-            // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
-            CommandGroup(replacing: .appSettings) {
-                SettingsCommand()
-            }
+        }
+    }
+}
+
+/// Меню приложения, общее для обоих интерфейсов.
+struct AppCommands: Commands {
+    var body: some Commands {
+        CommandGroup(replacing: .newItem) {}
+        CommandGroup(after: .appInfo) {
+            Button("Проверить обновления…") { Updater.shared.check() }
+            Button("Что нового…") { WhatsNew.shared.isShown = true }
+        }
+        // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
+        CommandGroup(replacing: .appSettings) {
+            SettingsCommand()
         }
     }
 }
@@ -280,7 +301,7 @@ private struct SidebarCommand: View {
 }
 
 /// Cmd+, — лист настроек в главном окне; если окно закрыто, сначала открываем его.
-private struct SettingsCommand: View {
+struct SettingsCommand: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
