@@ -74,23 +74,31 @@ struct ModuleDetail: View {
 struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
+    /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
+    @State private var showAbout = false
 
     var body: some View {
         // Выбранный модуль могли выключить: показываем первый из включённых.
         let current = modules.resolve(selection)
         NavigationSplitView {
             List(modules.enabledModules, selection: Binding(
-                get: { current },
-                set: { if let new = $0 { selection = new } }
+                // На странице «О проекте» выделение в списке снято.
+                get: { showAbout ? nil : current },
+                set: { if let new = $0 { selection = new; showAbout = false } }
             )) { module in
                 Label(module.title, systemImage: module.icon)
                     .foregroundStyle(module.isReady ? .primary : .secondary)
                     .tag(module)
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .safeAreaInset(edge: .bottom) { UpdateFooter() }
+            .safeAreaInset(edge: .bottom) { UpdateFooter(showAbout: $showAbout) }
         } detail: {
-            if let current {
+            if showAbout {
+                AboutView { module in
+                    selection = module
+                    showAbout = false
+                }
+            } else if let current {
                 ModuleDetail(module: current)
             } else {
                 AllModulesOff()
@@ -119,9 +127,10 @@ struct AllModulesOff: View {
     }
 }
 
-/// Внизу боковой панели: версия и, если вышла новая, кнопка установки.
+/// Внизу боковой панели: «О проекте», версия и, если вышла новая, кнопка установки.
 struct UpdateFooter: View {
     @ObservedObject var updater = Updater.shared
+    @Binding var showAbout: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -152,6 +161,16 @@ struct UpdateFooter: View {
             default:
                 EmptyView()
             }
+            Button {
+                showAbout = true
+            } label: {
+                Label("О проекте", systemImage: "info.circle")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+            .foregroundStyle(showAbout ? Color.accentColor : .primary)
             HStack {
                 Text("Версия \(updater.currentVersion)")
                 Spacer()
