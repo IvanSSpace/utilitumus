@@ -83,6 +83,8 @@ struct BrowserView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.borderless)
+                // Без квадратной рамки фокуса: окно открывается с фокусом на первой кнопке.
+                .focusable(false)
                 .help("Скрыть схему")
             }
         }
