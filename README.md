@@ -16,15 +16,19 @@
 
 ## Установка
 
-Скачай `Utilitumus.zip` из [последнего релиза](https://github.com/IvanSSpace/utilitumus/releases/latest), распакуй и перетащи `Utilitumus.app` в «Программы».
+[![Скачать Utilitumus](https://img.shields.io/badge/Скачать-Utilitumus.zip-2ea44f?style=for-the-badge&logo=apple)](https://github.com/IvanSSpace/utilitumus/releases/latest/download/Utilitumus.zip)
 
-Приложение подписано локально, без сертификата Apple, поэтому при первом запуске macOS его заблокирует. Открой его правым кликом и выбери «Открыть». Либо сними карантин командой:
+Проще всего поставить одной командой в Терминале: она скачает последнюю версию, проверит подпись, положит приложение в «Программы» и запустит его.
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Utilitumus.app
+curl -fsSL https://raw.githubusercontent.com/IvanSSpace/utilitumus/main/install.sh | bash
 ```
 
-Нужна macOS 14.2 или новее (микшеру нужны Core Audio process taps). Для модуля «Нагрузка» нужен Python 3.13 или новее.
+Если скачать кнопкой выше, распакуй архив и перетащи `Utilitumus.app` в «Программы». При первом запуске macOS его заблокирует, потому что приложение не подписано сертификатом Apple. Открой его правым кликом и выбери «Открыть», либо сними карантин командой `xattr -dr com.apple.quarantine /Applications/Utilitumus.app`. Команда установки выше этого шага не требует.
+
+Нужна macOS 14.2 или новее на Mac с Apple Silicon. Для модуля «Нагрузка» нужен Python 3.13 или новее.
+
+При первом запуске каждое разрешение даётся один раз: доступ к вентиляторам (пароль), «Универсальный доступ» для стеша, запись звука для микшера. Обновления подписаны тем же сертификатом, поэтому выданные разрешения после них сохраняются.
 
 ## Обновление
 
