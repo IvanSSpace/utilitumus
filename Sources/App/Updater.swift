@@ -170,6 +170,10 @@ final class Updater: ObservableObject {
         if fm.fileExists(atPath: fan.path) {
             try verifySignature(of: fan, identifier: "local.utilitumus.fan", strict: false)
         }
+        let voice = app.appendingPathComponent("Contents/MacOS/utilitumus-voice")
+        if fm.fileExists(atPath: voice.path) {
+            try verifySignature(of: voice, identifier: "local.utilitumus.voice", strict: false)
+        }
 
         // Копия рядом с целью (тот же том) — тогда подмена атомарная.
         let staged = target.deletingLastPathComponent().appendingPathComponent("Utilitumus.app.new")
