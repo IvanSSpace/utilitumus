@@ -9,6 +9,7 @@ struct BrowserView: View {
     @State private var errorText: String?
     @State private var addingRule = false
     @StateObject private var recorder = KeyRecorder()
+    @AppStorage("Browser.introHidden") private var introHidden = false
 
     private let probe = URL(string: "https://example.com")!
     private let rowHeight: CGFloat = 46
@@ -17,12 +18,16 @@ struct BrowserView: View {
 
     var body: some View {
         Form {
+            if !introHidden { introSection }
             statusSection
             browsersSection
             rulesSection
             hotkeysSection
             Section {
                 Button("Проверить…") { openTest() }
+                if introHidden {
+                    Button("Показать быстрый старт") { introHidden = false }
+                }
             } footer: {
                 Text("Покажет панель выбора для example.com, ничего не меняя в системе.")
             }
@@ -40,6 +45,78 @@ struct BrowserView: View {
             refreshDefault()
         }
         .sheet(isPresented: $addingRule) { AddRuleSheet(catalog: catalog) }
+    }
+
+    // MARK: - Быстрый старт
+
+    private var introSection: some View {
+        Section {
+            VStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 6) {
+                    introStep(icon: isDefault ? "checkmark.circle.fill" : "globe",
+                              title: "Сделай браузером по умолчанию", highlighted: !isDefault, done: isDefault) {
+                        if !isDefault {
+                            Button("Сделать") { setDefault(to: BrowserHelper.appURL) }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .disabled(busy)
+                        }
+                    }
+                    introArrow
+                    introStep(icon: "link", title: "Кликни любую ссылку", highlighted: false, done: false) {
+                        Button("Попробовать") { openTest() }
+                            .controlSize(.small)
+                    }
+                    introArrow
+                    introStep(icon: "cursorarrow.click.2", title: "Выбери браузер у курсора",
+                              highlighted: false, done: false) { EmptyView() }
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            HStack {
+                Text("Быстрый старт")
+                Spacer()
+                Button {
+                    introHidden = true
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(.borderless)
+                .help("Скрыть схему")
+            }
+        }
+    }
+
+    private var introArrow: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .frame(height: 40)
+    }
+
+    private func introStep<Extra: View>(icon: String, title: String, highlighted: Bool, done: Bool,
+                                        @ViewBuilder extra: () -> Extra) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 20))
+                .foregroundStyle(done ? Color.green : (highlighted ? Color.accentColor : .secondary))
+                .frame(height: 28)
+            Text(title)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            extra()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .background(highlighted ? Color.accentColor.opacity(0.12) : .clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(highlighted ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1)
+        )
     }
 
     // MARK: - Статус
