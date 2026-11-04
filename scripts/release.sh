@@ -25,11 +25,13 @@ if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Версия вписывается только в сборку: Info.plist в репозитории не меняется.
-cp Info.plist build-Info.plist.bak
-trap 'mv -f build-Info.plist.bak Info.plist' EXIT
+# Версия фиксируется в репозитории отдельным коммитом: иначе локальная сборка
+# остаётся со старой версией и приложение предлагает «обновиться» назад.
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" Info.plist
+git add Info.plist
+git commit -q -m "Версия $VERSION"
+git push -q origin HEAD:main
 
 NO_INSTALL=1 ./build.sh
 # Без постоянного сертификата у пользователей после обновления слетят разрешения.
