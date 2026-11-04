@@ -23,16 +23,27 @@ final class VoiceRecorder: @unchecked Sendable {
 
     /// `deviceUID` — UID устройства CoreAudio; nil или пропавшее устройство — системный микрофон.
     func start(deviceUID: String?) throws {
+        // Повторный старт (двойное нажатие клавиши) ставил второй tap на ту же шину —
+        // AVAudioEngine на это бросает исключение и роняет приложение. Сначала всё снимаем.
+        if running {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            running = false
+        }
         let input = engine.inputNode
+        input.removeTap(onBus: 0)
         if let deviceUID, var device = Self.deviceID(forUID: deviceUID), let unit = input.audioUnit {
             AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                  &device, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
-        let inFormat = input.outputFormat(forBus: 0)
-        guard inFormat.sampleRate > 0, inFormat.channelCount > 0,
+        // Формат берём у самого входа (inputFormat — то, что даёт устройство). Свой формат
+        // в installTap, не совпавший с устройством (сменили микрофон, другая частота), —
+        // тоже исключение и падение. Поэтому tap ставим с format: nil, а конвертер
+        // собираем по формату первого пришедшего буфера.
+        let hwFormat = input.inputFormat(forBus: 0)
+        guard hwFormat.sampleRate > 0, hwFormat.channelCount > 0,
               let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Self.sampleRate,
-                                            channels: 1, interleaved: false),
-              let converter = AVAudioConverter(from: inFormat, to: outFormat)
+                                            channels: 1, interleaved: false)
         else { throw VoiceEngineError("Микрофон недоступен") }
 
         lock.withLock {
@@ -40,9 +51,16 @@ final class VoiceRecorder: @unchecked Sendable {
             samples.reserveCapacity(16_000 * 30)
             smoothedLevel = 0
         }
-        let ratio = Self.sampleRate / inFormat.sampleRate
-        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buffer, _ in
+        let box = ConverterBox()
+        input.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             guard let self else { return }
+            let format = buffer.format
+            if box.converter == nil || box.format != format {
+                box.converter = AVAudioConverter(from: format, to: outFormat)
+                box.format = format
+            }
+            guard let converter = box.converter, format.sampleRate > 0 else { return }
+            let ratio = Self.sampleRate / format.sampleRate
             let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
             guard let out = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
             var fed = false
@@ -156,4 +174,11 @@ final class VoiceRecorder: @unchecked Sendable {
         }
         return status == noErr && device != 0 ? device : nil
     }
+}
+
+/// Конвертер, который создаётся в аудиопотоке по формату первого буфера. Пользуется им
+/// только поток tap-а, поэтому без блокировок.
+private final class ConverterBox: @unchecked Sendable {
+    var converter: AVAudioConverter?
+    var format: AVAudioFormat?
 }
