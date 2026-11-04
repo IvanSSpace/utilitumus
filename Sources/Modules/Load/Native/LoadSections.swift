@@ -10,36 +10,37 @@ struct AdviceSection: View {
     var onMore: (() -> Void)?
     var moreTitle = ""
 
+    private func icon(_ s: AdviceSeverity) -> String {
+        switch s {
+        case .high: return "exclamationmark.triangle.fill"
+        case .med: return "lightbulb.fill"
+        case .low: return "info.circle.fill"
+        }
+    }
+
     var body: some View {
-        Section {
+        DSSection("Что выключить", trailing: items.isEmpty ? nil : String(items.count)) {
             if items.isEmpty {
-                EmptyNote(text: "Подсказок нет — всё спокойно.")
+                LoadEmpty(text: "Подсказок нет — всё спокойно.")
             }
             ForEach(Array(items.prefix(limit ?? items.count))) { item in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                DSRow(icon: icon(item.severity), title: item.title, subtitle: item.detail) {
+                    HStack(spacing: 8) {
                         SeverityBadge(severity: item.severity)
-                        Text(item.title).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(item.detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let pid = item.stopPid {
-                        HStack {
-                            Button("Остановить…") { onStop(pid) }
+                        if let pid = item.stopPid {
                             if item.savesMB > 0 {
-                                Text("освободит \(Fmt.mb(item.savesMB))").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                                Text("−\(Fmt.mb(item.savesMB))").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                                    .help("Освободит \(Fmt.mb(item.savesMB))")
                             }
+                            DSButton("Остановить…", small: true) { onStop(pid) }
                         }
                     }
                 }
-                .padding(.vertical, 2)
             }
             if let limit, items.count > limit, let onMore {
-                Button("ещё \(items.count - limit) — \(moreTitle)", action: onMore).buttonStyle(.link)
-            }
-        } header: {
-            HStack {
-                Text("Что выключить")
-                if !items.isEmpty { Text("\(items.count)").foregroundStyle(.secondary).monospacedDigit() }
+                LoadLine {
+                    DSButton("ещё \(items.count - limit) — \(moreTitle)", icon: "chevron.right", style: .plain, small: true, action: onMore)
+                }
             }
         }
     }
@@ -52,18 +53,14 @@ struct TopProgramsSection: View {
     var body: some View {
         let list = map.freeCandidates.filter { $0.key != "macos" }.sorted { $0.totalMB > $1.totalMB }.prefix(5)
         let maxV = Double(list.map(\.totalMB).max() ?? 1)
-        Section {
-            if list.isEmpty { EmptyNote(text: "Пока нет данных.") }
+        DSSection("Кто больше всех", trailing: "RAM + сжато") {
+            if list.isEmpty { LoadEmpty(text: "Пока нет данных.") }
             ForEach(Array(list)) { c in
-                HStack {
-                    Text(c.name).lineLimit(1)
-                    Spacer()
+                DSRow(title: c.name) {
                     Text(Fmt.mb(c.totalMB)).monospacedDigit()
-                    ShareBar(values: [Double(c.totalMB)], maximum: maxV, colors: [.accentColor], width: 80)
+                    ShareBar(values: [Double(c.totalMB)], maximum: maxV, width: 80)
                 }
             }
-        } header: {
-            HStack { Text("Кто больше всех"); Spacer(); Text("в RAM + сжато").font(.caption).foregroundStyle(.secondary) }
         }
     }
 }
@@ -75,28 +72,30 @@ struct FreeCandidatesSection: View {
     var onStopGroup: (String) -> Void
 
     var body: some View {
-        Section {
+        DSSection("Что можно освободить", trailing: "RAM + сжато") {
             ForEach(map.freeCandidates) { c in
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                LoadLine {
+                    HStack(alignment: .top, spacing: 10) {
                         RoundedRectangle(cornerRadius: 2).fill(palette.color(forKey: c.key)).frame(width: 10, height: 10)
-                        Text(c.name).lineLimit(1)
-                        Spacer()
-                        Text("\(Fmt.mb(c.ramMB)) + \(Fmt.mb(c.compressedMB))").font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                        Text(Fmt.mb(c.totalMB)).fontWeight(.semibold).monospacedDigit().frame(width: 80, alignment: .trailing)
-                    }
-                    if let gid = c.stoppableGroup {
-                        Button("Остановить группу…") { onStopGroup(gid) }
-                            .controlSize(.small)
-                    }
-                    if !c.hint.isEmpty {
-                        Text(c.hint).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 4)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(c.name).font(DS.rowTitle).lineLimit(1)
+                            if !c.hint.isEmpty {
+                                Text(c.hint).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(Fmt.mb(c.totalMB)).fontWeight(.semibold).monospacedDigit()
+                            Text("\(Fmt.mb(c.ramMB)) + \(Fmt.mb(c.compressedMB))").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        if let gid = c.stoppableGroup {
+                            DSButton("Остановить…", small: true) { onStopGroup(gid) }
+                                .help("Остановить группу")
+                        }
                     }
                 }
-                .padding(.vertical, 2)
             }
-        } header: {
-            HStack { Text("Что можно освободить"); Spacer(); Text("в RAM + сжато").font(.caption).foregroundStyle(.secondary) }
         }
     }
 }
@@ -108,39 +107,34 @@ struct DiskSection: View {
     private func pct(_ v: Int?) -> String { v.map { "\($0) %" } ?? "нет данных" }
 
     var body: some View {
-        Section {
+        let model = [disk.model, disk.sizeGB.map { "\($0) GB" }].compactMap { $0 }.joined(separator: " · ")
+        DSSection("Диск", trailing: model.isEmpty ? nil : model) {
             if disk.hasSmart {
-                LabeledContent("Износ SSD") {
+                DSRow(icon: "internaldrive.fill", title: "Износ SSD") {
                     Text("\(pct(disk.wearPct)) · записано \(disk.writtenTB.map { Fmt.compact($0) + " TB" } ?? "—") · запас \(pct(disk.sparePct))")
-                        .monospacedDigit()
+                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
                 if let errors = disk.mediaErrors, errors > 0 {
-                    Label("Ошибок чтения/записи: \(errors) — сделай резервную копию", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
+                    LoadLine {
+                        Label("Ошибок чтения/записи: \(errors) — сделай резервную копию", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                    }
                 }
             }
-            LabeledContent("Запись в своп") {
+            DSRow(icon: disk.hasSmart ? nil : "internaldrive.fill", title: "Запись в своп") {
                 let day = "≈\(Fmt.compact(disk.swapGBPerDay)) GB/день"
                 let share = disk.swapSharePct.map { " (\($0) % всей записи)" } ?? ""
-                Text(day + share).monospacedDigit()
+                Text(day + share).font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
-            LabeledContent(disk.swap24SpanHours.map { "За последние \(Int(min(24, $0.rounded()))) ч" } ?? "За сутки") {
+            DSRow(title: disk.swap24SpanHours.map { "За последние \(Int(min(24, $0.rounded()))) ч" } ?? "За сутки") {
                 if let gb = disk.swapWritten24hGB, let span = disk.swap24SpanHours {
                     // История короче суток: число — за то, что накоплено, а не пересчёт на сутки.
-                    Text(Fmt.compact(span < 23 ? gb * span / 24 : gb) + " GB").monospacedDigit()
+                    Text(Fmt.compact(span < 23 ? gb * span / 24 : gb) + " GB").font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 } else {
-                    Text("копится").foregroundStyle(.secondary)
+                    Text("копится").font(.callout).foregroundStyle(.secondary)
                 }
             }
-            Text("Своп опасен не износом диска, а тормозами.")
-                .font(.caption).foregroundStyle(.secondary)
-        } header: {
-            HStack {
-                Text("Диск")
-                Spacer()
-                Text([disk.model, disk.sizeGB.map { "\($0) GB" }].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            LoadNote(text: "Своп опасен не износом диска, а тормозами.")
         }
     }
 }
@@ -166,35 +160,38 @@ struct GroupsSection: View {
 
     var body: some View {
         let maxMem = Double(groups.map(\.memMB).max() ?? 1)
-        Section {
-            if groups.isEmpty { EmptyNote(text: "Сейчас таких процессов нет.") }
+        DSSection(kind.title, trailing: "\(groups.count) · " + Fmt.mb(groups.reduce(0) { $0 + $1.memMB })) {
+            if groups.isEmpty { LoadEmpty(text: "Сейчас таких процессов нет.") }
             ForEach(groups) { g in
-                DisclosureGroup(isExpanded: Binding(
-                    get: { expanded.contains(g.id) },
-                    set: { if $0 { expanded.insert(g.id) } else { expanded.remove(g.id) } })
-                ) {
-                    GroupBody(group: g, snapshot: snapshot, showAll: Binding(
-                        get: { showAll.contains(g.id) },
-                        set: { if $0 { showAll.insert(g.id) } else { showAll.remove(g.id) } }),
-                        onStopProcess: onStopProcess, onStopGroup: onStopGroup)
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(g.name).lineLimit(1).help(g.path ?? "")
-                        Text("\(g.count) проц.").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                        Spacer()
-                        Text(Fmt.mb(g.memMB)).monospacedDigit()
-                        Text(Fmt.percent(Double(g.memMB), of: Double(snapshot.memory.totalMB)))
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 36, alignment: .trailing)
-                        ShareBar(values: [Double(g.memMB)], maximum: maxMem, colors: [.accentColor], width: 60)
+                let open = expanded.contains(g.id)
+                LoadLine {
+                    Button {
+                        if open { expanded.remove(g.id) } else { expanded.insert(g.id) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(g.name).font(DS.rowTitle).lineLimit(1).help(g.path ?? "")
+                            Text("\(g.count) проц.").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            Spacer()
+                            Text(Fmt.mb(g.memMB)).monospacedDigit()
+                            Text(Fmt.percent(Double(g.memMB), of: Double(snapshot.memory.totalMB)))
+                                .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 36, alignment: .trailing)
+                            ShareBar(values: [Double(g.memMB)], maximum: maxMem, width: 60)
+                            DisclosureChevron(open: open)
+                        }
+                        .contentShape(Rectangle())
+                        .hoverRow(selected: open)
                     }
+                    .buttonStyle(.plain)
                 }
-            }
-        } header: {
-            HStack {
-                Text(kind.title)
-                Text("\(groups.count)").foregroundStyle(.secondary).monospacedDigit()
-                Spacer()
-                Text(Fmt.mb(groups.reduce(0) { $0 + $1.memMB })).monospacedDigit()
+                if open {
+                    LoadLine(divider: false) {
+                        GroupBody(group: g, snapshot: snapshot, showAll: Binding(
+                            get: { showAll.contains(g.id) },
+                            set: { if $0 { showAll.insert(g.id) } else { showAll.remove(g.id) } }),
+                            onStopProcess: onStopProcess, onStopGroup: onStopGroup)
+                    }
+                    .padding(.top, -9)
+                }
             }
         }
     }
@@ -219,14 +216,12 @@ private struct GroupBody: View {
                     Text(showAll ? "всего \(Fmt.plural(group.count, "процесс", "процесса", "процессов"))"
                          : "ещё \(Fmt.plural(group.restCount, "процесс", "процесса", "процессов")) — \(Fmt.mb(group.restMB))")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button(showAll ? "свернуть" : "показать все") { showAll.toggle() }
-                        .buttonStyle(.link).font(.caption)
+                    DSButton(showAll ? "свернуть" : "показать все", style: .plain, small: true) { showAll.toggle() }
                 }
                 .padding(.top, 6)
             }
             if group.kind == .project || group.kind == .app, group.stoppableMB > 0 {
-                Button("Остановить группу…") { onStopGroup(group.id) }
-                    .controlSize(.small)
+                DSButton("Остановить группу…", small: true) { onStopGroup(group.id) }
                     .padding(.top, 8)
             }
             if !group.hints.isEmpty {
@@ -240,7 +235,6 @@ private struct GroupBody: View {
                 .padding(.top, 8)
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -271,7 +265,7 @@ private struct ProcessRow: View {
             if member.stoppable {
                 StopButton(help: "Остановить") { onStop(member.pid) }
             } else {
-                Color.clear.frame(width: 18, height: 1)
+                StopButton.gap
             }
         }
         .padding(.vertical, 2)

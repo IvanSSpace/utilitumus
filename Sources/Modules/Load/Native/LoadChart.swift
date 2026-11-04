@@ -69,7 +69,7 @@ struct HistoryChart: View {
 
     private var legend: some View {
         let last = window.points.last
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 4) {
+        return FlowGrid(minWidth: 170, spacing: 8, rowSpacing: 4) {
             ForEach(Array(window.series.enumerated()), id: \.element.id) { i, s in
                 HStack(spacing: 6) {
                     RoundedRectangle(cornerRadius: 2).fill(colors[safe: i]).frame(width: 10, height: 10)
@@ -178,6 +178,7 @@ struct HistoryChart: View {
 /// Мини-график для «Просто»: занято и своп, без осей.
 struct HistorySpark: View {
     let window: HistoryWindow
+    @Environment(\.dsTint) private var tint
 
     private var points: [HistoryWindow.Point] { window.points }
 
@@ -199,9 +200,9 @@ struct HistorySpark: View {
                     .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 Chart(points) { p in
                     AreaMark(x: .value("t", Date(timeIntervalSince1970: TimeInterval(p.ts))), yStart: .value("низ", used.lowerBound),
-                             yEnd: .value("занято", Double(p.usedMB))).foregroundStyle(Color.accentColor.opacity(0.25))
+                             yEnd: .value("занято", Double(p.usedMB))).foregroundStyle(tint.opacity(0.25))
                     LineMark(x: .value("t", Date(timeIntervalSince1970: TimeInterval(p.ts))), y: .value("занято", Double(p.usedMB)))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(tint)
                 }
                 .chartYScale(domain: used).chartXAxis(.hidden).chartYAxis(.hidden).frame(height: 36)
                 Chart(points) { p in

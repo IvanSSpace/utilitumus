@@ -13,7 +13,7 @@ struct SessionsTab: View {
     @State private var closed: Set<Int32> = []
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if let s = store.snapshot {
                 if mode == .full { full(s) } else { simple(s) }
                 FooterSection(snapshot: s)
@@ -21,22 +21,19 @@ struct SessionsTab: View {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }
         }
-        .formStyle(.grouped)
     }
 
     @ViewBuilder
     private func full(_ s: LoadSnapshot) -> some View {
         let d = s.sessions
         let now = s.timestamp.timeIntervalSince1970
-        Section {
-            if d.claude.isEmpty { EmptyNote(text: "Сессий Claude нет.") }
+        DSSection("Claude Code", trailing: SessionsHeader.summary(count: d.claude.count, mb: d.claude.reduce(0) { $0 + $1.memMB })) {
+            if d.claude.isEmpty { LoadEmpty(text: "Сессий Claude нет.") }
             ForEach(d.claude) { session in
                 SessionCard(session: session, now: now, expanded: expandedBinding(session),
                             onStop: { store.requestStop(session: session) },
                             onStopChild: { store.requestStop(session: session, child: $0) })
             }
-        } header: {
-            SessionsHeader(title: "Claude Code", count: d.claude.count, mb: d.claude.reduce(0) { $0 + $1.memMB })
         }
         TerminalsSection(hosts: d.terminals, onStopShell: { store.requestStop(shell: $0) },
                          onStopChild: { store.requestStop(shell: $0, child: $1) })
