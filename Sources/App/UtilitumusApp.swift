@@ -99,6 +99,7 @@ struct ModuleDetail: View {
 struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var whatsNew = WhatsNew.shared
     @Environment(\.openSettings) private var openSettings
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
@@ -161,6 +162,8 @@ struct MainView: View {
             }
         }
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0) }
+        .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet() }
+        .onAppear { whatsNew.showIfUpdated() }
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
@@ -248,7 +251,10 @@ struct UpdateFooter: View {
             .font(.callout)
             .foregroundStyle(showAbout ? Color.accentColor : .primary)
             HStack {
-                Text("Версия \(updater.currentVersion)")
+                // Клик по версии — «Обновление стороннего программного обеспечения»: что нового.
+                Button("Версия \(updater.currentVersion)") { WhatsNew.shared.isShown = true }
+                    .buttonStyle(.plain)
+                    .help("Что изменилось в последних версиях")
                 Spacer()
                 Button {
                     updater.check()

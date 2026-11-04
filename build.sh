@@ -64,6 +64,7 @@ codesign --force --sign "$SIGN_ID" "$LINKS_APP"
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
+cp Resources/WhatsNew.json "$APP_BUNDLE/Contents/Resources/"
 
 codesign --force --sign "$SIGN_ID" "$APP_BUNDLE"
 

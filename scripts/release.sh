@@ -20,6 +20,17 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   echo "Локальный main не совпадает с GitHub — сначала git push." >&2
   exit 1
 fi
+# Что нового — из Resources/WhatsNew.json: то же видят пользователи в приложении.
+NOTES="$(python3 -c '
+import json, sys
+v = sys.argv[1]
+e = next((e for e in json.load(open("Resources/WhatsNew.json")) if e["version"] == v), None)
+print("\n".join("- " + i for i in e["items"]) if e else "")
+' "$VERSION")"
+if [ -z "$NOTES" ]; then
+  echo "Нет записи для $VERSION в Resources/WhatsNew.json — допиши, что изменилось." >&2
+  exit 1
+fi
 if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
   echo "Релиз $TAG уже есть." >&2
   exit 1
@@ -43,5 +54,5 @@ ditto -c -k --keepParent build/Utilitumus.app build/Utilitumus.zip
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag "$TAG"
 git push -q origin "$TAG"
-gh release create "$TAG" build/Utilitumus.zip -R "$REPO" --title "Utilitumus $TAG" --generate-notes
+gh release create "$TAG" build/Utilitumus.zip -R "$REPO" --title "Utilitumus $TAG" --notes "$NOTES"
 echo "Выложено: https://github.com/$REPO/releases/tag/$TAG"
