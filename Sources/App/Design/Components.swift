@@ -15,6 +15,30 @@ import SwiftUI
 //
 // Страницу в карточку, фон окна и переход между модулями делает окно — в экране об этом заботиться не нужно.
 
+// MARK: - Наведение
+
+private struct HoverFill<S: Shape>: ViewModifier {
+    let shape: S
+    let normal: Color
+    let hovered: Color
+    @State private var hover = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(shape)
+            .background(shape.fill(hover ? hovered : normal))
+            .onHover { hover = $0 }
+    }
+}
+
+extension View {
+    /// Фон формы, который мгновенно (без анимации) меняется при наведении. Состояние наведения живёт
+    /// в самом модификаторе: родитель и содержимое при этом не пересобираются.
+    func hoverFill<S: Shape>(_ shape: S, normal: Color, hovered: Color) -> some View {
+        modifier(HoverFill(shape: shape, normal: normal, hovered: hovered))
+    }
+}
+
 // MARK: - Кнопки
 
 /// Главное действие страницы: подпись, значок, замыкание. Показывается капсулой в шапке.

@@ -101,7 +101,7 @@ enum DSTheme: String, CaseIterable, Identifiable {
 
 extension Module {
     /// Оттенок модуля (0…1) берётся из таблицы `ModuleCategory.all`.
-    fileprivate var dsHue: Double { category.hue(of: self) }
+    fileprivate var dsHue: Double { categoryHue }
 
     fileprivate func hsb(_ s: Double, _ b: Double) -> Color {
         Color(hue: dsHue, saturation: s, brightness: b)

@@ -9,16 +9,14 @@ struct ModuleScreen<Content: View>: View {
     let module: Module
     @ViewBuilder var content: Content
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var access = AccessState.shared
     @State private var hasPage = false
-    /// Меняется, когда экран доступа решил перепроверить требования.
-    @State private var recheck = 0
 
     var body: some View {
-        let _ = recheck
         if !modules.isOn(module) {
             ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
-        } else if !module.blockingRequirements.isEmpty {
-            ModuleSetupView(module: module) { recheck += 1 }
+        } else if access.blocked.contains(module) {
+            ModuleSetupView(module: module) { access.refresh() }
         } else {
             VStack(spacing: 0) {
                 if !hasPage { CompatBar(module: module) }

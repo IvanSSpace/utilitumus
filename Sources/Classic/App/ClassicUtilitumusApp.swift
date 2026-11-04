@@ -111,7 +111,8 @@ struct ClassicMainView: View {
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
-        .frame(minWidth: 680, minHeight: 460)
+        // Минимальный размер — окну, а не рамкой на корне: рамка заставляет NSHostingView перемерять всё дерево.
+        .background(WindowMinSize(width: 680, height: 460))
         .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
             // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
