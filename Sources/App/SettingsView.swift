@@ -1,72 +1,99 @@
 import SwiftUI
 
-/// Окно настроек (Cmd+,): раздел «Модули».
+/// Окно настроек (Cmd+,): модули. Один раздел — без вкладок, иначе сверху висит одинокая иконка.
 struct SettingsView: View {
     var body: some View {
-        TabView {
-            ModulesSettings()
-                .tabItem { Label("Модули", systemImage: "square.grid.2x2") }
-        }
-        .frame(width: 560)
-        .fixedSize(horizontal: false, vertical: true)
+        ModulesSettings()
+            .frame(width: 580)
+            .fixedSize(horizontal: false, vertical: true)
+            .navigationTitle("Модули")
     }
 }
 
 private struct ModulesSettings: View {
     @ObservedObject var manager = ModuleManager.shared
 
-    /// Высота строки задаём сами: List внутри окна с fixedSize не знает своей высоты.
-    private let rowHeight: CGFloat = 54
+    /// Высоту строки задаём сами: List внутри окна с fixedSize не знает своей высоты.
+    private let rowHeight: CGFloat = 48
 
     var body: some View {
-        // Не Form: `.onMove` внутри Form `.grouped` на macOS не срабатывает, а в List — штатный путь.
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Модули").font(.title2.weight(.semibold))
+                Text("Включай только нужные — выключенный ничего не делает и не ест ресурсы.")
+                    .foregroundStyle(.secondary)
+            }
+
+            // Не Form: `.onMove` внутри Form `.grouped` на macOS не срабатывает, а в List — штатный путь.
             List {
                 ForEach(manager.order) { module in
-                    HStack(spacing: 12) {
-                        ModuleIconBadge(module: module, size: 28)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(module.title)
-                            Text(module.summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        Spacer()
-                        Button {
-                            manager.setHidden(module, !manager.isHidden(module))
-                        } label: {
-                            Image(systemName: manager.isHidden(module) ? "eye.slash" : "eye")
-                                .frame(width: 20)
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(manager.isHidden(module) ? .secondary : .primary)
-                        .help(manager.isHidden(module) ? "Скрыт из боковой панели — показать" : "В боковой панели — скрыть")
-                        Toggle(module.title, isOn: Binding(
-                            get: { manager.isOn(module) },
-                            set: { manager.setOn(module, $0) }
-                        ))
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .help(manager.isOn(module) ? "Включён — выключить" : "Выключен — включить")
-                    }
-                    .frame(height: rowHeight)
+                    row(module)
+                        .frame(height: rowHeight)
                 }
                 .onMove { manager.move(from: $0, to: $1) }
             }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .listStyle(.inset(alternatesRowBackgrounds: false))
             .scrollDisabled(true)
-            .frame(height: CGFloat(manager.order.count) * (rowHeight + 8) + 8)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
+            .frame(height: CGFloat(manager.order.count) * (rowHeight + 9) + 10)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
 
-            Text("Переключатель включает модуль, глаз — показывает в боковой панели (скрытый работает в фоне). Порядок — перетаскиванием.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Button("Сбросить порядок и показать всё") { manager.resetAll() }
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                legend("switch.2", "работает")
+                legend("eye", "в боковой панели")
+                legend("line.3.horizontal", "перетащи — порядок")
+                Spacer()
+                Button("Сбросить") { manager.resetAll() }
+                    .buttonStyle(.link)
+                    .help("Порядок по умолчанию, все модули снова в боковой панели. Включённость не меняется")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
-        .padding(20)
+        .padding(22)
+    }
+
+    private func row(_ module: Module) -> some View {
+        let on = manager.isOn(module)
+        let hidden = manager.isHidden(module)
+        return HStack(spacing: 12) {
+            Image(systemName: "line.3.horizontal")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            ModuleIconBadge(module: module, size: 30)
+                .saturation(on ? 1 : 0.3)
+                .opacity(on ? 1 : 0.7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(module.title).fontWeight(.medium)
+                Text(module.info.tagline)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .help(module.info.tagline)
+            }
+            Spacer(minLength: 8)
+            Button {
+                manager.setHidden(module, !hidden)
+            } label: {
+                Image(systemName: hidden ? "eye.slash" : "eye")
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(hidden ? .tertiary : .secondary)
+            .help(hidden ? "Скрыт из боковой панели — показать" : "В боковой панели — скрыть")
+            Toggle(module.title, isOn: Binding(get: { on }, set: { manager.setOn(module, $0) }))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .labelsHidden()
+                .help(on ? "Включён — выключить" : "Выключен — включить")
+        }
+    }
+
+    private func legend(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text)
+        }
     }
 }

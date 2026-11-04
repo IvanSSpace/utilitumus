@@ -2,88 +2,159 @@ import SwiftUI
 
 /// Страница «О проекте». Не `Module`: у неё нет состояния в настройках.
 struct AboutView: View {
-    /// Открыть модуль в основном окне (для показанных и скрытых; выключенные не открываются).
+    /// Открыть модуль в основном окне (и показанный, и скрытый).
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var updater = Updater.shared
+
+    private static let groups: [(title: String, subtitle: String, modules: [Module])] = [
+        ("Исправления MacBook", "То, что в macOS должно быть, но его нет", [.sound, .fans, .mixer, .mouse]),
+        ("Утилиты с фишками", "Мелочи, которые экономят время каждый день", [.stash, .browser]),
+        ("Для работы с ИИ", "Когда агенты съедают память", [.load]),
+    ]
 
     var body: some View {
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Utilitumus").font(.largeTitle.bold())
-                    Text("Тонкая настройка MacBook там, где macOS её не даёт.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Зачем") {
-                Text("Вентиляторы на максимум перед игрой, наушники без захвата микрофона, лишнее закрыто перед работой. Всё это в одном приложении, а не в россыпи программ.")
-            }
-
-            Section("Исправления MacBook") {
-                Text("То, что в macOS должно быть, но его нет.")
-                    .foregroundStyle(.secondary)
-                moduleRow(.sound, "основные микрофон и выход, которые не перехватят провод или Bluetooth.")
-                moduleRow(.fans, "полная мощность одной кнопкой, свои режимы и кривые, защита от перегрева.")
-                moduleRow(.mixer, "громкость каждого приложения отдельно.")
-                moduleRow(.mouse, "прокрутка мыши отдельно от трекпада: своё направление и плавность.")
-            }
-
-            Section("Утилиты с фишками") {
-                moduleRow(.stash, "закрыть лишнее одной кнопкой и вернуть всё на места.")
-                moduleRow(.browser, "клик по ссылке открывает у курсора список браузеров; для частых случаев есть правила.")
-            }
-
-            Section("Для работы с ИИ") {
-                moduleRow(.load, "сколько памяти и свопа занимают сессии Claude Code, модели и программы.")
-            }
-
-            Section("Проект") {
-                HStack(spacing: 4) {
-                    Text("Открытый код:")
-                    Link("github.com/IvanSSpace/utilitumus",
-                         destination: URL(string: "https://github.com/IvanSSpace/utilitumus")!)
-                }
-                HStack(spacing: 4) {
-                    Text("Порядок, скрытие и выключение модулей — в")
-                    SettingsLink {
-                        Text("Настройках (Cmd+,)")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                hero
+                ForEach(Self.groups, id: \.title) { group in
+                    VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(group.title).font(.headline)
+                            Text(group.subtitle).font(.callout).foregroundStyle(.secondary)
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 10)], spacing: 10) {
+                            ForEach(group.modules) { module in
+                                ModuleCard(module: module, on: modules.isOn(module),
+                                           hidden: modules.isHidden(module)) { open(module) }
+                            }
+                        }
                     }
-                    .buttonStyle(.link)
                 }
+                footer
             }
+            .padding(24)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
-        .formStyle(.grouped)
         .navigationTitle("О проекте")
     }
 
-    @ViewBuilder
-    private func moduleRow(_ module: Module, _ text: String) -> some View {
-        let on = modules.isOn(module)
-        let hidden = modules.isHidden(module)
-        Button {
-            open(module)
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                ModuleIconBadge(module: module, size: 22)
-                    .opacity(on ? 1 : 0.4)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(Text(module.title).fontWeight(.semibold)) — \(text)")
-                    if !on {
-                        Text("выключен — открой, чтобы включить")
-                            .font(.caption)
-                    } else if hidden {
-                        Text("скрыт из панели — работает в фоне")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+    private var hero: some View {
+        HStack(alignment: .center, spacing: 18) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 84, height: 84)
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Utilitumus").font(.largeTitle.bold())
+                    Text(updater.currentVersion)
+                        .font(.callout.weight(.medium).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
                 }
-                .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+                Text("Тонкая настройка MacBook там, где macOS её не даёт. Одно лёгкое приложение вместо россыпи утилит.")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button {
+                        WhatsNew.shared.isShown = true
+                    } label: {
+                        Label("Что нового", systemImage: "sparkles")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button {
+                        updater.check()
+                    } label: {
+                        Label("Проверить обновления", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Link(destination: URL(string: "https://github.com/\(Updater.repo)")!) {
+                        Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .controlSize(.regular)
+                .padding(.top, 4)
             }
-            .foregroundStyle(on ? .primary : .secondary)
-            .contentShape(Rectangle())
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(LinearGradient(colors: [Color.accentColor.opacity(0.18), Color.purple.opacity(0.10), .clear],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(.quaternary))
+        }
+    }
+
+    private var footer: some View {
+        let on = Module.allCases.filter { modules.isOn($0) }.count
+        return HStack(spacing: 6) {
+            Text("Модулей: \(Module.allCases.count), включено: \(on).")
+            Text("Открытый код — делай форк и предлагай свои модули.")
+            Spacer()
+            SettingsLink { Text("Настроить модули") }
+                .buttonStyle(.link)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
+/// Карточка модуля: значок, название, одна строка о нём и состояние. Клик — открыть.
+private struct ModuleCard: View {
+    let module: Module
+    let on: Bool
+    let hidden: Bool
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .top, spacing: 12) {
+                ModuleIconBadge(module: module, size: 36)
+                    .saturation(on ? 1 : 0.3)
+                    .opacity(on ? 1 : 0.7)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(module.title).font(.body.weight(.semibold)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        status
+                    }
+                    Text(module.info.tagline)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2, reservesSpace: true)
+                        .multilineTextAlignment(.leading)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(hovered ? 0.08 : 0.04),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(hovered ? 0.12 : 0.06)))
+            .scaleEffect(hovered ? 1.01 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
+        .roundedFocusRing(12)
+        .onHover { h in withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { hovered = h } }
+        .help(on ? "Открыть" : "Открыть — там его можно включить")
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        let (text, color): (String, Color) = !on ? ("выключен", .secondary)
+            : hidden ? ("в фоне", .orange) : ("включён", .green)
+        Text(text)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.14), in: Capsule())
     }
 }
