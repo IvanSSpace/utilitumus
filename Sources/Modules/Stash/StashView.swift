@@ -422,15 +422,6 @@ struct StashView: View {
 
             scenariosSection
 
-            if !store.axTrusted {
-                DSSection("Доступ") {
-                    DSRow(icon: "lock.shield", title: "Дай «Универсальный доступ»",
-                          subtitle: "Без него окна не вернутся на места, остальное работает") {
-                        DSButton("Дать доступ…", small: true) { store.requestAccess() }
-                    }
-                }
-            }
-
             Text("Finder и Utilitumus не закрываются.")
                 .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.4))
                 .padding(.horizontal, 6)

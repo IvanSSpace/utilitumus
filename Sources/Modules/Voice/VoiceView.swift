@@ -29,10 +29,8 @@ struct VoiceView: View {
         DSPage(module: .voice, subtitle: "Голосовой ввод в любом приложении", primary: primary) {
             modelsSection
             controlSection
-            HStack(alignment: .top, spacing: DS.blockSpacing) {
-                testSection.frame(maxWidth: .infinity)
-                permissionsSection.frame(maxWidth: .infinity)
-            }
+            testSection
+            accessibilityHint
         }
         .onAppear {
             devices = VoiceRecorder.inputDevices()
@@ -194,34 +192,19 @@ struct VoiceView: View {
         }
     }
 
-    // MARK: - Разрешения
+    // MARK: - Универсальный доступ
 
-    private var permissionsSection: some View {
-        DSSection("Разрешения") {
-            DSRow(title: "Микрофон", subtitle: controller.micStatus == .authorized ? nil : micText) {
-                if controller.micStatus == .authorized {
-                    DSChip("Разрешён", color: .green, icon: "checkmark")
-                } else {
-                    DSButton("Разрешить…", small: true) { controller.requestMic() }
-                }
+    /// Микрофон просит экран «Осталось дать доступ»; «Универсальный доступ» желателен, и тем, кто его
+    /// пропустил, здесь остаётся одна строка.
+    @ViewBuilder private var accessibilityHint: some View {
+        if !controller.axTrusted {
+            HStack(spacing: 10) {
+                Text("Без «Универсального доступа» текст только копируется, остаётся нажать ⌘V.")
+                    .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                DSButton("Разрешить…", small: true) { controller.requestAccessibility() }
             }
-            DSRow(title: "Универсальный доступ",
-                  subtitle: controller.axTrusted ? nil : "Без него текст копируется, остаётся нажать ⌘V") {
-                if controller.axTrusted {
-                    DSChip("Разрешён", color: .green, icon: "checkmark")
-                } else {
-                    DSButton("Разрешить…", small: true) { controller.requestAccessibility() }
-                }
-            }
-            .help("Нужен, чтобы текст вставлялся сам")
-        }
-    }
-
-    private var micText: String {
-        switch controller.micStatus {
-        case .authorized: return "Разрешён"
-        case .notDetermined: return "Ещё не спрашивали"
-        default: return "Запрещён"
+            .padding(.horizontal, 6)
         }
     }
 }

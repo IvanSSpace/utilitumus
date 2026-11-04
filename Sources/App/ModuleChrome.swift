@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить».
-/// «Как это работает» и переключатель «Включён» рисует шапка `DSPage`. Экран, ещё не переведённый
+/// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить»,
+/// а если включён, но не выдан обязательный доступ, — экран «Осталось дать доступ».
+/// «Как это работает» и переключатель «Включён» модуля рисует шапка `DSPage`. Экран, ещё не переведённый
 /// на `DSPage`, получает вместо неё компактную полоску с теми же кнопками.
 /// Выключенный модуль ничего не делает и экран его не запускает.
 struct ModuleScreen<Content: View>: View {
@@ -9,16 +10,21 @@ struct ModuleScreen<Content: View>: View {
     @ViewBuilder var content: Content
     @ObservedObject private var modules = ModuleManager.shared
     @State private var hasPage = false
+    /// Меняется, когда экран доступа решил перепроверить требования.
+    @State private var recheck = 0
 
     var body: some View {
-        if modules.isOn(module) {
+        let _ = recheck
+        if !modules.isOn(module) {
+            ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
+        } else if !module.blockingRequirements.isEmpty {
+            ModuleSetupView(module: module) { recheck += 1 }
+        } else {
             VStack(spacing: 0) {
                 if !hasPage { CompatBar(module: module) }
                 content
             }
             .onPreferenceChange(DSPageKey.self) { hasPage = $0 }
-        } else {
-            ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
         }
     }
 }
@@ -40,33 +46,67 @@ private struct CompatBar: View {
     }
 }
 
-/// Модуль выключен: что он делает и кнопка «Включить».
+/// Модуль выключен: что он делает, что умеет, что понадобится, и кнопка «Включить».
 struct ModuleOffView: View {
     let module: Module
     let enable: () -> Void
     let more: () -> Void
+    @Environment(\.dsTheme) private var theme
 
     var body: some View {
-        DSPage(module: module, subtitle: module.info.tagline,
-               primary: DSAction("Включить", icon: "power", action: enable), controls: false) {
-            DSSection("О модуле", trailing: module == .mouse ? nil : "выключен") {
-                VStack(alignment: .leading, spacing: 12) {
-                    if module == .mouse { DSChip("На доработке", color: .orange, icon: "hammer.fill") }
-                    Text(module.info.lead)
-                        .font(.system(size: 13.5))
-                        .foregroundStyle(.white.opacity(0.8))
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 10) {
-                        DSButton("Подробнее", icon: "info.circle", action: more)
-                        Text("Пока модуль выключен, он ничего не делает.")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.4))
+        let info = module.info
+        let abilities = Array((info.sections.first?.points ?? []).prefix(3))
+        let needs = module.requirements
+        ModuleCentered(module: module, title: module.title, lead: info.lead) {
+            VStack(spacing: 14) {
+            if module == .mouse { DSChip("На доработке", color: .orange, icon: "hammer.fill") }
+            HStack(alignment: .top, spacing: 16) {
+                if !abilities.isEmpty {
+                    column("Что умеет") {
+                        VStack(alignment: .leading, spacing: 9) {
+                            ForEach(Array(abilities.enumerated()), id: \.offset) { _, point in
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill").font(.system(size: 12))
+                                        .foregroundStyle(theme.accent(module))
+                                    Text(point).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.8))
+                                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .padding(14)
                     }
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                column("Понадобится") {
+                    if needs.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.green)
+                            Text("Ничего: включил и работает").font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.8))
+                        }
+                        .padding(14)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(needs) { ModuleRequirementRow(requirement: $0, compact: true) }
+                        }
+                    }
+                }
             }
+            }
+            .environment(\.dsTint, theme.accent(module))
+        } actions: {
+            DSButton("Включить", icon: "power", style: .primary, action: enable)
+                .environment(\.dsTint, theme.accent(module))
+                .controlSize(.large)
+            DSButton("Подробнее", icon: "info.circle", action: more)
         }
+    }
+
+    private func column<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased()).font(DS.sectionTitle).tracking(0.8)
+                .foregroundStyle(.white.opacity(0.42)).padding(.horizontal, 6)
+            content().modifier(ModuleCard())
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 }
 
