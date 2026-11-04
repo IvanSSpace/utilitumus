@@ -1,37 +1,13 @@
 import Foundation
 import CoreAudio
 
-enum Transport: String, Codable {
-    case builtIn
-    case usb
-    case bluetooth
-    case virtual
-    case other
-}
-
-struct AudioDeviceInfo {
-    let id: AudioDeviceID
-    let uid: String
-    let name: String
-    let transport: Transport
-}
-
-/// Устройство для отображения в UI: может быть сейчас не подключено физически —
-/// тогда id недоступен, но имя/тип берём из последнего известного состояния
-/// (PriorityStore их запоминает), чтобы показать "вернётся само при подключении".
-struct DisplayDevice {
-    let uid: String
-    let name: String
-    let transport: Transport
-    let isConnected: Bool
-    let colorIndex: Int
-}
-
 final class MonitorState: ObservableObject {
     static let shared = MonitorState()
     @Published var currentInputName: String = "—"
     @Published var currentInputIsBluetooth: Bool = false
-    @Published var displayDevices: [DisplayDevice] = []
+    @Published var currentOutputName: String = "—"
+    @Published var displayInputs: [DisplayDevice] = []
+    @Published var displayOutputs: [DisplayDevice] = []
 }
 
 final class AudioMonitor {
@@ -41,33 +17,19 @@ final class AudioMonitor {
     private let queue = DispatchQueue(label: "utilitumus.sound.audio-monitor")
     private var refreshTimer: DispatchSourceTimer?
 
-    // macOS ставит Bluetooth-гарнитуру ВРЕМЕННЫМ (transient) default input на время
-    // звонка (Telegram/FaceTime/т.п.) — штатный механизм, сам корректно откатывает
-    // после звонка. Наш AudioObjectPropertyListener не отличает transient-переключение
-    // от обычного грэба и откатывает его немедленно — это превращается в борьбу с
-    // системным call-роутингом за Bluetooth-профиль (HFP/A2DP), которая рвёт не
-    // только вход, но и выход (общий радиоканал). Если откатываем слишком часто за
-    // короткое время — явно не случайный грэб, а такая борьба — отступаем на паузу.
-    private var recentCorrections: [Date] = []
-    private var backoffUntil: Date?
+    // Защита от борьбы с системным call-роутингом (см. CorrectionThrottle) —
+    // отдельно для входа и выхода, чтобы пауза одного не отключала другой.
+    private var inputThrottle = CorrectionThrottle()
+    private var outputThrottle = CorrectionThrottle()
 
     func start() {
-        var defaultInputAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var devicesAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        AudioObjectAddPropertyListenerBlock(systemObjectID, &defaultInputAddress, queue) { [weak self] _, _ in
-            self?.enforcePolicyOnQueue()
-        }
-        AudioObjectAddPropertyListenerBlock(systemObjectID, &devicesAddress, queue) { [weak self] _, _ in
-            self?.enforcePolicyOnQueue()
+        for selector in [kAudioHardwarePropertyDefaultInputDevice,
+                         kAudioHardwarePropertyDefaultOutputDevice,
+                         kAudioHardwarePropertyDevices] {
+            var addr = address(selector)
+            AudioObjectAddPropertyListenerBlock(systemObjectID, &addr, queue) { [weak self] _, _ in
+                self?.enforcePolicyOnQueue()
+            }
         }
 
         enforcePolicy()
@@ -86,8 +48,8 @@ final class AudioMonitor {
         refreshTimer = timer
     }
 
-    /// Безопасно вызывать с любого потока (в т.ч. main — например после ручной
-    /// перестановки приоритета в UI): всегда уходит на фоновую очередь первым делом.
+    /// Безопасно вызывать с любого потока (в т.ч. main — например после смены
+    /// основного устройства в UI): всегда уходит на фоновую очередь первым делом.
     func enforcePolicy() {
         queue.async { [weak self] in
             self?.enforcePolicyOnQueue()
@@ -97,49 +59,48 @@ final class AudioMonitor {
     // MARK: - Policy (выполняется только на `queue`)
 
     private func enforcePolicyOnQueue() {
-        let all = allInputDevices()
-        guard let currentID = defaultInputDeviceID() else { return }
-        let current = all.first(where: { $0.id == currentID })
+        let inputs = allDevices(scope: kAudioObjectPropertyScopeInput)
+        let outputs = allDevices(scope: kAudioObjectPropertyScopeOutput)
+        let currentInputID = defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice)
+        let currentOutputID = defaultDeviceID(kAudioHardwarePropertyDefaultOutputDevice)
 
-        // LockState/PriorityStore мутируются из SwiftUI на main thread — читаем и
-        // публикуем состояние для UI одним синхронным хопом на main, чтобы не гонять
+        // Хранилища мутируются из SwiftUI на main thread — читаем и публикуем
+        // состояние для UI одним синхронным хопом на main, чтобы не гонять
         // @Published свойства между потоками.
-        let (isLocked, ranked, disabledUIDs) = DispatchQueue.main.sync { () -> (Bool, [AudioDeviceInfo], Set<String>) in
-            if let current {
-                MonitorState.shared.currentInputName = current.name
-                MonitorState.shared.currentInputIsBluetooth = current.transport == .bluetooth
+        let (bluetoothLocked, primaryUID, outputChoice) = DispatchQueue.main.sync { () -> (Bool, String?, OutputChoice) in
+            let state = MonitorState.shared
+            let currentInput = inputs.first { $0.id == currentInputID }
+            if let currentInput {
+                state.currentInputName = currentInput.name
+                state.currentInputIsBluetooth = currentInput.transport == .bluetooth
+            }
+            if let current = outputs.first(where: { $0.id == currentOutputID }) {
+                state.currentOutputName = current.name
             }
             let locked = LockState.shared.isLocked
-            let available = PriorityStore.shared.syncKnownDevices(from: all)
-            MonitorState.shared.displayDevices = PriorityStore.shared.displayList(available: all)
-            return (locked, available, DeviceEnableStore.shared.disabledUIDs)
+            PrimaryInputStore.shared.migrateIfNeeded(connected: inputs, bluetoothLocked: locked)
+            KnownDeviceStore.inputs.sync(from: inputs)
+            KnownDeviceStore.outputs.sync(from: outputs)
+            state.displayInputs = KnownDeviceStore.inputs.displayList(available: inputs)
+            state.displayOutputs = KnownDeviceStore.outputs.displayList(available: outputs)
+            return (locked, PrimaryInputStore.shared.primaryUID, PrimaryOutputStore.shared.choice)
         }
-
-        // Виртуальные устройства (Loopback, Screaming Bee, Zoom и т.п.) — чужая
-        // песочница: если текущий вход уже такой, значит его выбрали руками ради
-        // роутинга/стриминга, тул не вмешивается вообще.
-        if let current, current.transport == .virtual || current.transport == .other { return }
-
-        let allowed = ranked.filter {
-            !($0.transport == .bluetooth && isLocked)
-                && !disabledUIDs.contains($0.uid)
-                && $0.transport != .virtual
-                && $0.transport != .other
-        }
-        guard let desired = allowed.first, desired.id != currentID else { return }
 
         let now = Date()
-        if let backoffUntil, now < backoffUntil { return }
 
-        recentCorrections.append(now)
-        recentCorrections.removeAll { now.timeIntervalSince($0) > 5 }
-        guard recentCorrections.count < 3 else {
-            backoffUntil = now.addingTimeInterval(25)
-            recentCorrections.removeAll()
-            return
+        // Нет default input вовсе — состояние переходное, не вмешиваемся.
+        if let currentInputID,
+           let desired = SoundPolicy.desiredInput(devices: inputs, currentID: currentInputID,
+                                                  primaryUID: primaryUID, bluetoothLocked: bluetoothLocked),
+           inputThrottle.allow(at: now) {
+            setDefaultInput(desired.id)
         }
 
-        setDefaultInput(desired.id)
+        if let currentOutputID,
+           let desired = SoundPolicy.desiredOutput(devices: outputs, currentID: currentOutputID, choice: outputChoice),
+           outputThrottle.allow(at: now) {
+            setDefaultOutput(desired.id)
+        }
     }
 
     // MARK: - CoreAudio helpers
@@ -149,8 +110,8 @@ final class AudioMonitor {
         AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
     }
 
-    private func defaultInputDeviceID() -> AudioDeviceID? {
-        var addr = address(kAudioHardwarePropertyDefaultInputDevice)
+    private func defaultDeviceID(_ selector: AudioObjectPropertySelector) -> AudioDeviceID? {
+        var addr = address(selector)
         var deviceID = AudioDeviceID(0)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         let status = AudioObjectGetPropertyData(systemObjectID, &addr, 0, nil, &size, &deviceID)
@@ -158,11 +119,22 @@ final class AudioMonitor {
         return deviceID
     }
 
-    private func setDefaultInput(_ deviceID: AudioDeviceID) {
-        var addr = address(kAudioHardwarePropertyDefaultInputDevice)
+    private func setDefault(_ selector: AudioObjectPropertySelector, _ deviceID: AudioDeviceID) {
+        var addr = address(selector)
         var id = deviceID
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
         AudioObjectSetPropertyData(systemObjectID, &addr, 0, nil, size, &id)
+    }
+
+    private func setDefaultInput(_ deviceID: AudioDeviceID) {
+        setDefault(kAudioHardwarePropertyDefaultInputDevice, deviceID)
+    }
+
+    /// Системный выход (звуки уведомлений) переключаем вместе с основным,
+    /// как это делает сама macOS, иначе сигналы уйдут на «случайное» устройство.
+    private func setDefaultOutput(_ deviceID: AudioDeviceID) {
+        setDefault(kAudioHardwarePropertyDefaultOutputDevice, deviceID)
+        setDefault(kAudioHardwarePropertyDefaultSystemOutputDevice, deviceID)
     }
 
     private func allDeviceIDs() -> [AudioDeviceID] {
@@ -185,8 +157,8 @@ final class AudioMonitor {
     }
 
     /// Персистентный ключ устройства (переживает переподключение), в отличие
-    /// от AudioDeviceID, который выдаётся заново при каждом коннекте — по нему хранится
-    /// порядок приоритета. Номер USB-порта из UID выкинут (см. DeviceIdentity).
+    /// от AudioDeviceID, который выдаётся заново при каждом коннекте — по нему хранятся
+    /// основное устройство и список известных. Номер USB-порта из UID выкинут (см. DeviceIdentity).
     /// nil — у устройства нет UID: запомнить его всё равно не по чему.
     private func deviceUID(_ id: AudioDeviceID) -> String? {
         var addr = address(kAudioDevicePropertyDeviceUID)
@@ -209,6 +181,10 @@ final class AudioMonitor {
             return .usb
         case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE:
             return .bluetooth
+        case kAudioDeviceTransportTypeAirPlay:
+            return .airplay
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort:
+            return .display
         case kAudioDeviceTransportTypeVirtual, kAudioDeviceTransportTypeAggregate:
             return .virtual
         default:
@@ -216,10 +192,10 @@ final class AudioMonitor {
         }
     }
 
-    private func hasInputStreams(_ id: AudioDeviceID) -> Bool {
+    private func hasStreams(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> Bool {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioObjectPropertyScopeInput,
+            mScope: scope,
             mElement: kAudioObjectPropertyElementMain
         )
         var size: UInt32 = 0
@@ -227,9 +203,9 @@ final class AudioMonitor {
         return size > 0
     }
 
-    private func allInputDevices() -> [AudioDeviceInfo] {
+    private func allDevices(scope: AudioObjectPropertyScope) -> [AudioDeviceInfo] {
         allDeviceIDs()
-            .filter { hasInputStreams($0) }
+            .filter { hasStreams($0, scope: scope) }
             .compactMap { id in
                 deviceUID(id).map { AudioDeviceInfo(id: id, uid: $0, name: deviceName(id), transport: transportType(id)) }
             }

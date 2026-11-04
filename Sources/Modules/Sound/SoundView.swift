@@ -1,113 +1,62 @@
 import SwiftUI
 
-/// Блёклый акцентный цвет для иконки устройства. Индекс в палитре назначается
-/// и хранится в PriorityStore (с избеганием коллизий между одновременно
-/// видимыми устройствами) — здесь только сама палитра, порядок должен
-/// совпадать с DeviceAccent.paletteSize.
-private let deviceAccentPalette: [Color] = [
-    Color(red: 0.45, green: 0.58, blue: 0.78), // приглушённый синий
-    Color(red: 0.48, green: 0.68, blue: 0.55), // приглушённый зелёный
-    Color(red: 0.78, green: 0.48, blue: 0.48), // приглушённый красный
-    Color(red: 0.62, green: 0.52, blue: 0.75), // приглушённый фиолетовый
-    Color(red: 0.82, green: 0.62, blue: 0.42), // приглушённый оранжевый
-    Color(red: 0.42, green: 0.68, blue: 0.68), // приглушённый бирюзовый
-    Color(red: 0.78, green: 0.55, blue: 0.65), // приглушённый розовый
-    Color(red: 0.72, green: 0.68, blue: 0.42), // приглушённый оливковый
-]
-
-private func deviceAccentColor(for device: DisplayDevice) -> Color {
-    deviceAccentPalette[device.colorIndex % deviceAccentPalette.count]
+private func icon(for transport: Transport) -> String {
+    switch transport {
+    case .builtIn: return "laptopcomputer"
+    case .usb: return "cable.connector"
+    case .bluetooth: return "wave.3.right"
+    case .airplay: return "airplayaudio"
+    case .display: return "display"
+    case .virtual, .other: return "questionmark.circle"
+    }
 }
 
-private struct DeviceRow: View {
-    let device: DisplayDevice
+/// Строка выбора, как радиокнопка: отметка слева, серая и с подписью, если
+/// устройство не подключено, с замком, если выбрать нельзя.
+private struct ChoiceRow: View {
+    let icon: String
+    let title: String
+    let note: String?
+    let isSelected: Bool
+    let isConnected: Bool
     let isLocked: Bool
-    /// Только у самого верхнего устройства в приоритете имеет смысл говорить
-    /// "подключится — станет входом": для остальных выше по рангу уже что-то
-    /// работает, реконнект нижних ничего не поменяет.
-    let isTopPriority: Bool
-    @ObservedObject var enableStore = DeviceEnableStore.shared
-
-    private var isManuallyDisabled: Bool { enableStore.disabledUIDs.contains(device.uid) }
-    private var isBluetoothBlocked: Bool { device.transport == .bluetooth && isLocked }
-    private var isBlocked: Bool { isBluetoothBlocked || isManuallyDisabled }
-
-    private var icon: String {
-        switch device.transport {
-        case .builtIn: return "laptopcomputer"
-        case .usb: return "cable.connector"
-        case .bluetooth: return "wave.3.right"
-        case .virtual, .other: return "questionmark.circle"
-        }
-    }
+    let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
-                get: { !isManuallyDisabled },
-                set: { enabled in
-                    if enabled {
-                        DeviceEnableStore.shared.enable(device.uid)
-                    } else {
-                        DeviceEnableStore.shared.disable(device.uid)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .frame(width: 18)
+
+                Image(systemName: icon)
+                    .foregroundStyle(isConnected && !isLocked ? .primary : .secondary)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .lineLimit(1)
+                            .foregroundStyle(isConnected && !isLocked ? .primary : .secondary)
+                        if isLocked {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    AudioMonitor.shared.enforcePolicy()
-                }
-            ))
-            .toggleStyle(.checkbox)
-            .labelsHidden()
-
-            Circle()
-                .fill(device.isConnected ? Color.green : Color.secondary.opacity(0.4))
-                .frame(width: 7, height: 7)
-
-            Image(systemName: icon)
-                .foregroundStyle(isBlocked ? .secondary : deviceAccentColor(for: device))
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(device.name)
-                        .lineLimit(1)
-                        .strikethrough(isBlocked)
-                        .foregroundStyle(isBlocked ? .secondary : (device.isConnected ? .primary : .secondary))
-                    if isBluetoothBlocked {
-                        Image(systemName: "lock.fill")
-                            .font(.caption2)
+                    if let note {
+                        Text(note)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                if !device.isConnected && isTopPriority {
-                    Text(isManuallyDisabled ? "не подключено, выключено" : "не подключено — станет входом при подключении")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
 
-            Spacer()
-
-            Button {
-                PriorityStore.shared.moveUp(device.uid)
-                AudioMonitor.shared.enforcePolicy()
-            } label: {
-                Image(systemName: "chevron.up")
-                    .frame(width: 24, height: 22)
-                    .contentShape(Rectangle())
+                Spacer()
             }
-            .buttonStyle(.borderless)
-            .help("Выше в приоритете")
-
-            Button {
-                PriorityStore.shared.moveDown(device.uid)
-                AudioMonitor.shared.enforcePolicy()
-            } label: {
-                Image(systemName: "chevron.down")
-                    .frame(width: 24, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .help("Ниже в приоритете")
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .disabled(isLocked)
     }
 }
 
@@ -122,31 +71,98 @@ private func deviceCountLabel(_ n: Int) -> String {
     }
 }
 
-/// Экран модуля «Звук» — то, что в MicGuard было выпадающей панелью в строке меню.
+/// Экран модуля «Звук»: основной микрофон и основной выход.
 struct SoundView: View {
     @ObservedObject var lockState = LockState.shared
     @ObservedObject var monitorState = MonitorState.shared
+    @ObservedObject var inputStore = PrimaryInputStore.shared
+    @ObservedObject var outputStore = PrimaryOutputStore.shared
     @State private var showOtherDevices = false
 
     /// Реальные микрофоны — то, что физически выбирают как вход.
-    private var physicalDevices: [DisplayDevice] {
-        monitorState.displayDevices.filter { $0.transport != .virtual && $0.transport != .other }
+    private var physicalInputs: [DisplayDevice] {
+        monitorState.displayInputs.filter { $0.transport.isPhysical }
     }
 
     /// Виртуальные/неопознанные устройства (Loopback, Screaming Bee, Zoom и т.п.) —
     /// шум от других приложений, а не то, что реально выбирают руками. Сворачиваем.
-    private var otherDevices: [DisplayDevice] {
-        monitorState.displayDevices.filter { $0.transport == .virtual || $0.transport == .other }
+    private var otherInputs: [DisplayDevice] {
+        monitorState.displayInputs.filter { !$0.transport.isPhysical }
+    }
+
+    private var physicalOutputs: [DisplayDevice] {
+        monitorState.displayOutputs.filter { $0.transport.isPhysical }
+    }
+
+    private var builtInInput: DisplayDevice? {
+        SoundPolicy.builtIn(in: physicalInputs, marker: SoundPolicy.microphoneMarker)
+    }
+
+    private var builtInOutput: DisplayDevice? {
+        SoundPolicy.builtIn(in: physicalOutputs, marker: SoundPolicy.speakerMarker)
+    }
+
+    private func inputRow(_ device: DisplayDevice) -> some View {
+        let isBuiltIn = device.uid == builtInInput?.uid
+        let selectedUID = inputStore.primaryUID ?? builtInInput?.uid
+        let isBluetoothBlocked = device.transport == .bluetooth && lockState.isLocked
+        return ChoiceRow(
+            icon: icon(for: device.transport),
+            title: isBuiltIn ? "Микрофон MacBook" : device.name,
+            note: device.isConnected ? nil : "не подключён",
+            isSelected: device.uid == selectedUID,
+            isConnected: device.isConnected,
+            isLocked: isBluetoothBlocked
+        ) {
+            inputStore.select(isBuiltIn ? nil : device.uid)
+            AudioMonitor.shared.enforcePolicy()
+        }
+    }
+
+    private func outputRow(_ device: DisplayDevice) -> some View {
+        let isBuiltIn = device.uid == builtInOutput?.uid
+        let isSelected: Bool
+        switch outputStore.choice {
+        case .builtIn: isSelected = isBuiltIn
+        case .device(let uid): isSelected = device.uid == uid
+        case .system: isSelected = false
+        }
+        return ChoiceRow(
+            icon: icon(for: device.transport),
+            title: isBuiltIn ? "Динамики MacBook" : device.name,
+            note: device.isConnected ? nil : "не подключён",
+            isSelected: isSelected,
+            isConnected: device.isConnected,
+            isLocked: false
+        ) {
+            outputStore.select(isBuiltIn ? .builtIn : .device(device.uid))
+            AudioMonitor.shared.enforcePolicy()
+        }
     }
 
     var body: some View {
         Form {
-            Section("Текущий вход") {
+            Section("Сейчас") {
                 Label {
                     Text(monitorState.currentInputName)
                 } icon: {
-                    Image(systemName: monitorState.currentInputIsBluetooth ? "wave.3.right.circle.fill" : "waveform.circle.fill")
+                    Image(systemName: monitorState.currentInputIsBluetooth ? "wave.3.right.circle.fill" : "mic.circle.fill")
                 }
+                Label {
+                    Text(monitorState.currentOutputName)
+                } icon: {
+                    Image(systemName: "speaker.wave.2.circle.fill")
+                }
+            }
+
+            Section {
+                ForEach(physicalInputs, id: \.uid) { inputRow($0) }
+            } header: {
+                Text("Основной микрофон")
+            } footer: {
+                Text("Если основной микрофон подключён, он и будет входом. Если нет — микрофон MacBook. Любой другой микрофон, например случайно подключённый провод, сам входом не станет.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -157,40 +173,50 @@ struct SoundView: View {
                     }
             } footer: {
                 Text(lockState.isLocked
-                     ? "Bluetooth-наушники никогда не станут входом. Приоритет — по списку ниже."
-                     : "Bluetooth разрешён как вход по приоритету, пока не включишь блок обратно.")
+                     ? "Bluetooth-наушники не станут входом и не выбираются основным микрофоном."
+                     : "Bluetooth-микрофон можно выбрать основным.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            Section {
-                ForEach(physicalDevices, id: \.uid) { device in
-                    DeviceRow(device: device, isLocked: lockState.isLocked, isTopPriority: device.uid == physicalDevices.first?.uid)
-                }
-            } header: {
-                Text("Приоритет входов")
-            } footer: {
-                Text("Галочка — участвует в выборе. Стрелки — порядок. Неподключённые остаются в списке серыми и вернутся сами.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !otherDevices.isEmpty {
+            if !otherInputs.isEmpty {
                 Section {
-                    DisclosureGroup(deviceCountLabel(otherDevices.count), isExpanded: $showOtherDevices) {
-                        ForEach(otherDevices, id: \.uid) { device in
-                            DeviceRow(device: device, isLocked: lockState.isLocked, isTopPriority: false)
+                    DisclosureGroup(deviceCountLabel(otherInputs.count), isExpanded: $showOtherDevices) {
+                        ForEach(otherInputs, id: \.uid) { device in
+                            Label(device.name, systemImage: icon(for: device.transport))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 } footer: {
-                    Text("Виртуальные устройства (Loopback, Zoom и т.п.). Если такое выбрано входом вручную — Utilitumus его не трогает.")
+                    Text("Виртуальные устройства (Loopback, Zoom и т.п.) основными не бывают. Если такое выбрано входом вручную, Utilitumus его не трогает.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Section {
+                ForEach(physicalOutputs, id: \.uid) { outputRow($0) }
+                ChoiceRow(
+                    icon: "questionmark.circle",
+                    title: "Как решит macOS",
+                    note: nil,
+                    isSelected: outputStore.choice == .system,
+                    isConnected: true,
+                    isLocked: false
+                ) {
+                    outputStore.select(.system)
+                    AudioMonitor.shared.enforcePolicy()
+                }
+            } header: {
+                Text("Основной выход")
+            } footer: {
+                Text("Если macOS переключит звук на другое устройство, вернём выбранное. Не перебиваем, когда ты сам выбрал в системе Bluetooth-наушники или AirPlay. Если основной выход отключён, звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .navigationTitle("Звук")
-        .navigationSubtitle("Приоритет микрофонов")
+        .navigationSubtitle("Основной микрофон и выход")
     }
 }
