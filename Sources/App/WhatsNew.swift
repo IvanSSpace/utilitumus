@@ -62,11 +62,7 @@ final class WhatsNew: ObservableObject {
 struct WhatsNewSheet: View {
     @ObservedObject var whatsNew = WhatsNew.shared
     @Environment(\.dismiss) private var dismiss
-    @Namespace private var versionPill
     @State private var selected: String?
-    /// Сколько пунктов уже «выпрыгнуло»: появляются по одному, с пружинкой.
-    @State private var revealed = 0
-    @State private var appeared = false
 
     private var entry: WhatsNewEntry? {
         whatsNew.entries.first { $0.version == selected } ?? whatsNew.entries.first
@@ -81,9 +77,6 @@ struct WhatsNewSheet: View {
                     if let entry {
                         ForEach(Array(entry.items.enumerated()), id: \.offset) { index, item in
                             ItemRow(item: item, tint: Self.tints[index % Self.tints.count])
-                                .opacity(index < revealed ? 1 : 0)
-                                .offset(y: index < revealed ? 0 : 14)
-                                .scaleEffect(index < revealed ? 1 : 0.94, anchor: .leading)
                         }
                     }
                 }
@@ -102,32 +95,24 @@ struct WhatsNewSheet: View {
         .frame(width: 500, height: 560)
         .onAppear {
             selected = whatsNew.entries.first?.version
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) { appeared = true }
-            reveal()
         }
     }
 
-    // Шапка: переливающийся градиент и подпрыгивающий значок.
+    // Шапка: статичный градиент.
     private var header: some View {
         ZStack(alignment: .bottomLeading) {
-            TimelineView(.animation) { context in
-                let t = context.date.timeIntervalSinceReferenceDate
-                LinearGradient(
-                    colors: [Color(hue: (t / 12).truncatingRemainder(dividingBy: 1), saturation: 0.55, brightness: 0.9),
-                             Color(hue: (t / 12 + 0.18).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.75),
-                             Color(hue: (t / 12 + 0.36).truncatingRemainder(dividingBy: 1), saturation: 0.55, brightness: 0.85)],
-                    startPoint: UnitPoint(x: 0.5 + 0.5 * cos(t / 3), y: 0),
-                    endPoint: UnitPoint(x: 0.5 - 0.5 * cos(t / 3), y: 1)
-                )
-            }
+            LinearGradient(
+                colors: [Color(hue: 0.62, saturation: 0.55, brightness: 0.9),
+                         Color(hue: 0.80, saturation: 0.6, brightness: 0.75),
+                         Color(hue: 0.95, saturation: 0.55, brightness: 0.85)],
+                startPoint: .top, endPoint: .bottom
+            )
             HStack(spacing: 14) {
                 Image(systemName: "shippingbox.fill")
                     .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 52, height: 52)
                     .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .scaleEffect(appeared ? 1 : 0.3)
-                    .rotationEffect(.degrees(appeared ? 0 : -25))
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Обновление стороннего программного обеспечения")
                         .font(.title3.weight(.bold))
@@ -136,12 +121,9 @@ struct WhatsNewSheet: View {
                         Text("Версия \(entry.version)")
                             .font(.callout.weight(.medium))
                             .opacity(0.85)
-                            .contentTransition(.numericText())
                     }
                 }
                 .foregroundStyle(.white)
-                .offset(x: appeared ? 0 : -12)
-                .opacity(appeared ? 1 : 0)
             }
             .padding(20)
         }
@@ -156,8 +138,7 @@ struct WhatsNewSheet: View {
                     let isOn = e.version == entry?.version
                     Button {
                         guard !isOn else { return }
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = e.version }
-                        reveal()
+                        selected = e.version
                     } label: {
                         Text(e.version)
                             .font(.callout.weight(isOn ? .semibold : .regular).monospacedDigit())
@@ -168,7 +149,6 @@ struct WhatsNewSheet: View {
                                 if isOn {
                                     Capsule()
                                         .fill(Color.accentColor.gradient)
-                                        .matchedGeometryEffect(id: "pill", in: versionPill)
                                 }
                             }
                             .contentShape(Capsule())
@@ -183,24 +163,12 @@ struct WhatsNewSheet: View {
         .scrollClipDisabled()
     }
 
-    /// Пункты появляются по одному: так взгляд идёт по списку, а не упирается в стену текста.
-    private func reveal() {
-        revealed = 0
-        let count = entry?.items.count ?? 0
-        for i in 0..<count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 + Double(i) * 0.07) {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.68)) { revealed = max(revealed, i + 1) }
-            }
-        }
-    }
-
     private static let tints: [Color] = [.pink, .orange, .yellow, .green, .teal, .blue, .indigo, .purple]
 }
 
 private struct ItemRow: View {
     let item: WhatsNewEntry.Item
     let tint: Color
-    @State private var hovered = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -209,14 +177,11 @@ private struct ItemRow: View {
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
                 .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .rotationEffect(.degrees(hovered ? -8 : 0))
-                .scaleEffect(hovered ? 1.1 : 1)
             Text(item.text)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(Color.primary.opacity(hovered ? 0.07 : 0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .onHover { h in withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { hovered = h } }
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }

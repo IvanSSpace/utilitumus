@@ -97,8 +97,6 @@ struct ModuleDetail: View {
             case .voice: VoiceView()
             }
         }
-        // Свой экран на каждый модуль: состояние (лист «Об инструменте») не переезжает между ними.
-        .id(module)
     }
 }
 
@@ -136,16 +134,12 @@ struct MainView: View {
                               peeked: $peeked, selection: $selection)
                         .frame(width: DS.sidebarWidth)
                         .background(theme.sidebar)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
-                ZStack {
-                    page(showAbout: showAbout, detail: detail)
-                        // Переход страницы: только прозрачность и сдвиг на 12 pt, без пружин и масштаба.
-                        .id(pageKey)
-                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .opacity))
-                }
-                .animation(.easeInOut(duration: 0.22), value: pageKey)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Страница меняется мгновенно, без перехода. Свой `id` на страницу: состояние
+                // (лист «Об инструменте», прокрутка) не переезжает между модулями.
+                page(showAbout: showAbout, detail: detail)
+                    .id(pageKey)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(theme.card))
                 .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
                     .stroke(.white.opacity(0.08), lineWidth: 0.7))
@@ -153,14 +147,12 @@ struct MainView: View {
                 // Панель скрыта: карточка уходит ниже светофоров и кнопки панели, чтобы не лечь под них.
                 .padding(EdgeInsets(top: sidebarHidden ? 44 : 10, leading: sidebarHidden ? 10 : 0, bottom: 10, trailing: 10))
             }
-            DSSidebarToggle(hidden: $sidebarHidden)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             // ⌘0 — на дашборд. Скрытая кнопка, чтобы сочетание работало и при скрытой панели.
             Button("") { peeked = nil; showAbout = false; showDashboard = true }
                 .keyboardShortcut("0", modifiers: .command)
                 .opacity(0).frame(width: 0, height: 0)
         }
-        .animation(DS.sidebarAnimation, value: sidebarHidden)
+        .overlay(alignment: .topLeading) { DSSidebarToggle(hidden: $sidebarHidden) }
         .environment(\.dsTint, theme.accent(tintModule))
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
@@ -173,7 +165,9 @@ struct MainView: View {
         }
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false } }
-        .frame(minWidth: 840, minHeight: 540)
+        // Минимальный размер окна задаёт `WindowMinSize`: `.frame(minWidth:)` на корне заставлял
+        // NSHostingView перемерять всё дерево при каждом изменении.
+        .background(WindowMinSize(width: 840, height: 540))
         .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
             // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
@@ -310,7 +304,7 @@ private struct SidebarCommand: View {
 
     var body: some View {
         Button(hidden ? "Показать боковую панель" : "Скрыть боковую панель") {
-            withAnimation(DS.sidebarAnimation) { hidden.toggle() }
+            hidden.toggle()
         }
         .keyboardShortcut("s", modifiers: [.control, .command])
     }

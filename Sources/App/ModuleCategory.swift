@@ -41,10 +41,26 @@ struct ModuleCategory: Identifiable, Hashable {
         let value = hue + (Double(index) - Double(modules.count - 1) / 2) * spread
         return value - value.rounded(.down)
     }
+
+    /// Категория и оттенок каждого модуля считаются один раз: их спрашивают из каждого `body`.
+    fileprivate static let byModule: [Module: ModuleCategory] = {
+        var result: [Module: ModuleCategory] = [:]
+        for module in Module.allCases {
+            result[module] = all.first { $0.modules.contains(module) } ?? all[all.count - 1]
+        }
+        return result
+    }()
+
+    fileprivate static let hueByModule: [Module: Double] = {
+        var result: [Module: Double] = [:]
+        for module in Module.allCases { result[module] = (byModule[module] ?? all[all.count - 1]).hue(of: module) }
+        return result
+    }()
 }
 
 extension Module {
-    var category: ModuleCategory {
-        ModuleCategory.all.first { $0.modules.contains(self) } ?? ModuleCategory.all[ModuleCategory.all.count - 1]
-    }
+    var category: ModuleCategory { ModuleCategory.byModule[self] ?? ModuleCategory.all[ModuleCategory.all.count - 1] }
+
+    /// Оттенок модуля (0…1) из кеша.
+    var categoryHue: Double { ModuleCategory.hueByModule[self] ?? category.hue }
 }

@@ -4,7 +4,8 @@ import SwiftUI
 
 // MARK: - Фон
 
-/// Статичный градиент оттенка модуля. При смене модуля — кроссфейд 0.2 с (без пятен и таймеров).
+/// Один статичный градиент текущего модуля (или нейтральный графитовый на дашборде): без кроссфейда
+/// и без градиентов остальных модулей под низом.
 /// `neutral` — страница без модуля (дашборд): нейтральный графитовый фон вместо цвета категории.
 struct DSBackground: View {
     let module: Module
@@ -12,30 +13,79 @@ struct DSBackground: View {
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
+        let colors = neutral && theme.followsModule ? DSTheme.graphite.background(module) : theme.background(module)
         ZStack {
             Color(white: 0.05)
-            if theme.followsModule {
-                ForEach(Module.allCases) { m in
-                    gradient(m).opacity(m == module && !neutral ? 1 : 0)
-                }
-                LinearGradient(colors: DSTheme.graphite.background(module), startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .opacity(neutral ? 1 : 0)
-            } else {
-                gradient(module)
-            }
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
         }
-        .animation(.easeInOut(duration: 0.2), value: module)
-        .animation(.easeInOut(duration: 0.2), value: neutral)
-    }
-
-    private func gradient(_ m: Module) -> some View {
-        LinearGradient(colors: theme.background(m), startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 
 extension DSTheme {
     /// Меняется ли фон от модуля к модулю (иначе кроссфейд не нужен).
     var followsModule: Bool { self == .calm || self == .vivid }
+}
+
+// MARK: - Минимальный размер окна
+
+/// `NSHostingView` умеет сообщать окну размеры содержимого, не зная его типа, только через протокол.
+private protocol HostingSizing: AnyObject { func stopReportingSizes() }
+extension NSHostingView: HostingSizing {
+    fileprivate func stopReportingSizes() { sizingOptions = [] }
+}
+
+/// Минимальный размер окна задаётся окну, а не `.frame(minWidth:minHeight:)` на корне: из-за рамки
+/// `NSHostingView` на каждое изменение содержимого заново мерил бы всё дерево. Размеры содержимого
+/// окну больше не сообщаются, поэтому и предел задаём явно.
+struct WindowMinSize: NSViewRepresentable {
+    let width: CGFloat
+    let height: CGFloat
+
+    func makeNSView(context: Context) -> MinSizeView { MinSizeView(size: NSSize(width: width, height: height)) }
+    func updateNSView(_ nsView: MinSizeView, context: Context) {}
+
+    final class MinSizeView: NSView {
+        let size: NSSize
+        init(size: NSSize) {
+            self.size = size
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            (window.contentView as? HostingSizing)?.stopReportingSizes()
+            for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResizeNotification] {
+                NotificationCenter.default.addObserver(self, selector: #selector(apply), name: name, object: window)
+            }
+            // Сразу после остановки измерения хостинг-вью сбрасывает предел: выставляем на следующем витке.
+            DispatchQueue.main.async { [weak self] in
+                self?.apply()
+                self?.growToMinimum()
+            }
+        }
+
+        /// Дешёвая сверка: если кто-то сбросил предел, возвращаем.
+        @objc private func apply() {
+            guard let window, window.contentMinSize != size else { return }
+            window.contentMinSize = size
+        }
+
+        /// Если окно уже меньше предела (запомненный размер), растягиваем до него.
+        private func growToMinimum() {
+            guard let window else { return }
+            let content = window.contentRect(forFrameRect: window.frame).size
+            if content.width < size.width || content.height < size.height {
+                window.setContentSize(NSSize(width: max(content.width, size.width), height: max(content.height, size.height)))
+            }
+        }
+
+        deinit { NotificationCenter.default.removeObserver(self) }
+    }
 }
 
 // MARK: - Боковая панель
@@ -47,7 +97,6 @@ struct DSSidebar: View {
     @Binding var peeked: Module?
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
-    @ObservedObject private var live = DashboardLive.shared
     /// Последний открытый модуль каждой категории: вкладка возвращает на него.
     @State private var last: [String: Module] = [:]
 
@@ -57,7 +106,10 @@ struct DSSidebar: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Список модулей панели считаем один раз за body.
+        let shown = modules.shownModules
+        let enabledCategories = Set(shown.map { $0.category.id })
+        return VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
             DSDashboardRow(selected: showDashboard && !showAbout) {
@@ -66,14 +118,9 @@ struct DSSidebar: View {
                 showDashboard = true
             }
             .padding(.horizontal, 10).padding(.bottom, 8)
-            DSCategoryTabs(active: activeCategory, enabled: { !shownModules(in: $0).isEmpty }, pick: pick)
+            DSCategoryTabs(active: activeCategory, enabled: { enabledCategories.contains($0.id) }, pick: pick)
                 .padding(.horizontal, 10).padding(.bottom, 6)
-            ZStack {
-                list
-                    .id(activeCategory?.id ?? "all")
-                    .transition(.opacity.combined(with: .offset(x: 10)))
-            }
-            .animation(DS.sidebarAnimation, value: activeCategory?.id)
+            list(shown)
             DSSidebarFooter(showAbout: $showAbout, peeked: $peeked)
         }
         .onChange(of: current, initial: true) { _, module in
@@ -81,11 +128,11 @@ struct DSSidebar: View {
         }
     }
 
-    private var list: some View {
+    private func list(_ shown: [Module]) -> some View {
         List {
             if let category = activeCategory {
                 Section {
-                    rows(category)
+                    rows(category, shown: shown)
                 } header: {
                     DSCategoryHeading(category: category)
                 }
@@ -94,7 +141,9 @@ struct DSSidebar: View {
                 // На дашборде — все модули подряд (без заголовков и статусов, чтобы влезли над футером),
                 // перетаскивать здесь нечего: порядок меняют внутри вкладки.
                 Section {
-                    ForEach(ModuleCategory.all.flatMap(shownModules(in:))) { row($0, withStatus: false) }
+                    ForEach(ModuleCategory.all.flatMap { category in shown.filter { $0.category == category } }) {
+                        row($0, withStatus: false)
+                    }
                 } header: {
                     DSAllModulesHeading()
                 }
@@ -110,8 +159,8 @@ struct DSSidebar: View {
     }
 
     @ViewBuilder
-    private func rows(_ category: ModuleCategory) -> some View {
-        let items = shownModules(in: category)
+    private func rows(_ category: ModuleCategory, shown: [Module]) -> some View {
+        let items = shown.filter { $0.category == category }
         ForEach(items) { module in row(module, withStatus: category.showsStatus) }
             .onMove { move(items, from: $0, to: $1) }
     }
@@ -128,13 +177,20 @@ struct DSSidebar: View {
     }
 
     private func row(_ module: Module, withStatus: Bool) -> some View {
-        let status = withStatus ? live.rowText(module) : nil
-        return DSSidebarRow(module: module, on: modules.isOn(module), status: status,
-                            selected: !showDashboard && !showAbout && peeked == nil && current == module) {
+        let on = modules.isOn(module)
+        let selected = !showDashboard && !showAbout && peeked == nil && current == module
+        let open = {
             selection = module
             peeked = nil
             showAbout = false
             showDashboard = false
+        }
+        return Group {
+            if withStatus {
+                DSStatusRow(module: module, on: on, selected: selected, action: open)
+            } else {
+                DSSidebarRow(module: module, on: on, status: nil, selected: selected, action: open)
+            }
         }
         .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
         .listRowSeparator(.hidden)
@@ -161,7 +217,6 @@ struct DSSidebar: View {
 private struct DSDashboardRow: View {
     let selected: Bool
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -174,11 +229,10 @@ private struct DSDashboardRow: View {
         }
         .padding(.horizontal, 10)
         .frame(height: 38)
-        .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
-            .fill(selected ? .white.opacity(0.13) : (hover ? .white.opacity(0.06) : .clear)))
-        .contentShape(Rectangle())
+        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
+                   normal: selected ? .white.opacity(0.13) : .clear,
+                   hovered: selected ? .white.opacity(0.13) : .white.opacity(0.06))
         .onTapGesture(perform: action)
-        .onHover { hover = $0 }
         .help("Дашборд (⌘0)")
         .accessibilityAddTraits(.isButton)
     }
@@ -221,7 +275,6 @@ private struct DSCategoryTabs: View {
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.05)))
-        .animation(.easeInOut(duration: 0.2), value: active)
     }
 }
 
@@ -255,18 +308,18 @@ private struct DSAllModulesHeading: View {
 extension DS {
     /// Ключ `@AppStorage`: скрыта ли боковая панель.
     static let sidebarHiddenKey = "Design.SidebarHidden"
-    static let sidebarAnimation = Animation.easeInOut(duration: 0.2)
 }
 
 /// Кнопка скрытия/показа панели рядом со светофорами. Остаётся видна и при скрытой панели.
 /// Положение берём у настоящей кнопки «зелёный» окна, чтобы не гадать с отступами системы.
+/// Ставится как `.overlay(alignment: .topLeading)`: сама кнопка размером с себя, а не на всё окно.
 struct DSSidebarToggle: View {
     @Binding var hidden: Bool
     @State private var anchor = CGPoint(x: 86, y: 20)
     @State private var hover = false
 
     var body: some View {
-        Button { withAnimation(DS.sidebarAnimation) { hidden.toggle() } } label: {
+        Button { hidden.toggle() } label: {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(.white.opacity(hover ? 0.95 : 0.65))
@@ -276,10 +329,12 @@ struct DSSidebarToggle: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .onHover { hover = $0 }
         .help(hidden ? "Показать боковую панель (⌃⌘S)" : "Скрыть боковую панель (⌃⌘S)")
-        .position(x: anchor.x + 14, y: anchor.y)
         .background(TrafficLightProbe(anchor: $anchor))
+        // Левый край кнопки — правее «зелёной» на 8 pt, центр по вертикали — на её середине.
+        .padding(.leading, anchor.x).padding(.top, anchor.y - 12)
     }
 }
 
@@ -300,17 +355,16 @@ private struct TrafficLightProbe: NSViewRepresentable {
     final class ProbeView: NSView {
         var onChange: ((CGPoint) -> Void)?
 
-        // Невидимый замерщик растянут на всё окно (из-за .position у кнопки) и лежит поверх
-        // страницы — без этого он забирал себе все клики, и интерфейс был «некликабельным».
+        // Замерщик лежит под кнопкой и кликов не берёт.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             NotificationCenter.default.removeObserver(self)
             guard let window else { return }
-            for name in [NSWindow.didResizeNotification, NSWindow.didExitFullScreenNotification] {
-                NotificationCenter.default.addObserver(self, selector: #selector(measure), name: name, object: window)
-            }
+            // Светофоры не двигаются при изменении размера окна — слушаем только выход из полного экрана.
+            NotificationCenter.default.addObserver(self, selector: #selector(measure),
+                                                   name: NSWindow.didExitFullScreenNotification, object: window)
             DispatchQueue.main.async { [weak self] in self?.measure() }
         }
 
@@ -328,6 +382,30 @@ private struct TrafficLightProbe: NSViewRepresentable {
     }
 }
 
+/// Строка со статусом из дашборда: наблюдает только статус своего модуля.
+private struct DSStatusRow: View {
+    let module: Module
+    let on: Bool
+    let selected: Bool
+    let action: () -> Void
+    @ObservedObject private var slot: DashSlot
+
+    init(module: Module, on: Bool, selected: Bool, action: @escaping () -> Void) {
+        self.module = module
+        self.on = on
+        self.selected = selected
+        self.action = action
+        slot = DashboardLive.slot(module)
+    }
+
+    var body: some View {
+        DSSidebarRow(module: module, on: on, status: (slot.state.text, slot.state.attention),
+                     selected: selected, action: action)
+            .onAppear { slot.attach() }
+            .onDisappear { slot.detach() }
+    }
+}
+
 /// Строка модуля: значок, название, справа точка «включён» или «выкл». Выбранная залита оттенком.
 /// В категории со статусами вторая строка — живой статус вместо «выкл».
 private struct DSSidebarRow: View {
@@ -337,7 +415,6 @@ private struct DSSidebarRow: View {
     let selected: Bool
     let action: () -> Void
     @Environment(\.dsTheme) private var theme
-    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -365,11 +442,10 @@ private struct DSSidebarRow: View {
         }
         .padding(.horizontal, 10)
         .frame(height: status == nil ? 38 : 46)
-        .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
-            .fill(selected ? theme.selection(module) : (hover ? .white.opacity(0.06) : .clear)))
-        .contentShape(Rectangle())
+        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
+                   normal: selected ? theme.selection(module) : .clear,
+                   hovered: selected ? theme.selection(module) : .white.opacity(0.06))
         .onTapGesture(perform: action)
-        .onHover { hover = $0 }
         .help(on ? "" : "Выключен — открой, чтобы включить")
         .accessibilityAddTraits(.isButton)
     }
@@ -484,7 +560,6 @@ private struct FooterLink: View {
     let action: () -> Void
     @Environment(\.dsTheme) private var theme
     @Environment(\.dsTint) private var tint
-    @State private var hover = false
 
     init(icon: String, title: String, selected: Bool = false, dim: Bool = false, chevron: Bool? = nil,
          action: @escaping () -> Void) {
@@ -508,11 +583,10 @@ private struct FooterLink: View {
         .foregroundStyle(.white.opacity(selected ? 1 : (dim ? 0.5 : 0.72)))
         .padding(.horizontal, 10)
         .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
-            .fill(selected ? tint.opacity(0.26) : (hover ? .white.opacity(0.06) : .clear)))
-        .contentShape(Rectangle())
+        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
+                   normal: selected ? tint.opacity(0.26) : .clear,
+                   hovered: selected ? tint.opacity(0.26) : .white.opacity(0.06))
         .onTapGesture(perform: action)
-        .onHover { hover = $0 }
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -522,7 +596,6 @@ private struct HiddenRow: View {
     let selected: Bool
     let action: () -> Void
     @Environment(\.dsTint) private var tint
-    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -533,11 +606,10 @@ private struct HiddenRow: View {
         .foregroundStyle(.white.opacity(selected ? 1 : 0.55))
         .padding(.horizontal, 10)
         .frame(height: 26)
-        .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous)
-            .fill(selected ? tint.opacity(0.26) : (hover ? .white.opacity(0.06) : .clear)))
-        .contentShape(Rectangle())
+        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
+                   normal: selected ? tint.opacity(0.26) : .clear,
+                   hovered: selected ? tint.opacity(0.26) : .white.opacity(0.06))
         .onTapGesture(perform: action)
-        .onHover { hover = $0 }
         .accessibilityAddTraits(.isButton)
     }
 }

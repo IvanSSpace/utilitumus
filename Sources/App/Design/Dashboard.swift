@@ -4,110 +4,203 @@ import Combine
 
 // Дашборд: страница по умолчанию. Три секции по категориям, у каждого модуля — живой статус
 // и одно быстрое действие. Статусы читаются из настоящих контроллеров только у включённых модулей
-// и ничего не запускают: ни таймеров, ни подписок на систему. Подписка на изменения — на уже
-// существующие `objectWillChange`, и только у включённых.
+// и ничего не запускают: ни таймеров, ни подписок на систему.
+//
+// Статус модуля — отдельный `DashSlot`: он подписывается на контроллер, пока статус на экране (карточка
+// дашборда, строка с подписью в боковой панели), считает текст при событии и публикует его, только если
+// он реально изменился. Разбудить перерисовкой можно лишь ту карточку или строку, чей статус поменялся.
 
 // MARK: - Живые статусы
 
-/// Быстрое действие на карточке модуля.
-struct DashAction {
-    let title: String
-    var icon: String?
-    let run: () -> Void
-}
-
-/// Что показать у включённого модуля: строка статуса и быстрое действие.
-struct DashLive {
-    var text: String
+/// Что показать у модуля: строка статуса и название быстрого действия. Сравнивается целиком,
+/// поэтому неизменный статус никого не перерисовывает. Само действие — `DashboardLive.perform`.
+struct DashState: Equatable {
+    var on = true
+    var text = ""
     /// Нужно внимание (нет доступа, не хватает модели): строка оранжевая.
     var attention = false
-    var action: DashAction?
+    var actionTitle: String?
+    var actionIcon: String?
 }
 
-/// Собирает статусы модулей из контроллеров и сообщает, когда они поменялись.
-/// Контроллер выключенного модуля не читается и не трогается.
+/// Видно ли окно приложения: скрытое или свёрнутое окно ничего не рисует, статусы считать незачем.
 @MainActor
-final class DashboardLive: ObservableObject {
-    static let shared = DashboardLive()
-
-    private let modules = ModuleManager.shared
-    private var managerSub: AnyCancellable?
-    private var subs: [Module: AnyCancellable] = [:]
+final class WindowVisibility: ObservableObject {
+    static let shared = WindowVisibility()
+    @Published private(set) var isVisible = true
 
     private init() {
-        managerSub = modules.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.resubscribe() }
-        resubscribe()
-    }
-
-    /// Подписки — только у включённых модулей: выключенный ничего не публикует.
-    private func resubscribe() {
-        for module in Module.allCases {
-            if modules.isOn(module) {
-                if subs[module] == nil { subs[module] = publisher(module).sink { [weak self] in self?.objectWillChange.send() } }
-            } else {
-                subs[module] = nil
+        let center = NotificationCenter.default
+        let names: [Notification.Name] = [
+            NSWindow.didChangeOcclusionStateNotification, NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification, NSWindow.didBecomeKeyNotification,
+            NSApplication.didHideNotification, NSApplication.didUnhideNotification,
+        ]
+        for name in names {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.recompute() }
             }
         }
-        objectWillChange.send()
+        recompute()
     }
 
-    /// Не чаще раза в секунду: вентиляторы публикуют каждые 2 с, перерисовывать панель чаще незачем.
-    private func publisher(_ module: Module) -> AnyPublisher<Void, Never> {
-        let source: AnyPublisher<Void, Never>
-        switch module {
-        case .sound: source = MonitorState.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .mouse: source = MouseController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .fans: source = FanController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .browser: source = BrowserCatalog.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .stash: source = StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .voice: source = VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .mixer: source = MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .load: source = LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+    private func recompute() {
+        let visible = NSApp.map { app in
+            !app.isHidden && app.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
+        } ?? true
+        if visible != isVisible { isVisible = visible }
+    }
+}
+
+/// Статус одного модуля. Подписки живут, пока есть хоть один показывающий его экран (`attach`/`detach`)
+/// и окно видно; при показе окна статус обновляется один раз.
+@MainActor
+final class DashSlot: ObservableObject {
+    let module: Module
+    @Published private(set) var state: DashState
+    private var attached = 0
+    private var subs: [AnyCancellable] = []
+    private var sourceSub: AnyCancellable?
+    private var visibilitySub: AnyCancellable?
+
+    fileprivate init(_ module: Module) {
+        self.module = module
+        state = DashboardLive.compute(module)
+    }
+
+    func attach() {
+        attached += 1
+        guard attached == 1 else { return }
+        visibilitySub = WindowVisibility.shared.$isVisible.removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.reconcile() }
+        reconcile()
+    }
+
+    func detach() {
+        attached = max(0, attached - 1)
+        guard attached == 0 else { return }
+        visibilitySub = nil
+        stop()
+    }
+
+    private func stop() {
+        subs = []
+        sourceSub = nil
+    }
+
+    private func reconcile() {
+        guard attached > 0, WindowVisibility.shared.isVisible else { stop(); return }
+        if subs.isEmpty {
+            // willChange приходит до смены значения: читаем контроллер со следующего витка.
+            subs = [
+                ModuleManager.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
+                AccessState.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
+            ]
         }
-        return source.throttle(for: 1, scheduler: DispatchQueue.main, latest: true).eraseToAnyPublisher()
+        update()
     }
 
-    /// Строка под названием модуля в боковой панели.
-    func rowText(_ module: Module) -> (text: String, attention: Bool) {
-        guard modules.isOn(module) else { return ("выключен", false) }
-        let state = live(module, askStash: {})
-        return (state.text, state.attention)
+    /// Выключенный модуль ничего не публикует: на контроллер подписываемся, только пока он включён.
+    private func syncSource() {
+        if ModuleManager.shared.isOn(module) {
+            guard sourceSub == nil else { return }
+            // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
+            sourceSub = DashboardLive.source(module)
+                .receive(on: DispatchQueue.main)
+                .throttle(for: 1, scheduler: DispatchQueue.main, latest: true)
+                .sink { [weak self] _ in self?.update() }
+        } else {
+            sourceSub = nil
+        }
     }
 
-    /// Статус и действие включённого модуля. `askStash` — показать подтверждение «Закрыть N программ?».
-    func live(_ module: Module, askStash: @escaping () -> Void) -> DashLive {
-        if !module.blockingRequirements.isEmpty { return DashLive(text: "нужен доступ", attention: true) }
+    private func update() {
+        syncSource()
+        let new = DashboardLive.compute(module)
+        if new != state { state = new }
+    }
+}
+
+/// Реестр статусов модулей. Контроллер выключенного модуля не читается и не трогается.
+@MainActor
+enum DashboardLive {
+    private static let slots: [Module: DashSlot] = Dictionary(
+        uniqueKeysWithValues: Module.allCases.map { ($0, DashSlot($0)) })
+
+    static func slot(_ module: Module) -> DashSlot { slots[module]! }
+
+    fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never> {
+        switch module {
+        case .sound: return MonitorState.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .mouse: return MouseController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .fans: return FanController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .browser: return BrowserCatalog.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        }
+    }
+
+    /// Быстрое действие карточки. `askStash` — показать подтверждение «Закрыть N программ?».
+    static func perform(_ module: Module, askStash: () -> Void) {
+        switch module {
+        case .fans:
+            FanController.shared.fullPower.toggle()
+        case .browser:
+            // Тестовая ссылка идёт тем же путём, что и кнопка «Проверить» на экране браузера.
+            NSWorkspace.shared.open([BrowserHelper.testURL], withApplicationAt: BrowserHelper.appURL,
+                                    configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error { NSLog("Utilitumus: помощник ссылок не запустился: %@", error.localizedDescription) }
+            }
+        case .stash:
+            let store = StashStore.shared
+            if !store.stashed.isEmpty {
+                Task { await store.restore() }
+            } else {
+                // Закрытие программ — только через подтверждение, как на экране Стеша.
+                askStash()
+            }
+        case .load:
+            LoadStore.shared.refreshNow()
+        case .sound, .mouse, .voice, .mixer:
+            break
+        }
+    }
+
+    fileprivate static func compute(_ module: Module) -> DashState {
+        guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
+        if module.isBlocked { return DashState(text: "нужен доступ", attention: true) }
         switch module {
         case .sound: return sound()
         case .mouse: return mouse()
         case .fans: return fans()
         case .browser: return browser()
-        case .stash: return stash(askStash)
+        case .stash: return stash()
         case .voice: return voice()
         case .mixer: return mixer()
         case .load: return load()
         }
     }
 
-    private func sound() -> DashLive {
+    private static func sound() -> DashState {
         let name = MonitorState.shared.currentInputName
-        return DashLive(text: name == "—" ? "слежу за микрофоном" : name)
+        return DashState(text: name == "—" ? "слежу за микрофоном" : name)
     }
 
-    private func mouse() -> DashLive {
+    private static func mouse() -> DashState {
         let s = MouseController.shared.settings
-        guard s.needsTap else { return DashLive(text: "всё как в системе") }
+        guard s.needsTap else { return DashState(text: "всё как в системе") }
         var parts: [String] = []
         if s.mouseDirection == .reversed || s.magicMouseDirection == .reversed { parts.append("прокрутка обратная") }
         if s.smoothEnabled { parts.append("плавность \(Int((s.smoothness * 100).rounded())) %") }
-        return DashLive(text: parts.joined(separator: " · "))
+        return DashState(text: parts.joined(separator: " · "))
     }
 
-    private func fans() -> DashLive {
+    private static func fans() -> DashState {
         let c = FanController.shared
-        if c.safetyTripped { return DashLive(text: "перегрев · вентиляторами управляет система", attention: true) }
+        if c.safetyTripped { return DashState(text: "перегрев · вентиляторами управляет система", attention: true) }
         var parts: [String] = []
         if let t = c.cpuMax { parts.append("\(Int(t.rounded()))°") }
         if c.fullPower {
@@ -117,17 +210,16 @@ final class DashboardLive: ObservableObject {
             parts.append(modes.count > 1 ? "Разные режимы" : (modes.first ?? .auto).title)
         }
         if let rpm = c.fans.map(\.actual).max() { parts.append("\(Int(rpm.rounded())) об/мин") }
+        var state = DashState(text: parts.joined(separator: " · "))
         // Без доступа помощника кнопка ничего бы не сделала.
-        var action: DashAction?
         if FanHelperInstaller.shared.status != .notInstalled && c.conflictingApp == nil {
-            action = c.fullPower
-                ? DashAction(title: "Авто", icon: "arrow.uturn.backward") { c.fullPower = false }
-                : DashAction(title: "Максимум", icon: "wind") { c.fullPower = true }
+            state.actionTitle = c.fullPower ? "Авто" : "Максимум"
+            state.actionIcon = c.fullPower ? "arrow.uturn.backward" : "wind"
         }
-        return DashLive(text: parts.joined(separator: " · "), action: action)
+        return state
     }
 
-    private func browser() -> DashLive {
+    private static func browser() -> DashState {
         let catalog = BrowserCatalog.shared
         let text: String
         if let main = catalog.fallback {
@@ -135,60 +227,48 @@ final class DashboardLive: ObservableObject {
         } else {
             text = catalog.browsers.isEmpty ? "ищу браузеры…" : "основной не выбран"
         }
-        // Тестовая ссылка идёт тем же путём, что и кнопка «Проверить» на экране браузера.
-        return DashLive(text: text, action: DashAction(title: "Проверить") {
-            NSWorkspace.shared.open([BrowserHelper.testURL], withApplicationAt: BrowserHelper.appURL,
-                                    configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if let error { NSLog("Utilitumus: помощник ссылок не запустился: %@", error.localizedDescription) }
-            }
-        })
+        return DashState(text: text, actionTitle: "Проверить")
     }
 
-    private func stash(_ ask: @escaping () -> Void) -> DashLive {
+    private static func stash() -> DashState {
         let store = StashStore.shared
         if !store.stashed.isEmpty {
-            return DashLive(text: "спрятано \(store.stashed.count) · можно вернуть",
-                            action: DashAction(title: "Вернуть", icon: "arrow.uturn.backward") {
-                                Task { await store.restore() }
-                            })
+            return DashState(text: "спрятано \(store.stashed.count) · можно вернуть",
+                             actionTitle: "Вернуть", actionIcon: "arrow.uturn.backward")
         }
-        if let busy = store.busy { return DashLive(text: busy) }
+        if let busy = store.busy { return DashState(text: busy) }
         let selected = store.selected
-        guard !selected.isEmpty else { return DashLive(text: "нет программ для закрытия") }
+        guard !selected.isEmpty else { return DashState(text: "нет программ для закрытия") }
         let freed = selected.reduce(0.0) { $0 + (store.usage[$1.bundleIdentifier ?? ""]?.memoryMB ?? 0) }
         let tail = freed > 0 ? " · ≈ \(memoryText(freed))" : ""
-        // Закрытие программ — только через подтверждение, как на экране Стеша.
-        return DashLive(text: "выбрано \(selected.count)\(tail)",
-                        action: DashAction(title: "Спрятать", icon: "archivebox", run: ask))
+        return DashState(text: "выбрано \(selected.count)\(tail)", actionTitle: "Спрятать", actionIcon: "archivebox")
     }
 
-    private func voice() -> DashLive {
+    private static func voice() -> DashState {
         let controller = VoiceController.shared
         let models = VoiceModelStore.shared
-        if controller.phase == .recording { return DashLive(text: "идёт запись…") }
+        if controller.phase == .recording { return DashState(text: "идёт запись…") }
         let model = models.selected.title.components(separatedBy: " — ")[0]
         if models.status(models.selected) != .installed {
-            return DashLive(text: "\(controller.hotKeyLabel) · модель не скачана", attention: true)
+            return DashState(text: "\(controller.hotKeyLabel) · модель не скачана", attention: true)
         }
-        return DashLive(text: "\(controller.hotKeyLabel) · \(model)")
+        return DashState(text: "\(controller.hotKeyLabel) · \(model)")
     }
 
-    private func mixer() -> DashLive {
+    private static func mixer() -> DashState {
         let apps = MixerController.shared.apps
-        guard let first = apps.first else { return DashLive(text: "сейчас ничего не играет") }
+        guard let first = apps.first else { return DashState(text: "сейчас ничего не играет") }
         let volume = first.volume < 0.995 ? " · \(Int((first.volume * 100).rounded())) %" : ""
-        if apps.count == 1 { return DashLive(text: "играет \(first.name)\(volume)") }
-        return DashLive(text: "играют \(first.name) и ещё \(apps.count - 1)")
+        if apps.count == 1 { return DashState(text: "играет \(first.name)\(volume)") }
+        return DashState(text: "играют \(first.name) и ещё \(apps.count - 1)")
     }
 
-    private func load() -> DashLive {
-        let store = LoadStore.shared
-        let refresh = DashAction(title: "Обновить") { store.refreshNow() }
-        guard let memory = store.snapshot?.memory else {
-            return DashLive(text: "открой для замера", action: refresh)
+    private static func load() -> DashState {
+        guard let memory = LoadStore.shared.snapshot?.memory else {
+            return DashState(text: "открой для замера", actionTitle: "Обновить")
         }
-        return DashLive(text: "память \(Fmt.gb(Double(memory.usedMB))) из \(Fmt.gb(Double(memory.totalMB))) ГБ",
-                        action: refresh)
+        return DashState(text: "память \(Fmt.gb(Double(memory.usedMB))) из \(Fmt.gb(Double(memory.totalMB))) ГБ",
+                         actionTitle: "Обновить")
     }
 }
 
@@ -198,7 +278,7 @@ struct DashboardPage: View {
     /// Открыть модуль в основном окне.
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
-    @ObservedObject private var live = DashboardLive.shared
+    @ObservedObject private var access = AccessState.shared
     @Environment(\.dsTheme) private var theme
     @State private var confirmStash = false
 
@@ -206,10 +286,8 @@ struct DashboardPage: View {
 
     var body: some View {
         // В обычном окне всё помещается без прокрутки; в самом маленьком — прокручивается.
-        ViewThatFits(in: .vertical) {
-            content
-            ScrollView(showsIndicators: false) { content }
-        }
+        ScrollView(showsIndicators: false) { content }
+            .scrollBounceBehavior(.basedOnSize)
         .confirmationDialog("Закрыть \(programs(StashStore.shared.selected.count))?", isPresented: $confirmStash) {
             Button("Закрыть и спрятать", role: .destructive) {
                 Task { await StashStore.shared.stashSelected() }
@@ -240,14 +318,14 @@ struct DashboardPage: View {
             Spacer(minLength: 0)
         }
         .padding(DS.pagePadding)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     // MARK: Шапка
 
     private var header: some View {
         let on = shown.filter { modules.isOn($0) }
-        let needAccess = on.filter { !$0.blockingRequirements.isEmpty }
+        let needAccess = on.filter { $0.isBlocked }
         return HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white.opacity(0.1)).frame(width: 50, height: 50)
@@ -321,52 +399,59 @@ private struct DashCard: View {
     let module: Module
     let open: () -> Void
     let askStash: () -> Void
-    @ObservedObject private var modules = ModuleManager.shared
-    @ObservedObject private var live = DashboardLive.shared
+    /// Карточка наблюдает только статус своего модуля.
+    @ObservedObject private var slot: DashSlot
     @Environment(\.dsTheme) private var theme
-    @State private var hover = false
+
+    init(module: Module, open: @escaping () -> Void, askStash: @escaping () -> Void) {
+        self.module = module
+        self.open = open
+        self.askStash = askStash
+        slot = DashboardLive.slot(module)
+    }
 
     var body: some View {
-        let on = modules.isOn(module)
-        let state = on ? live.live(module, askStash: askStash) : nil
+        let state = slot.state
+        let on = state.on
         let tint = theme.tone(module)
         HStack(spacing: 11) {
             HStack(spacing: 11) {
                 ModuleIconBadge(module: module, size: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(module.title).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
-                    Text(state?.text ?? "выключен")
+                    Text(state.text)
                         .font(.system(size: 12))
-                        .foregroundStyle(state?.attention == true ? Color.orange : .white.opacity(0.55))
+                        .foregroundStyle(state.attention ? Color.orange : .white.opacity(0.55))
                         .lineLimit(1).minimumScaleFactor(0.85)
                 }
             }
             .opacity(on ? 1 : 0.45)
             Spacer(minLength: 4)
             if !on {
-                DashButton(title: "Включить", solid: true, tint: tint) { modules.setOn(module, true) }
-            } else if let action = state?.action {
-                DashButton(title: action.title, icon: action.icon, tint: tint, action: action.run)
+                DashButton(title: "Включить", solid: true, tint: tint) { ModuleManager.shared.setOn(module, true) }
+            } else if let title = state.actionTitle {
+                DashButton(title: title, icon: state.actionIcon, tint: tint) {
+                    DashboardLive.perform(module, askStash: askStash)
+                }
             }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity).frame(height: dashCardHeight)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(tint.opacity(hover && on ? 0.13 : 0.075)))
+        .hoverFill(RoundedRectangle(cornerRadius: 14, style: .continuous),
+                   normal: tint.opacity(0.075), hovered: tint.opacity(on ? 0.13 : 0.075))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.2), lineWidth: 0.7))
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .onHover { hover = $0 }
-        .animation(.easeInOut(duration: 0.2), value: hover)
         .onTapGesture(perform: open)
         .contextMenu {
-            Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
+            Button(on ? "Выключить модуль" : "Включить модуль") { ModuleManager.shared.setOn(module, !on) }
             Button("Открыть", action: open)
         }
         .accessibilityElement(children: .contain)
+        .onAppear { slot.attach() }
+        .onDisappear { slot.detach() }
     }
 }
 
-/// Кнопка карточки: залитая («Включить») или мягкая.
+/// Кнопка карточки: залитая («Включить») или мягкая. Подсветка при наведении мгновенная.
 private struct DashButton: View {
     let title: String
     var icon: String?
@@ -374,7 +459,6 @@ private struct DashButton: View {
     let tint: Color
     let action: () -> Void
     @Environment(\.dsTheme) private var theme
-    @State private var hover = false
 
     var body: some View {
         Button(action: action) {
@@ -384,12 +468,10 @@ private struct DashButton: View {
             }
             .foregroundStyle(solid ? theme.onAccent : tint)
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(Capsule().fill(solid ? AnyShapeStyle(tint.opacity(hover ? 1 : 0.92))
-                                             : AnyShapeStyle(tint.opacity(hover ? 0.28 : 0.18))))
+            .hoverFill(Capsule(), normal: tint.opacity(solid ? 0.92 : 0.18), hovered: tint.opacity(solid ? 1 : 0.28))
         }
         .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .animation(.easeInOut(duration: 0.2), value: hover)
+        .focusable(false)
     }
 }
 

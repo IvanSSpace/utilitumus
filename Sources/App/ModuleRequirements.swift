@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import ApplicationServices
+import Combine
 
 /// Что модулю нужно от системы до работы: доступ, разрешение, помощник.
 /// Описание живёт здесь, а не в экранах модулей: по нему рисуются «Понадобится» на экране выключенного
@@ -94,26 +95,69 @@ extension Module {
     }
 
     /// Пункты, из-за которых вместо экрана модуля показывается «Осталось дать доступ».
+    /// Опрашивает систему на месте — в `body` не звать, там читается `isBlocked`.
     @MainActor var blockingRequirements: [ModuleRequirement] { requirements.filter(\.isBlocking) }
+
+    /// Закешированный ответ «не хватает доступа»: в `body` только чтение, без опроса системы.
+    @MainActor var isBlocked: Bool { AccessState.shared.blocked.contains(self) }
+}
+
+/// Кеш состояния доступов. Систему опрашиваем по событиям: возврат в приложение, ответ помощника
+/// вентиляторов, действия на экране доступа. Публикуем только при реальной смене.
+@MainActor
+final class AccessState: ObservableObject {
+    static let shared = AccessState()
+
+    @Published private(set) var blocked: Set<Module> = []
+    private var subs: [AnyCancellable] = []
+
+    private init() {
+        blocked = Self.compute()
+        subs.append(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                FanHelperInstaller.shared.refresh()
+                self?.refresh()
+            })
+        // Установка помощника кончается асинхронно: willChange приходит до смены значения, читаем со следующего витка.
+        subs.append(FanHelperInstaller.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refresh() })
+    }
+
+    func refresh() {
+        let new = Self.compute()
+        if new != blocked { blocked = new }
+    }
+
+    private static func compute() -> Set<Module> {
+        Set(Module.allCases.filter { !$0.blockingRequirements.isEmpty })
+    }
 }
 
 // MARK: - Экран «Осталось дать доступ»
 
-/// Модуль включён, но не хватает доступа. Статусы обновляются раз в 1,5 с, пока экран открыт,
-/// и при возвращении в приложение из настроек. Как только всё выдано, `onChange` просит `ModuleScreen`
-/// показать сам модуль.
+/// Модуль включён, но не хватает доступа. Статусы обновляются при возвращении в приложение из настроек
+/// и после нажатия кнопки (короткий опрос, пока система не ответит). Как только всё выдано, `onChange`
+/// просит `ModuleScreen` показать сам модуль. Постоянного таймера нет.
 struct ModuleSetupView: View {
     let module: Module
     let onChange: () -> Void
     /// Подмена списка нужна только для предпросмотра экрана; в приложении берётся `module.requirements`.
     var requirements: [ModuleRequirement]?
     @Environment(\.dsTheme) private var theme
-    @State private var tick = 0
+    /// Слепок «что выдано и какие ошибки»: меняется только при реальной смене, и только тогда экран перерисовывается.
+    @State private var snapshot: [String] = []
+    /// Растёт после нажатия кнопки: запускает короткий опрос.
+    @State private var pollToken = 0
 
     private var items: [ModuleRequirement] { requirements ?? module.requirements }
 
+    private func makeSnapshot() -> [String] {
+        items.map { "\($0.id):\($0.isGranted()):\($0.isBlocking):\($0.lastError() ?? "")" }
+    }
+
     var body: some View {
-        let _ = tick
+        let _ = snapshot
         let shown = items.filter { $0.level != .onFirstUse }
         let blocking = items.filter(\.isBlocking)
         let onlyRecommendedLeft = !blocking.isEmpty && blocking.allSatisfy { $0.level == .recommended }
@@ -124,6 +168,7 @@ struct ModuleSetupView: View {
                     ModuleRequirementRow(requirement: item, onRequest: {
                         item.request()
                         refresh()
+                        pollToken += 1
                     })
                 }
             }
@@ -132,19 +177,30 @@ struct ModuleSetupView: View {
             if onlyRecommendedLeft {
                 DSButton("Пропустить", icon: "forward.end.fill", style: .primary) {
                     items.filter { $0.level == .recommended }.forEach { ModuleRequirement.skip($0.id) }
-                    onChange()
+                    refresh()
                 }
             }
             DSButton("Подробнее", icon: "info.circle", style: .plain) { ModuleManager.shared.infoModule = module }
         }
         .environment(\.dsTint, theme.accent(module))
-        .onReceive(Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()) { _ in refresh() }
+        .onAppear { refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+        // Системные окна доступа не всегда возвращают фокус приложению: после нажатия секунд 30 переспрашиваем раз в секунду.
+        .task(id: pollToken) {
+            guard pollToken > 0 else { return }
+            for _ in 0..<30 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if Task.isCancelled { return }
+                refresh()
+            }
+        }
     }
 
     private func refresh() {
         if module == .fans { FanHelperInstaller.shared.refresh() }
-        tick += 1
+        let new = makeSnapshot()
+        if new != snapshot { snapshot = new }
+        AccessState.shared.refresh()
         if !items.contains(where: \.isBlocking) { onChange() }
     }
 }
@@ -236,8 +292,7 @@ struct ModuleCentered<Body: View, Actions: View>: View {
             Spacer(minLength: 0)
             VStack(spacing: 16) {
                 ModuleIconBadge(module: module, size: 84)
-                    .shadow(color: .black.opacity(0.3), radius: 14, y: 6)
-                VStack(spacing: 6) {
+                    VStack(spacing: 6) {
                     Text(title).font(DS.pageTitle)
                     Text(lead)
                         .font(.system(size: 13.5))
