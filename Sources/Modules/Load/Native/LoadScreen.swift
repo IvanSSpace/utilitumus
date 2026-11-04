@@ -4,14 +4,23 @@ import SwiftUI
 /// Заменяет веб-страницу lambscape в `ModuleDetail`.
 struct LoadScreen: View {
     @ObservedObject var store: LoadStore
+    @ObservedObject var background: BackgroundStore
     @AppStorage("LoadViewMode") private var modeRaw = LoadViewMode.full.rawValue
     @AppStorage("LoadTab") private var tabRaw = LoadTab.overview.rawValue
     @State private var drill: MemoryPart?
 
-    @MainActor init(store: LoadStore? = nil) { self.store = store ?? LoadStore.shared }
+    @MainActor init(store: LoadStore? = nil) {
+        let s = store ?? LoadStore.shared
+        self.store = s
+        background = s.background
+    }
 
     private var mode: LoadViewMode { LoadViewMode(rawValue: modeRaw) ?? .full }
-    private var tab: LoadTab { LoadTab(rawValue: tabRaw) ?? .overview }
+    private var tab: LoadTab {
+        let t = LoadTab(rawValue: tabRaw) ?? .overview
+        // «Фоновое» скрыто, пока нет ни агентов, ни ботов; выбор при этом не стираем — вкладка вернётся сама.
+        return t == .background && !background.hasContent ? .overview : t
+    }
 
     static func pressureWord(_ p: MemoryPressure) -> String {
         switch p {
@@ -29,7 +38,7 @@ struct LoadScreen: View {
         VStack(spacing: 0) {
             header
             Picker("Раздел", selection: Binding(get: { tab }, set: { tabRaw = $0.rawValue })) {
-                ForEach(LoadTab.allCases) { Text($0.title).tag($0) }
+                ForEach(LoadTab.allCases.filter { $0 != .background || background.hasContent }) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -54,6 +63,9 @@ struct LoadScreen: View {
         .onDisappear { store.screenDisappeared() }
         .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
             StopConfirmSheet(store: store, plan: plan)
+        }
+        .sheet(item: Binding(get: { background.pending }, set: { if $0 == nil { background.cancel() } })) { plan in
+            BackgroundConfirmSheet(background: background, plan: plan)
         }
     }
 
@@ -118,11 +130,13 @@ struct LoadScreen: View {
     private var content: some View {
         switch tab {
         case .overview:
-            OverviewTab(store: store, mode: mode, drill: $drill) { modeRaw = LoadViewMode.full.rawValue; tabRaw = LoadTab.memory.rawValue }
+            OverviewTab(store: store, mode: mode, drill: $drill,
+                        openMemory: { modeRaw = LoadViewMode.full.rawValue; tabRaw = LoadTab.memory.rawValue },
+                        openBackground: { modeRaw = LoadViewMode.full.rawValue; tabRaw = LoadTab.background.rawValue })
         case .sessions:
-            SessionsTab()
+            SessionsTab(store: store, mode: mode)
         case .background:
-            BackgroundTab()
+            BackgroundTab(background: background, mode: mode) { modeRaw = LoadViewMode.full.rawValue }
         case .memory:
             MemoryTab(store: store, mode: mode, drill: $drill) { modeRaw = LoadViewMode.full.rawValue }
         }

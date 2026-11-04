@@ -18,9 +18,9 @@ struct AdviceItem: Sendable, Identifiable {
     var stopPid: Int32?
 }
 
-/// Правила подсказок lambscape (advice.py), кроме тех, что про сессии Claude (простой, одинаковые MCP) —
-/// они появятся вместе с экраном «Сессии». Здесь: долгоживущие dev-серверы и тяжёлые потомки сессий и
-/// вкладок терминала, сироты, модели ollama, рост свопа и высокое давление.
+/// Правила подсказок lambscape (advice.py): долгоживущие dev-серверы и тяжёлые потомки сессий и вкладок
+/// терминала, простаивающие сессии Claude, сироты, одинаковые MCP в нескольких сессиях, модели ollama,
+/// рост свопа и высокое давление.
 enum Advice {
     static let longRunning: TimeInterval = 2 * 3600
     static let heavyMB = 500.0
@@ -37,10 +37,12 @@ enum Advice {
         var ollama: (Bool) -> [OllamaProbe.Model]
         var roots: [String]
         var now: TimeInterval
+        /// Сессии Claude (для правил про простой и дубли MCP).
+        var sessions: [ClaudeSession] = []
     }
 
     static func build(_ c: Context) -> [AdviceItem] {
-        var items = longRunningItems(c) + orphanItems(c) + ollamaItems(c) + swapItems(c)
+        var items = longRunningItems(c) + idleItems(c) + orphanItems(c) + mcpItems(c) + ollamaItems(c) + swapItems(c)
         items.sort { $0.severity != $1.severity ? $0.severity < $1.severity : $0.savesMB > $1.savesMB }
         return items
     }
@@ -100,6 +102,51 @@ enum Advice {
                 detail: h.why, savesMB: Int(mb.rounded()), stopPid: h.pid))
         }
         return out
+    }
+
+    // MARK: Сессии Claude
+
+    static let idleAfter: TimeInterval = 6 * 3600
+
+    /// Сессия «ждёт» больше 6 ч, и её можно остановить (не текущая и не под приложением).
+    private static func idleItems(_ c: Context) -> [AdviceItem] {
+        c.sessions.compactMap { s in
+            let idle = c.now - (s.lastActivity > 0 ? s.lastActivity : c.now)
+            guard s.status == .idle, idle > idleAfter, s.stoppable else { return nil }
+            let detail = s.resumeCommand.isEmpty ? "sessionId неизвестен — продолжить через --resume не выйдет"
+                : "продолжить потом: \(s.resumeCommand)"
+            return AdviceItem(id: "adv:idle:\(s.pid)", severity: .forMB(s.memMB), title: "Сессия \(s.name) простаивает \(Int(idle) / 3600) ч",
+                              detail: detail, savesMB: Int(s.memMB.rounded()), stopPid: s.pid)
+        }
+    }
+
+    /// «github-mcp-server» из «node …/github-mcp-server/dist/index.js»: первое слово с признаком MCP.
+    private static func mcpName(_ label: String) -> String {
+        label.split(whereSeparator: { $0 == "/" || $0.isWhitespace }).first { $0.range(of: "mcp", options: .caseInsensitive) != nil }
+            .map(String.init) ?? label
+    }
+
+    /// Один и тот же MCP-сервер в двух сессиях и больше: каждая сессия поднимает свою копию. Совет без кнопки.
+    private static func mcpItems(_ c: Context) -> [AdviceItem] {
+        var per: [String: [Int32: Double]] = [:] // сервер → сессия → MB
+        for s in c.sessions {
+            for k in s.children where k.kind == .mcp { per[mcpName(k.name), default: [:]][s.pid, default: 0] += k.memMB ?? 0 }
+        }
+        let dups = per.filter { $0.value.count >= 2 }
+        guard !dups.isEmpty else { return [] }
+        let names = dups.keys.sorted { a, b in
+            let (x, y) = (dups[a]!.values.reduce(0, +), dups[b]!.values.reduce(0, +))
+            return x != y ? x > y : a < b
+        }
+        let total = dups.values.reduce(0.0) { $0 + $1.values.reduce(0, +) }
+        let extra = dups.values.reduce(0.0) { $0 + $1.values.reduce(0, +) - ($1.values.max() ?? 0) } // всё, кроме одной копии
+        let more = names.count > 3 ? " и ещё \(names.count - 3)" : ""
+        let sessions = dups.values.map(\.count).max() ?? 0
+        return [AdviceItem(
+            id: "adv:mcp", severity: .low,
+            title: "MCP \(names.prefix(3).joined(separator: ", "))\(more) запущены в \(sessions) сессиях — \(Fmt.mb(total))",
+            detail: "Подключай их только в нужных проектах (.mcp.json проекта), а не глобально — тогда остальные сессии не будут поднимать свои копии",
+            savesMB: Int(extra.rounded()), stopPid: nil)]
     }
 
     // MARK: Сироты

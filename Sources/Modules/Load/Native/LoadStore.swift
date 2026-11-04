@@ -29,6 +29,8 @@ final class LoadStore: ObservableObject {
     @Published var notice: LoadNotice?
 
     let engine: LoadEngine
+    /// Вкладка «Фоновое»: агенты launchd и боты.
+    let background = BackgroundStore()
     private var historyLoop: Task<Void, Never>?
     private var liveLoop: Task<Void, Never>?
     private var watchers = 0
@@ -40,7 +42,10 @@ final class LoadStore: ObservableObject {
     private convenience init() { self.init(engine: LoadEngine()) }
 
     /// Свой движок — для проверок с отдельным файлом истории.
-    init(engine: LoadEngine) { self.engine = engine }
+    init(engine: LoadEngine) {
+        self.engine = engine
+        background.onFinish = { [weak self] r in self?.backgroundFinished(r) }
+    }
 
     // MARK: Модуль включён / выключен
 
@@ -107,9 +112,11 @@ final class LoadStore: ObservableObject {
         p.update(from: s.map)
         palette = p
         snapshot = s
+        background.update(from: s)
     }
 
     func refreshNow() {
+        background.forget()
         Task {
             let s = await engine.refreshNow()
             apply(s)
@@ -140,6 +147,16 @@ final class LoadStore: ObservableObject {
             pendingStop = nil
             show(LoadNotice(text: result.message, isError: !result.ok))
             apply(await engine.measure())
+        }
+    }
+
+    /// Действие над агентом или ботом выполнено: баннер и свежий замер (launchctl list обновится не сразу — второй замер позже).
+    private func backgroundFinished(_ r: StopResult) {
+        show(LoadNotice(text: r.message, isError: !r.ok))
+        Task {
+            apply(await engine.refreshNow())
+            try? await Task.sleep(for: .seconds(1.5))
+            apply(await engine.refreshNow())
         }
     }
 

@@ -14,6 +14,8 @@ struct LoadSnapshot: Sendable {
     var groups: [ProcessGroup]
     var map: MemoryMap
     var advice: [AdviceItem]
+    /// Сессии Claude, терминалы, tmux/Docker, сироты, память ИИ. В лёгком замере пусто.
+    var sessions: SessionsData
     var disk: DiskCard
     /// pid → почему не трогаем.
     var fence: [Int32: String]
@@ -50,6 +52,7 @@ actor LoadEngine {
     private let ollama = OllamaProbe()
     private let disk = DiskMonitor()
     private let roots = ProjectRoots()
+    private let sessionsBuilder = SessionsBuilder()
     private let history: LoadHistory
     private var lastRecorded = Date.distantPast
 
@@ -70,26 +73,33 @@ actor LoadEngine {
         let memory = SystemMemory.read()
         let rootList = roots.current
         let assigned = attribution.assign(procs, tree: tree, roots: rootList)
-        let fence = Protection.fence(procs: procs, tree: tree)
+        // Процессы ботов из bots.toml трогают только их кнопки.
+        let botFence = BotRegistry.fence(BotRegistry.load(), procs: procs, tree: tree, launchd: launchd.current())
+        let fence = Protection.fence(procs: procs, tree: tree, extra: botFence)
         let planner = StopPlanner(procs: procs, fence: fence, tree: tree)
 
         var groups = Grouping.groups(procs: procs, assigned: assigned, stoppable: planner.canStop)
         var map = MemoryMap()
         var advice: [AdviceItem] = []
+        var sessions = SessionsData.empty
         if !light {
             for i in groups.indices where groups[i].id == "system" { groups[i].hints = Grouping.systemHints(procs) }
             map = MemoryMap.build(procs: procs, assigned: assigned, groups: groups, memory: memory, stoppable: planner.canStop)
             let jobs = launchd.current()
+            sessionsBuilder.refreshMux()
+            sessions = sessionsBuilder.build(SessionsBuilder.Input(
+                procs: procs, tree: tree, planner: planner, roots: rootList, launchdPIDs: Set(jobs.values.compactMap { $0 }),
+                selfPid: getpid(), now: Date().timeIntervalSince1970))
             advice = Advice.build(Advice.Context(
                 procs: procs, tree: tree, planner: planner, memory: memory, map: map,
                 swapGrowthMB: history.swapGrowth(), launchdPIDs: Set(jobs.values.compactMap { $0 }),
                 ollama: { [ollama] running in ollama.current(processRunning: running) }, roots: rootList,
-                now: Date().timeIntervalSince1970))
+                now: Date().timeIntervalSince1970, sessions: sessions.claude))
         }
         let me = getpid()
         let snapshot = LoadSnapshot(
             timestamp: Date(), host: SystemMemory.host, memory: memory, procs: procs, tree: tree, assigned: assigned,
-            groups: groups, map: map, advice: advice, disk: disk.card(swap24: history.swapWrittenLastDay()), fence: fence,
+            groups: groups, map: map, advice: advice, sessions: sessions, disk: disk.card(swap24: history.swapWrittenLastDay()), fence: fence,
             launchd: launchd.current(), roots: rootList, selfPid: me, selfMemMB: procs[me]?.mem ?? 0,
             selfCPU: procs[me]?.cpuPercent,
             measureMillis: Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6)
@@ -110,6 +120,7 @@ actor LoadEngine {
     func refreshNow() -> LoadSnapshot {
         rootMemory.refreshIfStale(maxAge: 0)
         launchd.refreshIfStale(maxAge: 0)
+        sessionsBuilder.refreshMux(maxAge: 0)
         return measure()
     }
 
@@ -117,6 +128,18 @@ actor LoadEngine {
     func execute(_ plan: StopPlan) -> StopResult {
         let top = rootMemory.current()
         let procs = scanner.scan(rootMemory: top.memory, compressed: top.compressed)
-        return StopExecutor.execute(plan, procs: procs)
+        // Список заданий свежий: pid бота мог смениться после перезапуска, а кэш живёт до минуты.
+        let bots = BotRegistry.load()
+        var botFence: [Int32: String] = [:]
+        if !bots.isEmpty {
+            // Без списка заданий не отличить процесс бота от сироты.
+            guard let text = Tool.run(Exec.launchctl, ["list"], timeout: 10), !LaunchdJobs.parse(text).isEmpty else {
+                return StopResult(ok: false, message: "launchctl не ответил — не могу проверить ботов, повтори позже", freedMB: 0)
+            }
+            botFence = BotRegistry.fence(bots, procs: procs, tree: ProcessTree(procs), launchd: LaunchdJobs.parse(text))
+        }
+        let result = StopExecutor.execute(plan, procs: procs, extraFence: botFence)
+        ActionLog.record(stop: plan, result: result)
+        return result
     }
 }

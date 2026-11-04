@@ -14,8 +14,9 @@ enum Protection {
     static let systemDirs = ["/System/", "/usr/", "/sbin/", "/bin/", "/Library/Apple/"]
 
     /// pid → почему не трогаем: панель и её предки, дерево сессии Claude, из которой запущена панель,
-    /// и сессии Claude, которые ведёт приложение.
-    static func fence(procs: [Int32: LoadProcess], tree: ProcessTree, selfPid: Int32 = getpid()) -> [Int32: String] {
+    /// и сессии Claude, которые ведёт приложение. `extra` — процессы ботов из bots.toml со всеми потомками.
+    static func fence(procs: [Int32: LoadProcess], tree: ProcessTree, selfPid: Int32 = getpid(),
+                      extra: [Int32: String] = [:]) -> [Int32: String] {
         var out: [Int32: String] = [selfPid: "это сама панель"]
         let ups = tree.ancestors(of: selfPid, in: procs)
         for pid in ups { out[pid] = "предок панели" }
@@ -24,6 +25,7 @@ enum Protection {
                 for q in tree.subtree(of: pid) where out[q] == nil { out[q] = "сессия, из которой запущена панель" }
             }
         }
+        for (pid, why) in extra where out[pid] == nil { out[pid] = why }
         // .app панель не останавливает: убить агента Claude.app значит сломать чат, а не освободить память.
         for p in procs.values where Kinds.isClaude(p) {
             if let app = Kinds.hostApp(of: p, procs: procs), out[p.pid] == nil { out[p.pid] = "сессией управляет \(app).app" }
@@ -213,9 +215,10 @@ enum StopExecutor {
 
     /// Выполнить план по свежему скану. Всё, что за это время завершилось или сменилось, пропускаем;
     /// защищённое проверяем заново.
-    static func execute(_ plan: StopPlan, procs: [Int32: LoadProcess], grace: TimeInterval = StopExecutor.grace) -> StopResult {
+    static func execute(_ plan: StopPlan, procs: [Int32: LoadProcess], extraFence: [Int32: String] = [:],
+                        grace: TimeInterval = StopExecutor.grace) -> StopResult {
         let tree = ProcessTree(procs)
-        let fence = Protection.fence(procs: procs, tree: tree)
+        let fence = Protection.fence(procs: procs, tree: tree, extra: extraFence)
 
         if case .process(let pid) = plan.scope {
             guard let want = plan.targets.first(where: { $0.pid == pid }) else {

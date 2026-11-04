@@ -1,40 +1,59 @@
 import SwiftUI
 
-// Точка расширения этапа 2: экран «Сессии» (Claude Code, терминалы, tmux, Docker, сироты).
-//
-// Что взять из ядра (`Native/Core`):
-// - `LoadSnapshot.procs` / `.tree` — все процессы и дерево; `Kinds.isClaude(_:)` находит сессию claude,
-//   `Kinds.hostApp(of:procs:)` — приложение, которое её ведёт, `Kinds.childKind(_:)` — shell / mcp / dev-server;
-// - `ProcessTree.subtree(of:)` — сессия и потомки (глубокие первыми), `LoadProcess.age(now:)`, `.memMB`, `.cpuPercent`;
-// - `Attribution.sessionProject(cwd:roots:)` и `LoadSnapshot.roots` — проект сессии;
-// - `Advice.orphans(...)` — сироты;
-// - остановка: `LoadSnapshot.stopPlan(process:)` → `LoadStore.shared.requestStop(process:)` (подтверждение и
-//   SIGTERM → SIGKILL уже есть, защита — в `Protection`).
-// Правило подсказок про простой сессии и одинаковые MCP (advice.py: _idle, _mcp) добавляется в `Advice.build`.
+// Вкладка «Сессии»: сессии Claude Code, вкладки терминалов, tmux, Docker и сироты. Данные собирает
+// `SessionsBuilder` (Sessions/) по замеру ядра, здесь — только отрисовка. Остановка — через
+// `LoadStore.requestStop(...)` (Sessions/SessionStop.swift): подтверждение и защита — общие с остальными вкладками.
 
-/// Вкладка «Сессии». Этап 2 заменяет это представление.
 struct SessionsTab: View {
-    var body: some View {
-        ContentUnavailableView {
-            Label("Сессии — скоро", systemImage: "terminal")
-        } description: {
-            Text("Сессии Claude Code, вкладки терминалов, tmux и Docker появятся здесь в следующем обновлении.")
-        }
-    }
-}
+    @ObservedObject var store: LoadStore
+    let mode: LoadViewMode
 
-/// Сводка сессий в «Обзоре». Этап 2 заменяет эту секцию.
-struct SessionsCompactSection: View {
-    var body: some View {
-        Section("Сессии Claude") {
-            EmptyNote(text: "Скоро")
-        }
-    }
-}
+    /// Раскрытые и свёрнутые руками «Потомки»: у кого есть горячий потомок, список открыт сам, пока его не свернули.
+    @State private var opened: Set<Int32> = []
+    @State private var closed: Set<Int32> = []
 
-/// Плитка «ИИ» в итогах «Обзора». Этап 2 считает память ИИ (сессии, MCP, Claude.app, ollama, whisper).
-struct AIMemoryKPI: View {
     var body: some View {
-        KPITile(title: "ИИ", value: "—", subtitle: "скоро")
+        Form {
+            if let s = store.snapshot {
+                if mode == .full { full(s) } else { simple(s) }
+                FooterSection(snapshot: s)
+            } else {
+                ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func full(_ s: LoadSnapshot) -> some View {
+        let d = s.sessions
+        let now = s.timestamp.timeIntervalSince1970
+        Section {
+            if d.claude.isEmpty { EmptyNote(text: "Сессий Claude нет.") }
+            ForEach(d.claude) { session in
+                SessionCard(session: session, now: now, expanded: expandedBinding(session),
+                            onStop: { store.requestStop(session: session) },
+                            onStopChild: { store.requestStop(session: session, child: $0) })
+            }
+        } header: {
+            SessionsHeader(title: "Claude Code", count: d.claude.count, mb: d.claude.reduce(0) { $0 + $1.memMB })
+        }
+        TerminalsSection(hosts: d.terminals, onStopShell: { store.requestStop(shell: $0) },
+                         onStopChild: { store.requestStop(shell: $0, child: $1) })
+        MuxSection(tmux: d.tmux, docker: d.docker)
+        OrphansSection(orphans: d.orphans, stoppable: d.stoppableOrphans, onStop: { store.requestStop(orphan: $0) })
+    }
+
+    @ViewBuilder
+    private func simple(_ s: LoadSnapshot) -> some View {
+        SessionsSimpleSection(sessions: s.sessions.claude) { store.requestStop(session: $0) }
+    }
+
+    private func expandedBinding(_ s: ClaudeSession) -> Binding<Bool> {
+        Binding(
+            get: { opened.contains(s.pid) || (s.children.contains(where: \.isHot) && !closed.contains(s.pid)) },
+            set: { on in
+                if on { opened.insert(s.pid); closed.remove(s.pid) } else { opened.remove(s.pid); closed.insert(s.pid) }
+            })
     }
 }

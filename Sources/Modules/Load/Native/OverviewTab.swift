@@ -6,6 +6,8 @@ struct OverviewTab: View {
     let mode: LoadViewMode
     @Binding var drill: MemoryPart?
     var openMemory: () -> Void
+    var openBackground: () -> Void
+    @State private var aiOpen = false
 
     var body: some View {
         Form {
@@ -31,13 +33,14 @@ struct OverviewTab: View {
                 KPITile(title: "Своп", value: Fmt.gb(Double(m.swapUsedMB)), unit: "GB",
                         subtitle: "из \(Fmt.gb(Double(m.swapTotalMB))) GB · \(Fmt.percent(Double(m.swapUsedMB), of: Double(m.swapTotalMB)))",
                         warn: LoadScreen.swapIsHot(m))
-                AIMemoryKPI()
+                AIMemoryKPI(ai: s.sessions.ai, open: $aiOpen)
                 let freeable = s.advice.filter { $0.stopPid != nil }
                 let freeMB = Double(freeable.reduce(0) { $0 + $1.savesMB })
                 KPITile(title: "Можно освободить", value: freeable.isEmpty ? "—" : freeMB < 1024 ? String(Int(freeMB)) : Fmt.gb(freeMB),
                         unit: freeMB < 1024 ? "MB" : "GB", subtitle: freeable.isEmpty ? "нечего" : "по " + Fmt.plural(freeable.count, "подсказке", "подсказкам", "подсказкам"))
             }
             .padding(.vertical, 4)
+            if aiOpen { AIDrillPanel(ai: s.sessions.ai) }
         }
         Section {
             MemoryCard(snapshot: s, palette: store.palette, mode: .full, drill: $drill) { store.requestStop(process: $0) }
@@ -48,8 +51,8 @@ struct OverviewTab: View {
             }
         }
         AdviceSection(items: s.advice, limit: 5, onStop: { store.requestStop(process: $0) }, onMore: openMemory, moreTitle: "в «Памяти»")
-        SessionsCompactSection()
-        BackgroundCompactSection()
+        SessionsCompactSection(sessions: s.sessions.claude, now: s.timestamp.timeIntervalSince1970)
+        BackgroundCompactSection(background: store.background, open: openBackground)
     }
 
     @ViewBuilder
@@ -61,6 +64,7 @@ struct OverviewTab: View {
         }
         TopProgramsSection(map: s.map)
         AdviceSection(items: s.advice, limit: 3, onStop: { store.requestStop(process: $0) }, onMore: openMemory, moreTitle: "в «Подробно»")
+        SessionsSimpleSection(sessions: s.sessions.claude) { store.requestStop(session: $0) }
     }
 }
 

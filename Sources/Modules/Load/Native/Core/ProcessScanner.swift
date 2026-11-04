@@ -62,7 +62,12 @@ final class ProcessScanner {
     private var lastScan: UInt64 = 0
     private var ttys: [UInt32: String?] = [:]
 
-    private let argCapacity = 2 << 20
+    /// KERN_PROCARGS2 отвечает ошибкой, если буфер больше kern.argmax (1 MB), — берём ровно столько.
+    private let argCapacity: Int = {
+        var n: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname("kern.argmax", &n, &size, nil, 0) == 0 && n > 4096 ? Int(n) : 1 << 20
+    }()
     private let argBuffer: UnsafeMutableRawPointer
     private let pathBuffer: UnsafeMutablePointer<CChar>
     private let timebase: mach_timebase_info_data_t
