@@ -155,37 +155,32 @@ struct GroupsSection: View {
     let snapshot: LoadSnapshot
     @Binding var expanded: Set<String>
     @Binding var showAll: Set<String>
+    /// Виды, у которых показан весь список, а не первые `Self.initialLimit` групп.
+    @Binding var fullKinds: Set<GroupKind>
     var onStopProcess: (Int32) -> Void
     var onStopGroup: (String) -> Void
 
+    /// Сколько групп каждого вида видно сразу: сотни строк разом перерисовываются заметно.
+    static let initialLimit = 15
+
     var body: some View {
         let maxMem = Double(groups.map(\.memMB).max() ?? 1)
+        let totalRAM = snapshot.memory.totalMB
+        let all = fullKinds.contains(kind)
+        // Раскрытые группы остаются на виду, даже если уехали ниже первых строк.
+        let shown = all ? groups : groups.enumerated().filter { $0.offset < Self.initialLimit || expanded.contains($0.element.id) }.map(\.element)
         DSSection(kind.title, trailing: "\(groups.count) · " + Fmt.mb(groups.reduce(0) { $0 + $1.memMB })) {
             if groups.isEmpty { LoadEmpty(text: "Сейчас таких процессов нет.") }
-            ForEach(groups) { g in
+            ForEach(shown) { g in
                 let open = expanded.contains(g.id)
                 LoadLine {
-                    Button {
+                    GroupHeader(group: g, totalRAM: totalRAM, maxMem: maxMem, open: open) {
                         if open { expanded.remove(g.id) } else { expanded.insert(g.id) }
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(g.name).font(DS.rowTitle).lineLimit(1).help(g.path ?? "")
-                            Text("\(g.count) проц.").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                            Spacer()
-                            Text(Fmt.mb(g.memMB)).monospacedDigit()
-                            Text(Fmt.percent(Double(g.memMB), of: Double(snapshot.memory.totalMB)))
-                                .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 36, alignment: .trailing)
-                            ShareBar(values: [Double(g.memMB)], maximum: maxMem, width: 60)
-                            DisclosureChevron(open: open)
-                        }
-                        .contentShape(Rectangle())
-                        .hoverRow(selected: open)
                     }
-                    .buttonStyle(.plain)
                 }
                 if open {
                     LoadLine(divider: false) {
-                        GroupBody(group: g, snapshot: snapshot, showAll: Binding(
+                        GroupBody(group: g, procs: snapshot.procs, showAll: Binding(
                             get: { showAll.contains(g.id) },
                             set: { if $0 { showAll.insert(g.id) } else { showAll.remove(g.id) } }),
                             onStopProcess: onStopProcess, onStopGroup: onStopGroup)
@@ -193,13 +188,50 @@ struct GroupsSection: View {
                     .padding(.top, -9)
                 }
             }
+            if groups.count > Self.initialLimit {
+                LoadLine {
+                    DSButton(all ? "свернуть до \(Self.initialLimit)" : "ещё \(groups.count - shown.count) — показать все",
+                             icon: all ? "chevron.up" : "chevron.down", style: .plain, small: true) {
+                        if all { fullKinds.remove(kind) } else { fullKinds.insert(kind) }
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Строка группы: имя, число процессов, память, доля, полоса.
+private struct GroupHeader: View {
+    let group: ProcessGroup
+    let totalRAM: Int
+    let maxMem: Double
+    let open: Bool
+    var toggle: () -> Void
+
+    var body: some View {
+        let g = group
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Text(g.name).font(DS.rowTitle).lineLimit(1).help(g.path ?? "")
+                Text("\(g.count) проц.").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Spacer()
+                Text(Fmt.mb(g.memMB)).monospacedDigit()
+                Text(Fmt.percent(Double(g.memMB), of: Double(totalRAM)))
+                    .font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 36, alignment: .trailing)
+                ShareBar(values: [Double(g.memMB)], maximum: maxMem, width: 60)
+                DisclosureChevron(open: open)
+            }
+            .contentShape(Rectangle())
+            .hoverRow(selected: open)
+        }
+        .buttonStyle(.plain)
     }
 }
 
 private struct GroupBody: View {
     let group: ProcessGroup
-    let snapshot: LoadSnapshot
+    /// Только процессы: из всего снимка группе нужны лишь они.
+    let procs: [Int32: LoadProcess]
     @Binding var showAll: Bool
     var onStopProcess: (Int32) -> Void
     var onStopGroup: (String) -> Void
@@ -209,7 +241,7 @@ private struct GroupBody: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { i, m in
                 // В «top» память подогнана под итог группы, в полном списке — как есть.
-                ProcessRow(member: m, snapshot: snapshot, mb: showAll ? m.memMB : group.topMB[safe: i], onStop: onStopProcess)
+                ProcessRow(member: m, process: procs[m.pid], mb: showAll ? m.memMB : group.topMB[safe: i], onStop: onStopProcess)
             }
             if group.restCount > 0 || showAll {
                 HStack {
@@ -240,14 +272,14 @@ private struct GroupBody: View {
 
 private struct ProcessRow: View {
     let member: GroupMember
-    let snapshot: LoadSnapshot
+    let process: LoadProcess?
     let mb: Int?
     var onStop: (Int32) -> Void
 
     private static let kindNames: [ProcessKind: String] = [.devServer: "dev-сервер", .mcp: "MCP", .shell: "шелл"]
 
     var body: some View {
-        let p = snapshot.procs[member.pid]
+        let p = process
         HStack(spacing: 8) {
             Text(String(member.pid)).font(.caption.monospaced()).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
             VStack(alignment: .leading, spacing: 0) {

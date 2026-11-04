@@ -344,9 +344,33 @@ enum BotRegistry {
         return out
     }
 
+    private struct EnvCacheEntry {
+        var spec: BotSpec
+        var mtime: Date?
+        var missing: [String]
+    }
+
+    private static let cacheLock = NSLock()
+    private static var envCache: [String: EnvCacheEntry] = [:]
+    private static var portsCache: [Set<Int32>: (at: Date, ports: [String])] = [:]
+
     /// Обязательные переменные без значения. Сами значения (токены) никуда не уходят.
+    /// Файл с окружением перечитывается, только когда изменилось время его правки (или сам бот в bots.toml).
     static func envMissing(_ spec: BotSpec) -> [String] {
         guard !spec.requiresEnv.isEmpty else { return [] }
+        let mtime = spec.envFile.flatMap { try? FileManager.default.attributesOfItem(atPath: $0)[.modificationDate] as? Date }
+        cacheLock.lock()
+        let hit = envCache[spec.id]
+        cacheLock.unlock()
+        if let hit, hit.spec == spec, hit.mtime == mtime { return hit.missing }
+        let missing = readEnvMissing(spec)
+        cacheLock.lock()
+        envCache[spec.id] = EnvCacheEntry(spec: spec, mtime: mtime, missing: missing)
+        cacheLock.unlock()
+        return missing
+    }
+
+    private static func readEnvMissing(_ spec: BotSpec) -> [String] {
         var values = ProcessInfo.processInfo.environment
         if let file = spec.envFile, !file.isEmpty {
             values = [:]
@@ -365,6 +389,21 @@ enum BotRegistry {
     }
 
     // MARK: Слушающие порты
+
+    /// Порты набора процессов. Разбор сокетов через libproc не бесплатен, а набор pid почти не меняется:
+    /// для того же набора берём прошлый ответ, но не старше полминуты (порт у живого процесса мог смениться).
+    static func cachedListenPorts(of pids: Set<Int32>) -> [String] {
+        cacheLock.lock()
+        let cached = portsCache
+        cacheLock.unlock()
+        if let c = cached[pids], Date().timeIntervalSince(c.at) < 30 { return c.ports }
+        let ports = Set(pids.flatMap { listenPorts(of: $0) }).sorted()
+        cacheLock.lock()
+        if portsCache.count > 32 { portsCache = portsCache.filter { Date().timeIntervalSince($0.value.at) < 30 } }
+        portsCache[pids] = (Date(), ports)
+        cacheLock.unlock()
+        return ports
+    }
 
     /// Слушающие TCP-сокеты процесса вида «127.0.0.1:8765» — через libproc, без lsof.
     static func listenPorts(of pid: Int32) -> [String] {
@@ -459,7 +498,7 @@ extension BotRegistry {
         // Аптайм — по процессам launchd: менюбар-приложение бота живёт неделями и врало бы.
         let labelled = Set(spec.launchd.compactMap { launchd[$0] ?? nil }).intersection(mains)
         let starts = (labelled.isEmpty ? Set(mains) : labelled).compactMap { procs[$0]?.startTime }.filter { $0 > 0 }
-        let ports = Set(all.flatMap { listenPorts(of: $0) }).sorted()
+        let ports = cachedListenPorts(of: all)
         return BotItem(
             id: spec.id, name: spec.name, state: state, pids: mains,
             memMB: Int(all.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()),

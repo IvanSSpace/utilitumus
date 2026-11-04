@@ -16,14 +16,14 @@ struct HistorySample: Codable, Sendable {
 }
 
 /// Окно истории для графика: корзины по 5 минут, ряды — топ-5 групп и «прочее».
-struct HistoryWindow: Sendable {
-    struct Series: Sendable, Identifiable {
+struct HistoryWindow: Sendable, Equatable {
+    struct Series: Sendable, Identifiable, Equatable {
         var key: String
         var name: String
         var id: String { key }
     }
 
-    struct Point: Sendable, Identifiable {
+    struct Point: Sendable, Identifiable, Equatable {
         var ts: Int
         var usedMB: Int
         var swapMB: Int

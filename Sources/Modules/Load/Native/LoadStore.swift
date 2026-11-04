@@ -20,7 +20,15 @@ final class LoadStore: ObservableObject {
 
     static let liveInterval: Duration = .seconds(3)
 
+    /// Снимок для экрана: публикуется, только когда заметные данные изменились (см. `SnapshotKey`),
+    /// иначе каждые 3 с перерисовывался бы весь экран. Свежайший снимок — `latest`.
     @Published private(set) var snapshot: LoadSnapshot?
+    /// Всегда-меняющееся (время замера, память и CPU самой панели): отдельно, чтобы не трогать тяжёлые секции.
+    let live = LiveStats()
+    /// Самый свежий снимок: по нему строятся планы остановки (там нужны актуальные процессы), экран его не наблюдает.
+    private(set) var latest: LoadSnapshot?
+    private var publishedKey: SnapshotKey?
+    private var publishedAt = Date.distantPast
     @Published private(set) var history: HistoryWindow?
     @Published private(set) var palette = LoadPalette()
     /// План остановки, ждущий подтверждения.
@@ -107,30 +115,42 @@ final class LoadStore: ObservableObject {
         return NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
     }
 
-    func apply(_ s: LoadSnapshot) {
-        var p = palette
-        p.update(from: s.map)
-        palette = p
-        snapshot = s
-        background.update(from: s)
+    /// Не чаще чем раз в столько тихий снимок всё же публикуется: мелкие сдвиги (CPU, возраст) не залипают.
+    private static let quietRepublish: TimeInterval = 9
+
+    func apply(_ s: LoadSnapshot, force: Bool = false) {
+        latest = s
+        live.update(from: s)
+        let key = SnapshotKey(s)
+        let changed = force || key != publishedKey || snapshot == nil || Date().timeIntervalSince(publishedAt) >= Self.quietRepublish
+        if changed {
+            var p = palette
+            p.update(from: s.map)
+            // Палитра — значение целиком: публикуем, только если появились новые цвета.
+            if p != palette { palette = p }
+            snapshot = s
+            publishedKey = key
+            publishedAt = Date()
+        }
+        background.update(from: s, force: force)
     }
 
     func refreshNow() {
         background.forget()
         Task {
             let s = await engine.refreshNow()
-            apply(s)
+            apply(s, force: true)
         }
     }
 
     // MARK: Остановка
 
     func requestStop(process pid: Int32) {
-        pendingStop = snapshot?.stopPlan(process: pid)
+        pendingStop = latest?.stopPlan(process: pid)
     }
 
     func requestStop(group id: String) {
-        pendingStop = snapshot?.stopPlan(group: id)
+        pendingStop = latest?.stopPlan(group: id)
     }
 
     func cancelStop() {
@@ -146,7 +166,7 @@ final class LoadStore: ObservableObject {
             stopRunning = false
             pendingStop = nil
             show(LoadNotice(text: result.message, isError: !result.ok))
-            apply(await engine.measure())
+            apply(await engine.measure(), force: true)
         }
     }
 
@@ -154,9 +174,9 @@ final class LoadStore: ObservableObject {
     private func backgroundFinished(_ r: StopResult) {
         show(LoadNotice(text: r.message, isError: !r.ok))
         Task {
-            apply(await engine.refreshNow())
+            apply(await engine.refreshNow(), force: true)
             try? await Task.sleep(for: .seconds(1.5))
-            apply(await engine.refreshNow())
+            apply(await engine.refreshNow(), force: true)
         }
     }
 
