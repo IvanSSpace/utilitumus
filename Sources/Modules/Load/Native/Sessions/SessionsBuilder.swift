@@ -92,7 +92,7 @@ final class SessionsBuilder: @unchecked Sendable {
                 startedAt: started, lastActivity: last > 0 ? TimeInterval(last) : p.startTime, activity: activity,
                 memMB: order.reduce(0.0) { $0 + (i.procs[$1]?.mem ?? 0) }, version: version,
                 children: order.dropLast().compactMap { child($0, i) }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) },
-                resumeCommand: sid != nil && app == nil ? "claude --resume \(sid!)" : "",
+                resumeCommand: sid.map(TranscriptReader.isSafeID) == true && app == nil ? "claude --resume \(sid!)" : "",
                 hostApp: app, isSelf: above.contains(p.pid), stoppable: i.planner.canStop(p)))
         }
         transcripts.prune(keeping: seen) // кэш разбора — только для живых сессий

@@ -150,7 +150,8 @@ struct SessionCard: View {
                 }
             }
             HStack(spacing: 8) {
-                if !s.resumeCommand.isEmpty {
+                // Команду копируют в терминал — повторная проверка sessionId даже при готовой строке.
+                if !s.resumeCommand.isEmpty, s.sessionID.map(TranscriptReader.isSafeID) == true {
                     Text(s.resumeCommand).font(.caption.monospaced()).foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     Button {

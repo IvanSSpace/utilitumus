@@ -368,11 +368,10 @@ final class FanController: ObservableObject {
         if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 512_000 {
             try? FileManager.default.removeItem(at: url)
         }
+        // Каталог 0700, файл 0600 — журнал не должны читать другие пользователи мака.
+        ActionLog.preparePrivate(file: url)
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(data); try? handle.close()
-        } else {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: url)
         }
     }
 

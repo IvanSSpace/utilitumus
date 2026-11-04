@@ -1,8 +1,8 @@
 import Foundation
 import AppKit
 
-/// Обновление из GitHub Releases: релиз собирает GitHub Actions
-/// (.github/workflows/release.yml) и прикладывает Utilitumus.zip.
+/// Обновление из GitHub Releases: релиз собирает и подписывает автор на своём Mac
+/// (scripts/release.sh) и прикладывает Utilitumus.zip.
 /// Приложение скачивает его, проверяет, подменяет себя на месте и перезапускается.
 ///
 /// Скачанное через URLSession карантинный атрибут не получает (приложение не
@@ -156,13 +156,19 @@ final class Updater: ObservableObject {
               info["CFBundleShortVersionString"] as? String == expectedVersion else {
             throw UpdateError("В архиве не та версия Utilitumus")
         }
-        try run("/usr/bin/codesign", ["--verify", "--deep", app.path])
-        // Текущая версия подписана постоянным сертификатом — новая обязана быть
-        // подписана им же: иначе подменённый архив встал бы на место приложения.
-        // Ad-hoc подпись (сборка из исходников без сертификата) так не сверить.
-        let requirement = try designatedRequirement(of: target)
-        if requirement.contains("certificate leaf") {
-            try run("/usr/bin/codesign", ["--verify", "--test-requirement=\(requirement)", app.path])
+        // Подпись проверяем ВСЕГДА и по вшитому в приложение списку хэшей, а не по
+        // подписи текущей сборки: иначе, если текущая сборка ad-hoc (или подменена),
+        // атакующий, получивший контроль над GitHub, подсунул бы любой архив.
+        try verifySignature(of: app, identifier: "local.utilitumus", strict: true)
+        // Вложенные бинарники запечатаны подписью основного бандла, но личность их
+        // подписанта отдельно не проверена — сверяем со своим identifier.
+        let links = app.appendingPathComponent("Contents/Helpers/Utilitumus Links.app")
+        if fm.fileExists(atPath: links.path) {
+            try verifySignature(of: links, identifier: "local.utilitumus.links", strict: true)
+        }
+        let fan = app.appendingPathComponent("Contents/MacOS/utilitumus-fan")
+        if fm.fileExists(atPath: fan.path) {
+            try verifySignature(of: fan, identifier: "local.utilitumus.fan", strict: false)
         }
 
         // Копия рядом с целью (тот же том) — тогда подмена атомарная.
@@ -182,21 +188,34 @@ final class Updater: ObservableObject {
         NSApp.terminate(nil)
     }
 
-    /// `codesign -d -r-` → строка вида `=identifier "…" and certificate leaf = H"…"`.
-    nonisolated private static func designatedRequirement(of app: URL) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        process.arguments = ["-d", "-r-", app.path]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard let line = text.split(separator: "\n").first(where: { $0.hasPrefix("designated => ") }) else {
-            throw UpdateError("Не удалось прочитать подпись текущей версии")
+    /// SHA-1 листовых сертификатов, которыми разрешено подписывать релизы. Список
+    /// вшит в приложение: его не подменить через GitHub. Новый ключ добавляется
+    /// сюда ДО того, как им подписан первый релиз, старый убирается позже.
+    nonisolated static let trustedLeafHashes = [
+        "31e93f4b9e4ada7f6de82066c2194b35d92f7db4",  // «Utilitumus Signing»
+    ]
+
+    /// Требование к подписи: свой identifier и листовой сертификат из доверенного списка.
+    nonisolated static func requirement(identifier: String, leafHash: String) -> String {
+        "identifier \"\(identifier)\" and certificate leaf = H\"\(leafHash)\""
+    }
+
+    /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —
+    /// требование строкой (без `=` codesign принял бы это за путь к файлу).
+    nonisolated static func verifySignature(of path: URL, identifier: String, strict: Bool) throws {
+        var lastError: Error?
+        for hash in trustedLeafHashes {
+            var args = ["--verify"]
+            if strict { args += ["--deep", "--strict"] }
+            args += ["-R=" + requirement(identifier: identifier, leafHash: hash), path.path]
+            do {
+                try run("/usr/bin/codesign", args)
+                return
+            } catch {
+                lastError = error
+            }
         }
-        return "=" + line.dropFirst("designated => ".count)
+        throw UpdateError("Подпись \(path.lastPathComponent) не от автора Utilitumus: \(lastError?.localizedDescription ?? "")")
     }
 
     nonisolated private static func run(_ tool: String, _ args: [String]) throws {

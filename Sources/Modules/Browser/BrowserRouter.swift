@@ -14,8 +14,20 @@ final class BrowserRouter {
         return app
     }
 
+    /// Пускаем только http/https и файлы .html: ссылка приходит от любого приложения,
+    /// а схемы вроде `-flag://`, `javascript:`, `x-apple.systempreferences:` не должны
+    /// ни попадать в аргументы браузера, ни открывать чужие обработчики.
+    nonisolated static func isAllowed(_ url: URL) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "http", "https": return true
+        case "file": return ["html", "htm", "xhtml"].contains(url.pathExtension.lowercased())
+        default: return false
+        }
+    }
+
     /// `forcePanel` — кнопка «Проверить»: показать панель в любом случае, без правил.
     func handle(_ url: URL, from source: NSRunningApplication?, forcePanel: Bool = false) {
+        guard Self.isAllowed(url) else { return }
         let catalog = BrowserCatalog.shared
         // Настройки меняются в Utilitumus, а ссылки ведёт помощник: перечитываем на каждую ссылку.
         catalog.refresh()
@@ -83,7 +95,9 @@ final class BrowserRouter {
     /// поэтому `open -na`: новый экземпляр сам передаёт команду уже работающему.
     /// Не запущенный стартует с аргументами напрямую.
     private func openPrivately(_ url: URL, in browser: InstalledBrowser, flags: [String]) {
-        let target = url.isFileURL ? url.path : url.absoluteString
+        // Всегда полный URL со схемой (в том числе file:///…): аргумент не может
+        // начаться с «-» и превратиться в флаг браузера. isAllowed уже проверен в handle.
+        let target = url.absoluteString
         let running = !NSRunningApplication.runningApplications(withBundleIdentifier: browser.id).isEmpty
         if running {
             let process = Process()
@@ -105,7 +119,9 @@ final class BrowserRouter {
 enum BrowserLinkEvent {
     static func parse(_ event: NSAppleEventDescriptor) -> (url: URL, senderPID: pid_t?)? {
         guard let text = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
-              let url = URL(string: text) else { return nil }
+              let url = URL(string: text),
+              // Из Apple Event «открыть URL» — только веб-ссылки; file: приходит через application(_:open:).
+              ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         let pid = event.attributeDescriptor(forKeyword: AEKeyword(keySenderPIDAttr))?.int32Value
         return (url, pid)
     }

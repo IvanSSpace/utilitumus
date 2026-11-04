@@ -61,7 +61,8 @@ for key in CFBundleShortVersionString CFBundleVersion; do
   /usr/libexec/PlistBuddy -c "Set :$key $(/usr/libexec/PlistBuddy -c "Print :$key" Info.plist)" "$LINKS_APP/Contents/Info.plist"
 done
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$LINKS_APP/Contents/Resources/"
-codesign --force --options runtime --sign "$SIGN_ID" "$LINKS_APP"
+# identifier явно: Updater и install.sh сверяют именно его.
+codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.links "$LINKS_APP"
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"

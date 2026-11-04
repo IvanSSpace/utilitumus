@@ -1,0 +1,26 @@
+# Только проверка компиляции. Релизов и подписи здесь нет намеренно: ключ подписи
+# живёт только на Mac автора (./scripts/release.sh), секретов у репозитория нет.
+# Даже при взломе GitHub собранный здесь код не подписан ключом автора и не
+# пройдёт проверку в Updater и install.sh.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Токен только на чтение: публиковать из CI нечего и некуда.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      # Закреплён полным SHA коммита (v4.4.0), а не подвижным тегом.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      # Сертификата в CI нет — build.sh подпишет ad-hoc.
+      - name: Сборка
+        run: NO_INSTALL=1 ./build.sh

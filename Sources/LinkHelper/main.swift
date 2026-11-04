@@ -26,7 +26,7 @@ final class LinksDelegate: NSObject, NSApplicationDelegate {
     /// Файлы .html из Finder.
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated {
-            for url in urls where url.isFileURL || url.scheme == "http" || url.scheme == "https" {
+            for url in urls where BrowserRouter.isAllowed(url) {
                 BrowserRouter.shared.handle(url, from: nil)
             }
         }

@@ -46,11 +46,17 @@ final class TranscriptReader: @unchecked Sendable {
         })
     }
 
+    /// sessionId приходит из файла в ~/.claude и попадает в имя файла и в команду для
+    /// терминала: допускаем только [A-Za-z0-9_-], иначе можно подсунуть «; rm -rf …».
+    static func isSafeID(_ sid: String) -> Bool {
+        !sid.isEmpty && sid.unicodeScalars.allSatisfy {
+            $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_")
+        }
+    }
+
     /// Транскрипт сессии или nil, если sessionId странный (не пускаем «../» в путь).
     static func path(projectsDir: String, cwd: String, sessionID: String?) -> String? {
-        guard let sid = sessionID, !cwd.isEmpty, !sid.isEmpty,
-              sid.unicodeScalars.allSatisfy({ $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") })
-        else { return nil }
+        guard let sid = sessionID, !cwd.isEmpty, isSafeID(sid) else { return nil }
         return "\(projectsDir)/\(slug(cwd))/\(sid).jsonl"
     }
 
