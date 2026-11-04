@@ -15,23 +15,22 @@ struct SettingsView: View {
 private struct ModulesSettings: View {
     @ObservedObject var manager = ModuleManager.shared
 
+    /// Высота строки задаём сами: List внутри окна с fixedSize не знает своей высоты.
+    private let rowHeight: CGFloat = 54
+
     var body: some View {
-        Form {
-            Section {
+        // Не Form: `.onMove` внутри Form `.grouped` на macOS не срабатывает, а в List — штатный путь.
+        VStack(alignment: .leading, spacing: 12) {
+            List {
                 ForEach(manager.order) { module in
                     HStack(spacing: 12) {
-                        // Ручка: строку можно перетащить, порядок общий с боковой панелью.
-                        Image(systemName: "line.3.horizontal")
-                            .foregroundStyle(.tertiary)
-                        Image(systemName: module.icon)
-                            .font(.title3)
-                            .frame(width: 28)
-                            .foregroundStyle(.tint)
+                        ModuleIconBadge(module: module, size: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(module.title)
                             Text(module.summary)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
                         Spacer()
                         Picker(module.title, selection: Binding(
@@ -44,16 +43,23 @@ private struct ModulesSettings: View {
                         .labelsHidden()
                         .fixedSize()
                     }
+                    .frame(height: rowHeight)
                 }
                 .onMove { manager.move(from: $0, to: $1) }
-            } footer: {
-                Text("Порядок можно менять перетаскиванием, здесь и в боковой панели. Скрытый модуль пропадает из панели, но работает в фоне. Выключенный остановлен полностью.")
             }
+            .listStyle(.inset(alternatesRowBackgrounds: true))
+            .scrollDisabled(true)
+            .frame(height: CGFloat(manager.order.count) * (rowHeight + 8) + 8)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
 
-            Section {
-                Button("Сбросить порядок и показать всё") { manager.resetAll() }
-            }
+            Text("Порядок можно менять перетаскиванием строки, здесь и в боковой панели. Скрытый модуль пропадает из панели, но работает в фоне; открыть его можно по строке «Скрытые» внизу панели. Выключенный остановлен полностью.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Сбросить порядок и показать всё") { manager.resetAll() }
         }
-        .formStyle(.grouped)
+        .padding(20)
     }
 }

@@ -29,6 +29,19 @@ enum Module: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Цвет плашки значка: у каждого модуля свой, как в Системных настройках.
+    /// Системные цвета адаптируются к светлой и тёмной теме.
+    var tint: Color {
+        switch self {
+        case .sound: return .blue
+        case .load: return .orange
+        case .stash: return .purple
+        case .fans: return .teal
+        case .mixer: return .pink
+        case .mouse: return Color(nsColor: .systemGray)
+        }
+    }
+
     /// Одна строка о модуле — для списка в настройках.
     var summary: String {
         switch self {
@@ -53,6 +66,23 @@ enum Module: String, CaseIterable, Identifiable {
         case .mixer: return ""
         case .mouse: return ""
         }
+    }
+}
+
+/// Белый значок на цветной скруглённой плашке — один вид везде, где показан модуль.
+struct ModuleIconBadge: View {
+    let module: Module
+    var size: CGFloat = 22
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
+            .fill(module.tint.gradient)
+            .frame(width: size, height: size)
+            .overlay {
+                Image(systemName: module.icon)
+                    .font(.system(size: size * 0.55, weight: .medium))
+                    .foregroundStyle(.white)
+            }
     }
 }
 
@@ -98,7 +128,11 @@ struct MainView: View {
                 set: { if let new = $0 { selection = new; peeked = nil; showAbout = false } }
             )) {
                 ForEach(modules.shownModules) { module in
-                    Label(module.title, systemImage: module.icon)
+                    Label {
+                        Text(module.title)
+                    } icon: {
+                        ModuleIconBadge(module: module, size: 20)
+                    }
                         .foregroundStyle(module.isReady ? .primary : .secondary)
                         .tag(module)
                         .contextMenu {
@@ -111,7 +145,7 @@ struct MainView: View {
                 .onMove { modules.moveShown(from: $0, to: $1) }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .safeAreaInset(edge: .bottom) { UpdateFooter(showAbout: $showAbout) }
+            .safeAreaInset(edge: .bottom) { UpdateFooter(showAbout: $showAbout, peeked: $peeked) }
         } detail: {
             if showAbout {
                 AboutView { module in
@@ -154,10 +188,14 @@ struct NoShownModules: View {
     }
 }
 
-/// Внизу боковой панели: «О проекте», версия и, если вышла новая, кнопка установки.
+/// Внизу боковой панели: скрытые модули, «О проекте», версия и, если вышла новая, кнопка установки.
 struct UpdateFooter: View {
     @ObservedObject var updater = Updater.shared
+    @ObservedObject private var modules = ModuleManager.shared
     @Binding var showAbout: Bool
+    @Binding var peeked: Module?
+    /// Свёрнутость списка помним между запусками: скрытые открывают редко, но привычка остаётся.
+    @AppStorage("HiddenModulesExpanded") private var hiddenExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -188,6 +226,7 @@ struct UpdateFooter: View {
             default:
                 EmptyView()
             }
+            hiddenSection
             Button {
                 showAbout = true
             } label: {
@@ -221,6 +260,60 @@ struct UpdateFooter: View {
         }
         .padding(.horizontal, 12)
         .padding(.bottom, 10)
+    }
+}
+
+extension UpdateFooter {
+    /// «Скрытые · N» над «О проекте»: без скрытых модулей строки нет совсем.
+    @ViewBuilder
+    var hiddenSection: some View {
+        let hidden = modules.hiddenModules
+        if !hidden.isEmpty {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { hiddenExpanded.toggle() }
+            } label: {
+                HStack(spacing: 0) {
+                    Label("Скрытые · \(hidden.count)", systemImage: "eye.slash")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(hiddenExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            if hiddenExpanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(hidden) { module in
+                        Button {
+                            // Разовый показ: состояние не меняем, выделение в основном списке снимается через peeked.
+                            peeked = module
+                            showAbout = false
+                        } label: {
+                            HStack(spacing: 8) {
+                                ModuleIconBadge(module: module, size: 18)
+                                    .opacity(0.6)
+                                Text(module.title)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 2)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .font(.callout)
+                        .foregroundStyle(peeked == module && !showAbout ? Color.accentColor : .secondary)
+                        .contextMenu {
+                            Button("Показать в панели") { modules.setState(module, .shown) }
+                            Button("Выключить модуль") { modules.setState(module, .disabled) }
+                        }
+                    }
+                }
+                .padding(.leading, 4)
+            }
+        }
     }
 }
 

@@ -35,7 +35,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 swiftc -O -parse-as-library -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*') \
-  -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit -framework WebKit
+  -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 # Root-помощник вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ».
 swiftc -O -target "$TARGET" \
@@ -46,8 +46,6 @@ codesign --force --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDL
 
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
-# Публичный lambscape для модуля «Нагрузка» (обновлять: scripts/update-lambscape.sh)
-cp -R Vendor/lambscape "$APP_BUNDLE/Contents/Resources/lambscape"
 
 codesign --force --sign "$SIGN_ID" "$APP_BUNDLE"
 
@@ -58,7 +56,7 @@ echo "Собрано: $APP_BUNDLE"
 
 INSTALLED="/Applications/$APP_NAME.app"
 # Сначала штатный выход — чтобы отработал applicationWillTerminate (вентиляторы
-# в «Авто», сервер lambscape остановлен); pkill — только если не вышло.
+# в «Авто»); pkill — только если не вышло.
 pgrep -qf "$INSTALLED/Contents/MacOS/$APP_NAME" && osascript -e "quit app \"$APP_NAME\"" 2>/dev/null || true
 sleep 1
 pkill -f "$INSTALLED/Contents/MacOS/$APP_NAME" 2>/dev/null || true

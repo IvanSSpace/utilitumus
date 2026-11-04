@@ -64,9 +64,8 @@ struct AboutView: View {
             open(module)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: module.icon)
-                    .frame(width: 22)
-                    .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                ModuleIconBadge(module: module, size: 22)
+                    .opacity(on ? 1 : 0.4)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(Text(module.title).fontWeight(.semibold)) — \(text)")
                     if state == .hidden {

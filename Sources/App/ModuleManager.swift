@@ -75,6 +75,9 @@ final class ModuleManager: ObservableObject {
     /// Модули, которые видны в боковой панели, в нужном порядке.
     var shownModules: [Module] { order.filter { state(of: $0) == .shown } }
 
+    /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели.
+    var hiddenModules: [Module] { order.filter { state(of: $0) == .hidden } }
+
     func setState(_ module: Module, _ state: ModuleState) {
         defaults.set(state.rawValue, forKey: Self.stateKey(module))
         states[module] = state

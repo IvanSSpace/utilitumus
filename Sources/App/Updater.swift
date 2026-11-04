@@ -173,7 +173,7 @@ final class Updater: ObservableObject {
     }
 
     /// Открыть новую версию после выхода текущей. Выход штатный —
-    /// applicationWillTerminate вернёт вентиляторы в «Авто» и погасит lambscape.
+    /// applicationWillTerminate вернёт вентиляторы в «Авто».
     static func relaunch(_ app: URL) {
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
