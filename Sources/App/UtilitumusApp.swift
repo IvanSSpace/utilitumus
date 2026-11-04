@@ -67,10 +67,11 @@ enum Module: String, CaseIterable, Identifiable {
 struct ModuleIconBadge: View {
     let module: Module
     var size: CGFloat = 22
+    @Environment(\.dsTheme) private var theme
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-            .fill(module.tint.gradient)
+            .fill(theme.badge(module).gradient)
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: module.icon)
@@ -105,6 +106,7 @@ struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var whatsNew = WhatsNew.shared
+    @Environment(\.dsTheme) private var theme
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
@@ -119,65 +121,64 @@ struct MainView: View {
         let current = modules.resolve(selection)
         let displayed = peeked ?? current
         let detail = displayed == nil ? nil : (built ?? displayed)
-        NavigationSplitView {
-            List(selection: Binding(
-                // На странице «О проекте» и при разовом показе скрытого выделение снято.
-                get: { showAbout || peeked != nil ? nil : current },
-                set: { if let new = $0 { selection = new; peeked = nil; showAbout = false } }
-            )) {
-                ForEach(modules.shownModules) { module in
-                    let on = modules.isOn(module)
-                    Label {
-                        Text(module.title)
-                    } icon: {
-                        ModuleIconBadge(module: module, size: 20)
-                            .opacity(on ? 1 : 0.4)
-                    }
-                        .foregroundStyle(on ? .primary : .secondary)
-                        .help(on ? "" : "Выключен — открой, чтобы включить")
-                        .tag(module)
-                        .contextMenu {
-                            Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
-                            Button("Скрыть из панели") { modules.setHidden(module, true) }
-                            Divider()
-                            Button("Настроить модули…") { modules.settingsShown = true }
-                        }
+        // Для фона и акцента на «О проекте» и пустой панели берём последний выбранный модуль.
+        let tintModule = displayed ?? selection
+        let pageKey = showAbout ? "about" : (detail?.rawValue ?? "none")
+        ZStack {
+            DSBackground(module: tintModule)
+            HStack(spacing: 0) {
+                DSSidebar(current: current, showAbout: $showAbout, peeked: $peeked, selection: $selection)
+                    .frame(width: DS.sidebarWidth)
+                    .background(theme.sidebar)
+                ZStack {
+                    page(showAbout: showAbout, detail: detail)
+                        // Переход страницы: только прозрачность и сдвиг на 12 pt, без пружин и масштаба.
+                        .id(pageKey)
+                        .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 12)), removal: .opacity))
                 }
-                .onMove { modules.moveShown(from: $0, to: $1) }
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .safeAreaInset(edge: .bottom) { UpdateFooter(showAbout: $showAbout, peeked: $peeked) }
-        } detail: {
-            if showAbout {
-                AboutView { module in
-                    if !modules.isHidden(module) {
-                        selection = module
-                        peeked = nil
-                    } else {
-                        peeked = module
-                    }
-                    showAbout = false
-                }
-            } else if let detail {
-                ModuleDetail(module: detail)
-                    .toolbar { ModuleToolbar(module: detail, modules: modules) }
-            } else {
-                NoShownModules()
+                .animation(.easeInOut(duration: 0.22), value: pageKey)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(theme.card))
+                .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+                    .stroke(.white.opacity(0.08), lineWidth: 0.7))
+                .clipShape(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous))
+                .padding(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 10))
             }
         }
-        .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0) }
-        .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet() }
+        .environment(\.dsTint, theme.accent(tintModule))
+        .ignoresSafeArea()
+        .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
+        .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet().dsThemed() }
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
-        .sheet(isPresented: $modules.settingsShown) { SettingsView() }
+        .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
         .onAppear { whatsNew.showIfUpdated() }
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
-        .frame(minWidth: 680, minHeight: 460)
+        .frame(minWidth: 840, minHeight: 540)
         .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
             // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
             if let peeked, !modules.isHidden(peeked) { self.peeked = nil }
+        }
+    }
+
+    @ViewBuilder
+    private func page(showAbout: Bool, detail: Module?) -> some View {
+        if showAbout {
+            AboutView { module in
+                if !modules.isHidden(module) {
+                    selection = module
+                    peeked = nil
+                } else {
+                    peeked = module
+                }
+                self.showAbout = false
+            }
+        } else if let detail {
+            ModuleDetail(module: detail)
+        } else {
+            NoShownModules()
         }
     }
 }
@@ -185,169 +186,15 @@ struct MainView: View {
 /// В панели нет ни одного модуля: подсказка и быстрый переход в настройки.
 struct NoShownModules: View {
     var body: some View {
-        ContentUnavailableView {
-            Label("Панель пуста", systemImage: "square.grid.2x2")
-        } description: {
+        VStack(spacing: 12) {
+            Image(systemName: "square.grid.2x2").font(.system(size: 34)).foregroundStyle(.white.opacity(0.4))
+            Text("Панель пуста").font(.title3.weight(.semibold))
             Text("Нет модулей в панели — верни нужные в Настройках")
-        } actions: {
-            Button("Открыть настройки") { ModuleManager.shared.settingsShown = true }
-                .buttonStyle(.borderedProminent)
+                .foregroundStyle(.white.opacity(0.55))
+            DSButton("Открыть настройки", style: .primary) { ModuleManager.shared.settingsShown = true }
+                .padding(.top, 4)
         }
-    }
-}
-
-/// Внизу боковой панели: скрытые модули, «О проекте», версия и, если вышла новая, кнопка установки.
-struct UpdateFooter: View {
-    @ObservedObject var updater = Updater.shared
-    @ObservedObject private var modules = ModuleManager.shared
-    @Binding var showAbout: Bool
-    @Binding var peeked: Module?
-    /// Свёрнутость списка помним между запусками: скрытые открывают редко, но привычка остаётся.
-    @AppStorage("HiddenModulesExpanded") private var hiddenExpanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch updater.state {
-            case let .available(version, _, _):
-                Button {
-                    updater.install()
-                } label: {
-                    Label("Обновить до \(version)", systemImage: "arrow.down.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            case .installing:
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("Устанавливаю…").font(.caption)
-                }
-            case .failed(let message):
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
-            case .upToDate:
-                Text("Обновлений нет")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            default:
-                EmptyView()
-            }
-            hiddenSection
-            Button {
-                WhatsNew.shared.isShown = true
-            } label: {
-                Label("Что нового", systemImage: "sparkles")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .foregroundStyle(.primary)
-            // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
-            Button {
-                modules.settingsShown = true
-            } label: {
-                Label("Настроить модули", systemImage: "slider.horizontal.3")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .foregroundStyle(.primary)
-            Button {
-                showAbout = true
-            } label: {
-                Label("О проекте", systemImage: "info.circle")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .foregroundStyle(showAbout ? Color.accentColor : .primary)
-            HStack {
-                // Клик по версии — «Обновление стороннего программного обеспечения»: что нового.
-                Button("Версия \(updater.currentVersion)") { WhatsNew.shared.isShown = true }
-                    .buttonStyle(.plain)
-                    .help("Что изменилось в последних версиях")
-                Spacer()
-                Button {
-                    updater.check()
-                } label: {
-                    if updater.state == .checking {
-                        ProgressView().controlSize(.mini)
-                    } else if updater.state == .upToDate {
-                        Image(systemName: "checkmark")
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                }
-                .buttonStyle(.borderless)
-                .help(updater.state == .upToDate ? "Установлена последняя версия" : "Проверить обновления")
-                .disabled(updater.state == .checking || updater.state == .installing)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 10)
-    }
-}
-
-extension UpdateFooter {
-    /// «Скрытые · N» над «О проекте»: без скрытых модулей строки нет совсем.
-    @ViewBuilder
-    var hiddenSection: some View {
-        let hidden = modules.hiddenModules
-        if !hidden.isEmpty {
-            Button {
-                withAnimation(.easeInOut(duration: 0.15)) { hiddenExpanded.toggle() }
-            } label: {
-                HStack(spacing: 0) {
-                    Label("Скрытые · \(hidden.count)", systemImage: "eye.slash")
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .rotationEffect(.degrees(hiddenExpanded ? 90 : 0))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-
-            if hiddenExpanded {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(hidden) { module in
-                        Button {
-                            // Разовый показ: состояние не меняем, выделение в основном списке снимается через peeked.
-                            peeked = module
-                            showAbout = false
-                        } label: {
-                            HStack(spacing: 8) {
-                                ModuleIconBadge(module: module, size: 18)
-                                    .opacity(0.6)
-                                Text(module.title)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 2)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .font(.callout)
-                        .foregroundStyle(peeked == module && !showAbout ? Color.accentColor : .secondary)
-                        .contextMenu {
-                            Button("Показать в панели") { modules.setHidden(module, false) }
-                            Button(modules.isOn(module) ? "Выключить модуль" : "Включить модуль") {
-                                modules.setOn(module, !modules.isOn(module))
-                            }
-                        }
-                    }
-                }
-                .padding(.leading, 4)
-            }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -390,9 +237,11 @@ struct UtilitumusApp: App {
 
     var body: some Scene {
         Window("Utilitumus", id: "main") {
-            MainView()
+            MainView().dsThemed()
         }
-        .defaultSize(width: 760, height: 560)
+        // Без заголовка окна: содержимое уходит под светофоры, кнопки модуля — в шапке страницы.
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 980, height: 680)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appInfo) {

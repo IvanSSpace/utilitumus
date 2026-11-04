@@ -3,20 +3,70 @@ import SwiftUI
 /// Настройки модулей (Cmd+, и «Настроить модули»): лист поверх главного окна.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dsTheme) private var theme
+    @AppStorage("SelectedModule") private var selection: Module = .sound
 
     var body: some View {
-        VStack(spacing: 0) {
-            ModulesSettings()
-            Divider()
-            HStack {
-                Spacer()
-                Button("Готово") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+        ZStack {
+            DSBackground(module: selection)
+            VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Модули").font(DS.pageTitle)
+                        Text("Включай только нужные — выключенный ничего не делает и не ест ресурсы.")
+                            .font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
+                    }
+                    Spacer(minLength: 12)
+                    DSButton("Готово", style: .primary) { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                }
+                ThemeSection()
+                ModulesSettings()
             }
-            .padding(12)
+            .padding(DS.pagePadding)
         }
-        .frame(width: 580)
+        .environment(\.dsTint, theme.accent(selection))
+        .frame(width: 600)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// «Тема»: выбор цветовой темы, применяется сразу. Предпросмотр — кружок с фоном и точкой акцента.
+private struct ThemeSection: View {
+    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.calm.rawValue
+
+    var body: some View {
+        DSSection("Оформление") {
+            DSRow(icon: "paintpalette", title: "Тема", subtitle: "Цвета окна и боковой панели") {
+                HStack(spacing: 14) {
+                    ForEach(DSTheme.allCases) { theme in
+                        Button { raw = theme.rawValue } label: { swatch(theme) }
+                            .buttonStyle(.plain)
+                            .help(theme.title)
+                    }
+                }
+            }
+        }
+    }
+
+    private func swatch(_ theme: DSTheme) -> some View {
+        let selected = theme.rawValue == raw
+        let colors = theme.preview
+        return VStack(spacing: 4) {
+            Circle()
+                .fill(LinearGradient(colors: [colors[0], colors[1]], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 28, height: 28)
+                .overlay(Circle().fill(colors[2]).frame(width: 10, height: 10).offset(x: 6, y: 6))
+                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 0.7))
+                .padding(3)
+                .overlay(Circle().stroke(.white.opacity(selected ? 0.9 : 0), lineWidth: 1.5))
+            Text(theme.title)
+                .font(.system(size: 10.5, weight: selected ? .semibold : .regular))
+                .lineLimit(1)
+                .fixedSize()
+                .foregroundStyle(.white.opacity(selected ? 0.95 : 0.55))
+        }
+        .contentShape(Rectangle())
     }
 }
 
@@ -27,40 +77,34 @@ private struct ModulesSettings: View {
     private let rowHeight: CGFloat = 48
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Модули").font(.title2.weight(.semibold))
-                Text("Включай только нужные — выключенный ничего не делает и не ест ресурсы.")
-                    .foregroundStyle(.secondary)
-            }
-
-            // Не Form: `.onMove` внутри Form `.grouped` на macOS не срабатывает, а в List — штатный путь.
-            List {
-                ForEach(manager.order) { module in
-                    row(module)
-                        .frame(height: rowHeight)
+        VStack(alignment: .leading, spacing: 10) {
+            DSSection("Модули", trailing: "перетащи — порядок") {
+                // Не Form: `.onMove` внутри Form `.grouped` на macOS не срабатывает, а в List — штатный путь.
+                List {
+                    ForEach(manager.order) { module in
+                        row(module)
+                            .frame(height: rowHeight)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                    .onMove { manager.move(from: $0, to: $1) }
                 }
-                .onMove { manager.move(from: $0, to: $1) }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollDisabled(true)
+                .frame(height: CGFloat(manager.order.count) * (rowHeight + 9) + 10)
             }
-            .listStyle(.inset(alternatesRowBackgrounds: false))
-            .scrollDisabled(true)
-            .frame(height: CGFloat(manager.order.count) * (rowHeight + 9) + 10)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.separator))
 
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 legend("switch.2", "работает")
                 legend("eye", "в боковой панели")
-                legend("line.3.horizontal", "перетащи — порядок")
                 Spacer()
-                Button("Сбросить") { manager.resetAll() }
-                    .buttonStyle(.link)
+                DSButton("Сбросить", style: .plain, small: true) { manager.resetAll() }
                     .help("Порядок по умолчанию, все модули снова в боковой панели. Включённость не меняется")
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.white.opacity(0.45))
         }
-        .padding(22)
     }
 
     private func row(_ module: Module) -> some View {
@@ -69,15 +113,15 @@ private struct ModulesSettings: View {
         return HStack(spacing: 12) {
             Image(systemName: "line.3.horizontal")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.white.opacity(0.3))
             ModuleIconBadge(module: module, size: 30)
                 .saturation(on ? 1 : 0.3)
                 .opacity(on ? 1 : 0.7)
             VStack(alignment: .leading, spacing: 2) {
-                Text(module.title).fontWeight(.medium)
+                Text(module.title).font(DS.rowTitle)
                 Text(module.info.tagline)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.white.opacity(0.5))
                     .lineLimit(1)
                     .help(module.info.tagline)
             }
@@ -90,12 +134,9 @@ private struct ModulesSettings: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .foregroundStyle(hidden ? .tertiary : .secondary)
+            .foregroundStyle(.white.opacity(hidden ? 0.3 : 0.65))
             .help(hidden ? "Скрыт из боковой панели — показать" : "В боковой панели — скрыть")
-            Toggle(module.title, isOn: Binding(get: { on }, set: { manager.setOn(module, $0) }))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
+            DSToggle(module.title, isOn: Binding(get: { on }, set: { manager.setOn(module, $0) }))
                 .help(on ? "Включён — выключить" : "Выключен — включить")
         }
     }
