@@ -213,15 +213,7 @@ private struct ClassicFlowLayout: Layout {
     }
 }
 
-private func programs(_ n: Int) -> String {
-    let mod100 = n % 100, mod10 = n % 10
-    if (11...14).contains(mod100) { return "\(n) программ" }
-    switch mod10 {
-    case 1: return "\(n) программу"
-    case 2...4: return "\(n) программы"
-    default: return "\(n) программ"
-    }
-}
+// programs(_:) — общий, из Sources/Modules/Stash/StashView.swift.
 
 /// Экран модуля «Стеш программ».
 struct ClassicStashView: View {
