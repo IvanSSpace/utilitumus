@@ -19,10 +19,21 @@ private struct AppIcon: View {
     }
 }
 
-private struct MixerRow: View {
+/// Строка получает значения и замыкания, а не контроллер: иначе каждая публикация
+/// контроллера перерисовывала бы все строки. `Equatable` по `app` пропускает
+/// пересчёт, когда у строки ничего не поменялось.
+private struct MixerRow: View, Equatable {
     let app: MixerApp
-    @ObservedObject var controller: MixerController
+    let onVolume: (Double) -> Void
+    let onCommit: () -> Void
+    let onToggleMute: () -> Void
     @Environment(\.dsTint) private var tint
+    /// Значение под пальцем: слайдер двигается сразу, а список публикуется позже.
+    @State private var dragging: Double?
+
+    static func == (a: MixerRow, b: MixerRow) -> Bool { a.app == b.app }
+
+    private var shownVolume: Double { dragging ?? app.volume }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -36,21 +47,27 @@ private struct MixerRow: View {
             .frame(width: 150, alignment: .leading)
 
             Slider(value: Binding(
-                get: { app.volume },
+                get: { shownVolume },
                 // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
-                set: { controller.setVolume(($0 * 100).rounded() / 100, for: app.id) }
-            ), in: 0...1)
+                set: {
+                    let value = ($0 * 100).rounded() / 100
+                    dragging = value
+                    onVolume(value)
+                }
+            ), in: 0...1, onEditingChanged: { editing in
+                if !editing { onCommit(); dragging = nil }
+            })
             .tint(tint)
             .controlSize(.small)
             .opacity(app.muted ? 0.4 : 1)
 
-            Text("\(Int((app.volume * 100).rounded())) %")
+            Text("\(Int((shownVolume * 100).rounded())) %")
                 .font(.system(size: 12.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.7))
                 .frame(width: 46, alignment: .trailing)
 
             Button {
-                controller.setMuted(!app.muted, for: app.id)
+                onToggleMute()
             } label: {
                 Image(systemName: app.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                     .font(.system(size: 13))
@@ -63,13 +80,16 @@ private struct MixerRow: View {
             .help(app.muted ? "Вернуть звук" : "Выключить звук")
         }
         .modifier(RowDivider())
+        .onChange(of: app.volume) { dragging = nil }
     }
 }
 
 /// Приложение не запущено, но для него задана громкость: можно только сбросить.
-private struct PresetRow: View {
+private struct PresetRow: View, Equatable {
     let app: MixerApp
-    @ObservedObject var controller: MixerController
+    let onReset: () -> Void
+
+    static func == (a: PresetRow, b: PresetRow) -> Bool { a.app == b.app }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -79,7 +99,7 @@ private struct PresetRow: View {
             Text(app.muted ? "без звука" : "\(Int((app.volume * 100).rounded())) %")
                 .font(.system(size: 12.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
-            DSButton("Сбросить", small: true) { controller.reset(app.id) }
+            DSButton("Сбросить", small: true) { onReset() }
         }
         .modifier(RowDivider())
     }
@@ -96,6 +116,16 @@ private struct Note: View {
 struct MixerView: View {
     @ObservedObject private var controller = MixerController.shared
     @State private var showOthers = false
+
+    private func row(_ app: MixerApp) -> some View {
+        let id = app.id
+        return MixerRow(
+            app: app,
+            onVolume: { controller.setVolume($0, for: id) },
+            onCommit: { controller.commitVolumes() },
+            onToggleMute: { controller.setMuted(!controller.isMuted(id), for: id) }
+        ).equatable()
+    }
 
     var body: some View {
         DSPage(
@@ -122,16 +152,14 @@ struct MixerView: View {
                 if controller.apps.isEmpty {
                     DSRow(title: "Сейчас ничего не играет")
                 }
-                ForEach(controller.apps) { app in
-                    MixerRow(app: app, controller: controller)
-                }
+                ForEach(controller.apps) { app in row(app) }
             }
 
             if !controller.idleApps.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     DSSection("Молчат сейчас", trailing: "\(controller.idleApps.count)") {
-                        ForEach(controller.idleApps) { app in
-                            MixerRow(app: app, controller: controller)
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(controller.idleApps) { app in row(app) }
                         }
                     }
                     Note("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать.")
@@ -156,8 +184,8 @@ struct MixerView: View {
                         .buttonStyle(.plain)
                         .focusable(false)
                         if showOthers {
-                            ForEach(controller.otherApps) { app in
-                                MixerRow(app: app, controller: controller)
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(controller.otherApps) { app in row(app) }
                             }
                         }
                     }
@@ -167,12 +195,15 @@ struct MixerView: View {
             if !controller.presetApps.isEmpty {
                 DSSection("Настроены заранее", trailing: "\(controller.presetApps.count)") {
                     ForEach(controller.presetApps) { app in
-                        PresetRow(app: app, controller: controller)
+                        let id = app.id
+                        PresetRow(app: app, onReset: { controller.reset(id) }).equatable()
                     }
                 }
             }
 
             Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
         }
+        .onAppear { controller.setScreenVisible(true) }
+        .onDisappear { controller.setScreenVisible(false) }
     }
 }

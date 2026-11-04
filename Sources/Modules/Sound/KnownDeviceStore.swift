@@ -10,7 +10,7 @@ struct KnownDevice: Codable {
 }
 
 /// Устройство для отображения в UI: может быть сейчас не подключено.
-struct DisplayDevice: SoundDevice {
+struct DisplayDevice: SoundDevice, Equatable {
     let uid: String
     let name: String
     let transport: Transport
