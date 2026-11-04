@@ -38,13 +38,31 @@ final class BackgroundStore: ObservableObject {
     private let executor = BackgroundExecutor()
     private var collecting = false
     private var queued: LoadSnapshot?
+    private var lastSnapshot: LoadSnapshot?
+    private var lastCollect = Date.distantPast
+    /// Открыта вкладка «Фоновое»: список обновляется с каждым замером. Иначе — раз в `idleInterval`
+    /// (нужно лишь знать, есть ли что показать: от этого зависит вкладка и сводка на «Обзоре»).
+    private var tabOpen = false
+
+    static let idleInterval: TimeInterval = 15
 
     var hasContent: Bool { !data.isEmpty }
 
+    /// Экран сообщает, открыта ли вкладка «Фоновое». При открытии список собирается сразу.
+    func setTabOpen(_ open: Bool) {
+        guard open != tabOpen else { return }
+        tabOpen = open
+        if open, let s = lastSnapshot { update(from: s, force: true) }
+    }
+
     /// Новый замер: пересобрать список. Если прошлая сборка ещё идёт, берём самый свежий снимок после неё.
-    func update(from s: LoadSnapshot) {
+    /// `force` — после действия или «Обновить»: не ждать очередного срока.
+    func update(from s: LoadSnapshot, force: Bool = false) {
+        lastSnapshot = s
+        guard force || tabOpen || Date().timeIntervalSince(lastCollect) >= Self.idleInterval else { return }
         guard !collecting else { queued = s; return }
         collecting = true
+        lastCollect = Date()
         Task {
             let d = await Task.detached(priority: .utility) { BackgroundCollector.collect(s) }.value
             data = d

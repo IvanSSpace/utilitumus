@@ -13,7 +13,7 @@ struct OverviewTab: View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if let s = store.snapshot {
                 if mode == .full { full(s) } else { simple(s) }
-                FooterSection(snapshot: s)
+                FooterSection(host: s.host, live: store.live)
             } else {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }
@@ -58,7 +58,7 @@ struct OverviewTab: View {
             LoadLine(divider: false) {
                 MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }
             }
-            if let h = store.history { LoadLine { HistorySpark(window: h) } }
+            if let h = store.history { LoadLine { HistorySpark(window: h).equatable() } }
             LoadLine { Text(simpleDiskLine(s.disk)).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
         TopProgramsSection(map: s.map)
@@ -69,12 +69,14 @@ struct OverviewTab: View {
 
 /// Строка внизу: сколько занимает сама панель и на чём идёт.
 struct FooterSection: View {
-    let snapshot: LoadSnapshot
+    let host: HostInfo
+    /// Меняется каждый замер: наблюдает только эта строка, а не весь экран.
+    @ObservedObject var live: LiveStats
 
     var body: some View {
-        let s = snapshot, h = s.host
+        let h = host
         VStack(alignment: .leading, spacing: 2) {
-            Text("Utilitumus · \(Fmt.mb(s.selfMemMB)) · CPU \(s.selfCPU.map { String(format: "%.1f%%", $0) } ?? "—") · замер \(Int(s.measureMillis.rounded())) мс")
+            Text("Utilitumus · \(Fmt.mb(live.selfMemMB)) · CPU \(live.selfCPU.map { String(format: "%.1f%%", $0) } ?? "—") · замер \(Int(live.measureMillis.rounded())) мс")
             Text("\(h.chip) · \(Fmt.gb(Double(h.ramMB))) GB · macOS \(h.macOS) · аптайм \(Fmt.duration(h.uptime))")
         }
         .font(.caption).foregroundStyle(.secondary).monospacedDigit()

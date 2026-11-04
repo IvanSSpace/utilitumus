@@ -6,7 +6,7 @@ import Foundation
 extension LoadStore {
     /// `head` заменяет начало «Остановит <команда>»; `note` — хвост перед «Сначала SIGTERM».
     func requestStop(process pid: Int32, title: String, head: String, note: String = "") {
-        guard let snapshot, var plan = snapshot.stopPlan(process: pid) else { return }
+        guard let snapshot = latest, var plan = snapshot.stopPlan(process: pid) else { return }
         if let p = snapshot.procs[pid] {
             plan.message = plan.message.replacingOccurrences(of: "Остановит \(Kinds.label(p))", with: head)
         }

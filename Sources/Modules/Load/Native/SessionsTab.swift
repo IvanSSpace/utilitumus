@@ -16,7 +16,7 @@ struct SessionsTab: View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if let s = store.snapshot {
                 if mode == .full { full(s) } else { simple(s) }
-                FooterSection(snapshot: s)
+                FooterSection(host: s.host, live: store.live)
             } else {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }

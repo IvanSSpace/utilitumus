@@ -42,8 +42,9 @@ struct LoadScreen: View {
         }
         // Страница длиннее окна: открываться должна с шапки, а не с прокрученного места.
         .defaultScrollAnchor(.top)
-        .onAppear { store.screenAppeared() }
-        .onDisappear { store.screenDisappeared() }
+        .onAppear { store.screenAppeared(); background.setTabOpen(tab == .background) }
+        .onDisappear { store.screenDisappeared(); background.setTabOpen(false) }
+        .onChange(of: tab) { background.setTabOpen($1 == .background) }
         .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
             StopConfirmSheet(store: store, plan: plan).dsThemed()
         }

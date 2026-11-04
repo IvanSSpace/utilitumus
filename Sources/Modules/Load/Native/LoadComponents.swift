@@ -151,14 +151,13 @@ struct ShareBar: View {
 
     var body: some View {
         let colors = colors ?? [tint, .orange]
-        GeometryReader { geo in
-            HStack(spacing: 0) {
-                ForEach(Array(values.enumerated()), id: \.offset) { i, v in
-                    Rectangle().fill(colors[min(i, colors.count - 1)])
-                        .frame(width: maximum > 0 ? geo.size.width * min(1, v / maximum) : 0)
-                }
-                Spacer(minLength: 0)
+        // Ширина известна заранее: без GeometryReader, который на сотне строк «Подробно» дорог.
+        HStack(spacing: 0) {
+            ForEach(values.indices, id: \.self) { i in
+                Rectangle().fill(colors[min(i, colors.count - 1)])
+                    .frame(width: maximum > 0 ? width * min(1, max(0, values[i] / maximum)) : 0)
             }
+            Spacer(minLength: 0)
         }
         .frame(width: width, height: 5)
         .background(.white.opacity(0.1))
@@ -219,7 +218,9 @@ struct MemoryBar: View {
 
     private static let gap: CGFloat = 2
 
-    private struct Piece {
+    private struct Piece: Identifiable {
+        /// Сегмент и номер доли в нём: не зависит от общего порядка, пока состав сегментов тот же.
+        var id: String
         var segment: String
         var x: CGFloat
         var width: CGFloat
@@ -236,9 +237,9 @@ struct MemoryBar: View {
             let w = max(2, (width - gaps) * seg.weight / total)
             let partsTotal = max(seg.parts.reduce(0) { $0 + $1.weight }, 1)
             var px = x
-            for part in seg.parts {
+            for (n, part) in seg.parts.enumerated() {
                 let pw = w * part.weight / partsTotal
-                out.append(Piece(segment: seg.id, x: px, width: pw, color: part.color, tip: part.tip))
+                out.append(Piece(id: "\(seg.id)#\(n)", segment: seg.id, x: px, width: pw, color: part.color, tip: part.tip))
                 px += pw
             }
             x += w + Self.gap
@@ -256,7 +257,7 @@ struct MemoryBar: View {
             let pieces = layout(width: geo.size.width)
             let hovered = hoverX.flatMap { piece(at: $0, in: pieces) }
             ZStack(alignment: .topLeading) {
-                ForEach(Array(pieces.enumerated()), id: \.offset) { _, p in
+                ForEach(pieces) { p in
                     Rectangle().fill(p.color)
                         .frame(width: max(p.width, 0), height: height)
                         .offset(x: p.x)

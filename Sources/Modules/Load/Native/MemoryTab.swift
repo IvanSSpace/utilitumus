@@ -9,12 +9,13 @@ struct MemoryTab: View {
 
     @State private var expanded: Set<String> = []
     @State private var showAll: Set<String> = []
+    @State private var fullKinds: Set<GroupKind> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
             if let s = store.snapshot {
                 if mode == .full { full(s) } else { simple(s) }
-                FooterSection(snapshot: s)
+                FooterSection(host: s.host, live: store.live)
             } else {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }
@@ -34,6 +35,7 @@ struct MemoryTab: View {
                 if let h = store.history, !h.points.isEmpty {
                     HistoryChart(window: h, ramMB: s.memory.totalMB, swapTotalMB: s.memory.swapTotalMB,
                                  colors: store.palette.colors(forSeries: h.series))
+                        .equatable()
                 } else {
                     EmptyNote(text: "Пока пусто: точка пишется раз в минуту.")
                 }
@@ -44,7 +46,7 @@ struct MemoryTab: View {
         ForEach([GroupKind.project, .app, .system, .other], id: \.self) { kind in
             let list = s.groups.filter { $0.kind == kind }
             if !list.isEmpty || kind != .other {
-                GroupsSection(kind: kind, groups: list, snapshot: s, expanded: $expanded, showAll: $showAll,
+                GroupsSection(kind: kind, groups: list, snapshot: s, expanded: $expanded, showAll: $showAll, fullKinds: $fullKinds,
                               onStopProcess: { store.requestStop(process: $0) }, onStopGroup: { store.requestStop(group: $0) })
             }
         }
@@ -62,7 +64,7 @@ struct MemoryTab: View {
             LoadLine(divider: false) {
                 MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }
             }
-            if let h = store.history { LoadLine { HistorySpark(window: h) } }
+            if let h = store.history { LoadLine { HistorySpark(window: h).equatable() } }
             LoadLine { Text(simpleDiskLine(s.disk)).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
         TopProgramsSection(map: s.map)
