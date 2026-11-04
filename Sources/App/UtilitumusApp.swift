@@ -231,6 +231,16 @@ struct UpdateFooter: View {
                 EmptyView()
             }
             hiddenSection
+            Button {
+                WhatsNew.shared.isShown = true
+            } label: {
+                Label("Что нового", systemImage: "sparkles")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .font(.callout)
+            .foregroundStyle(.primary)
             // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
             SettingsLink {
                 Label("Настроить модули", systemImage: "slider.horizontal.3")
@@ -381,6 +391,7 @@ struct UtilitumusApp: App {
             CommandGroup(replacing: .newItem) {}
             CommandGroup(after: .appInfo) {
                 Button("Проверить обновления…") { Updater.shared.check() }
+                Button("Что нового…") { WhatsNew.shared.isShown = true }
             }
             // Свой пункт: системный «Settings…» без локализации в Info.plist был бы английским.
             CommandGroup(replacing: .appSettings) {

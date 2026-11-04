@@ -4,14 +4,34 @@ import SwiftUI
 /// Тексты — в Resources/WhatsNew.json; оттуда же release.sh берёт описание релиза на GitHub.
 struct WhatsNewEntry: Decodable, Identifiable {
     let version: String
-    let items: [String]
+    let items: [Item]
     var id: String { version }
+
+    /// Пункт — строка или `{ "icon": SF Symbol, "text": … }`.
+    struct Item: Decodable, Hashable {
+        let icon: String
+        let text: String
+
+        init(from decoder: Decoder) throws {
+            if let text = try? decoder.singleValueContainer().decode(String.self) {
+                self.icon = "sparkle"
+                self.text = text
+                return
+            }
+            let c = try decoder.container(keyedBy: Keys.self)
+            icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "sparkle"
+            text = try c.decode(String.self, forKey: .text)
+        }
+
+        private enum Keys: String, CodingKey { case icon, text }
+    }
 }
 
 @MainActor
 final class WhatsNew: ObservableObject {
     static let shared = WhatsNew()
 
+    /// Версии не новее установленной: запись следующего релиза пишется заранее и не должна светиться.
     let entries: [WhatsNewEntry]
     @Published var isShown = false
 
@@ -20,8 +40,10 @@ final class WhatsNew: ObservableObject {
 
     private init() {
         let url = Bundle.main.url(forResource: "WhatsNew", withExtension: "json")
-        entries = url.flatMap { try? Data(contentsOf: $0) }
+        let all = url.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode([WhatsNewEntry].self, from: $0) } ?? []
+        let current = self.current
+        entries = all.filter { $0.version.compare(current, options: .numeric) != .orderedDescending }
     }
 
     /// После обновления показываем один раз. На новой установке — нет: там всё «новое».
@@ -35,40 +57,38 @@ final class WhatsNew: ObservableObject {
     }
 }
 
+// MARK: - Окно
+
 struct WhatsNewSheet: View {
     @ObservedObject var whatsNew = WhatsNew.shared
     @Environment(\.dismiss) private var dismiss
+    @Namespace private var versionPill
+    @State private var selected: String?
+    /// Сколько пунктов уже «выпрыгнуло»: появляются по одному, с пружинкой.
+    @State private var revealed = 0
+    @State private var appeared = false
+
+    private var entry: WhatsNewEntry? {
+        whatsNew.entries.first { $0.version == selected } ?? whatsNew.entries.first
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            header
+            if whatsNew.entries.count > 1 { versionPicker }
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "shippingbox.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 40, height: 40)
-                            .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                        Text("Обновление стороннего программного обеспечения")
-                            .font(.title3.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(Array(whatsNew.entries.enumerated()), id: \.element.id) { index, entry in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Версия \(entry.version)")
-                                .font(.headline)
-                                .foregroundStyle(index == 0 ? .primary : .secondary)
-                            ForEach(entry.items, id: \.self) { item in
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text("•").foregroundStyle(.secondary)
-                                    Text(item)
-                                }
-                                .foregroundStyle(index == 0 ? .primary : .secondary)
-                            }
+                VStack(alignment: .leading, spacing: 10) {
+                    if let entry {
+                        ForEach(Array(entry.items.enumerated()), id: \.offset) { index, item in
+                            ItemRow(item: item, tint: Self.tints[index % Self.tints.count])
+                                .opacity(index < revealed ? 1 : 0)
+                                .offset(y: index < revealed ? 0 : 14)
+                                .scaleEffect(index < revealed ? 1 : 0.94, anchor: .leading)
                         }
                     }
                 }
-                .padding(24)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
@@ -79,6 +99,124 @@ struct WhatsNewSheet: View {
             }
             .padding(12)
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 500, height: 560)
+        .onAppear {
+            selected = whatsNew.entries.first?.version
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) { appeared = true }
+            reveal()
+        }
+    }
+
+    // Шапка: переливающийся градиент и подпрыгивающий значок.
+    private var header: some View {
+        ZStack(alignment: .bottomLeading) {
+            TimelineView(.animation) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                LinearGradient(
+                    colors: [Color(hue: (t / 12).truncatingRemainder(dividingBy: 1), saturation: 0.55, brightness: 0.9),
+                             Color(hue: (t / 12 + 0.18).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.75),
+                             Color(hue: (t / 12 + 0.36).truncatingRemainder(dividingBy: 1), saturation: 0.55, brightness: 0.85)],
+                    startPoint: UnitPoint(x: 0.5 + 0.5 * cos(t / 3), y: 0),
+                    endPoint: UnitPoint(x: 0.5 - 0.5 * cos(t / 3), y: 1)
+                )
+            }
+            HStack(spacing: 14) {
+                Image(systemName: "shippingbox.fill")
+                    .font(.system(size: 26, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(.white.opacity(0.22), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .scaleEffect(appeared ? 1 : 0.3)
+                    .rotationEffect(.degrees(appeared ? 0 : -25))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Обновление стороннего программного обеспечения")
+                        .font(.title3.weight(.bold))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let entry {
+                        Text("Версия \(entry.version)")
+                            .font(.callout.weight(.medium))
+                            .opacity(0.85)
+                            .contentTransition(.numericText())
+                    }
+                }
+                .foregroundStyle(.white)
+                .offset(x: appeared ? 0 : -12)
+                .opacity(appeared ? 1 : 0)
+            }
+            .padding(20)
+        }
+        .frame(height: 118)
+        .clipped()
+    }
+
+    private var versionPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(whatsNew.entries) { e in
+                    let isOn = e.version == entry?.version
+                    Button {
+                        guard !isOn else { return }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { selected = e.version }
+                        reveal()
+                    } label: {
+                        Text(e.version)
+                            .font(.callout.weight(isOn ? .semibold : .regular).monospacedDigit())
+                            .foregroundStyle(isOn ? Color.white : Color.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background {
+                                if isOn {
+                                    Capsule()
+                                        .fill(Color.accentColor.gradient)
+                                        .matchedGeometryEffect(id: "pill", in: versionPill)
+                                }
+                            }
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+        }
+        .scrollClipDisabled()
+    }
+
+    /// Пункты появляются по одному: так взгляд идёт по списку, а не упирается в стену текста.
+    private func reveal() {
+        revealed = 0
+        let count = entry?.items.count ?? 0
+        for i in 0..<count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 + Double(i) * 0.07) {
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.68)) { revealed = max(revealed, i + 1) }
+            }
+        }
+    }
+
+    private static let tints: [Color] = [.pink, .orange, .yellow, .green, .teal, .blue, .indigo, .purple]
+}
+
+private struct ItemRow: View {
+    let item: WhatsNewEntry.Item
+    let tint: Color
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .rotationEffect(.degrees(hovered ? -8 : 0))
+                .scaleEffect(hovered ? 1.1 : 1)
+            Text(item.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.primary.opacity(hovered ? 0.07 : 0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onHover { h in withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { hovered = h } }
     }
 }

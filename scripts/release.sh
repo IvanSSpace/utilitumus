@@ -25,7 +25,7 @@ NOTES="$(python3 -c '
 import json, sys
 v = sys.argv[1]
 e = next((e for e in json.load(open("Resources/WhatsNew.json")) if e["version"] == v), None)
-print("\n".join("- " + i for i in e["items"]) if e else "")
+print("\n".join("- " + (i["text"] if isinstance(i, dict) else i) for i in e["items"]) if e else "")
 ' "$VERSION")"
 if [ -z "$NOTES" ]; then
   echo "Нет записи для $VERSION в Resources/WhatsNew.json — допиши, что изменилось." >&2
