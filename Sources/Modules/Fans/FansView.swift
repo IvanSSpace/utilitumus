@@ -28,7 +28,7 @@ private struct Banner<Trailing: View>: View {
             Spacer(minLength: 10)
             trailing
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.horizontal, 14).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(color.opacity(0.14)))
     }
@@ -62,6 +62,8 @@ private struct FanCard: View {
     let gpuTemp: Double?
     /// «Максимум в играх» перебивает режим так же; в подписи — во что играем.
     let gameName: String?
+    /// Настройки «По датчику» вынесены в общий блок под карточками.
+    let sharedSensor: Bool
     @Environment(\.dsTint) private var tint
 
     private var overridden: Bool { fullPower || gameName != nil }
@@ -72,14 +74,14 @@ private struct FanCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
                 Image(systemName: "fan.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(fan.isManual ? tint : dim)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 26, height: 26)
                     .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.07)))
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("Вентилятор \(fan.index + 1)").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
                     if fan.isSpinningUp {
                         DSChip("раскручивается до \(Int(fan.target.rounded()))", color: .green)
@@ -90,69 +92,64 @@ private struct FanCard: View {
                     }
                 }
                 Spacer(minLength: 6)
-                VStack(alignment: .trailing, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
                     Text(verbatim: "\(Int(fan.actual.rounded()))")
-                        .font(.system(size: 22, weight: .bold, design: .rounded)).monospacedDigit()
+                        .font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
                         .foregroundStyle(.white)
                     Text("об/мин").font(.system(size: 11)).foregroundStyle(dim)
                 }
             }
 
-            VStack(spacing: 4) {
-                LoadBar(value: load)
-                HStack {
-                    Text(rpm(fan.min))
-                    Spacer()
-                    Text(rpm(fan.max))
-                }
-                .font(.system(size: 11)).foregroundStyle(dim).monospacedDigit()
-            }
+            LoadBar(value: load)
 
             DSSegmented(FanMode.allCases, selection: $config.mode) { $0.title }
                 .frame(maxWidth: .infinity)
                 .disabled(overridden)
                 .opacity(overridden ? 0.5 : 1)
 
-            if fullPower {
-                note("На максимуме: «Полная мощность». После неё вернётся «\(config.mode.title)».", color: .green)
-            } else if let gameName {
-                note("На максимуме: играешь в \(gameName). После игры вернётся «\(config.mode.title)».", color: .green)
-            } else {
-                switch config.mode {
-                case .auto:
-                    note("Оборотами управляет macOS.")
-
-                case .constant:
-                    HStack(spacing: 8) {
-                        // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
-                        Slider(value: Binding(
-                            get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
-                            set: { config.rpm = min(max(($0 / 100).rounded() * 100, fan.min), fan.max) }
-                        ), in: fan.min...fan.max)
-                        .controlSize(.small).tint(tint)
-                        Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
-                            .font(.system(size: 12, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 92, alignment: .trailing)
-                    }
-
-                case .sensor:
-                    DSSegmented(SensorSource.allCases, selection: $config.sensor) { $0.title }
-                        .frame(maxWidth: .infinity)
-                    TempSlider(title: "Разгон с", value: $config.fromTemp, range: 30...(config.toTemp - 5))
-                    TempSlider(title: "Максимум при", value: $config.toTemp, range: (config.fromTemp + 5)...100)
-                    if let now = (config.sensor == .cpu ? cpuTemp : gpuTemp) {
-                        note("Сейчас \(Int(now.rounded())) °C — самый горячий датчик.")
-                    }
-                    note("Ниже \(Int(config.fromTemp)) °C решает macOS, вентиляторы могут стоять. К \(Int(config.toTemp)) °C — максимум.")
-                }
-            }
+            modeArea
         }
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.5)
-        .padding(12)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous).fill(.white.opacity(0.05)))
+    }
+
+    @ViewBuilder private var modeArea: some View {
+        if fullPower {
+            note("На максимуме: «Полная мощность». После неё вернётся «\(config.mode.title)».", color: .green)
+        } else if let gameName {
+            note("На максимуме: играешь в \(gameName). После игры вернётся «\(config.mode.title)».", color: .green)
+        } else {
+            switch config.mode {
+            case .auto:
+                note("Оборотами управляет macOS.").frame(minHeight: 20, alignment: .leading)
+
+            case .constant:
+                HStack(spacing: 8) {
+                    // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
+                    Slider(value: Binding(
+                        get: { config.rpm == 0 ? fan.min : min(max(config.rpm, fan.min), fan.max) },
+                        set: { config.rpm = min(max(($0 / 100).rounded() * 100, fan.min), fan.max) }
+                    ), in: fan.min...fan.max)
+                    .controlSize(.small).tint(tint)
+                    Text(rpm(config.rpm == 0 ? fan.min : config.rpm))
+                        .font(.system(size: 12, weight: .medium)).monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 84, alignment: .trailing)
+                }
+                .frame(minHeight: 20)
+
+            case .sensor:
+                if sharedSensor {
+                    note("\(config.sensor.title): \(Int(config.fromTemp))–\(Int(config.toTemp)) °C. Настройки ниже.")
+                        .frame(minHeight: 20, alignment: .leading)
+                } else {
+                    SensorSettings(config: $config, cpuTemp: cpuTemp, gpuTemp: gpuTemp, compact: true)
+                }
+            }
+        }
     }
 
     private func note(_ text: String, color: Color? = nil) -> some View {
@@ -172,7 +169,7 @@ private struct TempSlider: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8))
-                .frame(width: 96, alignment: .leading)
+                .lineLimit(1).fixedSize()
             // Без step: на macOS 26 он рисует под дорожкой точечные засечки.
             Slider(value: Binding(get: { value }, set: { value = $0.rounded() }), in: range)
                 .controlSize(.small).tint(tint)
@@ -183,36 +180,134 @@ private struct TempSlider: View {
     }
 }
 
-// MARK: - Температура
+/// Датчик и границы «По датчику»: в общем блоке под карточками и внутри карточки, если режимы разные.
+private struct SensorSettings: View {
+    @Binding var config: FanConfig
+    let cpuTemp: Double?
+    let gpuTemp: Double?
+    /// Внутри карточки слайдеры в столбик; в общем блоке — два в ряд.
+    var compact = false
 
-private struct SensorGroup: View {
-    let icon: String
-    let title: String
-    let sensors: [SensorReading]
-    @State private var expanded = false
+    private var nowText: String? {
+        (config.sensor == .cpu ? cpuTemp : gpuTemp).map { "Сейчас \(Int($0.rounded())) °C" }
+    }
+
+    private var hint: String {
+        "Ниже \(Int(config.fromTemp)) °C решает macOS, вентиляторы могут стоять. К \(Int(config.toTemp)) °C — максимум."
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 10) {
+                // В общем блоке подсказка стоит в одной строке с датчиком — так он ниже на строку.
+                if compact {
+                    nowText.map { Text($0).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.85)) }
+                } else {
+                    (Text(nowText.map { $0 + ". " } ?? "").foregroundStyle(.white.opacity(0.85))
+                        + Text("Ниже \(Int(config.fromTemp)) °C решает macOS, к \(Int(config.toTemp)) °C — максимум.").foregroundStyle(dim))
+                        .font(.system(size: 11)).lineLimit(1).minimumScaleFactor(0.9)
+                }
+                Spacer(minLength: 0)
+                DSSegmented(SensorSource.allCases, selection: $config.sensor) { $0.title }
+                    .frame(width: 190)
+            }
+            if compact {
+                from
+                to
+                Text(hint).font(.system(size: 11)).foregroundStyle(dim).fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(spacing: 24) { from; to }
+            }
+        }
+    }
+
+    private var from: some View {
+        TempSlider(title: "Начинать с", value: $config.fromTemp, range: 30...(config.toTemp - 5))
+    }
+    private var to: some View {
+        TempSlider(title: "Максимум при", value: $config.toTemp, range: (config.fromTemp + 5)...100)
+    }
+}
+
+// MARK: - Карточка без заголовка
+
+/// Та же карточка, что у `DSSection`, но без подписи над ней: экран должен влезать без прокрутки.
+private struct FlatCard<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.dsTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+            .clipShape(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous)
+                .stroke(.white.opacity(0.06), lineWidth: 0.7))
+    }
+}
+
+private struct Separator: View {
+    var body: some View { Rectangle().fill(.white.opacity(0.07)).frame(height: 1) }
+}
+
+// MARK: - Температура
+
+/// Одна строка «Процессор 58° · Видеокарта 51°»; по клику раскрываются все датчики.
+private struct TemperatureCard: View {
+    let cpu: [SensorReading]
+    let gpu: [SensorReading]
+    @State private var expanded = false
+    @Environment(\.dsTint) private var tint
+
+    private var summary: String {
+        var parts: [String] = []
+        if let v = cpu.map(\.value).max() { parts.append("Процессор \(String(format: "%.0f°", v))") }
+        if let v = gpu.map(\.value).max() { parts.append("Видеокарта \(String(format: "%.0f°", v))") }
+        return parts.isEmpty ? "нет датчиков" : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        FlatCard {
             Button {
                 expanded.toggle()
             } label: {
-                DSRow(icon: icon, title: title, subtitle: subtitle) {
-                    if !sensors.isEmpty {
-                        Text(celsius(sensors.map(\.value).max()))
-                            .font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.95))
-                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(dim)
-                            .frame(width: 12)
-                    }
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.18))
+                        .frame(width: 26, height: 26)
+                        .overlay(Image(systemName: "thermometer.medium").font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(tint))
+                    Text("Температура").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                    Spacer(minLength: 10)
+                    Text(summary).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.9))
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(dim)
+                        .frame(width: 12)
                 }
+                .padding(.horizontal, 14).padding(.vertical, 7)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(sensors.isEmpty)
+            .disabled(cpu.isEmpty && gpu.isEmpty)
             .help(expanded ? "Скрыть датчики" : "Показать все датчики")
 
             if expanded {
+                Separator()
+                VStack(alignment: .leading, spacing: 10) {
+                    group("Процессор", cpu)
+                    group("Видеокарта", gpu)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder private func group(_ title: String, _ sensors: [SensorReading]) -> some View {
+        if !sensors.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(title) · датчиков: \(sensors.count)").font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 110))], alignment: .leading, spacing: 6) {
                     ForEach(sensors) { s in
                         HStack(spacing: 6) {
@@ -222,15 +317,8 @@ private struct SensorGroup: View {
                         }
                     }
                 }
-                .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
             }
         }
-    }
-
-    private var subtitle: String {
-        guard !sensors.isEmpty else { return "нет датчиков" }
-        let avg = sensors.map(\.value).reduce(0, +) / Double(sensors.count)
-        return "средняя \(celsius(avg)) · датчиков: \(sensors.count)"
     }
 }
 
@@ -310,99 +398,129 @@ private struct ChipFlow: Layout {
     }
 }
 
-/// «Максимум в играх»: переключатель, список своих игр и лаунчеры-исключения.
-private struct GameModeSection: View {
+/// «Максимум в играх»: переключатель, свои игры плашками и лаунчеры-исключения во всплывающем окне.
+private struct GameModeCard: View {
     @ObservedObject var game: GameModeController
     @State private var launchersOpen = false
+    @Environment(\.dsTint) private var tint
 
     private var excludedCount: Int {
         GameRules.defaultLaunchers.filter { game.isLauncherExcluded($0.key) }.count
     }
 
     var body: some View {
-        DSSection("Максимум в играх") {
-            DSRow(icon: "gamecontroller.fill", title: "Максимум в играх",
-                  subtitle: "Игра на переднем плане — вентиляторы сами идут на максимум") {
+        FlatCard {
+            HStack(spacing: 10) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.18))
+                    .frame(width: 26, height: 26)
+                    .overlay(Image(systemName: "gamecontroller.fill").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(tint))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Максимум в играх").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                    Text("Игра на переднем плане — вентиляторы сами идут на максимум")
+                        .font(.system(size: 11.5)).foregroundStyle(dim)
+                }
+                Spacer(minLength: 10)
                 DSToggle("Максимум в играх", isOn: $game.isEnabled)
             }
+            .padding(.horizontal, 14).padding(.vertical, 8)
 
             if game.isEnabled {
-                DSRow(title: "Мои игры",
-                      subtitle: game.myGames.isEmpty
-                        ? "Игры определяются сами. Остальные, например из CrossOver, добавь сюда." : nil) {
-                    Menu {
-                        if game.addable.isEmpty {
-                            Text("Нет запущенных программ")
-                        }
-                        ForEach(game.addable) { app in
-                            Button {
-                                game.addGame(app)
-                            } label: {
-                                if let icon = app.icon {
-                                    Label { Text(app.name) } icon: { Image(nsImage: icon) }
-                                } else {
-                                    Text(app.name)
-                                }
+                Separator()
+                HStack(spacing: 8) {
+                    if game.myGames.isEmpty {
+                        Text("Игры определяются сами. Остальные, например из CrossOver, добавь сюда.")
+                            .font(.system(size: 11.5)).foregroundStyle(dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        ChipFlow(spacing: 6) {
+                            ForEach(game.myGames) { entry in
+                                GameChip(entry: entry, icon: game.icon(for: entry)) { game.removeGame(entry) }
                             }
                         }
-                    } label: {
-                        Text("Добавить…")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .padding(.horizontal, 11).padding(.vertical, 5)
-                            .background(Capsule().fill(.white.opacity(0.1)))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .menuStyle(.button).buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
+                    addMenu
+                    launchersLink
                 }
-                if !game.myGames.isEmpty {
-                    ChipFlow(spacing: 6) {
-                        ForEach(game.myGames) { entry in
-                            GameChip(entry: entry, icon: game.icon(for: entry)) { game.removeGame(entry) }
-                        }
-                    }
-                    .padding(.horizontal, 14).padding(.bottom, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Button {
-                    launchersOpen.toggle()
-                } label: {
-                    DSRow(title: "Лаунчеры — не игры") {
-                        Text("\(excludedCount) из \(GameRules.defaultLaunchers.count)")
-                            .font(.system(size: 12.5, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(dim)
-                        Image(systemName: launchersOpen ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(dim)
-                            .frame(width: 12)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if launchersOpen {
-                    ForEach(GameRules.defaultLaunchers) { launcher in
-                        DSRow(title: launcher.name) {
-                            DSToggle(launcher.name, isOn: Binding(
-                                get: { game.isLauncherExcluded(launcher.key) },
-                                set: { game.setLauncherExcluded(launcher.key, $0) }
-                            ))
-                        }
-                    }
-                    Text("Лаунчер — не игра. Выключи, если нужно иначе.")
-                        .font(.system(size: 11.5)).foregroundStyle(dim)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                }
+                .padding(.horizontal, 14).padding(.vertical, 7)
             }
         }
         .onAppear { game.refreshRunning() }
+    }
+
+    private var addMenu: some View {
+        Menu {
+            if game.addable.isEmpty {
+                Text("Нет запущенных программ")
+            }
+            ForEach(game.addable) { app in
+                Button {
+                    game.addGame(app)
+                } label: {
+                    if let icon = app.icon {
+                        Label { Text(app.name) } icon: { Image(nsImage: icon) }
+                    } else {
+                        Text(app.name)
+                    }
+                }
+            }
+        } label: {
+            Text("Добавить…")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .padding(.horizontal, 11).padding(.vertical, 4)
+                .background(Capsule().fill(.white.opacity(0.1)))
+        }
+        .menuStyle(.button).buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var launchersLink: some View {
+        Button {
+            launchersOpen.toggle()
+        } label: {
+            HStack(spacing: 4) {
+                Text("Лаунчеры: \(excludedCount) из \(GameRules.defaultLaunchers.count)")
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(tint)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("Лаунчеры — не игры")
+        .popover(isPresented: $launchersOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Лаунчеры — не игры").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                    .padding(.bottom, 8)
+                ForEach(GameRules.defaultLaunchers) { launcher in
+                    HStack {
+                        Text(launcher.name).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
+                        Spacer(minLength: 16)
+                        DSToggle(launcher.name, isOn: Binding(
+                            get: { game.isLauncherExcluded(launcher.key) },
+                            set: { game.setLauncherExcluded(launcher.key, $0) }
+                        ))
+                    }
+                    .padding(.vertical, 5)
+                }
+                Text("Лаунчер — не игра. Выключи, если нужно иначе.")
+                    .font(.system(size: 11.5)).foregroundStyle(dim).padding(.top, 6)
+            }
+            .padding(14).frame(width: 290)
+            .dsThemed()
+            .environment(\.dsTint, tint)
+        }
     }
 }
 
 // MARK: - Экран
 
 /// Экран модуля «Вентиляторы» — аналог Macs Fan Control.
+/// Всё плотно, чтобы в обычном состоянии (два вентилятора, игры включены) страница не прокручивалась.
 struct FansView: View {
     @ObservedObject var controller = FanController.shared
     @ObservedObject var installer = FanHelperInstaller.shared
@@ -410,6 +528,15 @@ struct FansView: View {
 
     private var canControl: Bool { installer.status != .notInstalled && controller.conflictingApp == nil }
     private var gameName: String? { game.isActive ? game.phase.gameName : nil }
+    private var overridden: Bool { controller.fullPower || gameName != nil }
+
+    /// У всех вентиляторов «По датчику» с одинаковыми настройками — они правятся одним блоком.
+    private var sharedSensor: Bool {
+        let cs = controller.configs
+        guard controller.fans.count > 1, let first = cs.first, first.mode == .sensor else { return false }
+        return cs.allSatisfy { $0.mode == .sensor && $0.sensor == first.sensor
+            && $0.fromTemp == first.fromTemp && $0.toTemp == first.toTemp }
+    }
 
     private var primary: DSAction? {
         // Без доступа или при конфликте кнопка ничего бы не сделала — не показываем.
@@ -421,14 +548,14 @@ struct FansView: View {
 
     var body: some View {
         DSPage(module: .fans, subtitle: controller.cpuMax.map { "Процессор \(celsius($0))" }, primary: primary) {
-            banners
-            fansSection
-            GameModeSection(game: game)
-            DSSection("Температура") {
-                SensorGroup(icon: "cpu", title: "Процессор", sensors: controller.cpuSensors)
-                SensorGroup(icon: "display", title: "Видеокарта", sensors: controller.gpuSensors)
+            // Один дочерний блок: между блоками страницы 20 pt, а тут хватает 10.
+            VStack(alignment: .leading, spacing: 10) {
+                banners
+                fansSection
+                TemperatureCard(cpu: controller.cpuSensors, gpu: controller.gpuSensors)
+                GameModeCard(game: game)
+                footer
             }
-            footer
         }
         .onAppear { installer.refresh() }
     }
@@ -476,12 +603,6 @@ struct FansView: View {
 
     private var fansSection: some View {
         DSSection("Вентиляторы", trailing: rangeText) {
-            DSRow(icon: "fan.fill", title: "Все вентиляторы",
-                  subtitle: "Вернуть «Авто»: оборотами управляет macOS") {
-                DSButton("Всё авто", icon: "arrow.uturn.backward", small: true) { controller.setAllAuto() }
-                    .help("Вернуть все вентиляторы в «Авто»")
-                    .disabled(!canControl)
-            }
             if controller.fans.isEmpty {
                 Text("Вентиляторы не найдены").font(DS.rowSubtitle).foregroundStyle(dim)
                     .padding(.horizontal, 14).padding(.vertical, 12)
@@ -493,13 +614,45 @@ struct FansView: View {
                             FanCard(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
                                     fullPower: controller.fullPower,
                                     cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax,
-                                    gameName: gameName)
+                                    gameName: gameName, sharedSensor: sharedSensor)
                         }
                     }
                 }
                 .padding(10)
+
+                if sharedSensor && !overridden {
+                    Separator()
+                    SensorSettings(config: sharedConfig, cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .disabled(!canControl)
+                        .opacity(canControl ? 1 : 0.5)
+                }
             }
+            Separator()
+            HStack(spacing: 10) {
+                Text("«Авто» — оборотами управляет macOS")
+                    .font(.system(size: 11.5)).foregroundStyle(dim)
+                Spacer(minLength: 10)
+                DSButton("Всё авто", icon: "arrow.uturn.backward", small: true) { controller.setAllAuto() }
+                    .help("Вернуть все вентиляторы в «Авто»")
+                    .disabled(!canControl)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 5)
         }
+    }
+
+    /// Общие настройки «По датчику»: читаются у первого вентилятора, пишутся всем сразу одним присваиванием.
+    private var sharedConfig: Binding<FanConfig> {
+        Binding(
+            get: { controller.configs.first ?? FanConfig() },
+            set: { new in
+                controller.configs = controller.configs.map {
+                    var c = $0
+                    c.sensor = new.sensor; c.fromTemp = new.fromTemp; c.toTemp = new.toTemp
+                    return c
+                }
+            }
+        )
     }
 
     private var rangeText: String? {
@@ -516,13 +669,13 @@ struct FansView: View {
     }
 
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             if let error = controller.lastError {
                 Text(error).font(.system(size: 11.5)).foregroundStyle(.red)
             }
             HStack {
                 Text("При выходе из Utilitumus вентиляторы возвращаются в «Авто».")
-                    .font(.system(size: 11.5)).foregroundStyle(dim)
+                    .font(.system(size: 11)).foregroundStyle(dim)
                 Spacer()
                 if installer.status != .notInstalled {
                     DSButton("Забрать доступ…", style: .plain, small: true) { installer.uninstall() }
