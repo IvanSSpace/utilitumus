@@ -1,6 +1,40 @@
 import SwiftUI
 import AppKit
 
+/// Строка карточки с произвольным значком слева: та же геометрия, что у `DSRow`
+/// (значки браузеров и приложений — картинки, а не SF Symbols).
+private struct BRow<Leading: View, Trailing: View>: View {
+    let title: String
+    var subtitle: String?
+    var subtitleColor: Color?
+    var dimmed = false
+    var inset: CGFloat = 56
+    var minHeight: CGFloat = 50
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            leading
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(DS.rowTitle).lineLimit(1)
+                    .foregroundStyle(.white.opacity(dimmed ? 0.5 : 0.95))
+                if let subtitle {
+                    Text(subtitle).font(DS.rowSubtitle).lineLimit(1)
+                        .foregroundStyle(subtitleColor ?? .white.opacity(0.5))
+                }
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .frame(minHeight: minHeight)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, inset)
+        }
+    }
+}
+
 /// Экран модуля «Браузер».
 struct BrowserView: View {
     @ObservedObject var catalog = BrowserCatalog.shared
@@ -10,31 +44,36 @@ struct BrowserView: View {
     @State private var addingRule = false
     @StateObject private var recorder = KeyRecorder()
     @AppStorage("Browser.introHidden") private var introHidden = false
+    @Environment(\.dsTheme) private var theme
 
     private let probe = URL(string: "https://example.com")!
     private let rowHeight: CGFloat = 46
 
     private var isDefault: Bool { defaultID == BrowserHelper.bundleID }
+    /// Акцент модуля: `DSPage` кладёт его в окружение только для содержимого, а здесь он нужен в самом экране.
+    private var tint: Color { theme.accent(.browser) }
+
+    private var primary: DSAction {
+        isDefault
+            ? DSAction("Проверить", icon: "checkmark.seal") { openTest() }
+            : DSAction("Сделать основным", icon: "checkmark.seal.fill") { if !busy { setDefault(to: BrowserHelper.appURL) } }
+    }
 
     var body: some View {
-        Form {
+        DSPage(module: .browser, primary: primary) {
             if !introHidden { introSection }
-            statusSection
             browsersSection
-            rulesSection
-            hotkeysSection
-            Section {
-                Button("Проверить…") { openTest() }
-                if introHidden {
-                    Button("Показать быстрый старт") { introHidden = false }
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    rulesColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
+                    statusColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
                 }
-            } footer: {
-                Text("Покажет панель выбора для example.com, ничего не меняя в системе.")
+                VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                    rulesColumn
+                    statusColumn
+                }
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Браузер")
-        .navigationSubtitle("Выбор браузера для каждой ссылки")
         .onAppear {
             catalog.refresh()
             refreshDefault()
@@ -44,125 +83,102 @@ struct BrowserView: View {
             catalog.refresh()
             refreshDefault()
         }
-        .sheet(isPresented: $addingRule) { AddRuleSheet(catalog: catalog) }
+        .sheet(isPresented: $addingRule) { AddRuleSheet(catalog: catalog).dsThemed() }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 6)
     }
 
     // MARK: - Быстрый старт
 
     private var introSection: some View {
-        Section {
-            VStack(spacing: 12) {
-                HStack(alignment: .top, spacing: 6) {
-                    introStep(icon: isDefault ? "checkmark.circle.fill" : "globe",
-                              title: "Сделай браузером по умолчанию", highlighted: !isDefault, done: isDefault) {
-                        if !isDefault {
-                            Button("Сделать") { setDefault(to: BrowserHelper.appURL) }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .disabled(busy)
-                        }
+        DSSection("Быстрый старт") {
+            HStack(alignment: .top, spacing: 6) {
+                introStep(icon: isDefault ? "checkmark.circle.fill" : "globe",
+                          title: "Сделай браузером по умолчанию",
+                          color: isDefault ? .green : tint) {
+                    if !isDefault {
+                        DSButton("Сделать", style: .primary, small: true) { setDefault(to: BrowserHelper.appURL) }
+                            .disabled(busy)
                     }
-                    introArrow
-                    introStep(icon: "link", title: "Кликни любую ссылку", highlighted: false, done: false) {
-                        Button("Попробовать") { openTest() }
-                            .controlSize(.small)
-                    }
-                    introArrow
-                    introStep(icon: "cursorarrow.click.2", title: "Выбери браузер у курсора",
-                              highlighted: false, done: false) { EmptyView() }
                 }
-            }
-            .padding(.vertical, 4)
-        } header: {
-            HStack {
-                Text("Быстрый старт")
-                Spacer()
-                Button {
-                    introHidden = true
-                } label: {
-                    Image(systemName: "xmark")
+                introArrow
+                introStep(icon: "link", title: "Кликни любую ссылку", color: .white.opacity(0.6)) {
+                    DSButton("Попробовать", small: true) { openTest() }
                 }
-                .buttonStyle(.borderless)
-                // Без квадратной рамки фокуса: окно открывается с фокусом на первой кнопке.
-                .focusable(false)
-                .help("Скрыть схему")
+                introArrow
+                introStep(icon: "cursorarrow.click.2", title: "Выбери браузер у курсора",
+                          color: .white.opacity(0.6)) { EmptyView() }
+                DSButton("", icon: "xmark", style: .plain, small: true) { introHidden = true }
+                    .help("Скрыть быстрый старт")
             }
+            .padding(.horizontal, 12).padding(.vertical, 12)
         }
     }
 
     private var introArrow: some View {
         Image(systemName: "chevron.right")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.tertiary)
-            .frame(height: 40)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.25))
+            .frame(height: 24)
     }
 
-    private func introStep<Extra: View>(icon: String, title: String, highlighted: Bool, done: Bool,
+    private func introStep<Extra: View>(icon: String, title: String, color: Color,
                                         @ViewBuilder extra: () -> Extra) -> some View {
         VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundStyle(done ? Color.green : (highlighted ? Color.accentColor : .secondary))
-                .frame(height: 28)
-            Text(title)
-                .font(.callout)
+            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(color).frame(height: 24)
+            Text(title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.85))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             extra()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-        .background(highlighted ? Color.accentColor.opacity(0.12) : .clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(highlighted ? Color.accentColor.opacity(0.6) : Color.primary.opacity(0.12), lineWidth: 1)
-        )
     }
 
     // MARK: - Статус
 
-    @ViewBuilder
+    private var statusColumn: some View {
+        VStack(alignment: .leading, spacing: DS.blockSpacing) {
+            statusSection
+            hotkeysSection
+        }
+    }
+
     private var statusSection: some View {
-        Section {
-            if isDefault {
-                Label("Utilitumus — браузер по умолчанию", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                if let fallback = catalog.fallback {
-                    LabeledContent("Вернуть системе") {
-                        Button("Вернуть \(fallback.name)") { setDefault(to: fallback.url) }
-                            .disabled(busy)
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Статус") {
+                if isDefault {
+                    DSRow(icon: "checkmark.circle.fill", title: "Utilitumus — браузер по умолчанию",
+                          subtitle: catalog.fallback == nil
+                              ? "Отметь звёздочкой основной браузер: его можно вернуть системе."
+                              : nil)
+                    if let fallback = catalog.fallback {
+                        DSRow(icon: "arrow.uturn.backward", title: "Вернуть системе",
+                              subtitle: "Ссылки откроет \(fallback.name)") {
+                            DSButton("Вернуть", small: true) { setDefault(to: fallback.url) }
+                                .disabled(busy)
+                        }
                     }
                 } else {
-                    Text("Отметь звёздочкой основной браузер: его можно вернуть системе кнопкой.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    DSRow(icon: "globe", title: "Пока не браузер по умолчанию",
+                          subtitle: defaultName.map { "Сейчас ссылки открывает \($0)" })
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Utilitumus пока не браузер по умолчанию", systemImage: "globe")
-                        .font(.callout)
-                    if let name = defaultName {
-                        Text("Сейчас ссылки открывает \(name).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                if let errorText {
+                    DSRow(icon: "exclamationmark.triangle", title: errorText)
+                }
+                DSRow(icon: "checkmark.seal", title: "Тестовая ссылка", subtitle: "Панель для example.com") {
+                    DSButton("Проверить…", small: true) { openTest() }
+                }
+                if introHidden {
+                    DSRow(icon: "lightbulb", title: "Быстрый старт") {
+                        DSButton("Показать", small: true) { introHidden = false }
                     }
-                    Button("Сделать браузером по умолчанию") { setDefault(to: BrowserHelper.appURL) }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(busy)
                 }
-                .padding(.vertical, 4)
             }
-            if let errorText {
-                Label(errorText, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-        } header: {
-            Text("Статус")
-        } footer: {
-            Text("macOS спросит подтверждение. Выключишь модуль — ссылки пойдут в основной браузер.")
+            caption("macOS спросит подтверждение. Выключишь модуль — ссылки пойдут в основной браузер.")
         }
     }
 
@@ -207,28 +223,29 @@ struct BrowserView: View {
 
     // MARK: - Браузеры
 
-    @ViewBuilder
     private var browsersSection: some View {
-        Section {
-            if catalog.browsers.isEmpty {
-                Text("Браузеры не найдены").foregroundStyle(.secondary)
-            } else {
-                List {
-                    ForEach(catalog.browsers) { browser in
-                        browserRow(browser)
-                            .frame(height: rowHeight)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Браузеры", trailing: "Порядок — перетаскиванием") {
+                if catalog.browsers.isEmpty {
+                    BRow(title: "Браузеры не найдены", dimmed: true, inset: 14) { EmptyView() } trailing: { EmptyView() }
+                } else {
+                    List {
+                        ForEach(catalog.browsers) { browser in
+                            browserRow(browser)
+                                .frame(height: rowHeight)
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                        .onMove { catalog.move(from: $0, to: $1) }
                     }
-                    .onMove { catalog.move(from: $0, to: $1) }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .scrollDisabled(true)
+                    .frame(height: CGFloat(catalog.browsers.count) * rowHeight)
                 }
-                .listStyle(.plain)
-                .scrollDisabled(true)
-                .frame(height: CGFloat(catalog.browsers.count) * rowHeight + 8)
             }
-        } header: {
-            Text("Браузеры в панели выбора")
-        } footer: {
-            Text("Порядок — перетаскиванием, своя клавиша — кликом по значку с цифрой. Звёздочка — основной браузер.")
+            caption("Своя клавиша — клик по значку с цифрой. Звёздочка — основной браузер.")
         }
     }
 
@@ -237,42 +254,36 @@ struct BrowserView: View {
         let isMain = catalog.fallbackID == browser.id
         let keyCode = catalog.effectiveKeys[browser.id]
         let recording = recorder.recordingID == browser.id
-        return HStack(spacing: 10) {
-            Image(nsImage: browser.icon).resizable().frame(width: 30, height: 30)
+        return BRow(title: browser.name,
+                    subtitle: recording ? "нажми клавишу · Delete — снять · Esc — отмена" : nil,
+                    subtitleColor: recording ? tint : nil,
+                    dimmed: !shown, minHeight: rowHeight) {
+            Image(nsImage: browser.icon).resizable().frame(width: 28, height: 28)
                 .opacity(shown ? 1 : 0.4)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(browser.name)
-                    .foregroundStyle(shown ? .primary : .secondary)
-                if recording {
-                    Text("нажми клавишу · Delete — снять · Esc — отмена")
-                        .font(.caption).foregroundStyle(Color.accentColor)
-                } else if !shown {
-                    Text("скрыт").font(.caption).foregroundStyle(.secondary)
+        } trailing: {
+            HStack(spacing: 10) {
+                if !shown { DSChip("скрыт") }
+                if shown {
+                    keyBadge(browser, keyCode: keyCode, recording: recording)
                 }
+                Button {
+                    catalog.setFallback(isMain ? nil : browser.id)
+                } label: {
+                    Image(systemName: isMain ? "star.fill" : "star")
+                        .font(.system(size: 14))
+                        .foregroundStyle(isMain ? Color.yellow : .white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .help(isMain ? "Основной браузер" : "Сделать основным")
+                DSToggle("Показывать в панели", isOn: Binding(
+                    get: { shown },
+                    set: { catalog.setHidden(browser.id, !$0) }
+                ))
             }
-            Spacer()
-            if shown {
-                keyBadge(browser, keyCode: keyCode, recording: recording)
-            }
-            Button {
-                catalog.setFallback(isMain ? nil : browser.id)
-            } label: {
-                Image(systemName: isMain ? "star.fill" : "star")
-                    .foregroundStyle(isMain ? Color.yellow : .secondary)
-            }
-            .buttonStyle(.borderless)
-            .help(isMain ? "Основной браузер" : "Сделать основным")
-            Toggle("Показывать в панели", isOn: Binding(
-                get: { shown },
-                set: { catalog.setHidden(browser.id, !$0) }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
-            .controlSize(.small)
         }
     }
 
-    /// Бейдж клавиши, как на панели: скруглённый квадрат с обводкой. Клик — запись новой клавиши.
+    /// Бейдж клавиши, как на панели. Клик — запись новой клавиши.
     private func keyBadge(_ browser: InstalledBrowser, keyCode: UInt16?, recording: Bool) -> some View {
         let own = catalog.keys[browser.id] != nil
         return Button {
@@ -280,92 +291,109 @@ struct BrowserView: View {
         } label: {
             Text(recording ? "…" : keyCode.flatMap(BrowserKeys.label(for:)) ?? "–")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(recording ? Color.white : .primary)
-                .frame(width: 24, height: 24)
-                .background(recording ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(recording ? Color.accentColor : Color.primary.opacity(0.3), lineWidth: 1)
-                )
+                .foregroundStyle(recording ? Color.black.opacity(0.8) : .white.opacity(0.9))
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(recording ? tint : .white.opacity(own ? 0.16 : 0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(.white.opacity(own ? 0.3 : 0.14), lineWidth: 0.7))
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
         .help(own ? "Своя клавиша: клик — сменить" : "Клавиша по порядку: клик — назначить свою")
     }
 
     // MARK: - Правила
 
-    @ViewBuilder
-    private var rulesSection: some View {
-        Section {
-            if catalog.rules.isEmpty {
-                Text("Правил нет").foregroundStyle(.secondary)
+    private var rulesColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Правила", trailing: catalog.rules.isEmpty ? nil : "\(catalog.rules.count)") {
+                if catalog.rules.isEmpty {
+                    BRow(title: "Правил нет", dimmed: true, inset: 14) { EmptyView() } trailing: { EmptyView() }
+                }
+                ForEach(catalog.rules) { rule in
+                    ruleRow(rule)
+                }
+                HStack {
+                    DSButton("Добавить правило", icon: "plus", small: true) { addingRule = true }
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10)
+                .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14) }
             }
-            ForEach(catalog.rules) { rule in
-                ruleRow(rule)
-            }
-            Button("Добавить правило…") { addingRule = true }
-        } header: {
-            Text("Правила")
-        } footer: {
-            Text("Подошло правило — ссылка открывается без панели. Работает первое подходящее сверху.")
+            caption("Подошло правило — ссылка открывается без панели. Работает первое подходящее сверху.")
         }
     }
 
     private func ruleRow(_ rule: BrowserRule) -> some View {
         let browser = catalog.browser(id: rule.browserID)
-        return HStack(spacing: 10) {
-            ruleCondition(rule)
-            Image(systemName: "arrow.right").foregroundStyle(.secondary)
-            if let browser {
-                Image(nsImage: browser.icon).resizable().frame(width: 22, height: 22)
-                Text(browser.name)
-            } else {
-                Text("браузер не найден").foregroundStyle(.orange)
+        let title: String
+        switch rule.kind {
+        case .domain: title = rule.value
+        case .app: title = "из \(rule.title ?? rule.value)"
+        }
+        return BRow(title: title) {
+            ruleIcon(rule)
+        } trailing: {
+            HStack(spacing: 8) {
+                if rule.isPrivate { DSChip("приватно", icon: "eyeglasses") }
+                Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.4))
+                if let browser {
+                    HStack(spacing: 5) {
+                        Image(nsImage: browser.icon).resizable().frame(width: 16, height: 16)
+                        Text(browser.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    }
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Capsule().fill(.white.opacity(0.1)))
+                } else {
+                    DSChip("браузер не найден", color: .orange)
+                }
+                Button {
+                    catalog.removeRule(rule.id)
+                } label: {
+                    Image(systemName: "minus.circle").font(.system(size: 14)).foregroundStyle(.white.opacity(0.45))
+                }
+                .buttonStyle(.plain)
+                .help("Удалить правило")
             }
-            if rule.isPrivate {
-                Label("приватно", systemImage: "eyeglasses")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                catalog.removeRule(rule.id)
-            } label: {
-                Image(systemName: "minus.circle")
-            }
-            .buttonStyle(.borderless)
-            .help("Удалить правило")
         }
     }
 
     @ViewBuilder
-    private func ruleCondition(_ rule: BrowserRule) -> some View {
+    private func ruleIcon(_ rule: BrowserRule) -> some View {
         switch rule.kind {
         case .domain:
-            Label(rule.value, systemImage: "globe")
+            symbolTile("globe")
         case .app:
-            HStack(spacing: 6) {
-                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.value) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 20, height: 20)
-                } else {
-                    Image(systemName: "app").frame(width: 20, height: 20)
-                }
-                Text("из \(rule.title ?? rule.value)")
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: rule.value) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 30, height: 30)
+            } else {
+                symbolTile("app")
             }
         }
+    }
+
+    private func symbolTile(_ name: String) -> some View {
+        RoundedRectangle(cornerRadius: 9, style: .continuous).fill(tint.opacity(0.18))
+            .frame(width: 30, height: 30)
+            .overlay(Image(systemName: name).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint))
     }
 
     // MARK: - Подсказка
 
     private var hotkeysSection: some View {
-        Section("Клавиши на панели") {
-            LabeledContent("1–9", value: "открыть в браузере с этим номером")
-            LabeledContent("↑ ↓, Enter", value: "выбрать и открыть")
-            LabeledContent("⌥", value: "зажать при выборе: приватное окно")
-            LabeledContent("⇧", value: "зажать при выборе: запомнить для сайта")
-            LabeledContent("⌘C", value: "скопировать ссылку")
-            LabeledContent("Esc", value: "отмена, клик мимо — тоже")
+        DSSection("Клавиши на панели") {
+            hotkeyRow("1–9", "открыть в браузере с этим номером")
+            hotkeyRow("↑ ↓ ⏎", "выбрать и открыть")
+            hotkeyRow("⌥", "зажми при выборе: приватное окно")
+            hotkeyRow("⇧", "зажми: запомнить для сайта")
+            hotkeyRow("⌘C", "скопировать ссылку")
+            hotkeyRow("Esc", "отмена, клик мимо — тоже")
         }
+    }
+
+    private func hotkeyRow(_ keys: String, _ text: String) -> some View {
+        BRow(title: text, inset: 14, minHeight: 40) { EmptyView() } trailing: { DSKeyCaps(keys) }
     }
 }
 
@@ -424,10 +452,12 @@ final class KeyRecorder: ObservableObject {
     }
 }
 
+
 /// Лист «Добавить правило»: сайт или приложение → браузер.
 private struct AddRuleSheet: View {
     @ObservedObject var catalog: BrowserCatalog
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dsTheme) private var theme
 
     @State private var kind: BrowserRule.Kind = .domain
     @State private var domain = ""
@@ -443,24 +473,37 @@ private struct AddRuleSheet: View {
         return kind == .domain ? normalizedDomain != nil : app != nil
     }
 
+    private var domainNote: String? {
+        guard let normalizedDomain, normalizedDomain != domain.trimmingCharacters(in: .whitespaces) else { return nil }
+        return "Сохранится как \(normalizedDomain). Поддомены тоже подойдут."
+    }
+
+    private var privateNote: String? {
+        guard let browser, !browser.supportsPrivate else { return nil }
+        return "\(browser.name) не умеет открывать приватное окно из командной строки."
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                LabeledContent("Условие") {
-                    SegmentedControl([BrowserRule.Kind.domain, .app], selection: $kind) {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Новое правило").font(.system(size: 20, weight: .bold, design: .rounded))
+
+            DSSection("Условие") {
+                DSRow(icon: "line.3.horizontal.decrease", title: "Когда") {
+                    DSSegmented([BrowserRule.Kind.domain, .app], selection: $kind) {
                         $0 == .domain ? "Сайт" : "Приложение"
                     }
                 }
-
                 if kind == .domain {
-                    TextField("Домен", text: $domain, prompt: Text("google.com"))
-                    if let normalizedDomain, normalizedDomain != domain.trimmingCharacters(in: .whitespaces) {
-                        Text("Будет сохранён как \(normalizedDomain). Поддомены тоже подойдут.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    DSRow(icon: "globe", title: "Домен", subtitle: domainNote) {
+                        TextField("", text: $domain, prompt: Text("google.com"))
+                            .textFieldStyle(.plain)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 170)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.08)))
                     }
                 } else {
-                    LabeledContent("Ссылка из") {
+                    DSRow(icon: "app", title: "Ссылка из") {
                         Menu {
                             ForEach(runningApps, id: \.id) { candidate in
                                 Button {
@@ -484,33 +527,37 @@ private struct AddRuleSheet: View {
                         .fixedSize()
                     }
                 }
+            }
 
-                Picker("Открывать в", selection: $browserID) {
-                    ForEach(catalog.browsers) { browser in
-                        Text(browser.name).tag(browser.id)
+            DSSection("Куда открывать") {
+                DSRow(icon: "safari", title: "Открывать в") {
+                    Picker("Открывать в", selection: $browserID) {
+                        ForEach(catalog.browsers) { browser in
+                            Text(browser.name).tag(browser.id)
+                        }
                     }
+                    .labelsHidden()
+                    .fixedSize()
                 }
-                Toggle("Приватное окно", isOn: $isPrivate)
-                    .disabled(browser?.supportsPrivate != true)
-                if let browser, !browser.supportsPrivate {
-                    Text("\(browser.name) не умеет открывать приватное окно из командной строки.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                DSRow(icon: "eyeglasses", title: "Приватное окно", subtitle: privateNote) {
+                    DSToggle("Приватное окно", isOn: $isPrivate)
+                        .disabled(browser?.supportsPrivate != true)
                 }
             }
-            .formStyle(.grouped)
 
-            HStack {
+            HStack(spacing: 8) {
                 Spacer()
-                Button("Отмена", role: .cancel) { dismiss() }
+                DSButton("Отмена", style: .plain) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Добавить") { add() }
+                DSButton("Добавить", style: .primary) { add() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(!valid)
             }
-            .padding([.horizontal, .bottom], 16)
         }
-        .frame(width: 440)
+        .padding(22)
+        .frame(width: 460)
+        .background(LinearGradient(colors: theme.background(.browser), startPoint: .top, endPoint: .bottom))
+        .environment(\.dsTint, theme.accent(.browser))
         .onAppear {
             if browserID.isEmpty { browserID = catalog.fallbackID ?? catalog.pickerBrowsers.first?.id ?? "" }
         }

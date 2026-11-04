@@ -37,7 +37,7 @@ private struct DeviceStyle {
 
 private struct SymbolBadge: View {
     let style: DeviceStyle
-    var size: CGFloat = 24
+    var size: CGFloat = 30
     var dimmed = false
 
     var body: some View {
@@ -54,8 +54,43 @@ private struct SymbolBadge: View {
     }
 }
 
-/// Строка выбора, как радиокнопка: отметка слева, серая и с подписью, если
-/// устройство не подключено, с замком, если выбрать нельзя.
+/// Строка устройства в карточке: цветной значок слева. Для выбора — отметка справа,
+/// серая и с подписью, если устройство не подключено, с замком, если выбрать нельзя.
+private struct DeviceRow<Trailing: View>: View {
+    let style: DeviceStyle
+    let title: String
+    var note: String?
+    var dimmed = false
+    var locked = false
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SymbolBadge(style: style, size: 30, dimmed: dimmed)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(title).font(DS.rowTitle).lineLimit(1)
+                        .foregroundStyle(.white.opacity(dimmed ? 0.5 : 0.95))
+                    if locked {
+                        Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                if let note {
+                    Text(note).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            Spacer(minLength: 8)
+            trailing
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .frame(minHeight: 50)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 56)
+        }
+    }
+}
+
+/// Строка выбора, как радиокнопка.
 private struct ChoiceRow: View {
     let style: DeviceStyle
     let title: String
@@ -64,58 +99,19 @@ private struct ChoiceRow: View {
     let isConnected: Bool
     let isLocked: Bool
     let action: () -> Void
+    @Environment(\.dsTint) private var tint
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .frame(width: 18)
-
-                SymbolBadge(style: style, dimmed: !isConnected || isLocked)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .lineLimit(1)
-                            .foregroundStyle(isConnected && !isLocked ? .primary : .secondary)
-                        if isLocked {
-                            Image(systemName: "lock.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    if let note {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
+            DeviceRow(style: style, title: title, note: note, dimmed: !isConnected || isLocked, locked: isLocked) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(isSelected ? tint : .white.opacity(0.25))
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isLocked)
-    }
-}
-
-/// Короткое объяснение вверху экрана: что модуль делает на практике.
-private struct ExplainerBlock: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            SymbolBadge(style: DeviceStyle(symbol: "arrow.uturn.backward", tint: .green), size: 34)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Подключил наушники — macOS сменила микрофон — вернём твой.")
-                    .font(.headline)
-                Text("Если выбранный микрофон отключён, входом станет микрофон MacBook. Другие устройства сами входом не станут.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 4)
     }
 }
 
@@ -181,50 +177,37 @@ struct SoundView: View {
         }
     }
 
-    var body: some View {
-        Form {
-            Section {
-                ExplainerBlock()
-            }
-            .listRowBackground(Color.green.opacity(0.10))
+    private func caption(_ text: String) -> some View {
+        Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 6)
+    }
 
-            Section("Сейчас") {
-                HStack(spacing: 10) {
-                    SymbolBadge(style: DeviceStyle(symbol: "mic.fill",
-                                                   tint: monitorState.currentInputIsBluetooth ? .indigo : .blue))
-                    Text(monitorState.currentInputName)
+    private var inputColumn: some View {
+        VStack(alignment: .leading, spacing: DS.blockSpacing) {
+            VStack(alignment: .leading, spacing: 6) {
+                DSSection("Основной микрофон") {
+                    ForEach(physicalInputs, id: \.uid) { inputRow($0) }
                 }
-                HStack(spacing: 10) {
-                    SymbolBadge(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue))
-                    Text(monitorState.currentOutputName)
+                caption("Виртуальные устройства (Loopback, Zoom и т.п.) тут не показаны: основными они не бывают, а выбранные тобой вручную Utilitumus не трогает.")
+            }
+            DSSection("Bluetooth") {
+                DSRow(icon: "lock.shield", title: "Блокировать Bluetooth-микрофон",
+                      subtitle: lockState.isLocked
+                          ? "Bluetooth-микрофон не станет входом."
+                          : "Bluetooth-микрофон можно выбрать основным.") {
+                    DSToggle("Блокировать Bluetooth-микрофон", isOn: $lockState.isLocked)
                 }
             }
-
-            Section {
-                ForEach(physicalInputs, id: \.uid) { inputRow($0) }
-            } header: {
-                Text("Основной микрофон")
-            } footer: {
-                Text("Виртуальные устройства (Loopback, Zoom и т.п.) тут не показаны: основными они не бывают, а выбранные тобой вручную Utilitumus не трогает.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .onChange(of: lockState.isLocked) { _, _ in
+                AudioMonitor.shared.enforcePolicy()
             }
+        }
+    }
 
-            Section {
-                Toggle("Блокировать Bluetooth-микрофон", isOn: $lockState.isLocked)
-                    .toggleStyle(.switch)
-                    .onChange(of: lockState.isLocked) { _, _ in
-                        AudioMonitor.shared.enforcePolicy()
-                    }
-            } footer: {
-                Text(lockState.isLocked
-                     ? "Bluetooth-микрофон не станет входом."
-                     : "Bluetooth-микрофон можно выбрать основным.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
+    private var outputColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Основной выход") {
                 ForEach(physicalOutputs, id: \.uid) { outputRow($0) }
                 ChoiceRow(
                     style: DeviceStyle(symbol: "gearshape.fill", tint: .gray),
@@ -237,16 +220,37 @@ struct SoundView: View {
                     outputStore.select(.system)
                     AudioMonitor.shared.enforcePolicy()
                 }
-            } header: {
-                Text("Основной выход")
-            } footer: {
-                Text("Если macOS переключит звук, вернём выбранный выход. Отключён — звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            }
+            caption("Если macOS переключит звук, вернём выбранный выход. Отключён — звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
+        }
+    }
+
+    var body: some View {
+        DSPage(module: .sound) {
+            DSSection("Что делает") {
+                DSRow(icon: "arrow.uturn.backward",
+                      title: "Подключил наушники — macOS сменила микрофон — вернём твой.",
+                      subtitle: "Если выбранный микрофон отключён, входом станет микрофон MacBook. Другие устройства сами входом не станут.")
+            }
+
+            DSSection("Сейчас") {
+                DeviceRow(style: DeviceStyle(symbol: "mic.fill",
+                                             tint: monitorState.currentInputIsBluetooth ? .indigo : .blue),
+                          title: monitorState.currentInputName, note: "микрофон") { EmptyView() }
+                DeviceRow(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue),
+                          title: monitorState.currentOutputName, note: "выход") { EmptyView() }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    inputColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
+                    outputColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
+                }
+                VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                    inputColumn
+                    outputColumn
+                }
             }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Звук")
-        .navigationSubtitle("Основной микрофон и выход")
     }
 }
