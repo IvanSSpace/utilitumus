@@ -128,7 +128,7 @@
 
 `Tests/LinkCheck.swift` (чистая логика): строка статуса 200 символов → длина 80; `bundleID("awake") == "local.utilitumus.app.awake"`; `machService("awake") == "local.utilitumus.app.awake.xpc"`; `LinkHello`/`LinkStatus` переживают кодирование; `hello` с `protocolVersion = 99` → `LinkError.incompatible(99)`; битый JSON в ответе → ошибка, не падение.
 
-`Tests/run-link-check.sh` (подписанные бинарники и launchd, метка сервиса подставляется тестовым `id` = `test.link`, identifier сервера `local.utilitumus.app.test.link`, клиента — временный `--peer`): клиент получает hello и status; rogue с ad-hoc подписью — `rejected`; сервер, который не отвечает 10 с, — `timeout` за ≤2,5 с, при этом таймер главного потока клиента не пропускает тиков дольше 0,3 с; сервер убит `kill -9` — клиент получает ошибку, а после перезапуска launchd новый вызов успешен; `grep -c userInfo Sources/Kit/Link` = 0.
+`Tests/run-link-check.sh` (подписанные бинарники и launchd, метка сервиса подставляется тестовым `id` = `test.link`, identifier сервера `local.utilitumus.app.test.link`, клиента — временный `--peer`): клиент получает hello и status; rogue с ad-hoc подписью — ответа нет, обработчик не вызван, это не таймаут (отказ слушателя приходит кодами 4097/4099, как у упавшего сервиса; `rejected` только для 4102); сервер, который не отвечает 10 с, — `timeout` за ≤2,5 с, при этом таймер главного потока клиента не пропускает тиков дольше 0,3 с; сервер убит `kill -9` — клиент получает ошибку, а после перезапуска launchd новый вызов успешен; `grep -c userInfo Sources/Kit/Link` = 0.
 
 - [ ] **Step 2: Запустить, увидеть провал**
 
@@ -164,6 +164,8 @@
 - [ ] **Step 2: Запустить, увидеть провал**
 
 - [ ] **Step 3: Реализовать**
+
+`SatelliteCatalog.decode` отвергает весь каталог, если `id` не подходит под `^[a-z0-9][a-z0-9.-]*$`: `id` подставляется в строку требования подписи (тест: `x" or identifier "y`). В `LinkClient` при 4102 вызывать `invalidate()` прямо в обработчике ошибки, не после перехода на главный актор. Обновление: `quit` (результат — выход процесса, а не ответ), замена, `launchctl bootout` + `bootstrap`, затем `hello` с повторами до 15 с: launchd придерживает перезапуск процесса, прожившего меньше 10 с.
 
 Порядок установки — как в спеке: скачать → `sha256` → `ditto -x -k` во временную папку на том же томе → проверка → атомарная замена (`replaceItemAt`) → плист → `bootstrap`. `Catalog/catalog.json` = `{"schema":1,"apps":[]}`.
 
@@ -237,7 +239,7 @@
 
 Стенды и тесты этой задачи подменяют `Kit.defaults` своим suite: код Kit в любом процессе без bundle id центра читает и пишет настоящий домен `local.utilitumus`, своё имя бинарника уже не защищает. Утилита перечитывает тему и свою палитру (`Theme.swift` грузит её один раз) при показе окна и по `UserDefaults.didChangeNotification`.
 
-`LSUIElement = true`; окно 480×520 c `AwakeView` в `dsThemed()`; значок в меню-баре (`cup.and.saucer.fill`), скрыт, пока запущен центр; `moduleControls` рисует переключатель `App.awake.Enabled`. Строка статуса: «Mac не уснёт» / «Mac не уснёт · ещё 1 ч» / «Mac засыпает как обычно» / при пассивном режиме — причина. `linkSetEnabled` заново вызывает `SatelliteRole.decide`: после передачи от центра пассивная утилита становится активной без перезапуска. Изменение статуса → `KitLink.postStatusChanged`. `AwakeController` компилируется и в центр, и в утилиту без условной компиляции. Проверка обновлений без центра — раз в сутки через `SatelliteCatalog`; если код нужен и центру и утилите, каталог и версии переезжают в `Sources/Kit` (бандл заменяет себя как `Updater`, без `SatelliteInstaller`).
+`LSUIElement = true`; окно 480×520 c `AwakeView` в `dsThemed()`; значок в меню-баре (`cup.and.saucer.fill`), скрыт, пока запущен центр; `moduleControls` рисует переключатель `App.awake.Enabled`. Строка статуса: «Mac не уснёт» / «Mac не уснёт · ещё 1 ч» / «Mac засыпает как обычно» / при пассивном режиме — причина. `linkSetEnabled` заново вызывает `SatelliteRole.decide`: после передачи от центра пассивная утилита становится активной без перезапуска. Изменение статуса → `KitLink.postStatusChanged`. `LinkServer` принимает центр **или** свой же identifier (`peerIdentifiers`, требование `(hub) or (self)`), иначе запуск из Finder не передаст `openWindow` работающей копии; в тест: клиент с нашим сертификатом и чужим identifier по-прежнему получает отказ. `AwakeController` компилируется и в центр, и в утилиту без условной компиляции. Проверка обновлений без центра — раз в сутки через `SatelliteCatalog`; если код нужен и центру и утилите, каталог и версии переезжают в `Sources/Kit` (бандл заменяет себя как `Updater`, без `SatelliteInstaller`).
 
 - [ ] **Step 4: Тесты проходят; стенд за экраном показывает окно в теме `dusk` — приложить PNG к отчёту**
 
@@ -255,7 +257,7 @@
 - Consumes: `SatelliteCatalog`, `SatelliteInstaller`, `LinkClient`, `KitLink.statusChanged`, `App.<id>.HandedOver`.
 - Produces:
   - `enum ModuleHandover { enum Decision: Equatable { case keepBuiltIn, handOver, satelliteOwns, returnToBuiltIn }; static func decide(bundlePresent: Bool, handedOver: Bool, reply: LinkStatus?) -> Decision }`
-  - `@MainActor final class SatelliteRegistry: ObservableObject { static let shared; @Published private(set) var entries: [Module: Entry]; func refresh() }`; `Entry { catalog: CatalogApp?; installedVersion: String?; status: LinkStatus?; responding: Bool }`. Опрос: при запуске, при открытии Стора, по `statusChanged`. Без таймера в простое.
+  - `@MainActor final class SatelliteRegistry: ObservableObject { static let shared; @Published private(set) var entries: [Module: Entry]; func refresh() }`; `Entry { catalog: CatalogApp?; installedVersion: String?; status: LinkStatus?; responding: Bool }`. Опрос: при запуске, при открытии Стора, по `statusChanged` (наблюдатель с `suspensionBehavior: .deliverImmediately`, иначе неактивный центр получит пинок с задержкой). Без таймера в простое.
   - `ModuleManager.setExternal(_: Module, _: Bool)` — встроенный модуль не стартует и останавливается; `isOn`/`isInstalled` учитывают внешний вариант, `ModuleReset` не меняется.
   - `SatellitePage(module:)` — статус, «Открыть окно», переключатель, «Нужны доступы: N».
 
