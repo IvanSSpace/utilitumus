@@ -62,30 +62,30 @@ private struct DeviceRow<Trailing: View>: View {
     var note: String?
     var dimmed = false
     var locked = false
+    /// Подпись справа от названия в той же строке (строка остаётся одной высоты).
+    var inline = false
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 12) {
-            SymbolBadge(style: style, size: 30, dimmed: dimmed)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title).font(DS.rowTitle).lineLimit(1)
-                        .foregroundStyle(.white.opacity(dimmed ? 0.5 : 0.95))
-                    if locked {
-                        Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
-                    }
+        HStack(spacing: 10) {
+            SymbolBadge(style: style, size: 26, dimmed: dimmed)
+            HStack(spacing: 6) {
+                Text(title).font(DS.rowTitle).lineLimit(1)
+                    .foregroundStyle(.white.opacity(dimmed ? 0.5 : 0.95))
+                if locked {
+                    Image(systemName: "lock.fill").font(.system(size: 10)).foregroundStyle(.white.opacity(0.5))
                 }
-                if let note {
-                    Text(note).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
+                if let note, inline {
+                    Text(note).font(.system(size: 11.5)).lineLimit(1).foregroundStyle(.white.opacity(0.45))
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             trailing
         }
-        .padding(.horizontal, 14).padding(.vertical, 9)
-        .frame(minHeight: 50)
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .frame(minHeight: 38)
         .overlay(alignment: .top) {
-            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 56)
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 48)
         }
     }
 }
@@ -103,9 +103,9 @@ private struct ChoiceRow: View {
 
     var body: some View {
         Button(action: action) {
-            DeviceRow(style: style, title: title, note: note, dimmed: !isConnected || isLocked, locked: isLocked) {
+            DeviceRow(style: style, title: title, note: note, dimmed: !isConnected || isLocked, locked: isLocked, inline: true) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 17))
+                    .font(.system(size: 16))
                     .foregroundStyle(isSelected ? tint : .white.opacity(0.25))
             }
             .contentShape(Rectangle())
@@ -178,26 +178,24 @@ struct SoundView: View {
     }
 
     private func caption(_ text: String) -> some View {
-        Text(text).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42))
-            .fixedSize(horizontal: false, vertical: true)
+        Text(text).font(.system(size: 11)).foregroundStyle(.white.opacity(0.42))
+            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 6)
     }
 
     private var inputColumn: some View {
-        VStack(alignment: .leading, spacing: DS.blockSpacing) {
-            VStack(alignment: .leading, spacing: 6) {
-                DSSection("Основной микрофон") {
-                    ForEach(physicalInputs, id: \.uid) { inputRow($0) }
-                }
-                caption("Виртуальные устройства (Loopback, Zoom и т.п.) тут не показаны: основными они не бывают, а выбранные тобой вручную Utilitumus не трогает.")
+        VStack(alignment: .leading, spacing: 12) {
+            DSSection("Основной микрофон") {
+                ForEach(physicalInputs, id: \.uid) { inputRow($0) }
             }
+            caption("Виртуальные устройства (Loopback, Zoom) не показаны: Utilitumus их не трогает.")
             DSSection("Bluetooth") {
-                DSRow(icon: "lock.shield", title: "Блокировать Bluetooth-микрофон",
-                      subtitle: lockState.isLocked
-                          ? "Bluetooth-микрофон не станет входом."
-                          : "Bluetooth-микрофон можно выбрать основным.") {
+                DeviceRow(style: DeviceStyle(symbol: "lock.shield.fill", tint: .indigo),
+                          title: "Блокировать Bluetooth-вход") {
                     DSToggle("Блокировать Bluetooth-микрофон", isOn: $lockState.isLocked)
                 }
+                .help(lockState.isLocked ? "Bluetooth-микрофон не станет входом."
+                                         : "Bluetooth-микрофон можно выбрать основным.")
             }
             .onChange(of: lockState.isLocked) { _, _ in
                 AudioMonitor.shared.enforcePolicy()
@@ -206,7 +204,7 @@ struct SoundView: View {
     }
 
     private var outputColumn: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             DSSection("Основной выход") {
                 ForEach(physicalOutputs, id: \.uid) { outputRow($0) }
                 ChoiceRow(
@@ -221,24 +219,27 @@ struct SoundView: View {
                     AudioMonitor.shared.enforcePolicy()
                 }
             }
-            caption("Если macOS переключит звук, вернём выбранный выход. Отключён — звук идёт на динамики MacBook. «Как решит macOS» — не вмешиваться.")
+            caption("Выход отключён — звук на динамиках MacBook. «Как решит macOS» — не вмешиваться.")
         }
     }
 
     var body: some View {
         DSPage(module: .sound) {
-            DSSection("Что делает") {
-                DSRow(icon: "arrow.uturn.backward",
-                      title: "Подключил наушники — macOS сменила микрофон — вернём твой.",
-                      subtitle: "Если выбранный микрофон отключён, входом станет микрофон MacBook. Другие устройства сами входом не станут.")
-            }
+            // Что делает — одной строкой; подробности в «Как это работает».
+            Text("Подключил наушники, macOS сменила микрофон — вернём твой. Выбранный отключён — входом станет MacBook.")
+                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .padding(.horizontal, 6)
+                .padding(.top, -8)
 
             DSSection("Сейчас") {
-                DeviceRow(style: DeviceStyle(symbol: "mic.fill",
-                                             tint: monitorState.currentInputIsBluetooth ? .indigo : .blue),
-                          title: monitorState.currentInputName, note: "микрофон") { EmptyView() }
-                DeviceRow(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue),
-                          title: monitorState.currentOutputName, note: "выход") { EmptyView() }
+                HStack(spacing: 0) {
+                    DeviceRow(style: DeviceStyle(symbol: "mic.fill",
+                                                 tint: monitorState.currentInputIsBluetooth ? .indigo : .blue),
+                              title: monitorState.currentInputName, note: "микрофон", inline: true) { EmptyView() }
+                    DeviceRow(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue),
+                              title: monitorState.currentOutputName, note: "выход", inline: true) { EmptyView() }
+                }
             }
 
             ViewThatFits(in: .horizontal) {
@@ -246,7 +247,7 @@ struct SoundView: View {
                     inputColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
                     outputColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
                 }
-                VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                VStack(alignment: .leading, spacing: 12) {
                     inputColumn
                     outputColumn
                 }
