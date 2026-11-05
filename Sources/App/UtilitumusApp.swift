@@ -156,8 +156,9 @@ struct MainView: View {
                 if !sidebarHidden {
                     DSSidebar(current: current, showDashboard: $showDashboard, showStore: $showStore, showAbout: $showAbout,
                               peeked: $peeked, selection: $selection)
+                        // Без собственной заливки и границы: панель лежит прямо на фоне окна,
+                        // единственный поднятый элемент — карточка страницы.
                         .frame(width: DS.sidebarWidth)
-                        .background(theme.sidebar)
                 }
                 Group {
                     if fast {

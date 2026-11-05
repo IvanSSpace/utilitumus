@@ -656,7 +656,8 @@ struct DSSidebarFooter: View {
             .padding(.horizontal, 10).padding(.top, 6)
         }
         .padding(.horizontal, 10)
-        .padding(.bottom, 12)
+        // Воздух снизу и слева такой же, как у карточки страницы (10 pt).
+        .padding(.bottom, 10)
     }
 
     /// «Скрытые · N» над «Что нового»: без скрытых модулей строки нет совсем.
