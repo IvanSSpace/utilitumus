@@ -3,21 +3,26 @@ import AppKit
 
 struct ModuleDetail: View {
     let module: Module
+    @ObservedObject private var modules = ModuleManager.shared
 
     var body: some View {
-        ModuleScreen(module: module) {
-            switch module {
-            case .sound: SoundView()
-            case .fans: FansView()
-            case .load: LoadScreen()
-            case .stash: StashView()
-            case .mixer: MixerView()
-            case .mouse: MouseView()
-            case .browser: BrowserView()
-            case .voice: VoiceView()
-            case .clipboard: ClipboardView()
-            case .keyboard: KeyboardView()
-            case .awake: AwakeView()
+        if modules.isExternal(module) {
+            SatellitePage(module: module)
+        } else {
+            ModuleScreen(module: module) {
+                switch module {
+                case .sound: SoundView()
+                case .fans: FansView()
+                case .load: LoadScreen()
+                case .stash: StashView()
+                case .mixer: MixerView()
+                case .mouse: MouseView()
+                case .browser: BrowserView()
+                case .voice: VoiceView()
+                case .clipboard: ClipboardView()
+                case .keyboard: KeyboardView()
+                case .awake: AwakeView()
+                }
             }
         }
     }
@@ -146,6 +151,7 @@ struct MainView: View {
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false; showStore = false } }
         .onChange(of: showAbout) { if showAbout { showStore = false } }
+        .onChange(of: showStore) { if showStore { SatelliteRegistry.shared.refresh() } }
         // Стор просит открыть модуль («Открыть» и «Настроить»): скрытый открывается разовым показом.
         .onReceive(NotificationCenter.default.publisher(for: .storeOpenModule)) { note in
             guard let module = note.object as? Module else { return }
@@ -262,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MicGuardMigration.run()
         DockMode.start()
         ModuleManager.shared.startEnabled()
+        SatelliteRegistry.shared.start()
         Updater.shared.check(quiet: true)
         // Без значка в Dock окно при обычном запуске должно появиться впереди.
         if !DockMode.showsInDock, !CommandLine.arguments.contains("--background") {

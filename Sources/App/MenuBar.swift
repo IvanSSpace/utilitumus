@@ -41,6 +41,7 @@ enum DockMode {
 /// Значок в меню-баре: окно, переключатели модулей, быстрые действия, «Что нового», «Выйти».
 struct AppMenuBarScene: Scene {
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
     @ObservedObject private var fans = FanController.shared
     @ObservedObject private var stash = StashStore.shared
     @ObservedObject private var awake = AwakeController.shared
@@ -53,23 +54,27 @@ struct AppMenuBarScene: Scene {
             Section("Модули") {
                 ForEach(modules.order) { module in
                     Toggle(module.title, isOn: Binding(
-                        get: { modules.isOn(module) }, set: { modules.setOn(module, $0) }))
+                        get: { modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module) },
+                        set: {
+                            if modules.isExternal(module) { satellites.setEnabled(module, $0) } else { modules.setOn(module, $0) }
+                        }))
                 }
             }
 
-            if modules.isOn(.fans) {
+            // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.
+            if modules.runsBuiltIn(.fans) {
                 Section("Вентиляторы") {
                     Toggle("Полная мощность", isOn: $fans.fullPower)
                     Button("Все в режим «Авто»") { fans.setAllAuto() }
                 }
             }
 
-            if modules.isOn(.awake) {
+            if modules.runsBuiltIn(.awake) {
                 Toggle("Не спать", isOn: Binding(
                     get: { awake.isActive }, set: { $0 ? awake.activate() : awake.deactivate() }))
             }
 
-            if modules.isOn(.stash) {
+            if modules.runsBuiltIn(.stash) {
                 Section("Стеш программ") {
                     Button("Спрятать выбранные") {
                         Task {

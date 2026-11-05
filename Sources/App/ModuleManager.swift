@@ -21,6 +21,8 @@ final class ModuleManager: ObservableObject {
     @Published private(set) var order: [Module]
     @Published private(set) var enabled: Set<Module>
     @Published private(set) var hidden: Set<Module>
+    /// Модули, которые ведёт отдельная утилита: встроенный код не работает, страница и строка панели остаются.
+    @Published private(set) var external: Set<Module>
     /// Открытая страница «Об инструменте» (кнопка (i) или «Подробнее»).
     @Published var infoModule: Module?
     /// Открыт лист «Модули» (настройки) поверх главного окна.
@@ -63,6 +65,8 @@ final class ModuleManager: ObservableObject {
         order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
         hidden = Set(Module.allCases.filter { defaults.bool(forKey: Self.hiddenKey($0)) })
+        // Сразу из настроек: ответа утилиты и каталога при запуске ещё нет, а двойной работы быть не должно и на миг.
+        external = Set(Module.allCases.filter { defaults.bool(forKey: ModuleHandover.handedOverKey($0.rawValue)) })
     }
 
     // MARK: Переход со старого формата
@@ -111,15 +115,18 @@ final class ModuleManager: ObservableObject {
 
     // MARK: Состояние
 
-    func isOn(_ module: Module) -> Bool { enabled.contains(module) }
+    func isOn(_ module: Module) -> Bool { enabled.contains(module) || external.contains(module) }
+    func isExternal(_ module: Module) -> Bool { external.contains(module) }
+    /// Работает ли встроенный код: контроллеры модуля можно трогать только тогда.
+    func runsBuiltIn(_ module: Module) -> Bool { enabled.contains(module) && !external.contains(module) }
     func isHidden(_ module: Module) -> Bool { hidden.contains(module) }
 
     /// Модули в порядке панели без скрытых; выключенные тоже тут (панель сама оставляет только установленные
     /// и открытый сейчас). Нужно для перетаскивания: переставляются места, занятые видимыми.
     var shownModules: [Module] { order.filter { !hidden.contains($0) } }
 
-    /// «Установлен» = включён. Скрытие на это не влияет.
-    func isInstalled(_ module: Module) -> Bool { enabled.contains(module) }
+    /// «Установлен» = включён или ведётся утилитой. Скрытие на это не влияет.
+    func isInstalled(_ module: Module) -> Bool { isOn(module) }
 
     /// Установленные модули в порядке панели, скрытые тоже.
     var installedModules: [Module] { order.filter(isInstalled) }
@@ -142,6 +149,14 @@ final class ModuleManager: ObservableObject {
     func setOn(_ module: Module, _ on: Bool) {
         defaults.set(on, forKey: Self.onKey(module))
         if on { enabled.insert(module) } else { enabled.remove(module) }
+        if isActive { sync(module) }
+    }
+
+    /// Модуль ведёт утилита: встроенный останавливается и не стартует. `ModuleOn` не меняется: снимут
+    /// утилиту — встроенный вернётся таким, каким был.
+    func setExternal(_ module: Module, _ isExternal: Bool) {
+        guard isExternal != external.contains(module) else { return }
+        if isExternal { external.insert(module) } else { external.remove(module) }
         if isActive { sync(module) }
     }
 
@@ -197,7 +212,7 @@ final class ModuleManager: ObservableObject {
     }
 
     private func sync(_ module: Module) {
-        let wanted = enabled.contains(module)
+        let wanted = runsBuiltIn(module)
         guard wanted != running.contains(module) else { return }
         if wanted {
             running.insert(module)

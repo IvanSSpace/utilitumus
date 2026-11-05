@@ -140,6 +140,7 @@ struct DSSidebar: View {
     @Binding var peeked: Module?
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
     /// Последний открытый модуль каждой категории: вкладка возвращает на него.
     @State private var last: [String: Module] = [:]
 
@@ -251,7 +252,8 @@ struct DSSidebar: View {
     }
 
     private func row(_ module: Module, withStatus: Bool) -> some View {
-        let on = modules.isOn(module)
+        // Точка и «выкл» в строке говорят о работе самого модуля; утилита выключается отдельно от установки.
+        let on = modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module)
         let selected = !showDashboard && !showAbout && !showStore && peeked == nil && current == module
         let open = {
             selection = module

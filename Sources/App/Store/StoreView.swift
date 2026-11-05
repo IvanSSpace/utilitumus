@@ -26,7 +26,9 @@ struct StoreView: View {
                 StoreBar()
             }
             .overlay(alignment: .bottom) {
-                if let module = store.justInstalled {
+                if let failure = store.failure {
+                    StoreFailureToast(failure: failure).padding(.bottom, 1).transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if let module = store.justInstalled {
                     StoreToast(module: module).padding(.bottom, 1).transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -311,6 +313,27 @@ private struct StoreToast: View {
     }
 }
 
+/// Установка сорвалась: сама не исчезает, иначе причину можно не успеть прочитать.
+private struct StoreFailureToast: View {
+    let failure: StoreFailure
+    @ObservedObject private var store = StoreModel.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text("\(failure.module.title): \(failure.message)").fontWeight(.medium).lineLimit(2)
+            DSButton("", icon: "xmark", style: .plain, small: true) { store.dismissFailure() }
+                .help("Закрыть")
+        }
+        .font(.system(size: 12.5))
+        .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 6)
+        .background(Capsule().fill(.regularMaterial))
+        .background(Capsule().fill(.black.opacity(0.4)))
+        .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 0.7))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
+    }
+}
+
 /// Кнопка (i): открывает боковую панель с подробностями.
 private struct StoreInfoButton: View {
     let module: Module
@@ -440,7 +463,8 @@ struct StoreActionButton: View {
                 .help("Отменить скачивание")
         case .installed:
             if store.hasUpdate(module) {
-                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: small) {
+                DSButton(store.satellites.hasBundle(module) ? "Обновить" : "Обновить ресурсы",
+                         icon: "arrow.triangle.2.circlepath", style: .primary, small: small) {
                     store.downloadResources(module)
                 }
             } else if let progress = store.pendingSetup(module) {

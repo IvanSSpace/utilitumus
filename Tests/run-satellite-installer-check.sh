@@ -22,7 +22,13 @@ forbid() {
     *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
   esac
 }
-forbid '\.live|live[A-Z]' Tests/SatelliteInstallerCheck.swift 'настоящие замыкания и пути в тесте'
+status=0
+found="$(grep -rnE '\.live|live[A-Z]' Tests --include='*.swift')" || status=$?
+case "$status" in
+  0) echo "ПРОВАЛ: настоящие замыкания и пути в тестах:"; echo "$found"; exit 1 ;;
+  1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;
+  *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
+esac
 forbid 'UserDefaults|Kit\.defaults' Sources/App/Satellites/SatelliteInstaller.swift 'настройки в установщике'
 
 rm -rf "$OUT"
@@ -98,6 +104,6 @@ sign "$F/plist-id/$NAME.app" "$SIGN_NAME" "$IDENT"; pack plist-id
 cp Tests/SatelliteInstallerCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name SatelliteInstallerCheck -o "$OUT/check" "$OUT/src/main.swift" \
   Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/SatelliteCatalog.swift \
-  $(find Sources/Kit/Link Sources/App/Satellites -name '*.swift')
+  $(find Sources/Kit/Link -name '*.swift') Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift
 
 "$OUT/check" "$F" "$OUT/work" Catalog/catalog.json
