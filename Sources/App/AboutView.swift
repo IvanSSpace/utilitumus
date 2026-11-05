@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Страница «О проекте». Не `Module`: у неё нет состояния в настройках.
-struct AboutView: View {
+struct AboutView: View, Equatable {
+    static func == (a: Self, b: Self) -> Bool { true }
     /// Открыть модуль в основном окне (и показанный, и скрытый).
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared

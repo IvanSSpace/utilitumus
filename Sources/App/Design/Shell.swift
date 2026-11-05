@@ -4,8 +4,8 @@ import SwiftUI
 
 // MARK: - Фон
 
-/// Один статичный градиент текущего модуля (или нейтральный графитовый на дашборде): без кроссфейда
-/// и без градиентов остальных модулей под низом.
+/// Один градиент текущего модуля (или нейтральный графитовый на дашборде). Цвета интерполируются:
+/// смена модуля и темы плавно перетекает за 0,35 с. Анимируется только этот слой, не страница.
 /// `neutral` — страница без модуля (дашборд): нейтральный графитовый фон вместо цвета категории.
 struct DSBackground: View {
     let module: Module
@@ -14,10 +14,47 @@ struct DSBackground: View {
 
     var body: some View {
         let colors = neutral && theme.followsModule ? DSTheme.graphite.background(module) : theme.background(module)
+        let stops = BackgroundStops(colors)
         ZStack {
             Color(white: 0.05)
-            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            BlendedGradient(stops: stops)
         }
+        .animation(.easeInOut(duration: 0.35), value: stops)
+    }
+}
+
+/// Два цвета градиента как вектор: SwiftUI умеет интерполировать только числа.
+private struct BackgroundStops: VectorArithmetic, Equatable {
+    var v: [Double]
+
+    init(_ colors: [Color]) {
+        v = colors.prefix(2).flatMap { color -> [Double] in
+            let c = NSColor(color).usingColorSpace(.sRGB) ?? .black
+            return [c.redComponent, c.greenComponent, c.blueComponent]
+        }
+        while v.count < 6 { v.append(0) }
+    }
+    private init(raw: [Double]) { v = raw }
+
+    static var zero: BackgroundStops { BackgroundStops(raw: Array(repeating: 0, count: 6)) }
+    static func + (a: Self, b: Self) -> Self { BackgroundStops(raw: zip(a.v, b.v).map(+)) }
+    static func - (a: Self, b: Self) -> Self { BackgroundStops(raw: zip(a.v, b.v).map(-)) }
+    mutating func scale(by rhs: Double) { v = v.map { $0 * rhs } }
+    var magnitudeSquared: Double { v.reduce(0) { $0 + $1 * $1 } }
+}
+
+private struct BlendedGradient: View, Animatable {
+    var stops: BackgroundStops
+    var animatableData: BackgroundStops {
+        get { stops }
+        set { stops = newValue }
+    }
+
+    var body: some View {
+        let v = stops.v
+        LinearGradient(colors: [Color(.sRGB, red: v[0], green: v[1], blue: v[2]),
+                                Color(.sRGB, red: v[3], green: v[4], blue: v[5])],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 

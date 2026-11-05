@@ -274,7 +274,9 @@ enum DashboardLive {
 
 // MARK: - Страница
 
-struct DashboardPage: View {
+struct DashboardPage: View, Equatable {
+    static func == (a: Self, b: Self) -> Bool { true }
+    @Environment(\.pageActive) private var pageActive
     /// Открыть модуль в основном окне.
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
@@ -298,8 +300,8 @@ struct DashboardPage: View {
                  + "\n\nНесохранённое программы спросят сами.")
         }
         // Список программ для Стеша: один разовый снимок, без подписок. Само не запускается.
-        .task {
-            guard modules.isOn(.stash) else { return }
+        .task(id: pageActive) {
+            guard pageActive, modules.isOn(.stash) else { return }
             StashStore.shared.refresh()
             await StashStore.shared.refreshUsage()
         }
@@ -446,8 +448,7 @@ private struct DashCard: View {
             Button("Открыть", action: open)
         }
         .accessibilityElement(children: .contain)
-        .onAppear { slot.attach() }
-        .onDisappear { slot.detach() }
+        .onPageActive { if $0 { slot.attach() } else { slot.detach() } }
     }
 }
 

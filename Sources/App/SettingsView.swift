@@ -22,6 +22,7 @@ struct SettingsView: View {
                 }
                 ThemeSection()
                 UIStyleSection()
+                PageModeSection()
                 ModulesSettings()
             }
             .padding(DS.pagePadding)
@@ -92,6 +93,28 @@ private struct UIStyleSection: View {
                         Updater.relaunch(Bundle.main.bundleURL)
                     }
                 }
+            }
+        }
+    }
+}
+
+/// «Страницы»: быстрый режим держит открытые экраны в памяти, экономный собирает экран при каждом открытии.
+/// Применяется сразу: окно само переключается между двумя способами показа страницы.
+private struct PageModeSection: View {
+    @AppStorage(PageMode.storageKey) private var raw = PageMode.fast.rawValue
+
+    private var mode: Binding<PageMode> {
+        Binding(get: { PageMode(rawValue: raw) ?? .fast }, set: { raw = $0.rawValue })
+    }
+
+    var body: some View {
+        DSSection("Страницы") {
+            DSRow(icon: "bolt", title: "Режим страниц",
+                  subtitle: mode.wrappedValue == .fast
+                    ? "Открытые экраны остаются в памяти, переключение мгновенное, с плавным переходом"
+                    : "Экран собирается при открытии, без перехода: меньше памяти") {
+                DSSegmented(PageMode.allCases, selection: mode) { $0.title }
+                    .frame(width: 220)
             }
         }
     }
