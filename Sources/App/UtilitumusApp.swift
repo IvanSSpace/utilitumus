@@ -5,6 +5,7 @@ import AppKit
 enum Module: String, CaseIterable, Identifiable {
     case sound, load, stash, fans, mixer, mouse, browser, voice, clipboard
     case keyboard
+    case awake
 
     var id: String { rawValue }
 
@@ -20,6 +21,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .voice: return "Голос"
         case .clipboard: return "Буфер"
         case .keyboard: return "Клавиатура"
+        case .awake: return "Не спать"
         }
     }
 
@@ -35,6 +37,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .voice: return "waveform"
         case .clipboard: return "doc.on.clipboard.fill"
         case .keyboard: return "keyboard"
+        case .awake: return "cup.and.saucer.fill"
         }
     }
 
@@ -52,6 +55,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .voice: return .green
         case .clipboard: return .mint
         case .keyboard: return .cyan
+        case .awake: return .brown
         }
     }
 
@@ -68,6 +72,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .voice: return "Голосовой ввод по горячей клавише: надиктовал — текст вставился туда, где курсор. Всё распознаётся на этом Mac"
         case .clipboard: return "История буфера обмена и цветные пространства для ссылок и текстов. Панель по горячей клавише, всё зашифровано на этом Mac"
         case .keyboard: return "Мгновенная смена раскладки по тапу Fn/🌐 вместо медленной системной"
+        case .awake: return "Mac не засыпает, пока ты работаешь: на час, на несколько или пока не выключишь"
         }
     }
 }
@@ -106,6 +111,7 @@ struct ModuleDetail: View {
             case .voice: VoiceView()
             case .clipboard: ClipboardView()
             case .keyboard: KeyboardView()
+            case .awake: AwakeView()
             }
         }
     }

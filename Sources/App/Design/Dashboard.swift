@@ -139,6 +139,7 @@ enum DashboardLive {
         case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
@@ -166,6 +167,8 @@ enum DashboardLive {
             }
         case .load:
             LoadStore.shared.refreshNow()
+        case .awake:
+            AwakeController.shared.toggle()
         case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard:
             break
         }
@@ -182,6 +185,7 @@ enum DashboardLive {
         case .stash: return stash()
         case .voice: return voice()
         case .clipboard: return clipboard()
+        case .awake: return awake()
         case .mixer: return mixer()
         case .load: return load()
         case .keyboard: return keyboard()
@@ -271,6 +275,13 @@ enum DashboardLive {
         // Второе переключение от системы ломает смену языка: показываем сразу.
         if KeyboardController.shared.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
         return DashState(text: "\(c.currentName) · \(c.mode.title.lowercased())")
+    }
+
+    private static func awake() -> DashState {
+        let c = AwakeController.shared
+        guard c.isActive else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
+        let tail = c.endDate.map { " · ещё \(AwakeController.remainingText(until: $0))" } ?? ""
+        return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
     }
 
     private static func mixer() -> DashState {

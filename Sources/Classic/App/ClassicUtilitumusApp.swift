@@ -34,6 +34,7 @@ struct ClassicModuleDetail: View {
             case .voice: ClassicVoiceView()
             case .clipboard: ClassicClipboardView()
             case .keyboard: ClassicKeyboardView()
+            case .awake: ClassicAwakeView()
             }
         }
         // Свой экран на каждый модуль: состояние (лист «Об инструменте») не переезжает между ними.

@@ -36,6 +36,9 @@ extension ModuleHooks {
         case .keyboard:
             return ModuleHooks(start: { KeyboardController.shared.start() },
                                stop: { KeyboardController.shared.stop() })
+        case .awake:
+            return ModuleHooks(start: { AwakeController.shared.start() },
+                               stop: { AwakeController.shared.stop() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })
