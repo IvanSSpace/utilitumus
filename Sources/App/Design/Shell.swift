@@ -132,6 +132,7 @@ struct DSSidebar: View {
     @Binding var showDashboard: Bool
     @Binding var showStore: Bool
     @Binding var showAbout: Bool
+    @Binding var showStore: Bool
     @Binding var peeked: Module?
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
@@ -157,18 +158,11 @@ struct DSSidebar: View {
                 showStore = false
                 showDashboard = true
             }
-            .padding(.horizontal, 10).padding(.bottom, 2)
-            // Стор — рядом с дашбордом: витрина модулей и наборов контента.
-            DSDashboardRow(icon: "bag.fill", title: "Стор", help: "Стор модулей и наборов", selected: showStore) {
-                peeked = nil
-                showAbout = false
-                showStore = true
-            }
             .padding(.horizontal, 10).padding(.bottom, 8)
             DSCategoryTabs(active: activeCategory, enabled: { enabledCategories.contains($0.id) }, pick: pick)
                 .padding(.horizontal, 10).padding(.bottom, 6)
             list(shown)
-            DSSidebarFooter(showAbout: $showAbout, peeked: $peeked)
+            DSSidebarFooter(showAbout: $showAbout, showStore: $showStore, peeked: $peeked)
         }
         .onChange(of: current, initial: true) { _, module in
             if let module { last[module.category.id] = module }
@@ -542,10 +536,16 @@ struct DSSidebarFooter: View {
                 EmptyView()
             }
             hiddenSection
+            // Стор внизу, рядом с настройкой модулей: открывают его редко, а наверху он занимал много места.
+            FooterLink(icon: "bag", title: "Стор", selected: showStore) {
+                peeked = nil
+                showAbout = false
+                showStore = true
+            }
             FooterLink(icon: "sparkles", title: "Что нового") { WhatsNew.shared.isShown = true }
             // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
             FooterLink(icon: "slider.horizontal.3", title: "Настроить модули") { modules.settingsShown = true }
-            FooterLink(icon: "info.circle", title: "О проекте", selected: showAbout) { showAbout = true }
+            FooterLink(icon: "info.circle", title: "О проекте", selected: showAbout) { showStore = false; showAbout = true }
             HStack {
                 // Клик по версии — «Обновление стороннего программного обеспечения»: что нового.
                 Button("Версия \(updater.currentVersion)") { WhatsNew.shared.isShown = true }
