@@ -4,6 +4,7 @@ import AppKit
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
     case sound, load, stash, fans, mixer, mouse, browser, voice
+    case keyboard
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "Мышь"
         case .browser: return "Браузер"
         case .voice: return "Голос"
+        case .keyboard: return "Клавиатура"
         }
     }
 
@@ -30,6 +32,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "computermouse"
         case .browser: return "globe"
         case .voice: return "waveform"
+        case .keyboard: return "keyboard"
         }
     }
 
@@ -45,6 +48,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return Color(nsColor: .systemGray)
         case .browser: return .indigo
         case .voice: return .green
+        case .keyboard: return .cyan
         }
     }
 
@@ -59,6 +63,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "Своё направление прокрутки для мыши и плавная прокрутка колеса"
         case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
         case .voice: return "Голосовой ввод по горячей клавише: надиктовал — текст вставился туда, где курсор. Всё распознаётся на этом Mac"
+        case .keyboard: return "Мгновенная смена раскладки по тапу Fn/🌐 вместо медленной системной"
         }
     }
 }
@@ -95,6 +100,7 @@ struct ModuleDetail: View {
             case .mouse: MouseView()
             case .browser: BrowserView()
             case .voice: VoiceView()
+            case .keyboard: KeyboardView()
             }
         }
     }

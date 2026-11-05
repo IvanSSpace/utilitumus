@@ -75,6 +75,13 @@ extension Module {
         case .mouse:
             return [.accessibility(id: "mouse.ax", subtitle: "Чтобы менять направление и плавность прокрутки",
                                    request: { MouseController.shared.requestAccess() })]
+        case .keyboard:
+            // Tap только слушает, поэтому нужен именно «Мониторинг ввода».
+            return [ModuleRequirement(
+                id: "keyboard.input", title: "Мониторинг ввода", subtitle: "Чтобы заметить тап по Fn/🌐; ничего не записывается",
+                icon: "keyboard.fill",
+                isGranted: { CGPreflightListenEventAccess() },
+                request: { KeyboardController.shared.requestAccess() })]
         case .mixer:
             return [ModuleRequirement(
                 id: "mixer.capture", title: "Запись системного звука", subtitle: "Система спросит при первом звуке",
