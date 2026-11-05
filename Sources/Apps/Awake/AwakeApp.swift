@@ -3,8 +3,9 @@ import Combine
 import SwiftUI
 
 /// Сборка со швом работает под тестовой меткой launchd и своим id: настоящие имена ей не нужны.
+/// Исключение — `KIT_TEST_REAL_ID`: сквозной проверке нужен плист, который пишет настоящий установщик.
 enum AwakeIdentity {
-    #if KIT_TEST_DEFAULTS
+    #if KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
     static let id = "test.awake"
     static let label = "local.utilitumus.test.awake"
     #else

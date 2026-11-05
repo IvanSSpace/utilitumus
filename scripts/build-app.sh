@@ -1,7 +1,8 @@
 #!/bin/bash
 # Собирает отдельную утилиту из Sources/Apps/<Имя>, Sources/Modules/<Имя> и Sources/Kit.
 #   scripts/build-app.sh awake Awake 1.0.0 build/apps
-# Пятый аргумент --test-seam только для стендов: настройки в своём suite, состояние центра подставное.
+# Пятый аргумент только для стендов: --test-seam — настройки в своём suite, состояние центра подставное;
+# --test-seam-real-id — то же, но с настоящими id и меткой launchd (Tests/run-hub-e2e.sh).
 set -euo pipefail
 # Установщик отвергает архив с файлами, доступными на запись группе или всем.
 umask 022
@@ -9,8 +10,10 @@ umask 022
 SWIFT_FLAGS=()
 if [ $# -eq 5 ] && [ "$5" = "--test-seam" ]; then
   SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS)
+elif [ $# -eq 5 ] && [ "$5" = "--test-seam-real-id" ]; then
+  SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS -D KIT_TEST_REAL_ID)
 elif [ $# -ne 4 ]; then
-  echo "Использование: scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода> [--test-seam]" >&2
+  echo "Использование: scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода> [--test-seam|--test-seam-real-id]" >&2
   exit 1
 fi
 ID="$1"
