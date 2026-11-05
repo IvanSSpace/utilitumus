@@ -26,10 +26,10 @@ struct ClassicSettingsView: View {
 
 /// «Интерфейс»: классический или новый. Стиль окна на лету не меняется — после выбора предлагаем перезапуск.
 private struct ClassicUIStyleSection: View {
-    @AppStorage(UIStyle.storageKey) private var raw = UIStyle.classic.rawValue
+    @AppStorage(UIStyle.storageKey) private var raw = UIStyle.new.rawValue
 
     private var style: Binding<UIStyle> {
-        Binding(get: { UIStyle(rawValue: raw) ?? .classic }, set: { raw = $0.rawValue })
+        Binding(get: { UIStyle(rawValue: raw) ?? .new }, set: { raw = $0.rawValue })
     }
 
     var body: some View {

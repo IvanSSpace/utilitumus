@@ -85,7 +85,7 @@ private struct UIStyleSection: View {
     @AppStorage(UIStyle.storageKey) private var raw = UIStyle.new.rawValue
 
     private var style: Binding<UIStyle> {
-        Binding(get: { UIStyle(rawValue: raw) ?? .classic }, set: { raw = $0.rawValue })
+        Binding(get: { UIStyle(rawValue: raw) ?? .new }, set: { raw = $0.rawValue })
     }
 
     var body: some View {
