@@ -14,7 +14,7 @@ enum Welcome {
 
     /// Цвета категорий на тёмном фоне: насыщеннее, чем в боковой панели.
     static func tint(_ category: ModuleCategory) -> Color {
-        Color(hue: category.hue, saturation: 0.62, brightness: 0.95)
+        Color(hue: category.hue, saturation: 0.75, brightness: 0.95)
     }
 }
 
@@ -99,8 +99,8 @@ private struct WelcomeBackdrop: View {
         TimelineView(.periodic(from: .now, by: 0.1)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
-                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.035)))
-                let radius = max(size.width, size.height) * 0.62
+                context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Color(white: 0.02)))
+                let radius = max(size.width, size.height) * 0.5
                 for (index, category) in ModuleCategory.all.enumerated() {
                     // У каждого пятна свой период (≈ 40–60 с) и фаза, чтобы они не двигались в такт.
                     let phase = Double(index) * 2.1
@@ -110,7 +110,7 @@ private struct WelcomeBackdrop: View {
                     let color = Welcome.tint(category)
                     context.fill(
                         Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)),
-                        with: .radialGradient(Gradient(colors: [color.opacity(0.42), color.opacity(0)]),
+                        with: .radialGradient(Gradient(colors: [color.opacity(0.34), color.opacity(0)]),
                                               center: CGPoint(x: cx, y: cy), startRadius: 0, endRadius: radius))
                 }
             }
@@ -221,7 +221,7 @@ private struct WelcomePrivacyStep: View {
 
     private let points: [(icon: String, title: String, text: String)] = [
         ("checkmark.seal.fill", "Обновления подписаны",
-         "Каждое обновление проверяется подписью, прежде чем встанет"),
+         "Подпись каждого обновления проверяется до установки"),
         ("hand.raised.fill", "Разрешения видно до установки",
          "Модуль заранее говорит, что ему понадобится и зачем"),
         ("lock.shield.fill", "Ничего не уходит в сеть",
