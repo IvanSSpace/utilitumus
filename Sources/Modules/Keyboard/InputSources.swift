@@ -47,8 +47,12 @@ enum InputSources {
 enum FnSystemAction {
     private static let domain = "com.apple.HIToolbox" as CFString
     private static let key = "AppleFnUsageType" as CFString
-    /// Прежнее значение, пока мы держим 0: Int, а -1 — ключа не было.
+    /// Прежнее значение, пока мы держим 0: Int, а -1 — ключа не было. Только для отката;
+    /// намерение «держать 0» хранит `keepOffKey`, а не наличие этого значения.
     private static let savedKey = "Keyboard.SavedFnUsage"
+    /// Пользователь просил отключить системное действие 🌐 и не отменял. Сбрасывается только
+    /// выключением модуля пользователем или удалением в Сторе (`restore`).
+    private static let keepOffKey = "Keyboard.KeepSystemFnOff"
 
     /// Текущее значение; nil — ключа нет (система действует по умолчанию, это не «ничего»).
     static var usage: Int? {
@@ -71,16 +75,24 @@ enum FnSystemAction {
         }
     }
 
-    /// Мы выставили 0 и помним, что было.
-    static var isOverridden: Bool { UserDefaults.standard.object(forKey: savedKey) != nil }
+    /// Нужно держать 0, пока модуль включён.
+    static var keepsOff: Bool { UserDefaults.standard.bool(forKey: keepOffKey) }
+
+    /// Обновление с версии, где флага не было: модуль включён, система держит 0 (или осталось
+    /// запомненное прежнее значение) — значит, пользователь просил отключить. Зовётся при запуске модуля.
+    static func migrateKeepOff() {
+        let defaults = UserDefaults.standard
+        if usage == 0 || defaults.object(forKey: savedKey) != nil { defaults.set(true, forKey: keepOffKey) }
+    }
 
     /// Нужно ли заново отключить действие при запуске модуля: пользователь просил отключить
     /// (`overridden`), а система держит не 0 (после перезапуска приложения, смены настроек).
     static func needsReapply(overridden: Bool, usage: Int?) -> Bool { overridden && usage != 0 }
 
-    /// «Отключить, пока модуль включён»: намерение живёт в `savedKey`, пока значение не вернули.
+    /// «Отключить, пока модуль включён»: намерение фиксирует `keepOffKey`.
     static func disable() {
         let defaults = UserDefaults.standard
+        defaults.set(true, forKey: keepOffKey)
         // Прежним считаем то, что стоит сейчас; 0 не затирает уже запомненное.
         if usage != 0 || defaults.object(forKey: savedKey) == nil { defaults.set(usage ?? -1, forKey: savedKey) }
         write(0)
@@ -90,15 +102,17 @@ enum FnSystemAction {
     /// true — значение пришлось вернуть в 0 (его сбросили).
     @discardableResult
     static func reapplyIfNeeded() -> Bool {
-        guard needsReapply(overridden: isOverridden, usage: usage) else { return false }
+        guard needsReapply(overridden: keepsOff, usage: usage) else { return false }
         disable()
         return true
     }
 
-    /// Вернуть значение, если его меняли мы.
+    /// Вернуть значение, если его меняли мы. Зовётся, только когда пользователь выключил модуль
+    /// или удалил его в Сторе: при выходе из приложения и обновлении модуль зовёт `quit`.
     static func restore() {
         restoreDictation()
         let defaults = UserDefaults.standard
+        defaults.set(false, forKey: keepOffKey)
         guard let saved = defaults.object(forKey: savedKey) as? Int else { return }
         write(saved < 0 ? nil : saved)
         defaults.removeObject(forKey: savedKey)

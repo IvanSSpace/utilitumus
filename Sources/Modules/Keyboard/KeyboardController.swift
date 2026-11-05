@@ -74,6 +74,7 @@ final class KeyboardController: ObservableObject {
         }
         observeTapEvents()
         // Пользователь просил отключить системное действие: после перезапуска применяем снова.
+        FnSystemAction.migrateKeepOff()
         enforceSystemAction()
         refreshAccess()
         refreshSystem()
