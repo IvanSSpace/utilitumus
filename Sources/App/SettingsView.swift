@@ -20,17 +20,24 @@ struct SettingsView: View {
                     DSButton("Готово", style: .primary) { dismiss() }
                         .keyboardShortcut(.defaultAction)
                 }
-                ThemeSection()
-                DockSection()
-                UIStyleSection()
-                PageModeSection()
-                ModulesSettings()
+                // Разделов и модулей стало много: лист по высоте содержимого вылезал за окно.
+                // Шапка с «Готово» стоит на месте, остальное прокручивается внутри листа.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                        ThemeSection()
+                        DockSection()
+                        UIStyleSection()
+                        PageModeSection()
+                        ModulesSettings()
+                    }
+                }
+                .scrollIndicators(.automatic)
             }
             .padding(DS.pagePadding)
         }
         .environment(\.dsTint, theme.accent(selection))
-        .frame(width: 600)
-        .fixedSize(horizontal: false, vertical: true)
+        // Меньше стандартного окна (693), чтобы лист целиком помещался поверх него.
+        .frame(width: 600, height: 600)
     }
 }
 
