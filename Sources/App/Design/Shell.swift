@@ -130,6 +130,7 @@ struct WindowMinSize: NSViewRepresentable {
 struct DSSidebar: View {
     let current: Module?
     @Binding var showDashboard: Bool
+    @Binding var showStore: Bool
     @Binding var showAbout: Bool
     @Binding var peeked: Module?
     @Binding var selection: Module
@@ -139,7 +140,7 @@ struct DSSidebar: View {
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
-        showDashboard && !showAbout ? nil : (peeked ?? current ?? selection).category
+        (showDashboard && !showAbout) || showStore ? nil : (peeked ?? current ?? selection).category
     }
 
     var body: some View {
@@ -149,10 +150,19 @@ struct DSSidebar: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
-            DSDashboardRow(selected: showDashboard && !showAbout) {
+            DSDashboardRow(icon: "square.grid.2x2", title: "Дашборд", help: "Дашборд (⌘0)",
+                           selected: showDashboard && !showAbout && !showStore) {
                 peeked = nil
                 showAbout = false
+                showStore = false
                 showDashboard = true
+            }
+            .padding(.horizontal, 10).padding(.bottom, 2)
+            // Стор — рядом с дашбордом: витрина модулей и наборов контента.
+            DSDashboardRow(icon: "bag.fill", title: "Стор", help: "Стор модулей и наборов", selected: showStore) {
+                peeked = nil
+                showAbout = false
+                showStore = true
             }
             .padding(.horizontal, 10).padding(.bottom, 8)
             DSCategoryTabs(active: activeCategory, enabled: { enabledCategories.contains($0.id) }, pick: pick)
@@ -204,22 +214,24 @@ struct DSSidebar: View {
 
     /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
     private func pick(_ category: ModuleCategory) {
-        if category == activeCategory && !showAbout && peeked == nil { return }
+        if category == activeCategory && !showAbout && !showStore && peeked == nil { return }
         let shown = shownModules(in: category)
         guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else { return }
         selection = target
         peeked = nil
         showAbout = false
+        showStore = false
         showDashboard = false
     }
 
     private func row(_ module: Module, withStatus: Bool) -> some View {
         let on = modules.isOn(module)
-        let selected = !showDashboard && !showAbout && peeked == nil && current == module
+        let selected = !showDashboard && !showAbout && !showStore && peeked == nil && current == module
         let open = {
             selection = module
             peeked = nil
             showAbout = false
+            showStore = false
             showDashboard = false
         }
         return Group {
@@ -250,17 +262,20 @@ struct DSSidebar: View {
     }
 }
 
-/// Строка «Дашборд» над вкладками.
+/// Строка «Дашборд» / «Стор» над вкладками.
 private struct DSDashboardRow: View {
+    let icon: String
+    let title: String
+    let help: String
     let selected: Bool
     let action: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "square.grid.2x2")
+            Image(systemName: icon)
                 .font(.system(size: 13.5, weight: .semibold)).frame(width: 24)
                 .foregroundStyle(.white.opacity(selected ? 0.95 : 0.6))
-            Text("Дашборд").font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+            Text(title).font(.system(size: 13.5, weight: selected ? .semibold : .medium))
                 .foregroundStyle(.white.opacity(selected ? 1 : 0.8))
             Spacer(minLength: 0)
         }
@@ -270,7 +285,7 @@ private struct DSDashboardRow: View {
                    normal: selected ? .white.opacity(0.13) : .clear,
                    hovered: selected ? .white.opacity(0.13) : .white.opacity(0.06))
         .onTapGesture(perform: action)
-        .help("Дашборд (⌘0)")
+        .help(help)
         .accessibilityAddTraits(.isButton)
     }
 }

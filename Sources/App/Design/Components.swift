@@ -323,8 +323,8 @@ struct DSRow<Trailing: View>: View {
 }
 
 extension DSRow where Trailing == EmptyView {
-    init(icon: String? = nil, title: String, subtitle: String? = nil) {
-        self.init(icon: icon, title: title, subtitle: subtitle) { EmptyView() }
+    init(icon: String? = nil, title: String, subtitle: String? = nil, iconTint: Color? = nil) {
+        self.init(icon: icon, title: title, subtitle: subtitle, iconTint: iconTint) { EmptyView() }
     }
 }
 
@@ -438,7 +438,7 @@ struct DSModuleControls: View {
     }
 }
 
-private struct DSBadge: View {
+struct DSBadge: View {
     let icon: String
     @Environment(\.dsTint) private var tint
     var body: some View {
@@ -448,7 +448,7 @@ private struct DSBadge: View {
     }
 }
 
-private struct DSHeaderLayout<Badge: View, Controls: View>: View {
+struct DSHeaderLayout<Badge: View, Controls: View>: View {
     let title: String
     var subtitle: String?
     var primary: DSAction?

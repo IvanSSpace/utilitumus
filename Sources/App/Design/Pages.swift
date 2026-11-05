@@ -26,12 +26,15 @@ enum PageKey: Hashable {
     /// В панели нет модулей.
     case empty
     case about
+    /// Стор: витрина модулей и наборов контента.
+    case store
 
     /// Порядок как в боковой панели: дашборд, модули по категориям, «О проекте» внизу.
     var order: Int {
         switch self {
         case .dashboard, .empty: return 0
-        case .module(let m): return 1 + (Self.moduleOrder.firstIndex(of: m) ?? 0)
+        case .store: return 1
+        case .module(let m): return 2 + (Self.moduleOrder.firstIndex(of: m) ?? 0)
         case .about: return 1000
         }
     }
@@ -40,7 +43,7 @@ enum PageKey: Hashable {
         + Module.allCases.filter { m in !ModuleCategory.all.contains { $0.modules.contains(m) } }
 
     /// Все страницы в стабильном порядке — по нему идёт ForEach, чтобы слои не переставлялись.
-    static let all: [PageKey] = [.dashboard, .empty] + Module.allCases.map { .module($0) } + [.about]
+    static let all: [PageKey] = [.dashboard, .empty, .store] + Module.allCases.map { .module($0) } + [.about]
 }
 
 // MARK: - Активность страницы
