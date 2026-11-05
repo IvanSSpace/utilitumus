@@ -20,8 +20,8 @@ struct MixerApp: Identifiable, Equatable {
 
 /// Громкость каждого приложения отдельно. Тап создаётся только для приложений,
 /// у которых громкость не 100 % или включено «без звука»: пока микшером не
-/// пользуются, звук идёт мимо него. Всё на main thread: опрос списка процессов
-/// стоит микросекунды, реалтайм-часть живёт внутри `ProcessTap`.
+/// пользуются, звук идёт мимо него. Состояние живёт на main thread, а обход
+/// процессов HAL (`MixerHAL.processes()`) считается в фоне; реалтайм-часть — в `ProcessTap`.
 @MainActor
 final class MixerController: ObservableObject {
     static let shared = MixerController()
@@ -65,6 +65,32 @@ final class MixerController: ObservableObject {
     private var volumes: [String: Double]
     private var muted: Set<String>
     private var timer: Timer?
+    /// Опрос раз в секунду, пока экран открыт; в фоне реже: новый процесс, смена
+    /// устройства и включение звука у известного процесса приходят событиями.
+    private static let visiblePollSeconds: TimeInterval = 1
+    private static let hiddenPollSeconds: TimeInterval = 4
+    /// Снимок HAL, посчитанный в фоне: процессы с владельцами и устройство вывода.
+    private struct Row: Equatable {
+        let objectID: AudioObjectID
+        let pid: pid_t
+        let bundleID: String?
+        let isRunningOutput: Bool
+        let owner: pid_t
+        let exe: String
+    }
+    private struct Snapshot: Equatable {
+        var rows: [Row]
+        var outputUID: String?
+    }
+    private typealias Groups = [String: (name: String, icon: NSImage, ids: Set<AudioObjectID>, playing: Bool)]
+    private nonisolated static let halQueue = DispatchQueue(label: "utilitumus.mixer.hal", qos: .utility)
+    private var snapshot: Snapshot?
+    /// Группы по приложениям считаются из снимка один раз, пока он не поменялся.
+    private var groupsCache: Groups?
+    private var fetching = false
+    private var refetchRequested = false
+    /// Слушатели «процесс начал/закончил вывод» — по одному на аудио-процесс.
+    private var processListeners: [AudioObjectID: () -> Void] = [:]
     /// Имя и иконка незапущенных приложений: ищутся по bundle id один раз.
     private var presetMeta: [String: (name: String, icon: NSImage)] = [:]
     private var unlisten: [() -> Void] = []
@@ -81,12 +107,9 @@ final class MixerController: ObservableObject {
 
     func start() {
         guard timer == nil else { return }
-        // Включение и выключение вывода у уже известного процесса событиями не
-        // приходит, поэтому список ещё и опрашивается.
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            MainActor.assumeIsolated { MixerController.shared.refresh() }
-        }
-        timer?.tolerance = 0.3
+        // Опрос — страховка к событиям (слушатели процессов ставятся по снимку);
+        // нужен и для таймеров «молчит дольше 3 с» и «тап без данных».
+        schedulePoll()
         // Новый процесс и смена устройства вывода реагируют сразу, без ожидания опроса.
         for selector in [kAudioHardwarePropertyProcessObjectList, kAudioHardwarePropertyDefaultOutputDevice] {
             unlisten.append(MixerHAL.listen(selector) {
@@ -94,6 +117,16 @@ final class MixerController: ObservableObject {
             })
         }
         refresh()
+    }
+
+    private func schedulePoll() {
+        timer?.invalidate()
+        let interval = screenVisible ? Self.visiblePollSeconds : Self.hiddenPollSeconds
+        let t = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            MainActor.assumeIsolated { MixerController.shared.refresh() }
+        }
+        t.tolerance = interval * 0.3
+        timer = t
     }
 
     func volume(for id: String) -> Double { volumes[id] ?? 1 }
@@ -104,7 +137,8 @@ final class MixerController: ObservableObject {
     func setScreenVisible(_ value: Bool) {
         guard screenVisible != value else { return }
         screenVisible = value
-        if value { refresh() }
+        if timer != nil { schedulePoll() }
+        if value { processSnapshot(); refresh() }
     }
 
     /// Шаг слайдера: громкость и gain тапа меняются сразу, без обхода HAL. Полный
@@ -148,15 +182,15 @@ final class MixerController: ObservableObject {
         guard let session = sessions[id] else {
             // Приложения нет в сессиях: тапа нет, громкость применится, когда оно зазвучит.
             // Но строки в «Настроены заранее» и «Молчат» могли поменять состав.
-            if wants != wantsTapBefore { refresh() }
+            if wants != wantsTapBefore { processSnapshot() }
             return
         }
         if wants != wantsTapBefore { session.failedAt = nil }
         if let tap = session.tap, wants {
             tap.setGain(muted.contains(id) ? 0 : Float(volume(for: id)))
         } else if (session.tap != nil) != wants, wants != wantsTapBefore || session.failedAt == nil {
-            // Тап нужно создать или убрать: это уже работа для полного прохода.
-            refresh()
+            // Тап нужно создать или убрать: это уже работа для полного прохода по снимку.
+            processSnapshot()
         }
     }
 
@@ -207,6 +241,12 @@ final class MixerController: ObservableObject {
         timer = nil
         unlisten.forEach { $0() }
         unlisten = []
+        processListeners.values.forEach { $0() }
+        processListeners = [:]
+        snapshot = nil
+        groupsCache = nil
+        fetching = false
+        refetchRequested = false
         for session in sessions.values {
             session.tap?.destroy()
             session.tap = nil
@@ -222,27 +262,79 @@ final class MixerController: ObservableObject {
 
     // MARK: - Обновление
 
+    /// Запросить свежий снимок HAL: обход процессов идёт в фоне, на main приходит
+    /// результат. Запросы во время обхода склеиваются в один повторный.
     private func refresh() {
         // Уже поставленный в очередь вызов после stop() не должен снова создать тапы.
         guard timer != nil else { return }
-        let now = Date()
+        if fetching { refetchRequested = true; return }
+        fetching = true
         let me = ProcessInfo.processInfo.processIdentifier
-        var groups: [String: (name: String, icon: NSImage, ids: Set<AudioObjectID>, playing: Bool)] = [:]
+        Self.halQueue.async {
+            let snap = Self.fetchSnapshot(me: me)
+            Task { @MainActor in MixerController.shared.finishFetch(snap) }
+        }
+    }
 
-        for process in MixerHAL.processes() where process.pid != me {
+    private nonisolated static func fetchSnapshot(me: pid_t) -> Snapshot {
+        let rows: [Row] = MixerHAL.processes().compactMap { process in
+            guard process.pid != me else { return nil }
             let owner = MixerHAL.responsiblePID(for: process.pid)
-            if owner == me { continue }
-            let app = NSRunningApplication(processIdentifier: owner)
-            let exe = Self.executableName(of: process.pid)
-            let key = app?.bundleIdentifier ?? process.bundleID ?? "exe:\(exe)"
+            guard owner != me else { return nil }
+            return Row(objectID: process.objectID, pid: process.pid, bundleID: process.bundleID,
+                       isRunningOutput: process.isRunningOutput, owner: owner,
+                       exe: executableName(of: process.pid))
+        }
+        return Snapshot(rows: rows, outputUID: MixerHAL.defaultOutputUID())
+    }
+
+    private func finishFetch(_ snap: Snapshot) {
+        fetching = false
+        guard timer != nil else { return }
+        // Публикуем и пересчитываем только при изменении.
+        if snap != snapshot {
+            if snap.rows != snapshot?.rows { groupsCache = nil; syncProcessListeners(snap.rows) }
+            snapshot = snap
+        }
+        processSnapshot()
+        if refetchRequested { refetchRequested = false; refresh() }
+    }
+
+    /// Включение вывода у уже известного процесса событием приходит только по его
+    /// объекту: слушаем каждый, чтобы громкость применялась сразу, а не по опросу.
+    private func syncProcessListeners(_ rows: [Row]) {
+        let ids = Set(rows.map(\.objectID))
+        for (id, off) in processListeners where !ids.contains(id) { off(); processListeners[id] = nil }
+        for id in ids where processListeners[id] == nil {
+            processListeners[id] = MixerHAL.listen(kAudioProcessPropertyIsRunningOutput, on: id) {
+                Task { @MainActor in MixerController.shared.refresh() }
+            }
+        }
+    }
+
+    private func buildGroups(_ rows: [Row]) -> Groups {
+        var groups: Groups = [:]
+        for row in rows {
+            let app = NSRunningApplication(processIdentifier: row.owner)
+            let key = app?.bundleIdentifier ?? row.bundleID ?? "exe:\(row.exe)"
             var group = groups[key] ?? (
-                app?.localizedName ?? exe,
+                app?.localizedName ?? row.exe,
                 app?.icon ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: nil) ?? NSImage(),
                 [], false)
-            group.ids.insert(process.objectID)
-            group.playing = group.playing || process.isRunningOutput
+            group.ids.insert(row.objectID)
+            group.playing = group.playing || row.isRunningOutput
             groups[key] = group
         }
+        return groups
+    }
+
+    /// Применить последний снимок: сессии, тапы, опубликованные списки.
+    private func processSnapshot() {
+        guard timer != nil, let snapshot else { return }
+        let now = Date()
+        let me = ProcessInfo.processInfo.processIdentifier
+        let groups = groupsCache ?? buildGroups(snapshot.rows)
+        groupsCache = groups
 
         for (key, group) in groups {
             // В список попадают только те, кто играет (или играл только что).
@@ -262,7 +354,7 @@ final class MixerController: ObservableObject {
             sessions[key] = nil
         }
 
-        let outputUID = MixerHAL.defaultOutputUID()
+        let outputUID = snapshot.outputUID
         for (key, session) in sessions { apply(key, session, outputUID: outputUID, now: now) }
         clearPermissionProblemIfWorking()
 
@@ -386,7 +478,7 @@ final class MixerController: ObservableObject {
         }
     }
 
-    private static func executableName(of pid: pid_t) -> String {
+    private nonisolated static func executableName(of pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: 256)
         return proc_name(pid, &buffer, UInt32(buffer.count)) > 0 ? String(cString: buffer) : "pid \(pid)"
     }

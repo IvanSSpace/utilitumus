@@ -60,13 +60,14 @@ enum MixerHAL {
         return string(device, kAudioDevicePropertyDeviceUID)
     }
 
-    /// Подписка на изменение свойства системного объекта. Возвращает отписку.
-    static func listen(_ selector: AudioObjectPropertySelector, _ handler: @escaping () -> Void) -> () -> Void {
+    /// Подписка на изменение свойства объекта (по умолчанию системного). Возвращает отписку.
+    static func listen(_ selector: AudioObjectPropertySelector,
+                       on object: AudioObjectID = AudioObjectID(kAudioObjectSystemObject),
+                       _ handler: @escaping () -> Void) -> () -> Void {
         var addr = address(selector)
         let block: AudioObjectPropertyListenerBlock = { _, _ in handler() }
-        let system = AudioObjectID(kAudioObjectSystemObject)
-        AudioObjectAddPropertyListenerBlock(system, &addr, .main, block)
-        return { AudioObjectRemovePropertyListenerBlock(system, &addr, .main, block) }
+        AudioObjectAddPropertyListenerBlock(object, &addr, .main, block)
+        return { AudioObjectRemovePropertyListenerBlock(object, &addr, .main, block) }
     }
 
     private typealias ResponsibleFn = @convention(c) (pid_t) -> pid_t
