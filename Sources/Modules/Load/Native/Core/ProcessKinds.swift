@@ -1,8 +1,8 @@
 import Foundation
 
-/// Вид потомка: по нему решаем, что считать dev-сервером и что показывать подписью.
+/// Вид потомка: по нему решаем, что считать dev-сервером, сборкой и что показывать подписью.
 enum ProcessKind: String, Sendable {
-    case shell, mcp, devServer, other
+    case shell, mcp, devServer, build, other
 }
 
 /// Классификация процессов: приложения, шеллы, dev-серверы, Claude. Правила один в один с lambscape
@@ -96,8 +96,19 @@ enum Kinds {
 
     // MARK: Потомки
 
+    /// Компиляторы и сборщики: по имени исполняемого файла, а не по аргументам — иначе `swift-frontend …/serve/…`
+    /// принимался за dev-сервер.
+    static let buildTools: Set<String> = ["swift-frontend", "swift-driver", "swift-build", "swift-autolink-extract", "swiftc",
+                                          "clang", "clang++", "clang-cache", "cc", "c++", "gcc", "g++", "ld", "lld", "rustc", "cargo",
+                                          "tsc", "esbuild", "swc", "xcodebuild", "ninja", "make", "cmake"]
+
+    static func isBuildTool(_ p: LoadProcess) -> Bool {
+        buildTools.contains(p.name) || buildTools.contains(p.exeName)
+    }
+
     static func childKind(_ p: LoadProcess) -> ProcessKind {
         if shells.contains(p.name) { return .shell }
+        if isBuildTool(p) { return .build }
         let text = p.args.isEmpty ? p.exe : p.args.joined(separator: " ")
         if text.range(of: "mcp", options: .caseInsensitive) != nil { return .mcp }
         if matches(devPattern, text) { return .devServer }

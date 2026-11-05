@@ -22,7 +22,7 @@ extension LoadStore {
     }
 
     func requestStop(child c: SessionChild, owner: String) {
-        let what = c.kind == .devServer ? "dev-сервер" : "процесс"
+        let what = c.kind == .devServer ? "dev-сервер" : c.kind == .build ? "сборку" : "процесс"
         let age = c.age > 0 ? ", работает \(Fmt.age(c.age))" : ""
         requestStop(process: c.pid, title: "Остановить \(c.name)", head: "Остановит \(c.name) — \(what) \(owner)\(age)")
     }
