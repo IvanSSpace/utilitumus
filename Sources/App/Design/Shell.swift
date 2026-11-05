@@ -137,6 +137,9 @@ struct DSSidebar: View {
     @ObservedObject private var modules = ModuleManager.shared
     /// Последний открытый модуль каждой категории: вкладка возвращает на него.
     @State private var last: [String: Module] = [:]
+    /// Модуль, который тянут, и место, куда он ляжет, если отпустить.
+    @State private var dragging: Module?
+    @State private var drop: DropMark?
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
@@ -150,14 +153,17 @@ struct DSSidebar: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
-            DSDashboardRow(icon: "square.grid.2x2", title: "Дашборд", help: "Дашборд (⌘0)",
-                           selected: showDashboard && !showAbout && !showStore) {
-                peeked = nil
-                showAbout = false
-                showStore = false
-                showDashboard = true
+            // Строка «Дашборд» пока скрыта: страница и код на месте, включается `DS.dashboardInSidebar`.
+            if DS.dashboardInSidebar {
+                DSDashboardRow(icon: "square.grid.2x2", title: "Дашборд", help: "Дашборд (⌘0)",
+                               selected: showDashboard && !showAbout && !showStore) {
+                    peeked = nil
+                    showAbout = false
+                    showStore = false
+                    showDashboard = true
+                }
+                .padding(.horizontal, 10).padding(.bottom, 8)
             }
-            .padding(.horizontal, 10).padding(.bottom, 8)
             DSCategoryTabs(active: activeCategory, enabled: { enabledCategories.contains($0.id) }, pick: pick)
                 .padding(.horizontal, 10).padding(.bottom, 6)
             list(shown)
@@ -169,29 +175,22 @@ struct DSSidebar: View {
     }
 
     private func list(_ shown: [Module]) -> some View {
-        List {
-            if let category = activeCategory {
-                Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                if let category = activeCategory {
                     rows(category, shown: shown)
-                } header: {
-                    DSCategoryHeading(category: category)
-                }
-                .listSectionSeparator(.hidden)
-            } else {
-                // На дашборде — все модули подряд (без заголовков и статусов, чтобы влезли над футером),
-                // перетаскивать здесь нечего: порядок меняют внутри вкладки.
-                Section {
+                } else {
+                    // На дашборде и в сторе — все модули подряд (без статусов, чтобы влезли над футером),
+                    // перетаскивать здесь нечего: порядок меняют внутри вкладки.
+                    DSAllModulesHeading()
                     ForEach(ModuleCategory.all.flatMap { category in shown.filter { $0.category == category } }) {
                         row($0, withStatus: false)
                     }
-                } header: {
-                    DSAllModulesHeading()
                 }
-                .listSectionSeparator(.hidden)
             }
+            .padding(.horizontal, 10).padding(.vertical, 2)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .scrollIndicators(.never)
     }
 
     private func shownModules(in category: ModuleCategory) -> [Module] {
@@ -201,8 +200,23 @@ struct DSSidebar: View {
     @ViewBuilder
     private func rows(_ category: ModuleCategory, shown: [Module]) -> some View {
         let items = shown.filter { $0.category == category }
-        ForEach(items) { module in row(module, withStatus: category.showsStatus) }
-            .onMove { move(items, from: $0, to: $1) }
+        ForEach(items) { module in
+            let status = category.showsStatus
+            row(module, withStatus: status)
+                .overlay(alignment: drop?.below == true ? .bottom : .top) {
+                    // Линия вставки: сверху или снизу строки, куда ляжет модуль.
+                    if drop?.module == module { DSDropLine() }
+                }
+                .onDrag {
+                    dragging = module
+                    return NSItemProvider(object: module.rawValue as NSString)
+                }
+                .onDrop(of: [.text], delegate: SidebarDrop(module: module, height: status ? 46 : 38, items: items,
+                                                           dragging: dragging, mark: $drop) { from, to in
+                    dragging = nil
+                    move(items, from: IndexSet(integer: from), to: to)
+                })
+        }
     }
 
     /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
@@ -234,9 +248,6 @@ struct DSSidebar: View {
                 DSSidebarRow(module: module, on: on, status: nil, selected: selected, action: open)
             }
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
-        .listRowSeparator(.hidden)
-        .listRowBackground(Color.clear)
         .contextMenu {
             let on = modules.isOn(module)
             Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
@@ -323,20 +334,6 @@ private struct DSCategoryTabs: View {
     }
 }
 
-/// Заголовок выбранной категории над её модулями: название и подпись.
-private struct DSCategoryHeading: View {
-    let category: ModuleCategory
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(category.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-            Text(category.subtitle).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.45))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 4)
-    }
-}
-
 /// Заголовок общего списка на дашборде: вкладки не выбраны, модули идут подряд.
 private struct DSAllModulesHeading: View {
     var body: some View {
@@ -344,13 +341,66 @@ private struct DSAllModulesHeading: View {
             Text("Все модули").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
             Text("Вкладка выберется сама").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.45))
         }
-        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 4)
+        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 6)
     }
 }
 
+// MARK: - Перетаскивание
+
+/// Куда ляжет перетаскиваемый модуль: перед строкой `module` или после неё.
+struct DropMark: Equatable {
+    let module: Module
+    let below: Bool
+}
+
+/// Линия вставки между строками.
+private struct DSDropLine: View {
+    @Environment(\.dsTint) private var tint
+
+    var body: some View {
+        Capsule().fill(tint).frame(height: 2).padding(.horizontal, 4).offset(y: 0)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Приём перетаскивания на строку: только из своей категории; верхняя половина строки — «перед ней»,
+/// нижняя — «после». Сам перенос делает `done(откуда, куда)` в индексах категории.
+private struct SidebarDrop: DropDelegate {
+    let module: Module
+    let height: CGFloat
+    let items: [Module]
+    let dragging: Module?
+    @Binding var mark: DropMark?
+    let done: (Int, Int) -> Void
+
+    private var allowed: Bool { dragging.map { $0.category == module.category } ?? false }
+
+    func validateDrop(info: DropInfo) -> Bool { allowed }
+
+    func dropEntered(info: DropInfo) { mark = allowed ? DropMark(module: module, below: info.location.y > height / 2) : nil }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard allowed else { return DropProposal(operation: .forbidden) }
+        let new = DropMark(module: module, below: info.location.y > height / 2)
+        if new != mark { mark = new }
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) { if mark?.module == module { mark = nil } }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer { mark = nil }
+        guard allowed, let dragging, let from = items.firstIndex(of: dragging), let at = items.firstIndex(of: module)
+        else { return false }
+        done(from, info.location.y > height / 2 ? at + 1 : at)
+        return true
+    }
+}
 // MARK: - Скрытие панели
 
 extension DS {
+    /// Показывать ли в панели строку «Дашборд». Пока скрыта: страница остаётся, стартовая — первый модуль.
+    static let dashboardInSidebar = false
     /// Ключ `@AppStorage`: скрыта ли боковая панель.
     static let sidebarHiddenKey = "Design.SidebarHidden"
 }

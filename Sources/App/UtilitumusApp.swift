@@ -125,8 +125,8 @@ struct MainView: View {
     @AppStorage(DS.sidebarHiddenKey) private var sidebarHidden = false
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
     @State private var showAbout = false
-    /// Дашборд — страница по умолчанию при запуске; не сохраняем, как и «О проекте».
-    @State private var showDashboard = true
+    /// Дашборд — стартовая страница, пока его строка в панели включена; иначе открываем модуль. Не сохраняем.
+    @State private var showDashboard = DS.dashboardInSidebar
     /// Стор (прототип): открывается сразу, если запуск с `-OpenStore YES`.
     @State private var showStore = UserDefaults.standard.bool(forKey: "OpenStore")
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
@@ -187,9 +187,11 @@ struct MainView: View {
                 .padding(EdgeInsets(top: sidebarHidden ? 44 : 10, leading: sidebarHidden ? 10 : 0, bottom: 10, trailing: 10))
             }
             // ⌘0 — на дашборд. Скрытая кнопка, чтобы сочетание работало и при скрытой панели.
-            Button("") { peeked = nil; showAbout = false; showStore = false; showDashboard = true }
-                .keyboardShortcut("0", modifiers: .command)
-                .opacity(0).frame(width: 0, height: 0)
+            if DS.dashboardInSidebar {
+                Button("") { peeked = nil; showAbout = false; showStore = false; showDashboard = true }
+                    .keyboardShortcut("0", modifiers: .command)
+                    .opacity(0).frame(width: 0, height: 0)
+            }
         }
         .overlay(alignment: .topLeading) { DSSidebarToggle(hidden: $sidebarHidden) }
         .environment(\.dsTint, pageTint)
