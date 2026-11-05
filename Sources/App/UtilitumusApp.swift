@@ -3,7 +3,7 @@ import AppKit
 
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
-    case sound, load, stash, fans, mixer, mouse, browser, voice
+    case sound, load, stash, fans, mixer, mouse, browser, voice, awake
 
     var id: String { rawValue }
 
@@ -17,6 +17,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "Мышь"
         case .browser: return "Браузер"
         case .voice: return "Голос"
+        case .awake: return "Не спать"
         }
     }
 
@@ -30,6 +31,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "computermouse"
         case .browser: return "globe"
         case .voice: return "waveform"
+        case .awake: return "cup.and.saucer.fill"
         }
     }
 
@@ -45,6 +47,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return Color(nsColor: .systemGray)
         case .browser: return .indigo
         case .voice: return .green
+        case .awake: return .brown
         }
     }
 
@@ -59,6 +62,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .mouse: return "Своё направление прокрутки для мыши и плавная прокрутка колеса"
         case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
         case .voice: return "Голосовой ввод по горячей клавише: надиктовал — текст вставился туда, где курсор. Всё распознаётся на этом Mac"
+        case .awake: return "Mac не засыпает, пока ты работаешь: на час, на несколько или пока не выключишь"
         }
     }
 }
@@ -95,6 +99,7 @@ struct ModuleDetail: View {
             case .mouse: MouseView()
             case .browser: BrowserView()
             case .voice: VoiceView()
+            case .awake: AwakeView()
             }
         }
     }

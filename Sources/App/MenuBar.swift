@@ -43,6 +43,7 @@ struct AppMenuBarScene: Scene {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var fans = FanController.shared
     @ObservedObject private var stash = StashStore.shared
+    @ObservedObject private var awake = AwakeController.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -61,6 +62,11 @@ struct AppMenuBarScene: Scene {
                     Toggle("Полная мощность", isOn: $fans.fullPower)
                     Button("Все в режим «Авто»") { fans.setAllAuto() }
                 }
+            }
+
+            if modules.isOn(.awake) {
+                Toggle("Не спать", isOn: Binding(
+                    get: { awake.isActive }, set: { $0 ? awake.activate() : awake.deactivate() }))
             }
 
             if modules.isOn(.stash) {

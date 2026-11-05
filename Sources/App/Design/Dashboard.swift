@@ -138,6 +138,7 @@ enum DashboardLive {
         case .browser: return BrowserCatalog.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         }
@@ -164,6 +165,8 @@ enum DashboardLive {
             }
         case .load:
             LoadStore.shared.refreshNow()
+        case .awake:
+            AwakeController.shared.toggle()
         case .sound, .mouse, .voice, .mixer:
             break
         }
@@ -179,6 +182,7 @@ enum DashboardLive {
         case .browser: return browser()
         case .stash: return stash()
         case .voice: return voice()
+        case .awake: return awake()
         case .mixer: return mixer()
         case .load: return load()
         }
@@ -253,6 +257,13 @@ enum DashboardLive {
             return DashState(text: "\(controller.hotKeyLabel) · модель не скачана", attention: true)
         }
         return DashState(text: "\(controller.hotKeyLabel) · \(model)")
+    }
+
+    private static func awake() -> DashState {
+        let c = AwakeController.shared
+        guard c.isActive else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
+        let tail = c.endDate.map { " · осталось \(AwakeController.remainingText(until: $0))" } ?? ""
+        return DashState(text: "не даёт спать\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
     }
 
     private static func mixer() -> DashState {

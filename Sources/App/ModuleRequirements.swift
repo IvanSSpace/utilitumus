@@ -59,7 +59,7 @@ struct ModuleRequirement: Identifiable {
 extension Module {
     @MainActor var requirements: [ModuleRequirement] {
         switch self {
-        case .sound, .load, .browser:
+        case .sound, .load, .browser, .awake:
             return []
         case .fans:
             return [ModuleRequirement(
