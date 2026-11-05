@@ -316,21 +316,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Точка входа. Стиль окна задаётся сценой `App` и на лету не меняется, поэтому интерфейс
-/// выбирается при запуске (`UIStyle.launched`): запускаем одно из двух приложений-сцен.
-/// Смену в настройках применяет перезапуск.
+/// Точка входа.
 @main
-enum Launcher {
-    @MainActor
-    static func main() {
-        switch UIStyle.launched {
-        case .new: UtilitumusApp.main()
-        case .classic: ClassicApp.main()
-        }
-    }
-}
-
-/// Новый интерфейс.
 struct UtilitumusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 

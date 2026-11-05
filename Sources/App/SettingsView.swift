@@ -26,7 +26,6 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: DS.blockSpacing) {
                         ThemeSection()
                         DockSection()
-                        UIStyleSection()
                         PageModeSection()
                         ModulesSettings()
                     }
@@ -77,32 +76,6 @@ private struct ThemeSection: View {
                 .foregroundStyle(.white.opacity(selected ? 0.95 : 0.55))
         }
         .contentShape(Rectangle())
-    }
-}
-
-/// «Интерфейс»: классический (как до редизайна) или новый. Стиль окна сменить на лету нельзя — после выбора предлагаем перезапуск.
-private struct UIStyleSection: View {
-    @AppStorage(UIStyle.storageKey) private var raw = UIStyle.new.rawValue
-
-    private var style: Binding<UIStyle> {
-        Binding(get: { UIStyle(rawValue: raw) ?? .new }, set: { raw = $0.rawValue })
-    }
-
-    var body: some View {
-        DSSection("Интерфейс") {
-            DSRow(icon: "macwindow", title: "Интерфейс", subtitle: "Новый — в разработке") {
-                DSSegmented(UIStyle.allCases, selection: style) { $0.title }
-                    .frame(width: 220)
-            }
-            if style.wrappedValue != UIStyle.launched {
-                DSRow(icon: "arrow.triangle.2.circlepath", title: "Нужен перезапуск",
-                      subtitle: "Интерфейс «\(style.wrappedValue.title)» включится после перезапуска") {
-                    DSButton("Перезапустить сейчас", style: .primary, small: true) {
-                        Updater.relaunch(Bundle.main.bundleURL)
-                    }
-                }
-            }
-        }
     }
 }
 
