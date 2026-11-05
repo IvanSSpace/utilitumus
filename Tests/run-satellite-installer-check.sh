@@ -86,6 +86,15 @@ good link-dangling 2.0.0; ln -s nowhere "$F/link-dangling/$NAME.app/Contents/Res
 good link-top 2.0.0; mv "$F/link-top/$NAME.app" "$F/link-top/real"; ln -s real "$F/link-top/$NAME.app"; (cd "$F/link-top" && zip -qy "$F/link-top.zip" "$NAME.app")
 head -c 4096 /dev/urandom > "$F/garbage.zip"
 
+# Режимы файлов подписью не запечатаны: подпись таких бандлов верна, отказать должна проверка архива.
+good mode-exe 2.0.0; chmod 777 "$F/mode-exe/$NAME.app/Contents/MacOS/$NAME"; pack mode-exe
+good mode-dir 2.0.0; chmod 775 "$F/mode-dir/$NAME.app/Contents/Resources"; pack mode-dir
+
+# Подпись верна и с нужным identifier, но Info.plist говорит о другом приложении.
+mkdir -p "$F/plist-id"; bundle "$F/plist-id" 2.0.0
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier local.utilitumus.app.test.other" "$F/plist-id/$NAME.app/Contents/Info.plist"
+sign "$F/plist-id/$NAME.app" "$SIGN_NAME" "$IDENT"; pack plist-id
+
 cp Tests/SatelliteInstallerCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name SatelliteInstallerCheck -o "$OUT/check" "$OUT/src/main.swift" \
   Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/SatelliteCatalog.swift \

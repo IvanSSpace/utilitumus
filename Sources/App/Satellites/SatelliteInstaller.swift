@@ -13,11 +13,16 @@ struct SatellitePaths {
 enum SatelliteInstallError: LocalizedError, Equatable {
     case checksum
     case archive(String)
+    case invalidName(String)
+    case rollbackFailed(cause: String, problems: [String])
 
     var errorDescription: String? {
         switch self {
         case .checksum: return "Скачанный архив модуля повреждён: контрольная сумма не совпала"
         case .archive(let reason): return "Архив модуля не подходит: \(reason)"
+        case .invalidName(let name): return "Недопустимое имя модуля: \(name)"
+        case .rollbackFailed(let cause, let problems):
+            return "\(cause). Вернуть прежнюю версию модуля не удалось: \(problems.joined(separator: "; "))"
         }
     }
 }
@@ -86,6 +91,8 @@ final class SatelliteInstaller {
     }
 
     func install(_ app: CatalogApp, name: String) async throws {
+        try Self.check(id: app.id)
+        try Self.check(name: name)
         let archive = try await download(app.url)
         defer { try? fm.removeItem(at: archive) }
         // Только целостность скачанного: доверие держится на подписи.
@@ -100,23 +107,26 @@ final class SatelliteInstaller {
 
         let staged = try unpack(archive, into: work, name: name)
         try verify(staged, KitLink.bundleID(app.id))
-        let executable = try mainExecutable(of: staged)
+        let executable = try checkInfo(of: staged, against: app)
 
         let bundle = bundleURL(name)
         let agent = agentURL(app.id)
         let hadBundle = fm.fileExists(atPath: bundle.path)
         let oldAgent = try? Data(contentsOf: agent)
         let updating = hadBundle || oldAgent != nil
+        let createdAppsDir = !fm.fileExists(atPath: paths.appsDir.path)
         // Копия на том же томе: APFS делает её мгновенно, старая версия нужна для отката.
         let oldBundle = work.appendingPathComponent("previous.app")
         if hadBundle { try fm.copyItem(at: bundle, to: oldBundle) }
 
         if updating { await link.quit(app.id) }
+        var replaced = false
         do {
             try fm.createDirectory(at: paths.appsDir, withIntermediateDirectories: true)
             try fm.createDirectory(at: paths.agentsDir, withIntermediateDirectories: true)
             if hadBundle {
                 _ = try fm.replaceItemAt(bundle, withItemAt: staged)
+                replaced = true
             } else {
                 try fm.moveItem(at: staged, to: bundle)
             }
@@ -127,17 +137,15 @@ final class SatelliteInstaller {
             try await bootstrap(agent)
             if updating { try await waitForHello(app.id) }
         } catch {
-            bootout(app.id)
-            if hadBundle {
-                _ = try? fm.replaceItemAt(bundle, withItemAt: oldBundle)
-            } else {
-                try? fm.removeItem(at: bundle)
-            }
-            if let oldAgent {
-                try? oldAgent.write(to: agent, options: .atomic)
-                try? await bootstrap(agent)
-            } else {
-                try? fm.removeItem(at: agent)
+            let undo = Undo(
+                id: app.id, bundle: bundle, agent: agent,
+                oldBundle: hadBundle ? oldBundle : nil, oldAgent: oldAgent,
+                replaced: replaced, createdAppsDir: createdAppsDir)
+            // Своя задача: отмена install не должна оборвать откат, иначе `Task.sleep` между
+            // попытками `bootstrap` бросит сразу и старая версия останется не загруженной.
+            let problems = await Task { await self.rollback(undo) }.value
+            guard problems.isEmpty else {
+                throw SatelliteInstallError.rollbackFailed(cause: error.localizedDescription, problems: problems)
             }
             throw error
         }
@@ -145,6 +153,8 @@ final class SatelliteInstaller {
 
     /// Настройки утилиты остаются: они в общем домене и пригодятся при повторной установке.
     func remove(id: String, name: String) async throws {
+        try Self.check(id: id)
+        try Self.check(name: name)
         await link.quit(id)
         try removeStaleAgent(id: id)
         let bundle = bundleURL(name)
@@ -152,9 +162,76 @@ final class SatelliteInstaller {
     }
 
     func removeStaleAgent(id: String) throws {
+        try Self.check(id: id)
         bootout(id)
         let agent = agentURL(id)
         if fm.fileExists(atPath: agent.path) { try fm.removeItem(at: agent) }
+    }
+
+    /// Что вернуть, если установка сорвалась после начала изменений.
+    private struct Undo {
+        let id: String
+        let bundle: URL
+        let agent: URL
+        let oldBundle: URL?
+        let oldAgent: Data?
+        let replaced: Bool
+        let createdAppsDir: Bool
+    }
+
+    /// Возвращает то, что вернуть не удалось. Трогает только изменённое: при запрете записи старые
+    /// бандл и плист целы, и повторная запись дала бы ложный сбой отката.
+    private func rollback(_ undo: Undo) async -> [String] {
+        var problems: [String] = []
+        bootout(undo.id)
+        do {
+            if let oldBundle = undo.oldBundle {
+                if undo.replaced || !fm.fileExists(atPath: undo.bundle.path) {
+                    try Self.restore(oldBundle, to: undo.bundle)
+                }
+            } else if fm.fileExists(atPath: undo.bundle.path) {
+                try fm.removeItem(at: undo.bundle)
+            }
+        } catch {
+            problems.append(error.localizedDescription)
+        }
+        do {
+            if let oldAgent = undo.oldAgent {
+                if (try? Data(contentsOf: undo.agent)) != oldAgent {
+                    try oldAgent.write(to: undo.agent, options: .atomic)
+                }
+                try await bootstrap(undo.agent)
+            } else if fm.fileExists(atPath: undo.agent.path) {
+                try fm.removeItem(at: undo.agent)
+            }
+        } catch {
+            problems.append(error.localizedDescription)
+        }
+        // rmdir, а не removeItem: непустую папку он не удалит.
+        if undo.createdAppsDir { rmdir(paths.appsDir.path) }
+        return problems
+    }
+
+    /// Поведение `replaceItemAt` без цели документация не обещает, поэтому без цели — перемещение.
+    static func restore(_ backup: URL, to bundle: URL) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: bundle.path) {
+            _ = try fm.replaceItemAt(bundle, withItemAt: backup)
+        } else {
+            try fm.moveItem(at: backup, to: bundle)
+        }
+    }
+
+    /// `id` подставляется в требование подписи и в путь к плисту, а вызвать можно и в обход каталога.
+    private static func check(id: String) throws {
+        guard SatelliteCatalog.isValidID(id) else { throw SatelliteCatalogError.invalidID(id) }
+    }
+
+    /// Имя становится путём: `../Имя` указал бы на бандл вне `appsDir`, а `remove` его удалит.
+    private static func check(name: String) throws {
+        guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else {
+            throw SatelliteInstallError.invalidName(name)
+        }
     }
 
     private func bundleURL(_ name: String) -> URL { paths.appsDir.appendingPathComponent(name + ".app") }
@@ -218,31 +295,56 @@ final class SatelliteInstaller {
         }
         let app = unpacked.appendingPathComponent(name + ".app")
         // attributesOfItem не идёт по ссылке: сам бандл ссылкой быть не может.
-        guard try fm.attributesOfItem(atPath: app.path)[.type] as? FileAttributeType == .typeDirectory else {
+        let attributes = try fm.attributesOfItem(atPath: app.path)
+        guard attributes[.type] as? FileAttributeType == .typeDirectory else {
             throw SatelliteInstallError.archive("\(name).app — не папка")
         }
-        try rejectEscapingLinks(in: app)
+        guard !Self.writableByOthers(attributes) else {
+            throw SatelliteInstallError.archive("запись разрешена группе или всем: \(name).app")
+        }
+        try rejectUnsafeItems(in: app)
         return app
     }
 
     /// Ссылка годится, только если настоящий путь ведёт внутрь бандла. Цепочки и ссылки в пустоту
-    /// проверяет realpath: разобрать такое на строках надёжно нельзя.
-    private func rejectEscapingLinks(in app: URL) throws {
+    /// проверяет realpath: разобрать такое на строках надёжно нельзя. Режимы файлов подпись
+    /// не запечатывает, поэтому запись для группы и всех проверяется здесь.
+    private func rejectUnsafeItems(in app: URL) throws {
         guard let root = Self.realPath(app.path), let walker = fm.enumerator(atPath: app.path) else {
             throw SatelliteInstallError.archive("бандл не читается")
         }
-        for case let relative as String in walker where walker.fileAttributes?[.type] as? FileAttributeType == .typeSymbolicLink {
-            let target = Self.realPath(app.path + "/" + relative)
-            guard let target, target == root || target.hasPrefix(root + "/") else {
-                throw SatelliteInstallError.archive("ссылка ведёт за пределы бандла: \(relative)")
+        for case let relative as String in walker {
+            let attributes = walker.fileAttributes ?? [:]
+            if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+                let target = Self.realPath(app.path + "/" + relative)
+                guard let target, target == root || target.hasPrefix(root + "/") else {
+                    throw SatelliteInstallError.archive("ссылка ведёт за пределы бандла: \(relative)")
+                }
+            } else if Self.writableByOthers(attributes) {
+                throw SatelliteInstallError.archive("запись разрешена группе или всем: \(relative)")
             }
         }
     }
 
-    private func mainExecutable(of app: URL) throws -> String {
-        let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist"))
+    /// Нет сведений о режиме — считается небезопасным.
+    private static func writableByOthers(_ attributes: [FileAttributeKey: Any]) -> Bool {
+        guard let mode = attributes[.posixPermissions] as? Int else { return true }
+        return mode & 0o022 != 0
+    }
+
+    /// Сверка с каталогом уже после подписи: Info.plist ею запечатан. Возвращает имя исполняемого файла.
+    private func checkInfo(of bundle: URL, against app: CatalogApp) throws -> String {
+        let info = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
+        let identifier = info?["CFBundleIdentifier"] as? String
+        guard identifier == KitLink.bundleID(app.id) else {
+            throw SatelliteInstallError.archive("в бандле другой identifier: \(identifier ?? "нет")")
+        }
+        let version = info?["CFBundleShortVersionString"] as? String
+        guard version == app.version else {
+            throw SatelliteInstallError.archive("в бандле версия \(version ?? "нет"), в каталоге \(app.version)")
+        }
         guard let executable = info?["CFBundleExecutable"] as? String,
-              fm.isExecutableFile(atPath: app.appendingPathComponent("Contents/MacOS").appendingPathComponent(executable).path) else {
+              fm.isExecutableFile(atPath: bundle.appendingPathComponent("Contents/MacOS").appendingPathComponent(executable).path) else {
             throw SatelliteInstallError.archive("в бандле нет исполняемого файла")
         }
         return executable

@@ -40,9 +40,11 @@ enum KitSigning {
         let err = Pipe()
         process.standardError = err
         try process.run()
+        // Сначала чтение: процесс, заполнивший канал, не выйдет, пока его не прочитают.
+        let output = err.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            let text = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let text = String(data: output, encoding: .utf8) ?? ""
             throw Failure("\((tool as NSString).lastPathComponent): \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
     }

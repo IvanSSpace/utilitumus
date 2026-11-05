@@ -22,9 +22,9 @@ func check(_ ok: Bool, _ name: String) {
 
 // MARK: - Каталог
 
-func json(schema: Int = 1, ids: [String] = ["awake"], minHub: String = "0.6.0") -> Data {
+func json(schema: Int = 1, ids: [String] = ["awake"], version: String = "1.0.0", minHub: String = "0.6.0") -> Data {
     let apps = ids.map { id -> [String: Any] in
-        ["id": id, "version": "1.0.0", "minHub": minHub, "url": "https://example.com/Awake.zip", "sha256": "ab", "sizeMB": 2]
+        ["id": id, "version": version, "minHub": minHub, "url": "https://example.com/Awake.zip", "sha256": "ab", "sizeMB": 2]
     }
     return try! JSONSerialization.data(withJSONObject: ["schema": schema, "apps": apps])
 }
@@ -55,6 +55,23 @@ func catalogChecks() {
     check(decodeError(json(ids: ["awake", #"x" or identifier "y"#])) == .invalidID(#"x" or identifier "y"#), "один плохой id отвергает весь каталог")
     for good in ["awake", "a", "0", "a.b-c9"] {
         check((try? SatelliteCatalog.decode(json(ids: [good]))) != nil, "id «\(good)» принимается")
+    }
+
+    for bad in ["", "abc", "1.0-beta", "1..0", ".1", "1.", "1.0\n", "v1.0", "１.０"] {
+        check(decodeError(json(version: bad)) == .invalidVersion(bad), "version «\(bad)» отвергается")
+        check(decodeError(json(minHub: bad)) == .invalidVersion(bad), "minHub «\(bad)» отвергается")
+    }
+    for good in ["1", "0.6.0", "10.20.30.40"] {
+        check((try? SatelliteCatalog.decode(json(version: good, minHub: good))) != nil, "версия «\(good)» принимается")
+    }
+
+    // Проверка в самом CatalogApp: мимо decode её не обойти.
+    let single = #"{"id":"a/b","version":"1.0.0","minHub":"0.6.0","url":"https://example.com/a.zip","sha256":"ab","sizeMB":1}"#
+    do {
+        _ = try JSONDecoder().decode(CatalogApp.self, from: Data(single.utf8))
+        check(false, "CatalogApp сам отвергает плохой id")
+    } catch {
+        check((error as? SatelliteCatalogError) == .invalidID("a/b"), "CatalogApp сам отвергает плохой id (\(error))")
     }
 
     func available(minHub: String, hub: String) -> Bool {
@@ -98,6 +115,9 @@ final class Stand {
     var downloaded: [URL] = []
     var verifyCalls = 0
     var failBootstraps = 0
+    var failBootstrapsOfVersion: [String: Int] = [:]
+    var onBootstrap: (() -> Void)?
+    var onHello: (() -> Void)?
     var failBootouts = false
     var failDownload = false
     var failHellos = 0
@@ -126,8 +146,13 @@ final class Stand {
                 self.log("bootstrap")
                 let domain = "gui/\(getuid())"
                 check(args == ["bootstrap", domain, self.agent.path], "bootstrap: домен и путь к плисту")
+                self.onBootstrap?()
                 if self.failBootstraps > 0 {
                     self.failBootstraps -= 1
+                    throw KitSigning.Failure("launchctl: bootstrap")
+                }
+                if let left = self.failBootstrapsOfVersion[self.version], left > 0 {
+                    self.failBootstrapsOfVersion[self.version] = left - 1
                     throw KitSigning.Failure("launchctl: bootstrap")
                 }
             case "bootout":
@@ -158,6 +183,7 @@ final class Stand {
             hello: { [unowned self] id in
                 check(id == appID, "hello: id")
                 self.log("hello")
+                self.onHello?()
                 if self.failHellos > 0 {
                     self.failHellos -= 1
                     throw LinkError.timeout
@@ -165,26 +191,28 @@ final class Stand {
             },
             helloWindow: helloWindow))
 
-    func catalogApp(_ fixture: String, sha: String? = nil) -> CatalogApp {
+    func catalogApp(_ fixture: String, sha: String? = nil, version: String? = nil) -> CatalogApp {
         let zip = fixtures.appendingPathComponent(fixture + ".zip")
         let real = SHA256.hash(data: try! Data(contentsOf: zip)).map { String(format: "%02x", $0) }.joined()
-        return CatalogApp(id: appID, version: "1.0.0", minHub: "0.0.0", url: zip, sha256: sha ?? real, sizeMB: 1)
+        // Все фикстуры, кроме v1, собраны с версией 2.0.0.
+        let inArchive = fixture == "v1" ? "1.0.0" : "2.0.0"
+        return CatalogApp(id: appID, version: version ?? inArchive, minHub: "0.0.0", url: zip, sha256: sha ?? real, sizeMB: 1)
     }
 
     /// Ошибка установки; nil — прошла.
-    func install(_ fixture: String, sha: String? = nil) async -> Error? {
+    func install(_ fixture: String, sha: String? = nil, version: String? = nil) async -> Error? {
         do {
-            try await installer.install(catalogApp(fixture, sha: sha), name: appName)
+            try await installer.install(catalogApp(fixture, sha: sha, version: version), name: appName)
             return nil
         } catch {
             return error
         }
     }
 
+    /// appsDir не должно быть вовсе: установка, которая его создала, за собой его убирает.
     var nothingInstalled: Bool {
-        let apps = (try? fm.contentsOfDirectory(atPath: paths.appsDir.path)) ?? []
         let agents = (try? fm.contentsOfDirectory(atPath: paths.agentsDir.path)) ?? []
-        return apps.isEmpty && agents.isEmpty
+        return !fm.fileExists(atPath: paths.appsDir.path) && agents.isEmpty
     }
     /// Рядом с appsDir и agentsDir ничего постороннего, скачанный архив убран.
     var noLitter: Bool {
@@ -261,6 +289,39 @@ func installChecks() async {
         check(s.verifyCalls == 0, "\(fixture): до подписи не дошло")
         check(s.nothingInstalled && s.events.isEmpty, "\(fixture): ничего не тронуто")
         check(s.noLitter, "\(fixture): ни скачанного, ни мусора")
+    }
+
+    for fixture in ["mode-exe", "mode-dir"] {
+        let s = Stand("archive-" + fixture)
+        let error = await s.install(fixture)
+        check(isArchiveError(error), "\(fixture): запись для группы или всех — отказ по архиву (\(String(describing: error)))")
+        check(s.verifyCalls == 0, "\(fixture): до подписи не дошло")
+        check(s.nothingInstalled && s.events.isEmpty, "\(fixture): ничего не тронуто")
+    }
+
+    do {
+        let s = Stand("wrong-version")
+        let error = await s.install("v1", version: "9.9.9")
+        check(isArchiveError(error), "версия в бандле не та, что в каталоге: отказ (\(String(describing: error)))")
+        check(s.verifyCalls == 1, "версия в бандле не та: подпись при этом верна")
+        check(s.nothingInstalled && s.events.isEmpty, "версия в бандле не та: ничего не тронуто")
+    }
+
+    do {
+        let s = Stand("plist-id")
+        let error = await s.install("plist-id")
+        check(isArchiveError(error), "identifier в Info.plist чужой: отказ (\(String(describing: error)))")
+        check(s.verifyCalls == 1, "identifier в Info.plist чужой: подпись при этом верна")
+        check(s.nothingInstalled && s.events.isEmpty, "identifier в Info.plist чужой: ничего не тронуто")
+    }
+
+    do {
+        let s = Stand("existing-apps-dir")
+        try! fm.createDirectory(at: s.paths.appsDir, withIntermediateDirectories: true)
+        s.failBootstraps = 1000
+        check(await s.install("v1") != nil, "appsDir уже был, bootstrap не проходит: ошибка")
+        check(fm.fileExists(atPath: s.paths.appsDir.path), "appsDir уже был: откат его не удалил")
+        check(!fm.fileExists(atPath: s.bundle.path), "appsDir уже был: бандла нет")
     }
 
     do {
@@ -350,6 +411,191 @@ func updateChecks() async {
     }
 }
 
+func rollbackChecks() async {
+    func standWithV1(_ name: String) async -> (Stand, Data) {
+        let s = Stand(name)
+        check(await s.install("v1") == nil, "\(name): v1 поставилась")
+        s.events = []
+        return (s, try! Data(contentsOf: s.agent))
+    }
+    func setMode(_ dir: URL, _ mode: Int) {
+        try! fm.setAttributes([.posixPermissions: mode], ofItemAtPath: dir.path)
+    }
+
+    // Запись запрещена: новая версия не встала, значит возвращать на место нечего и незачем.
+    do {
+        let (s, plist) = await standWithV1("readonly-agents")
+        setMode(s.paths.agentsDir, 0o555)
+        let error = await s.install("v2")
+        setMode(s.paths.agentsDir, 0o755)
+        check(error != nil, "agentsDir только для чтения: ошибка")
+        if case .rollbackFailed = error as? SatelliteInstallError { check(false, "agentsDir только для чтения: откат не должен считаться сбоем (\(String(describing: error)))") }
+        check(s.version == "1.0.0", "agentsDir только для чтения: версия 1.0.0 (\(s.version))")
+        check((try? Data(contentsOf: s.agent)) == plist, "agentsDir только для чтения: старый плист цел")
+        check(s.events.last == "bootstrap@1.0.0", "agentsDir только для чтения: старая версия снова запущена (\(s.events))")
+    }
+    do {
+        let (s, plist) = await standWithV1("readonly-apps")
+        setMode(s.paths.appsDir, 0o555)
+        let error = await s.install("v2")
+        setMode(s.paths.appsDir, 0o755)
+        check(error != nil, "appsDir только для чтения: ошибка")
+        if case .rollbackFailed = error as? SatelliteInstallError { check(false, "appsDir только для чтения: откат не должен считаться сбоем (\(String(describing: error)))") }
+        check(s.version == "1.0.0", "appsDir только для чтения: версия 1.0.0 (\(s.version))")
+        check((try? Data(contentsOf: s.agent)) == plist, "appsDir только для чтения: старый плист цел")
+        check(s.events.last == "bootstrap@1.0.0", "appsDir только для чтения: старая версия снова запущена (\(s.events))")
+    }
+
+    // Цель исчезла: replaceItemAt как есть и restore с запасным moveItem.
+    do {
+        let dir = workRoot.appendingPathComponent("restore-missing")
+        try! fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let make = { (name: String) -> URL in
+            let url = dir.appendingPathComponent(name)
+            try! fm.createDirectory(at: url, withIntermediateDirectories: true)
+            try! Data("старая".utf8).write(to: url.appendingPathComponent("file"))
+            return url
+        }
+        let raw = make("raw-backup")
+        let rawTarget = dir.appendingPathComponent("raw-target")
+        let rawResult = Result { try fm.replaceItemAt(rawTarget, withItemAt: raw) }
+        print("     replaceItemAt на отсутствующую цель: \(rawResult), цель есть: \(fm.fileExists(atPath: rawTarget.path))")
+
+        let backup = make("backup")
+        let target = dir.appendingPathComponent("target")
+        check((try? SatelliteInstaller.restore(backup, to: target)) != nil, "restore: цели нет — не ошибка")
+        check((try? Data(contentsOf: target.appendingPathComponent("file"))) == Data("старая".utf8), "restore: цели нет — резервная копия встала на место")
+
+        let replacement = make("replacement")
+        try! Data("новая".utf8).write(to: replacement.appendingPathComponent("file"))
+        check((try? SatelliteInstaller.restore(replacement, to: target)) != nil, "restore: цель есть — заменена")
+        check((try? Data(contentsOf: target.appendingPathComponent("file"))) == Data("новая".utf8), "restore: цель есть — содержимое новое")
+    }
+
+    do {
+        let s = Stand("bundle-vanished")
+        s.helloWindow = 0.2
+        check(await s.install("v1") == nil, "bundle-vanished: v1 поставилась")
+        let plist = try! Data(contentsOf: s.agent)
+        s.failHellos = 1000
+        s.onHello = { [unowned s] in try? fm.removeItem(at: s.bundle) }
+        let error = await s.install("v2")
+        check(error != nil, "бандл исчез во время обновления: ошибка")
+        check(s.version == "1.0.0", "бандл исчез во время обновления: старая версия возвращена (\(s.version))")
+        check((try? Data(contentsOf: s.agent)) == plist, "бандл исчез во время обновления: старый плист цел")
+    }
+
+    // Сам откат не удался: это должно быть видно отдельной ошибкой.
+    do {
+        let (s, _) = await standWithV1("rollback-bundle-fails")
+        s.failBootstraps = 10
+        var locked = false
+        s.onBootstrap = { [unowned s] in
+            if !locked {
+                locked = true
+                setMode(s.paths.appsDir, 0o555)
+            }
+        }
+        let error = await s.install("v2")
+        setMode(s.paths.appsDir, 0o755)
+        if case .rollbackFailed(let cause, let problems) = error as? SatelliteInstallError {
+            check(cause == "launchctl: bootstrap" && problems.count == 1, "откат бандла не удался: причина и сбой отката (\(cause), \(problems))")
+        } else {
+            check(false, "откат бандла не удался: отдельная ошибка (\(String(describing: error)))")
+        }
+    }
+    do {
+        let (s, _) = await standWithV1("rollback-bootstrap-fails")
+        s.failBootstraps = 1000
+        let error = await s.install("v2")
+        if case .rollbackFailed(_, let problems) = error as? SatelliteInstallError {
+            check(problems == ["launchctl: bootstrap"], "bootstrap старой версии не прошёл: отдельная ошибка (\(problems))")
+        } else {
+            check(false, "bootstrap старой версии не прошёл: отдельная ошибка (\(String(describing: error)))")
+        }
+        check(s.version == "1.0.0", "bootstrap старой версии не прошёл: бандл всё же возвращён")
+    }
+
+    // Отмена: откат всё равно должен получить все попытки bootstrap.
+    do {
+        let (s, _) = await standWithV1("update-cancel-rollback")
+        s.failHellos = 1000
+        s.failBootstrapsOfVersion = ["1.0.0": 1]
+        s.onHello = { withUnsafeCurrentTask { $0?.cancel() } }
+        let error = await Task { await s.install("v2") }.value
+        check(error is CancellationError, "обновление отменено: ошибка отмены (\(String(describing: error)))")
+        check(s.events.filter { $0 == "bootstrap@1.0.0" }.count == 2, "обновление отменено: первый bootstrap отката не прошёл, второй был (\(s.events))")
+        check(s.version == "1.0.0", "обновление отменено: старая версия возвращена")
+    }
+}
+
+func entryPointChecks() async {
+    let badIDs = [#"x" or identifier "y"#, "../x", "a/b", "Awake", ""]
+    for (index, bad) in badIDs.enumerated() {
+        let s = Stand("bad-id-\(index)")
+        let app = CatalogApp(id: bad, version: "1.0.0", minHub: "0.0.0", url: fixtures.appendingPathComponent("v1.zip"), sha256: "ab", sizeMB: 1)
+        do {
+            try await s.installer.install(app, name: appName)
+            check(false, "install: id «\(bad)» отвергается")
+        } catch {
+            check((error as? SatelliteCatalogError) == .invalidID(bad), "install: id «\(bad)» отвергается (\(error))")
+        }
+        do {
+            try await s.installer.remove(id: bad, name: appName)
+            check(false, "remove: id «\(bad)» отвергается")
+        } catch {
+            check((error as? SatelliteCatalogError) == .invalidID(bad), "remove: id «\(bad)» отвергается (\(error))")
+        }
+        do {
+            try s.installer.removeStaleAgent(id: bad)
+            check(false, "removeStaleAgent: id «\(bad)» отвергается")
+        } catch {
+            check((error as? SatelliteCatalogError) == .invalidID(bad), "removeStaleAgent: id «\(bad)» отвергается (\(error))")
+        }
+        check(s.events.isEmpty && s.downloaded.isEmpty && s.verifyCalls == 0, "id «\(bad)»: ни скачивания, ни launchctl, ни связи (\(s.events))")
+    }
+
+    for (index, bad) in ["../Victim", "", "a/b", ".hidden", "..", "/abs"].enumerated() {
+        let s = Stand("bad-name-\(index)")
+        let victim = s.root.appendingPathComponent("Victim.app")
+        try! fm.createDirectory(at: victim, withIntermediateDirectories: true)
+        do {
+            try await s.installer.remove(id: appID, name: bad)
+            check(false, "remove: имя «\(bad)» отвергается")
+        } catch {
+            check((error as? SatelliteInstallError) == .invalidName(bad), "remove: имя «\(bad)» отвергается (\(error))")
+        }
+        do {
+            try await s.installer.install(s.catalogApp("v1"), name: bad)
+            check(false, "install: имя «\(bad)» отвергается")
+        } catch {
+            check((error as? SatelliteInstallError) == .invalidName(bad), "install: имя «\(bad)» отвергается (\(error))")
+        }
+        check(fm.fileExists(atPath: victim.path), "имя «\(bad)»: папка рядом с appsDir цела")
+        check(s.events.isEmpty && s.downloaded.isEmpty, "имя «\(bad)»: ни скачивания, ни launchctl, ни связи (\(s.events))")
+    }
+}
+
+/// KitSigning.run: процесс пишет в stderr больше, чем вмещает канал. Срок — чтобы зависание было провалом, а не вечным тестом.
+func chattyProcessCheck() {
+    final class Box: @unchecked Sendable { var message: String? }
+    let box = Box()
+    let done = DispatchSemaphore(value: 0)
+    DispatchQueue.global().async {
+        do {
+            try KitSigning.run("/bin/sh", ["-c", "yes x | head -c 200000 >&2; exit 3"])
+        } catch {
+            box.message = error.localizedDescription
+        }
+        done.signal()
+    }
+    let finished = done.wait(timeout: .now() + 10) == .success
+    check(finished, "KitSigning.run: 200 КБ в stderr не вешают")
+    if finished {
+        check(box.message?.contains("x\nx") == true, "KitSigning.run: код выхода не 0 — ошибка с текстом stderr")
+    }
+}
+
 func removeChecks() async {
     do {
         let s = Stand("remove")
@@ -409,6 +655,9 @@ catalogChecks()
 agentChecks()
 await installChecks()
 await updateChecks()
+await rollbackChecks()
+await entryPointChecks()
+chattyProcessCheck()
 await removeChecks()
 print(failures == 0 ? "КАТАЛОГ И УСТАНОВЩИК: ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
 exit(failures == 0 ? 0 : 1)
