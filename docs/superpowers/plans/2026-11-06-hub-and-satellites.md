@@ -308,6 +308,41 @@
 
 ---
 
+### Task 9: Помощник вентиляторов без setuid
+
+Отдельно от пилота, по просьбе автора: закрыть дыру до всего остального.
+
+**Files:**
+- Create: `Sources/Shared/FanLink.swift`, `Tests/FanHelperCheck.swift`, `Tests/run-fan-helper-check.sh`
+- Modify: `Sources/FanHelper/main.swift`, `Sources/Modules/Fans/FanHelperInstaller.swift`, код Вентиляторов, запускающий помощника процессом, `build.sh` (сборка помощника), `README.md`, если там описан setuid
+
+**Interfaces:**
+- Produces:
+  - `FanLink.service = "local.utilitumus.fan.xpc"`, `FanLink.label = "local.utilitumus.fan"`, `FanLink.helperVersion = "4"`.
+  - `@objc protocol FanHelperXPC { version(reply: (String) -> Void); setAuto(_ fan: Int, reply: (String?) -> Void); setRPM(_ fan: Int, _ rpm: Double, reply: (String?) -> Void) }` — `String?` = текст ошибки, `nil` = успех.
+  - `FanHelperClient` с таймаутом 3 с, вне главного потока, без запуска процессов на каждую команду. При отказе подписи — `invalidate()`, как в `LinkClient`.
+  - Плист службы: `Label`, `ProgramArguments`, `MachServices`; без `RunAtLoad` и `KeepAlive`.
+
+Слушатель принимает ровно: `(identifier "local.utilitumus" and certificate leaf = H"…") or (identifier "local.utilitumus.app.fans" and certificate leaf = H"…")`. Бинарник с аргументом `version` печатает версию и выходит без SMC; без аргументов и не из launchd не слушает и не пишет в SMC (проверка `XPC_SERVICE_NAME == label`).
+
+Скрипт установки (root, один запрос пароля): копия во временный каталог внутри `/Library/PrivilegedHelperTools` → `chown root:wheel`, `chmod 0755` → проверка подписи копии → `mv -f` на место → плист 0644 root:wheel в `/Library/LaunchDaemons` → `launchctl bootout` (ошибка не важна) → `launchctl bootstrap system <плист>`. Удаление: `bootout`, удалить плист и бинарник. Статус `ready` только если: плист есть и принадлежит root, бинарник root и **без setuid**, версия службы по XPC равна вшитой. Старая установка с setuid — `outdated`, плашка «Обновить доступ».
+
+Запрещено агенту: запрашивать пароль администратора, ставить службу в систему, писать в настоящий SMC. Тесты — сборка со швом `-D FAN_TEST_FAKE_SMC` и метка `local.utilitumus.test.fan` в домене пользователя.
+
+- [ ] **Step 1: Написать тесты**
+
+Клиент с identifier центра и нашим сертификатом получает ответ. Ad-hoc клиент и клиент с нашим сертификатом, но чужим identifier не получают ответа и не меняют поддельный SMC. Подменённая служба отвергается клиентом. `setRPM(0, Double.nan)`, бесконечность, отрицательный номер и номер ≥ числа вентиляторов — ошибка, запись не происходит. Обороты выше максимума зажимаются в Mx, ниже минимума в Mn. Запуск без launchd не пишет в SMC. В сборке без шва нет символов поддельного SMC (`nm`). Текст скрипта установки не содержит `4750`, `4755`, `u+s`; проверка подписи стоит раньше `mv`; скрипт удаления снимает службу, плист и бинарник. Плист содержит только нужные ключи. Служба без подключений выходит через заданное время (в тесте 2 с).
+
+- [ ] **Step 2: Запустить, увидеть провал**
+
+- [ ] **Step 3: Реализовать, команды и зажим оборотов — как в нынешнем помощнике**
+
+- [ ] **Step 4: Тест проходит, `Tests/run-fan-gate-check.sh` и `NO_INSTALL=1 ./build.sh` проходят, `launchctl list` без `local.utilitumus.test.fan`**
+
+- [ ] **Step 5: Commit** `Помощник вентиляторов: служба с проверкой подписи вместо setuid`
+
+---
+
 ## Вне этого плана: требует решения автора
 
 - Слияние `hub` в `main`, выпуск центра 0.6.0 и утилиты `awake-v1.0.0`, запись в `Resources/WhatsNew.json`, строка в реальном `Catalog/catalog.json`. Публикация только после проверки автором на своём Mac.
