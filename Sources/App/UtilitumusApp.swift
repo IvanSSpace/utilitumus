@@ -127,6 +127,9 @@ struct MainView: View {
     @State private var showAbout = false
     /// Дашборд — страница по умолчанию при запуске; не сохраняем, как и «О проекте».
     @State private var showDashboard = true
+    /// Стор (прототип): открывается сразу, если запуск с `-OpenStore YES`.
+    @State private var showStore = UserDefaults.standard.bool(forKey: "OpenStore")
+    @ObservedObject private var store = StoreModel.shared
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
@@ -142,15 +145,15 @@ struct MainView: View {
         let current = modules.resolve(selection)
         let displayed = peeked ?? current
         // Для фона и акцента на «О проекте» и пустой панели берём последний выбранный модуль.
-        let tintModule = displayed ?? selection
-        let onDashboard = showDashboard && !showAbout
+        let tintModule = showStore && !showAbout ? store.tintModule : (displayed ?? selection)
+        let onDashboard = showDashboard && !showAbout && !showStore
         let detail = displayed == nil ? nil : (built ?? displayed)
-        let pageKey: PageKey = showAbout ? .about : (showDashboard ? .dashboard : (displayed.map { .module($0) } ?? .empty))
+        let pageKey: PageKey = showAbout ? .about : showStore ? .store : (showDashboard ? .dashboard : (displayed.map { .module($0) } ?? .empty))
         ZStack {
             DSBackground(module: tintModule, neutral: onDashboard)
             HStack(spacing: 0) {
                 if !sidebarHidden {
-                    DSSidebar(current: current, showDashboard: $showDashboard, showAbout: $showAbout,
+                    DSSidebar(current: current, showDashboard: $showDashboard, showStore: $showStore, showAbout: $showAbout,
                               peeked: $peeked, selection: $selection)
                         .frame(width: DS.sidebarWidth)
                         .background(theme.sidebar)
@@ -183,7 +186,7 @@ struct MainView: View {
                 .padding(EdgeInsets(top: sidebarHidden ? 44 : 10, leading: sidebarHidden ? 10 : 0, bottom: 10, trailing: 10))
             }
             // ⌘0 — на дашборд. Скрытая кнопка, чтобы сочетание работало и при скрытой панели.
-            Button("") { peeked = nil; showAbout = false; showDashboard = true }
+            Button("") { peeked = nil; showAbout = false; showStore = false; showDashboard = true }
                 .keyboardShortcut("0", modifiers: .command)
                 .opacity(0).frame(width: 0, height: 0)
         }
@@ -199,7 +202,8 @@ struct MainView: View {
             DispatchQueue.main.async { built = displayed }
         }
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
-        .onChange(of: peeked) { if peeked != nil { showDashboard = false } }
+        .onChange(of: peeked) { if peeked != nil { showDashboard = false; showStore = false } }
+        .onChange(of: showAbout) { if showAbout { showStore = false } }
         // Минимальный размер окна задаёт `WindowMinSize`: `.frame(minWidth:)` на корне заставлял
         // NSHostingView перемерять всё дерево при каждом изменении.
         .background(WindowMinSize(width: 840, height: 540))
@@ -211,7 +215,7 @@ struct MainView: View {
     }
 
     private func economyKey(showAbout: Bool, detail: Module?) -> PageKey {
-        showAbout ? .about : (showDashboard ? .dashboard : (detail.map { .module($0) } ?? .empty))
+        showAbout ? .about : showStore ? .store : (showDashboard ? .dashboard : (detail.map { .module($0) } ?? .empty))
     }
 
     @ViewBuilder
@@ -239,6 +243,8 @@ struct MainView: View {
             .equatable()
         case .module(let module):
             ModuleDetail(module: module)
+        case .store:
+            StoreView()
         case .empty:
             NoShownModules()
         }
