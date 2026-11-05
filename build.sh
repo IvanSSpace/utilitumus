@@ -25,7 +25,7 @@ if security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   SIGN_ID="$SIGN_NAME"
 else
   SIGN_ID="-"
-  echo "⚠️  Сертификата «$SIGN_NAME» нет — подпись ad-hoc, разрешения macOS слетят после пересборки."
+  echo "⚠️  Сертификата «${SIGN_NAME}» нет — подпись ad-hoc, разрешения macOS слетят после пересборки."
 fi
 
 # Движок голосового ввода (sherpa-onnx, статически): скачивается один раз, хэши сверяются.
