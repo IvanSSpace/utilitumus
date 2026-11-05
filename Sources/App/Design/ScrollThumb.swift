@@ -67,7 +67,9 @@ private struct DSThumbScroll<Content: View>: View {
 
     var body: some View {
         ScrollView { content.background(SystemScrollerHider()) }
-            .scrollIndicators(.hidden)
+            // .never, а не .hidden: при «Показывать полосы: всегда» (мышь) .hidden оставляет системную
+            // полосу, и она съедает ширину справа — контент сдвигался влево.
+            .scrollIndicators(.never)
             .scrollPosition($position)
             .onScrollGeometryChange(for: ThumbModel.Metrics.self) { g in
                 ThumbModel.Metrics(offset: g.contentOffset.y + g.contentInsets.top,
@@ -143,6 +145,8 @@ private struct SystemScrollerHider: NSViewRepresentable {
             super.viewDidMoveToWindow()
             DispatchQueue.main.async { [weak self] in
                 guard let scroll = self?.enclosingScrollView else { return }
+                // Плавающий стиль: даже если полосу вернут, она не займёт место под контентом.
+                scroll.scrollerStyle = .overlay
                 scroll.hasVerticalScroller = false
                 scroll.hasHorizontalScroller = false
             }
