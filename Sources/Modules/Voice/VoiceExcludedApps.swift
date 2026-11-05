@@ -27,13 +27,13 @@ enum VoiceExcludedApps {
     }
 
     /// Окно выбора .app в /Applications; возвращает bundle id выбранной программы.
-    static func pick() -> String? {
+    static func pick(message: String = "Выбери программу, где голос Utilitumus не нужен") -> String? {
         let panel = NSOpenPanel()
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.applicationBundle]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "Выбери программу, где голос Utilitumus не нужен"
+        panel.message = message
         panel.prompt = "Добавить"
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return Bundle(url: url)?.bundleIdentifier

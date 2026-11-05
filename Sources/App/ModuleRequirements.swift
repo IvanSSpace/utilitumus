@@ -81,6 +81,11 @@ extension Module {
                 icon: "waveform.badge.mic", level: .onFirstUse,
                 isGranted: { !MixerController.shared.permissionProblem },
                 request: {})]
+        case .clipboard:
+            return [
+                .accessibility(id: "clipboard.ax", subtitle: "Чтобы выбранная запись вставлялась сама, иначе останется нажать ⌘V",
+                               level: .recommended, request: { ClipboardController.shared.requestAccessibility() }),
+            ]
         case .voice:
             return [
                 ModuleRequirement(

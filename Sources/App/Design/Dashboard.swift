@@ -138,6 +138,7 @@ enum DashboardLive {
         case .browser: return BrowserCatalog.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         }
@@ -164,7 +165,7 @@ enum DashboardLive {
             }
         case .load:
             LoadStore.shared.refreshNow()
-        case .sound, .mouse, .voice, .mixer:
+        case .sound, .mouse, .voice, .mixer, .clipboard:
             break
         }
     }
@@ -179,6 +180,7 @@ enum DashboardLive {
         case .browser: return browser()
         case .stash: return stash()
         case .voice: return voice()
+        case .clipboard: return clipboard()
         case .mixer: return mixer()
         case .load: return load()
         }
@@ -242,6 +244,12 @@ enum DashboardLive {
         let freed = selected.reduce(0.0) { $0 + (store.usage[$1.bundleIdentifier ?? ""]?.memoryMB ?? 0) }
         let tail = freed > 0 ? " · ≈ \(memoryText(freed))" : ""
         return DashState(text: "выбрано \(selected.count)\(tail)", actionTitle: "Спрятать", actionIcon: "archivebox")
+    }
+
+    private static func clipboard() -> DashState {
+        let controller = ClipboardController.shared
+        if controller.storeError != nil { return DashState(text: "нет ключа шифрования", attention: true) }
+        return DashState(text: "\(controller.hotKeyLabel) · \(controller.items.count) записей")
     }
 
     private static func voice() -> DashState {

@@ -323,15 +323,27 @@ private struct TintedChip: View {
     var body: some View { DSChip(text, color: tint) }
 }
 
+/// То, чему назначают сочетание: «Голос» и «Буфер».
+@MainActor
+protocol HotKeyTarget: AnyObject {
+    func setHotKey(keyCode: UInt32, modifiers: UInt32)
+    func resetHotKey()
+    func suspendHotKey()
+    func resumeHotKey()
+}
+
+extension VoiceController: HotKeyTarget {}
+extension ClipboardController: HotKeyTarget {}
+
 /// Запись сочетания клавиш: пока идёт, следующее нажатое сочетание назначается, остальное глотается.
 @MainActor
 final class HotKeyRecorder: ObservableObject {
     @Published private(set) var isRecording = false
     private var keyMonitor: Any?
     private var mouseMonitor: Any?
-    private weak var controller: VoiceController?
+    private weak var controller: (any HotKeyTarget)?
 
-    func start(_ controller: VoiceController) {
+    func start(_ controller: some HotKeyTarget) {
         stop()
         self.controller = controller
         isRecording = true
