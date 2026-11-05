@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Какой интерфейс показывать: прежний («Классический») или переработанный («Новый»).
-/// Выбор лежит в настройках (`UI.Style`), по умолчанию — классический, пока новый не доведён.
+/// Выбор лежит в настройках (`UI.Style`), по умолчанию — новый; классический остаётся на выбор.
 enum UIStyle: String, CaseIterable, Identifiable {
     case classic, new
 
@@ -19,7 +19,7 @@ enum UIStyle: String, CaseIterable, Identifiable {
 
     /// Выбранный в настройках.
     static var stored: UIStyle {
-        UIStyle(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .classic
+        UIStyle(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .new
     }
 
     /// Интерфейс, с которым запущено окно. Читается один раз при старте: стиль заголовка окна задаётся

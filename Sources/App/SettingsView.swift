@@ -82,7 +82,7 @@ private struct ThemeSection: View {
 
 /// «Интерфейс»: классический (как до редизайна) или новый. Стиль окна сменить на лету нельзя — после выбора предлагаем перезапуск.
 private struct UIStyleSection: View {
-    @AppStorage(UIStyle.storageKey) private var raw = UIStyle.classic.rawValue
+    @AppStorage(UIStyle.storageKey) private var raw = UIStyle.new.rawValue
 
     private var style: Binding<UIStyle> {
         Binding(get: { UIStyle(rawValue: raw) ?? .classic }, set: { raw = $0.rawValue })
