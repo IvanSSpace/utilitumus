@@ -54,5 +54,5 @@ ditto -c -k --keepParent build/Utilitumus.app build/Utilitumus.zip
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag "$TAG"
 git push -q origin "$TAG"
-gh release create "$TAG" build/Utilitumus.zip -R "$REPO" --title "Utilitumus $TAG" --notes "$NOTES"
+gh release create "$TAG" build/Utilitumus.zip -R "$REPO" --title "Utilitumus $TAG" --notes "$NOTES" --latest=true
 echo "Выложено: https://github.com/$REPO/releases/tag/$TAG"
