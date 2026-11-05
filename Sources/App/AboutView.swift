@@ -79,7 +79,7 @@ struct AboutView: View, Equatable {
             Text("Модулей: \(Module.allCases.count), включено: \(on).")
             Text("Открытый код — делай форк и предлагай свои модули.")
             Spacer()
-            DSButton("Настроить модули", style: .plain, small: true) { modules.settingsShown = true }
+            DSButton("Настройки", style: .plain, small: true) { modules.settingsShown = true }
         }
         .font(.caption)
         .foregroundStyle(.white.opacity(0.45))

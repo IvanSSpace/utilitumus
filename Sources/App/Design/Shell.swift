@@ -285,7 +285,7 @@ struct DSSidebar: View {
             Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
             Button("Скрыть из панели") { modules.setHidden(module, true) }
             Divider()
-            Button("Настроить модули…") { modules.settingsShown = true }
+            Button("Настройки…") { modules.settingsShown = true }
         }
     }
 
@@ -578,7 +578,7 @@ private struct DSSidebarRow: View {
     }
 }
 
-/// Внизу панели: обновление, «Скрытые», «Что нового», «Настроить модули», «О проекте», версия.
+/// Внизу панели: обновление, «Скрытые», «Стор», «Что нового», «Настройки», «О проекте», версия.
 struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
@@ -618,15 +618,15 @@ struct DSSidebarFooter: View {
                 EmptyView()
             }
             hiddenSection
-            // Стор внизу, рядом с настройкой модулей: открывают его редко, а наверху он занимал много места.
+            // Стор внизу, рядом с настройками: открывают его редко, а наверху он занимал много места.
             FooterLink(icon: "bag", title: "Стор", selected: showStore) {
                 peeked = nil
                 showAbout = false
                 showStore = true
             }
             FooterLink(icon: "sparkles", title: "Что нового") { WhatsNew.shared.isShown = true }
-            // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
-            FooterLink(icon: "slider.horizontal.3", title: "Настроить модули") { modules.settingsShown = true }
+            // Оформление, Dock и режим страниц; без этой строки туда попадали только через Cmd+, или контекстное меню.
+            FooterLink(icon: "gearshape", title: "Настройки") { modules.settingsShown = true }
             FooterLink(icon: "info.circle", title: "О проекте", selected: showAbout) { showStore = false; showAbout = true }
             HStack {
                 // Клик по версии — «Обновление стороннего программного обеспечения»: что нового.

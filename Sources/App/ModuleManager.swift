@@ -111,13 +111,6 @@ final class ModuleManager: ObservableObject {
         if isHidden { hidden.insert(module) } else { hidden.remove(module) }
     }
 
-    /// Перетаскивание в настройках: там виден весь список.
-    func move(from source: IndexSet, to destination: Int) {
-        var new = order
-        new.moveItems(from: source, to: destination)
-        setOrder(new)
-    }
-
     /// Перетаскивание в боковой панели: там только видимые. Скрытые остаются на своих местах,
     /// переставляются лишь места, занятые видимыми.
     func moveShown(from source: IndexSet, to destination: Int) {
