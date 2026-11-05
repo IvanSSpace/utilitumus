@@ -89,39 +89,86 @@ enum FnSystemAction {
     /// (`overridden`), а система держит не 0 (после перезапуска приложения, смены настроек).
     static func needsReapply(overridden: Bool, usage: Int?) -> Bool { overridden && usage != 0 }
 
-    /// «Отключить, пока модуль включён»: намерение фиксирует `keepOffKey`.
-    static func disable() {
-        let defaults = UserDefaults.standard
-        defaults.set(true, forKey: keepOffKey)
-        // Прежним считаем то, что стоит сейчас; 0 не затирает уже запомненное.
-        if usage != 0 || defaults.object(forKey: savedKey) == nil { defaults.set(usage ?? -1, forKey: savedKey) }
-        write(0)
+    /// «Отключить, пока модуль включён»: намерение фиксирует `keepOffKey`. Если в системе уже 0,
+    /// ничего не пишем и систему не дёргаем. true — значение пришлось менять.
+    @discardableResult
+    static func disable() -> Bool {
+        UserDefaults.standard.set(true, forKey: keepOffKey)
+        guard writeZero() else { return false }
+        applyToSystem()
+        return true
     }
 
-    /// Запуск модуля: вернуть наше «отключено», если приложение перезапускали.
-    /// true — значение пришлось вернуть в 0 (его сбросили).
-    @discardableResult
-    static func reapplyIfNeeded() -> Bool {
-        guard needsReapply(overridden: keepsOff, usage: usage) else { return false }
-        disable()
+    /// Пишет 0 (без применения), запомнив прежнее значение, если оно ещё не запомнено.
+    /// false — там уже 0, писать нечего.
+    private static func writeZero() -> Bool {
+        let current = usage
+        guard current != 0 else { return false }
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: savedKey) == nil { defaults.set(current ?? -1, forKey: savedKey) }
+        writeUsage(0)
         return true
+    }
+
+    /// Результат `reapplyAll`: что система успела вернуть и каким было действие 🌐.
+    struct Reapplied {
+        var usageFixed = false
+        var previousUsage: Int?
+        var dictationFixed = false
+        var any: Bool { usageFixed || dictationFixed }
+    }
+
+    /// Запуск и проверки: вернуть наше «отключено», если систему сбросили (перезапуск, правка настроек,
+    /// «OK» в окне диктовки). Все записи сначала, потом один `activateSettings`; переключатель
+    /// перезапускаем, только если менялось действие 🌐.
+    static func reapplyAll() -> Reapplied {
+        var result = Reapplied()
+        let current = usage
+        if needsReapply(overridden: keepsOff, usage: current), writeZero() {
+            result.usageFixed = true
+            result.previousUsage = current
+        }
+        if dictationOverridden, isDictationOnDoubleFn(hotKeys),
+           let changed = settingEnabled(hotKeys, id: dictationKey, to: false) {
+            writeHotKeys(changed)
+            result.dictationFixed = true
+        }
+        if result.any { applyToSystem(restartSwitcher: result.usageFixed) }
+        return result
+    }
+
+    /// Отключить действие 🌐 и диктовку на двойном Fn за один проход: записи, потом одно применение.
+    /// Для шага «сделать всё автоматически».
+    @discardableResult
+    static func disableAll() -> Bool {
+        UserDefaults.standard.set(true, forKey: keepOffKey)
+        let usageChanged = writeZero()
+        let dictationChanged = writeDictationOff()
+        if usageChanged || dictationChanged { applyToSystem(restartSwitcher: usageChanged) }
+        return usageChanged || dictationChanged
     }
 
     /// Вернуть значение, если его меняли мы. Зовётся, только когда пользователь выключил модуль
     /// или удалил его в Сторе: при выходе из приложения и обновлении модуль зовёт `quit`.
     static func restore() {
-        restoreDictation()
+        let dictationRestored = restoreDictation()
         let defaults = UserDefaults.standard
         defaults.set(false, forKey: keepOffKey)
-        guard let saved = defaults.object(forKey: savedKey) as? Int else { return }
-        write(saved < 0 ? nil : saved)
-        defaults.removeObject(forKey: savedKey)
+        var usageRestored = false
+        if let saved = defaults.object(forKey: savedKey) as? Int {
+            defaults.removeObject(forKey: savedKey)
+            if saved < 0 ? usage != nil : usage != saved {
+                writeUsage(saved < 0 ? nil : saved)
+                usageRestored = true
+            }
+        }
+        if usageRestored || dictationRestored { applyToSystem(restartSwitcher: usageRestored) }
     }
 
-    private static func write(_ value: Int?) {
+    /// Только запись, без `activateSettings`: применяет вызывающий, один раз на все записи.
+    private static func writeUsage(_ value: Int?) {
         CFPreferencesSetAppValue(key, value.map { NSNumber(value: $0) }, domain)
         CFPreferencesAppSynchronize(domain)
-        applyToSystem()
     }
 
     /// macOS не перечитывает AppleFnUsageType сама: TextInputSwitcher держит старое значение и
@@ -194,25 +241,27 @@ enum FnSystemAction {
     /// Мы сняли диктовку с двойного Fn и помним, что она была включена.
     static var dictationOverridden: Bool { UserDefaults.standard.object(forKey: savedDictationKey) != nil }
 
-    /// Выключить горячую клавишу диктовки; при выключении модуля вернём.
-    static func disableDictation() {
-        guard isDictationOnDoubleFn(hotKeys), let changed = settingEnabled(hotKeys, id: dictationKey, to: false) else { return }
+    /// Выключить горячую клавишу диктовки; при выключении модуля вернём. true — что-то менялось.
+    @discardableResult
+    static func disableDictation() -> Bool {
+        guard writeDictationOff() else { return false }
+        applyToSystem(restartSwitcher: false)
+        return true
+    }
+
+    /// Запись без применения; false — диктовки на двойном Fn и так нет.
+    private static func writeDictationOff() -> Bool {
+        guard isDictationOnDoubleFn(hotKeys), let changed = settingEnabled(hotKeys, id: dictationKey, to: false) else { return false }
         UserDefaults.standard.set(true, forKey: savedDictationKey)
         writeHotKeys(changed)
+        return true
     }
 
-    /// Вернуть диктовку, если выключали мы.
-    private static func restoreDictation() {
-        guard dictationOverridden else { return }
+    /// Вернуть диктовку, если выключали мы (без применения). true — записали.
+    private static func restoreDictation() -> Bool {
+        guard dictationOverridden else { return false }
         UserDefaults.standard.removeObject(forKey: savedDictationKey)
-        if let changed = settingEnabled(hotKeys, id: dictationKey, to: true) { writeHotKeys(changed) }
-    }
-
-    /// Диктовку сбросили (обновление macOS, правка в настройках), а мы обещали держать выключенной.
-    @discardableResult
-    static func reapplyDictationIfNeeded() -> Bool {
-        guard dictationOverridden, isDictationOnDoubleFn(hotKeys),
-              let changed = settingEnabled(hotKeys, id: dictationKey, to: false) else { return false }
+        guard let changed = settingEnabled(hotKeys, id: dictationKey, to: true) else { return false }
         writeHotKeys(changed)
         return true
     }
@@ -220,7 +269,6 @@ enum FnSystemAction {
     private static func writeHotKeys(_ all: [String: Any]) {
         CFPreferencesSetAppValue(hotKeysKey, all as CFDictionary, hotKeysDomain)
         CFPreferencesAppSynchronize(hotKeysDomain)
-        applyToSystem(restartSwitcher: false)
     }
 }
 

@@ -67,7 +67,7 @@ struct KeyboardView: View {
             }
             if controller.dictationConflict {
                 DSRow(icon: "mic.fill", title: "Диктовка включается двойным нажатием 🌐",
-                      subtitle: "Иначе двойной тап Fn вызовет диктовку. Верну, когда выключишь модуль.",
+                      subtitle: "Иначе двойной тап Fn вызовет диктовку. Верну, когда выключишь модуль. Если macOS спросит «Включить диктовку?», нажми «Не сейчас».",
                       iconTint: .orange) {
                     VStack(alignment: .trailing, spacing: 6) {
                         DSButton("Убрать диктовку с двойного Fn", icon: "mic.slash.fill", style: .primary, small: true) {
