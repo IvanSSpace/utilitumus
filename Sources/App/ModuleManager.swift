@@ -43,6 +43,9 @@ final class ModuleManager: ObservableObject {
     init(defaults: UserDefaults = .standard, hooks: @escaping (Module) -> ModuleHooks) {
         self.defaults = defaults
         self.hooks = hooks
+        // Слепок до миграций: они сами пишут `ModulesV2`, и по нему новую установку было бы не отличить.
+        let resetPlan = ModuleReset.plan(snapshot: defaults.dictionaryRepresentation(),
+                                         moduleIDs: Module.allCases.map(\.rawValue))
         if defaults.object(forKey: Self.migratedKey) == nil {
             Self.migrate(defaults)
             defaults.set(true, forKey: Self.migratedKey)
@@ -50,6 +53,12 @@ final class ModuleManager: ObservableObject {
         if defaults.object(forKey: Self.uninstallSplitKey) == nil {
             Self.splitUninstallFromHidden(defaults)
             defaults.set(true, forKey: Self.uninstallSplitKey)
+        }
+        // После миграций (иначе они вернули бы старые состояния) и до чтения `enabled`: ничего лишнего не стартует.
+        if let resetPlan {
+            for (key, value) in resetPlan.writes { defaults.set(value, forKey: key) }
+            // «Клавиатура» при выходе не возвращала 🌐; без этого после сброса Fn не менял бы язык вообще.
+            if resetPlan.restoresSystemFn { FnSystemAction.restore() }
         }
         order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
@@ -59,10 +68,7 @@ final class ModuleManager: ObservableObject {
     // MARK: Переход со старого формата
 
     /// Признаки того, что приложение уже запускали до этой версии.
-    private static let existingInstallPrefixes = [
-        "ModuleOrder", "ModuleState.", "ModuleEnabled.", "SelectedModule", "FanConfigs", "MicGuard",
-        "UtilitumusKnown", "UtilitumusPrimary", "Stash", "Mixer", "GameMode", "LoadTab", "LoadViewMode",
-    ]
+    private static let existingInstallPrefixes = ModuleReset.legacyPrefixes
 
     /// Раньше модуль по умолчанию работал, а состояние было одно из трёх: показан / скрыт (работает) /
     /// выключен (и не виден). У тех, кто уже пользуется, всё остаётся как было — пишем это явно.
