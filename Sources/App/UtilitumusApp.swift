@@ -127,7 +127,7 @@ struct MainView: View {
     @State private var showAbout = false
     /// Дашборд — стартовая страница, пока его строка в панели включена; иначе открываем модуль. Не сохраняем.
     @State private var showDashboard = DS.dashboardInSidebar
-    /// Стор (прототип): открывается сразу, если запуск с `-OpenStore YES`.
+    /// Стор открывается сразу при запуске с `-OpenStore YES` (для снимков).
     @State private var showStore = UserDefaults.standard.bool(forKey: "OpenStore")
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
@@ -207,6 +207,15 @@ struct MainView: View {
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false; showStore = false } }
         .onChange(of: showAbout) { if showAbout { showStore = false } }
+        // Стор установил модуль: открываем его, чтобы сработал шаг «сначала доступы».
+        .onReceive(NotificationCenter.default.publisher(for: .storeOpenModule)) { note in
+            guard let module = note.object as? Module else { return }
+            selection = module
+            peeked = nil
+            showAbout = false
+            showStore = false
+            showDashboard = false
+        }
         // Минимальный размер окна задаёт `WindowMinSize`: `.frame(minWidth:)` на корне заставлял
         // NSHostingView перемерять всё дерево при каждом изменении.
         .background(WindowMinSize(width: 840, height: 540))

@@ -1,7 +1,11 @@
 import SwiftUI
+import AVFoundation
+import ApplicationServices
+import Combine
 
-// Стор (прототип): витрина-настройщик. Код модулей уже в приложении, стор лишь «устанавливает» —
-// в прототипе это локальное состояние в памяти. Настоящие модули не включаются и не выключаются.
+// Стор: витрина-настройщик. Код модулей уже в приложении, «установлен» = модуль в боковой панели и включён.
+// Установка показывает модуль и включает его, качает ресурсы (пока это модель «Голоса») и открывает модуль.
+// Удаление выключает и убирает из панели, стирает скачанное; настройки модуля остаются.
 
 // MARK: - Разрешения
 
@@ -15,6 +19,17 @@ enum StorePermission: String, CaseIterable {
         case .inputMonitoring: return "Мониторинг ввода"
         case .rootHelper: return "Root-помощник"
         case .systemAudio: return "Запись системного звука"
+        }
+    }
+
+    /// Выдано ли сейчас: те же проверки, что в `ModuleRequirements`. nil — заранее не проверить (система спросит сама).
+    @MainActor var isGranted: Bool? {
+        switch self {
+        case .accessibility: return AXIsProcessTrusted()
+        case .microphone: return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        case .inputMonitoring: return CGPreflightListenEventAccess()
+        case .rootHelper: return FanHelperInstaller.shared.status != .notInstalled
+        case .systemAudio: return nil
         }
     }
 
@@ -41,14 +56,25 @@ struct StoreDownload {
     let megabytes: Int
     let kind: String
     let path: String
+    /// Подпись под размером, например какая именно модель.
+    let name: String
+    /// Что ещё можно докачать по желанию, уже внутри модуля.
+    var optional: String?
 }
 
 // MARK: - Каталог
 
 enum StoreCatalog {
-    static func downloads(_ m: Module) -> StoreDownload? {
-        m == .voice ? StoreDownload(megabytes: 170, kind: "модель",
-                                    path: "~/Library/Application Support/Utilitumus/Voice/") : nil
+    static func megabytes(_ model: VoiceModel) -> Int { Int((Double(model.sizeBytes) / 1_000_000).rounded()) }
+
+    /// Что скачается при установке. У «Голоса» — выбранная модель (по умолчанию GigaAM), размер из `VoiceModels`.
+    @MainActor static func downloads(_ m: Module) -> StoreDownload? {
+        guard m == .voice else { return nil }
+        let model = VoiceModelStore.shared.selected
+        let other = VoiceModel.allCases.first { $0 != model }
+        return StoreDownload(megabytes: megabytes(model), kind: "модель", path: "~/Library/Application Support/Utilitumus/Voice/Models/",
+                             name: model.title,
+                             optional: other.map { "\($0.title) — ещё \(megabytes($0)) МБ, по желанию в самом модуле" })
     }
 
     static func needs(_ m: Module) -> [StoreNeed] {
@@ -82,16 +108,22 @@ enum StoreCatalog {
         }
     }
 
-    /// Что сотрётся при удалении.
-    static func removal(_ m: Module) -> String {
-        if let d = downloads(m) { return "Скачанная \(d.kind) (\(d.megabytes) МБ) и настройки модуля" }
-        if needs(m).contains(where: { $0.permission == .rootHelper }) { return "Настройки модуля и root-помощник" }
-        if m == .clipboard { return "Сохранённая история, пространства и настройки" }
-        return "Только настройки модуля, программа остаётся целой"
+    /// Что сотрётся при удалении: пункты для подтверждения.
+    @MainActor static func removal(_ m: Module) -> [String] {
+        var items = ["Модуль выключится и пропадёт из боковой панели"]
+        if m == .voice {
+            for model in VoiceModel.allCases where VoiceModelStore.shared.status(model) != .notInstalled {
+                items.append("Скачанная модель \(model.title) (\(megabytes(model)) МБ)")
+            }
+        }
+        if needs(m).contains(where: { $0.permission == .rootHelper }) {
+            items.append("Root-помощник останется в системе: его убирают вручную")
+        }
+        return items
     }
 
     /// Короткая подпись размера для плитки и карточки.
-    static func sizeText(_ m: Module, short: Bool = false) -> String {
+    @MainActor static func sizeText(_ m: Module, short: Bool = false) -> String {
         if short { return downloads(m).map { "+\($0.megabytes) МБ" } ?? "без загрузки" }
         return downloads(m).map { "+\($0.megabytes) МБ \($0.kind)" } ?? "ничего не скачивает"
     }
@@ -175,26 +207,20 @@ struct StorePack: Identifiable {
 
 // MARK: - Состояние установки
 
-enum StoreItemID: Hashable {
-    case module(Module)
-    case pack(String)
-}
-
 enum StoreStage: Int, CaseIterable {
-    case download, verify, permissions
+    case download, verify
 
     var title: String {
         switch self {
         case .download: return "Скачивание"
         case .verify: return "Проверка подписи"
-        case .permissions: return "Разрешения"
         }
     }
 }
 
 enum StoreState: Equatable {
     case available
-    /// Этап и доля внутри него (0…1).
+    /// Идёт скачивание ресурсов: этап и доля внутри него (0…1).
     case installing(StoreStage, Double)
     case installed
 }
@@ -204,42 +230,51 @@ enum StoreTab: String, CaseIterable, Hashable {
     var title: String { self == .showcase ? "Витрина" : "Наборы контента" }
 }
 
+extension Notification.Name {
+    /// Стор просит главное окно открыть модуль (после установки): в `object` — `Module`.
+    static let storeOpenModule = Notification.Name("Utilitumus.StoreOpenModule")
+}
+
 @MainActor
 final class StoreModel: ObservableObject {
     static let shared = StoreModel()
 
-    @Published private(set) var states: [StoreItemID: StoreState] = [:]
-    /// Установленное, для чего есть новые ресурсы.
-    @Published private(set) var updates: Set<StoreItemID> = []
     @Published var tab: StoreTab = .showcase
     @Published var detail: Module?
-    /// Разрешения, выданные до стора: у уже включённых модулей они есть.
-    let baseGranted: Set<StorePermission>
+    /// Модуль, удаление которого ждёт подтверждения.
+    @Published var pendingRemoval: Module?
+
+    private let modules = ModuleManager.shared
+    private let voice = VoiceModelStore.shared
+    private var subs: [AnyCancellable] = []
 
     /// Рекомендация дня.
     static let featured: Module = .voice
 
-    /// Во сколько раз замедлить имитацию (для снимков).
-    var slowdown = 1.0
-    private var tasks: [StoreItemID: Task<Void, Never>] = [:]
-    private var before: [StoreItemID: StoreState] = [:]
-
     init() {
-        baseGranted = Set(Module.allCases.filter { ModuleManager.shared.isOn($0) }
-            .flatMap { StoreCatalog.needs($0).map(\.permission) })
-        // Старт — из реального «включён», дальше состояние живёт только здесь.
-        for module in Module.allCases {
-            states[.module(module)] = ModuleManager.shared.isOn(module) ? .installed : .available
-        }
-        if states[.module(.voice)] == .installed {
-            updates.insert(.module(.voice))
-            states[.pack("v-ru-s")] = .installed
-        }
+        // Состояние берём у менеджера модулей и стора моделей: их изменения перерисовывают стор.
+        subs.append(modules.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
+        subs.append(voice.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
     }
 
-    func state(_ id: StoreItemID) -> StoreState { states[id] ?? .available }
-    func state(_ module: Module) -> StoreState { state(.module(module)) }
-    func hasUpdate(_ id: StoreItemID) -> Bool { updates.contains(id) }
+    /// «Установлен» = модуль в боковой панели и включён.
+    func isInstalled(_ module: Module) -> Bool { modules.isOn(module) && !modules.isHidden(module) }
+
+    func state(_ module: Module) -> StoreState {
+        if module == .voice {
+            switch voice.status(voice.selected) {
+            case .downloading(let p): return .installing(.download, p)
+            case .verifying: return .installing(.verify, 0)
+            default: break
+            }
+        }
+        return isInstalled(module) ? .installed : .available
+    }
+
+    /// Установленному модулю не хватает ресурсов: у «Голоса» не скачана модель.
+    func hasUpdate(_ module: Module) -> Bool {
+        module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
+    }
 
     // MARK: Окно подробностей
 
@@ -253,81 +288,53 @@ final class StoreModel: ObservableObject {
 
     // MARK: Сборка
 
-    /// Модули, которые стоят или ставятся.
+    /// Установленные и ставящиеся модули.
     var buildModules: [Module] {
-        Module.allCases.filter { m in
-            switch state(m) {
-            case .available: return false
-            default: return true
-            }
-        }
+        Module.allCases.filter { state($0) != .available }
     }
 
-    var buildMegabytes: Int { buildModules.reduce(0) { $0 + (StoreCatalog.downloads($1)?.megabytes ?? 0) } }
+    /// Сколько реально лежит на диске из скачанного.
+    var buildMegabytes: Int {
+        buildModules.contains(.voice)
+            ? VoiceModel.allCases.filter { VoiceModelStore.isInstalled($0) }.reduce(0) { $0 + StoreCatalog.megabytes($1) } : 0
+    }
 
-    /// Разрешения сборки, которых до стора не было.
+    /// Доступы установленных модулей, которых ещё нет (системе придётся о них спросить).
     var newPermissions: [StorePermission] {
-        let all = buildModules.flatMap { StoreCatalog.needs($0).map(\.permission) }
-        let new = Set(all).subtracting(baseGranted)
-        return StorePermission.allCases.filter(new.contains)
+        let all = Set(buildModules.flatMap { StoreCatalog.needs($0).map(\.permission) })
+        return StorePermission.allCases.filter { all.contains($0) && $0.isGranted != true }
     }
 
-    // MARK: Установка (имитация)
+    // MARK: Действия
 
-    func install(_ id: StoreItemID) {
-        let hasDownload: Bool
-        let hasPermissions: Bool
-        switch id {
-        case .module(let m):
-            hasDownload = StoreCatalog.downloads(m) != nil
-            hasPermissions = !StoreCatalog.needs(m).isEmpty
-        case .pack:
-            hasDownload = true
-            hasPermissions = false
+    /// Показать в панели, включить, скачать ресурсы и открыть модуль: его экран «сначала доступы» попросит разрешения.
+    func install(_ module: Module) {
+        modules.setHidden(module, false)
+        modules.setOn(module, true)
+        downloadResources(module)
+        close()
+        NotificationCenter.default.post(name: .storeOpenModule, object: module)
+    }
+
+    /// Скачивание ресурсов модуля; там, где их нет, ничего не делает.
+    func downloadResources(_ module: Module) {
+        if module == .voice, !VoiceModelStore.isInstalled(voice.selected) { voice.download(voice.selected) }
+    }
+
+    func cancel(_ module: Module) {
+        if module == .voice { voice.cancel(voice.selected) }
+    }
+
+    func requestRemoval(_ module: Module) { pendingRemoval = module }
+
+    /// Выключить, убрать из панели, стереть скачанное. Настройки модуля не трогаем.
+    func remove(_ module: Module) {
+        modules.setOn(module, false)
+        modules.setHidden(module, true)
+        if module == .voice {
+            for model in VoiceModel.allCases where voice.status(model) != .notInstalled { voice.delete(model) }
         }
-        // Секунды на этап: пустой этап (нечего скачивать, нет разрешений) пролетает быстро.
-        let plan: [(StoreStage, Double)] = [(.download, hasDownload ? 1.6 : 0.25),
-                                            (.verify, hasDownload ? 0.7 : 0.3),
-                                            (.permissions, hasPermissions ? 1.1 : 0.25)]
-        run(id, plan: plan)
-    }
-
-    /// Обновление ресурсов: только скачивание и проверка подписи.
-    func update(_ id: StoreItemID) {
-        run(id, plan: [(.download, 1.2), (.verify, 0.6)])
-    }
-
-    func cancel(_ id: StoreItemID) {
-        tasks[id]?.cancel()
-        tasks[id] = nil
-        states[id] = before[id] ?? .available
-    }
-
-    func remove(_ id: StoreItemID) {
-        tasks[id]?.cancel()
-        tasks[id] = nil
-        states[id] = .available
-        updates.remove(id)
-    }
-
-    private func run(_ id: StoreItemID, plan: [(StoreStage, Double)]) {
-        guard tasks[id] == nil else { return }
-        before[id] = state(id) == .installed ? .installed : .available
-        let slow = slowdown
-        tasks[id] = Task { @MainActor [weak self] in
-            let steps = 20
-            for (stage, seconds) in plan {
-                for step in 0...steps {
-                    if Task.isCancelled { return }
-                    self?.states[id] = .installing(stage, Double(step) / Double(steps))
-                    try? await Task.sleep(nanoseconds: UInt64(seconds * slow / Double(steps) * 1e9))
-                }
-            }
-            guard let self, !Task.isCancelled else { return }
-            states[id] = .installed
-            updates.remove(id)
-            tasks[id] = nil
-        }
+        pendingRemoval = nil
     }
 }
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Страница «Стор», V4: витрина V1 (рекомендация и ряды плиток по категориям), подробности как в V3 —
+// Страница «Стор»: витрина V1 (рекомендация и ряды плиток по категориям), подробности как в V3 —
 // плавающая панель справа поверх страницы, снизу полоса «Твоя сборка» из V2. Переходы 0,2 с, без пружин.
 // Цвет страницы нейтральный (см. `DSTheme.storeTint`): модуль красит только свою плитку и карточку.
 
@@ -43,6 +43,16 @@ struct StoreView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.easeInOut(duration: 0.2), value: detail)
+        .alert("Удалить «\(store.pendingRemoval?.title ?? "")»?", isPresented: removalShown, presenting: store.pendingRemoval) { module in
+            Button("Удалить", role: .destructive) { store.remove(module) }
+            Button("Отмена", role: .cancel) {}
+        } message: { module in
+            Text((StoreCatalog.removal(module).map { "• " + $0 } + ["Настройки сохранятся, если поставишь снова."]).joined(separator: "\n"))
+        }
+    }
+
+    private var removalShown: Binding<Bool> {
+        Binding(get: { store.pendingRemoval != nil }, set: { if !$0 { store.pendingRemoval = nil } })
     }
 }
 
@@ -77,7 +87,7 @@ private struct StoreFeatured: View {
             }
             Spacer(minLength: 12)
             VStack(spacing: 4) {
-                StoreActionButton(id: .module(module), small: false)
+                StoreActionButton(module: module, small: false)
                 DSButton("Подробнее", style: .plain, small: true) { store.open(module) }
             }
             .fixedSize()
@@ -178,7 +188,7 @@ private struct StoreTile: View {
         HStack(spacing: 10) {
             ModuleIconBadge(module: module, size: 36)
                 .overlay(alignment: .bottomTrailing) {
-                    StoreGlyph(state: state, update: store.hasUpdate(.module(module)), tint: cat).offset(x: 5, y: 5)
+                    StoreGlyph(state: state, update: store.hasUpdate(module), tint: cat).offset(x: 5, y: 5)
                 }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
@@ -262,11 +272,11 @@ private struct StoreBar: View {
         let new = store.newPermissions
         HStack(spacing: 8) {
             Image(systemName: "shippingbox.fill").foregroundStyle(.white.opacity(0.6))
-            if count > 0 { Text("Твоя сборка:").fontWeight(.semibold) }
+            if count > 0 { Text("Установлено:").fontWeight(.semibold) }
             if count == 0 {
                 Text("Пока ничего не установлено").foregroundStyle(.white.opacity(0.7))
             } else {
-                Text("\(count) \(Self.plural(count)) · \(store.buildMegabytes) МБ · новые разрешения:")
+                Text("\(count) \(Self.plural(count)) · скачано \(store.buildMegabytes) МБ · ждут доступа:")
                     .foregroundStyle(.white.opacity(0.7))
                 if new.isEmpty {
                     Text("нет").foregroundStyle(.white.opacity(0.7))
@@ -319,24 +329,24 @@ struct StoreGlyph: View {
     }
 }
 
-/// Главная кнопка по состоянию: Установить / Обновить ресурсы / «Установлен» / процент.
+/// Главная кнопка по состоянию: Установить / Докачать модель / «Установлен» / процент.
 struct StoreActionButton: View {
-    let id: StoreItemID
+    let module: Module
     var small = true
     @ObservedObject private var store = StoreModel.shared
 
     var body: some View {
-        switch store.state(id) {
+        switch store.state(module) {
         case .available:
-            DSButton("Установить", icon: "arrow.down.circle.fill", style: .primary, small: small) { store.install(id) }
+            DSButton("Установить", icon: "arrow.down.circle.fill", style: .primary, small: small) { store.install(module) }
         case .installing(let stage, let p):
             let done = (Double(stage.rawValue) + p) / Double(StoreStage.allCases.count)
-            DSButton("\(Int(done * 100))% · \(stage.title)", style: .secondary, small: small) { store.cancel(id) }
-                .help("Отменить установку")
+            DSButton("\(Int(done * 100))% · \(stage.title)", style: .secondary, small: small) { store.cancel(module) }
+                .help("Отменить скачивание")
         case .installed:
-            if store.hasUpdate(id) {
+            if store.hasUpdate(module) {
                 DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: small) {
-                    store.update(id)
+                    store.downloadResources(module)
                 }
             } else {
                 DSChip("Установлен", color: .green, icon: "checkmark")
@@ -355,12 +365,12 @@ private struct StorePacksTab: View {
             HStack(spacing: 12) {
                 Image(systemName: "checkmark.seal.fill").font(.system(size: 20)).foregroundStyle(.green)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Наборы подписаны ключом Utilitumus").font(.system(size: 13, weight: .semibold))
-                    Text("Перед установкой приложение сверяет подпись: чужие или изменённые данные не примет")
+                    Text("Наборы контента появятся позже").font(.system(size: 13, weight: .semibold))
+                    Text("Сейчас в сторе ставятся только модули; наборы будут подписаны ключом Utilitumus")
                         .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
                 }
                 Spacer(minLength: 8)
-                DSChip("Ключ v1", color: .green)
+                DSChip("Скоро", color: .green)
             }
             .padding(.horizontal, 16).padding(.vertical, 11)
             .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(.green.opacity(0.10)))
@@ -380,45 +390,20 @@ private struct StorePacksTab: View {
 
 private struct PackSection: View {
     let group: PackGroup
-    @ObservedObject private var store = StoreModel.shared
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
         let packs = StorePack.all.filter { $0.group == group }
         let tint = theme.tone(group.module)
-        let have = packs.filter { store.state(.pack($0.id)) == .installed }.count
-        DSSection(group.title, trailing: "\(have) из \(packs.count)", mark: theme.categoryColor(group.module.category)) {
+        DSSection(group.title, trailing: "скоро", mark: theme.categoryColor(group.module.category)) {
             ForEach(packs) { pack in
                 DSRow(icon: group.icon, title: pack.title, subtitle: "\(pack.sizeText) · \(pack.detail)", iconTint: tint) {
-                    PackAction(id: .pack(pack.id))
+                    DSChip("Скоро", color: tint).fixedSize()
                 }
+                .opacity(0.6)
             }
         }
         .frame(maxWidth: .infinity)
-    }
-}
-
-private struct PackAction: View {
-    let id: StoreItemID
-    @ObservedObject private var store = StoreModel.shared
-
-    var body: some View {
-        switch store.state(id) {
-        case .available:
-            DSButton("Скачать", icon: "arrow.down", style: .secondary, small: true) { store.install(id) }
-        case .installing(let stage, let p):
-            HStack(spacing: 7) {
-                StoreProgressBar(value: (Double(stage.rawValue) + p) / Double(StoreStage.allCases.count))
-                    .frame(width: 54)
-                Text(stage == .download ? "качаю" : "проверяю").font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
-            }
-        case .installed:
-            HStack(spacing: 4) {
-                DSChip("Есть", color: .green, icon: "checkmark")
-                DSButton("", icon: "trash", style: .plain, small: true) { store.remove(id) }
-                    .help("Удалить набор")
-            }
-        }
     }
 }
 

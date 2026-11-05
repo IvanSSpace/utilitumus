@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Плавающая панель подробностей (V3 + «новое / уже выдано» из V2): лежит справа поверх страницы стора,
+// Плавающая панель подробностей («новое / уже выдано» по живой проверке доступов): лежит справа поверх страницы стора,
 // раскладка под ней не меняется. Закрытие: крестик, клик по затемнению или Esc.
 
 struct StoreDetail: View {
@@ -10,8 +10,7 @@ struct StoreDetail: View {
 
     var body: some View {
         let cat = theme.categoryColor(module.category)
-        let id = StoreItemID.module(module)
-        let state = store.state(id)
+        let state = store.state(module)
         let needs = StoreCatalog.needs(module)
         let download = StoreCatalog.downloads(module)
         VStack(alignment: .leading, spacing: 12) {
@@ -22,8 +21,8 @@ struct StoreDetail: View {
                     HStack(spacing: 5) {
                         // Рядом с пометкой состояния категория не влезает в узкую панель.
                         if state == .installed {
-                            DSChip(store.hasUpdate(id) ? "Есть обновление" : "Установлен",
-                                   color: store.hasUpdate(id) ? .orange : .green)
+                            DSChip(store.hasUpdate(module) ? "Нет модели" : "Установлен",
+                                   color: store.hasUpdate(module) ? .orange : .green)
                         } else {
                             DSChip(module.category.title, color: cat)
                         }
@@ -52,29 +51,31 @@ struct StoreDetail: View {
                                   subtitle: "Работает без особых разрешений", iconTint: .green)
                         } else {
                             ForEach(needs) { need in
-                                let granted = state == .installed || store.baseGranted.contains(need.permission)
-                                StoreNeedRow(need: need, granted: granted, tint: cat)
+                                StoreNeedRow(need: need, granted: need.permission.isGranted, tint: cat)
                             }
                         }
                     }
 
-                    DSSection("Что скачается", trailing: download == nil ? "без загрузки" : "подпись проверим") {
+                    DSSection("Что скачается", trailing: download == nil ? "без загрузки" : "хэш сверим") {
                         if let download {
                             DSRow(icon: "arrow.down.circle.fill", title: "+\(download.megabytes) МБ, \(download.kind)",
-                                  subtitle: download.path, iconTint: cat)
+                                  subtitle: "\(download.name)\n\(download.path)", iconTint: cat)
+                            if let optional = download.optional {
+                                DSRow(icon: "plus.circle", title: "Другая модель", subtitle: optional, iconTint: cat)
+                            }
                         } else {
                             DSRow(icon: "shippingbox.fill", title: "Всё уже в приложении",
                                   subtitle: "Ничего не скачивается", iconTint: cat)
                         }
                     }
 
-                    DSSection("Что удалится") {
-                        DSRow(icon: "trash.fill", title: StoreCatalog.removal(module), iconTint: cat)
+                    DSSection("Что удалится", trailing: "настройки сохранятся") {
+                        ForEach(StoreCatalog.removal(module), id: \.self) { DSRow(icon: "trash.fill", title: $0, iconTint: cat) }
                     }
                 }
             }
 
-            HStack(spacing: 8) { buttons(id: id, state: state) }
+            HStack(spacing: 8) { buttons(state: state) }
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(16)
@@ -90,24 +91,24 @@ struct StoreDetail: View {
     }
 
     @ViewBuilder
-    private func buttons(id: StoreItemID, state: StoreState) -> some View {
+    private func buttons(state: StoreState) -> some View {
         switch state {
         case .available:
-            DSButton("Установить", icon: "arrow.down.circle.fill", style: .primary) { store.install(id) }
+            DSButton("Установить", icon: "arrow.down.circle.fill", style: .primary) { store.install(module) }
         case .installing:
-            DSButton("Отменить", style: .secondary) { store.cancel(id) }
+            DSButton("Отменить", style: .secondary) { store.cancel(module) }
         case .installed:
-            DSButton("Удалить", icon: "trash", style: .secondary, small: true) { store.remove(id) }
-            if store.hasUpdate(id) {
+            DSButton("Удалить", icon: "trash", style: .secondary, small: true) { store.requestRemoval(module) }
+            if store.hasUpdate(module) {
                 DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: true) {
-                    store.update(id)
+                    store.downloadResources(module)
                 }
             }
         }
     }
 }
 
-/// Три этапа установки столбиком: скачивание, проверка подписи, разрешения. У текущего — полоса.
+/// Этапы скачивания столбиком: скачивание, проверка хэша. У текущего — полоса.
 private struct StoreStages: View {
     let stage: StoreStage
     let progress: Double
@@ -137,7 +138,8 @@ private struct StoreStages: View {
 /// Разрешение: название и пометка «новое / уже выдано» в одной строке, пояснение под ними.
 private struct StoreNeedRow: View {
     let need: StoreNeed
-    let granted: Bool
+    /// nil — заранее не проверить, система спросит сама.
+    let granted: Bool?
     let tint: Color
 
     var body: some View {
@@ -146,7 +148,8 @@ private struct StoreNeedRow: View {
                 Text(need.permission.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
-                DSChip(granted ? "уже выдано" : "новое", color: granted ? .green : .orange).fixedSize()
+                DSChip(granted == nil ? "спросит сама" : (granted == true ? "уже выдано" : "новое"),
+                       color: granted == nil ? .gray : (granted == true ? .green : .orange)).fixedSize()
             }
             Text(need.why).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
