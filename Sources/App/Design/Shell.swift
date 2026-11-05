@@ -142,13 +142,11 @@ struct DSSidebar: View {
     @ObservedObject private var modules = ModuleManager.shared
     /// Последний открытый модуль каждой категории: вкладка возвращает на него.
     @State private var last: [String: Module] = [:]
-    /// Нажатая вкладка без модулей: страница остаётся прежней, в списке заглушка.
-    @State private var emptyTab: ModuleCategory?
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
         if (showDashboard && !showAbout) || showStore { return nil }
-        return emptyTab ?? (peeked ?? current ?? selection).category
+        return (peeked ?? current ?? selection).category
     }
 
     /// Модуль, чья страница открыта прямо сейчас. Его могли выключить тумблером на этой странице:
@@ -180,6 +178,12 @@ struct DSSidebar: View {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
+            // Ничего не установлено: все вкладки закрыты, подсказка ведёт в Стор.
+            if shown.isEmpty {
+                Text("Выбери модули в Сторе")
+                    .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+            }
             DSCategoryTabs(active: activeCategory, pick: pick)
                 .padding(.horizontal, 10).padding(.bottom, 6)
             list(shown)
@@ -188,12 +192,6 @@ struct DSSidebar: View {
         .onChange(of: current, initial: true) { _, module in
             if let module { last[module.category.id] = module }
         }
-        // Любой переход на другую страницу снимает заглушку пустой вкладки.
-        .onChange(of: current) { emptyTab = nil }
-        .onChange(of: showDashboard) { emptyTab = nil }
-        .onChange(of: showAbout) { emptyTab = nil }
-        .onChange(of: showStore) { emptyTab = nil }
-        .onChange(of: peeked) { emptyTab = nil }
         // Рамку фокуса клавиатуры в панели не рисуем: после клика кнопка получала фокус, и вокруг неё
         // появлялась синяя рамка. Строки и ссылки подвала кликаются мышью, Tab по ним не нужен.
         .focusEffectDisabled()
@@ -203,17 +201,8 @@ struct DSSidebar: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 if let category = activeCategory {
-                    if shown.contains(where: { $0.category == category }) {
-                        rows(category, shown: shown)
-                    } else {
-                        DSEmptyCategory(category: category) {
-                            StoreModel.shared.show(category: category)
-                            peeked = nil
-                            showAbout = false
-                            showStore = true
-                        }
-                    }
-                } else {
+                    rows(category, shown: shown)
+                } else if !shown.isEmpty {
                     // На дашборде и в сторе — все модули подряд (без статусов, чтобы влезли над футером),
                     // перетаскивать здесь нечего: порядок меняют внутри вкладки.
                     DSAllModulesHeading()
@@ -242,15 +231,11 @@ struct DSSidebar: View {
     }
 
     /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
+    /// Закрытая вкладка (в категории нет установленных) не нажимается, сюда она не доходит.
     private func pick(_ category: ModuleCategory) {
         if category == activeCategory && !showAbout && !showStore && peeked == nil { return }
         let shown = shownModules(in: category)
-        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else {
-            // Пустая вкладка нажимается: в списке заглушка со ссылкой в Стор.
-            emptyTab = category
-            return
-        }
-        emptyTab = nil
+        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else { return }
         selection = target
         peeked = nil
         showAbout = false
@@ -262,7 +247,6 @@ struct DSSidebar: View {
         let on = modules.isOn(module)
         let selected = !showDashboard && !showAbout && !showStore && peeked == nil && current == module
         let open = {
-            emptyTab = nil
             selection = module
             peeked = nil
             showAbout = false
@@ -323,35 +307,18 @@ private struct DSDashboardRow: View {
 }
 
 /// Три вкладки-пилюли: Фоном, Под рукой, С ИИ. Выбранная залита цветом категории.
+/// Вкладка без установленных модулей закрыта: приглушена, с замком, не нажимается.
 private struct DSCategoryTabs: View {
     let active: ModuleCategory?
     let pick: (ModuleCategory) -> Void
-    @Environment(\.dsTheme) private var theme
+    @ObservedObject private var modules = ModuleManager.shared
 
     var body: some View {
+        let installed = Set(modules.installedModules.map(\.category))
         HStack(spacing: 3) {
             ForEach(ModuleCategory.all) { category in
-                let selected = category == active
-                let tint = theme.categoryColor(category)
-                VStack(spacing: 4) {
-                    Image(systemName: category.icon).font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(tint.opacity(selected ? 1 : 0.65))
-                    Text(category.title).font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(selected ? 0.95 : 0.5))
-                        .lineLimit(1).fixedSize()
-                }
-                .frame(maxWidth: .infinity).frame(height: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .fill(tint.opacity(0.18))
-                        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .stroke(tint.opacity(0.35), lineWidth: 0.6))
-                        .opacity(selected ? 1 : 0)
-                )
-                .contentShape(Rectangle())
-                .onTapGesture { pick(category) }
-                .help(category.subtitle)
-                .accessibilityAddTraits(.isButton)
+                DSCategoryTab(category: category, selected: category == active,
+                              hasModules: installed.contains(category), pick: pick)
             }
         }
         .padding(3)
@@ -359,23 +326,66 @@ private struct DSCategoryTabs: View {
     }
 }
 
-/// Вместо списка во вкладке, где нет ни одного установленного модуля.
-struct DSEmptyCategory: View {
+/// Одна вкладка. Закрыта, пока в категории нет установленного модуля (открытая сейчас закрытой не рисуется:
+/// вкладку модуля, которого только что выключили, не гасим под ногами). Когда первый модуль ставят,
+/// вкладка открывается: замок гаснет, значок разгорается, цвет категории мягко вспыхивает вокруг ~1 с.
+private struct DSCategoryTab: View {
     let category: ModuleCategory
-    let openStore: () -> Void
+    let selected: Bool
+    let hasModules: Bool
+    let pick: (ModuleCategory) -> Void
     @Environment(\.dsTheme) private var theme
+    /// Сила свечения разблокировки: 0 — нет, 1 — пик.
+    @State private var glow = 0.0
+
+    private var locked: Bool { !hasModules && !selected }
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: category.icon).font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(theme.categoryColor(category).opacity(0.7))
-            Text("В этой категории пока нет модулей")
-                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-            DSButton("Открыть Стор", icon: "bag", small: true, action: openStore)
+        let tint = theme.categoryColor(category)
+        VStack(spacing: 4) {
+            Image(systemName: category.icon).font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint.opacity(selected ? 1 : locked ? 0.25 : 0.65))
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: "lock.fill").font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .padding(2.5)
+                        .background(Circle().fill(.black.opacity(0.45)))
+                        .offset(x: 9, y: -5)
+                        .scaleEffect(locked ? 1 : 0.4)
+                        .opacity(locked ? 1 : 0)
+                }
+            Text(category.title).font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(selected ? 0.95 : locked ? 0.28 : 0.5))
+                .lineLimit(1).fixedSize()
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 14).padding(.top, 36)
+        .frame(maxWidth: .infinity).frame(height: 52)
+        .animation(.easeOut(duration: 0.4), value: locked)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(tint.opacity(0.18))
+                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(tint.opacity(0.35), lineWidth: 0.6))
+                .opacity(selected ? 1 : 0)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(tint.opacity(0.22 * glow))
+                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(tint.opacity(0.9 * glow), lineWidth: 1.2))
+                .shadow(color: tint.opacity(0.8 * glow), radius: 10 * glow)
+                .allowsHitTesting(false)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { if hasModules || selected { pick(category) } }
+        .help(locked ? "Поставь модуль из этой категории в Сторе" : category.subtitle)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(locked ? "Закрыто: поставь модуль из этой категории в Сторе" : "")
+        .onChange(of: hasModules) { was, now in
+            guard now, !was else { return }
+            // Быстро вспыхнуть, потом ~1 с гаснуть.
+            withAnimation(.easeOut(duration: 0.18)) { glow = 1 }
+            withAnimation(.easeOut(duration: 1.0).delay(0.2)) { glow = 0 }
+        }
     }
 }
 
