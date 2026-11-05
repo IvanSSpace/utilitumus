@@ -29,6 +29,7 @@ struct VoiceView: View {
         DSPage(module: .voice, subtitle: "Голосовой ввод в любом приложении", primary: primary) {
             modelsSection
             controlSection
+            excludedSection
             testSection
             accessibilityHint
         }
@@ -168,6 +169,40 @@ struct VoiceView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    // MARK: - Исключения
+
+    private var excludedSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Не включать голос в этих приложениях") {
+                ForEach(controller.excludedApps, id: \.self) { id in
+                    HStack(spacing: 12) {
+                        Group {
+                            if let icon = VoiceExcludedApps.icon(id) {
+                                Image(nsImage: icon).resizable()
+                            } else {
+                                Image(systemName: "app.dashed").foregroundStyle(.white.opacity(0.5))
+                            }
+                        }
+                        .frame(width: 28, height: 28)
+                        Text(VoiceExcludedApps.name(id)).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                        Spacer(minLength: 10)
+                        DSButton("Убрать", style: .plain, small: true) { controller.removeExcluded(id) }
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                }
+                DSRow(icon: "nosign", title: controller.excludedApps.isEmpty ? "Список пуст" : "Добавить ещё") {
+                    DSButton("Добавить…", icon: "plus", small: true) {
+                        if let id = VoiceExcludedApps.pick() { controller.addExcluded(id) }
+                    }
+                }
+            }
+            Text("В этих программах сочетание голоса не срабатывает и доходит до самой программы: у неё свой ввод.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(.white.opacity(0.4))
+                .padding(.horizontal, 6)
+        }
     }
 
     // MARK: - Проверить

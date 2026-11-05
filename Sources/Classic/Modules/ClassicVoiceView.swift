@@ -19,6 +19,7 @@ struct ClassicVoiceView: View {
             if noneInstalled { hintSection }
             modelsSection
             controlSection
+            excludedSection
             testSection
             permissionsSection
         }
@@ -186,6 +187,36 @@ struct ClassicVoiceView: View {
 
     private var micBinding: Binding<String> {
         Binding(get: { controller.micUID ?? "" }, set: { controller.micUID = $0.isEmpty ? nil : $0 })
+    }
+
+    // MARK: - Исключения
+
+    private var excludedSection: some View {
+        Section {
+            ForEach(controller.excludedApps, id: \.self) { id in
+                HStack(spacing: 10) {
+                    if let icon = VoiceExcludedApps.icon(id) {
+                        Image(nsImage: icon).resizable().frame(width: 24, height: 24)
+                    } else {
+                        Image(systemName: "app.dashed").frame(width: 24, height: 24).foregroundStyle(.secondary)
+                    }
+                    Text(VoiceExcludedApps.name(id))
+                    Spacer(minLength: 8)
+                    Button("Убрать", role: .destructive) { controller.removeExcluded(id) }
+                }
+            }
+            HStack {
+                if controller.excludedApps.isEmpty { Text("Список пуст").foregroundStyle(.secondary) }
+                Spacer()
+                Button("Добавить…") {
+                    if let id = VoiceExcludedApps.pick() { controller.addExcluded(id) }
+                }
+            }
+        } header: {
+            Text("Не включать голос в этих приложениях")
+        } footer: {
+            Text("В этих программах сочетание голоса не срабатывает и доходит до самой программы: у неё свой ввод.")
+        }
     }
 
     // MARK: - Проверить
