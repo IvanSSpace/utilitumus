@@ -88,7 +88,12 @@ final class ClipboardController: ObservableObject {
             return
         }
         storeError = nil
-        store = ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit)
+        attach(ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit))
+    }
+
+    /// Подключить хранилище. Отдельно от `openStore`, чтобы стенд мог подставить своё, не трогая Keychain и диск.
+    func attach(_ store: ClipboardStore) {
+        self.store = store
         sync()
     }
 

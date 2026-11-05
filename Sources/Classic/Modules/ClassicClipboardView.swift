@@ -39,8 +39,10 @@ struct ClassicClipboardView: View {
                 ForEach(controller.spaces) { space in
                     HStack {
                         Circle().fill(ClipPalette.color(space.colorID)).frame(width: 12, height: 12)
-                        TextField("Название", text: Binding(get: { space.name },
-                                                            set: { controller.renameSpace(space.id, to: $0) }))
+                        // Подпись поля в Form уезжает влево, поэтому прячем её и даём подсказку.
+                        TextField("", text: Binding(get: { space.name }, set: { controller.renameSpace(space.id, to: $0) }),
+                                  prompt: Text("Название"))
+                            .labelsHidden()
                         Picker("", selection: Binding(get: { space.colorID }, set: { controller.setColor(space.id, $0) })) {
                             ForEach(ClipPalette.all, id: \.id) { Text($0.name).tag($0.id) }
                         }
@@ -51,7 +53,7 @@ struct ClassicClipboardView: View {
                     }
                 }
                 HStack {
-                    TextField("Новое пространство", text: $newName).onSubmit(create)
+                    TextField("", text: $newName, prompt: Text("Новое пространство")).labelsHidden().onSubmit(create)
                     Button("Создать", action: create).disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: {

@@ -75,8 +75,7 @@ struct ClipboardView: View {
                 if let error = controller.storeError {
                     DSRow(icon: "key.slash", title: error)
                 }
-                DSRow(icon: "clock.arrow.circlepath", title: "Размер истории",
-                      subtitle: "Закреплённое в пространствах не считается") {
+                DSRow(icon: "clock.arrow.circlepath", title: "Размер истории") {
                     DSSegmented(ClipboardPolicy.limits, selection: Binding(
                         get: { controller.limit }, set: { controller.setLimit($0) })) { "\($0)" }
                 }
@@ -86,7 +85,7 @@ struct ClipboardView: View {
                         .disabled(controller.historyCount == 0)
                 }
             }
-            caption(recorder.isRecording ? "Esc — отмена, Delete — вернуть ⌘⇧V" : "Работает в любой программе.")
+            if recorder.isRecording { caption("Esc — отмена, Delete — вернуть ⌘⇧V") }
         }
     }
 
@@ -106,7 +105,7 @@ struct ClipboardView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 188)
+                .frame(maxHeight: 170)
                 .fixedSize(horizontal: false, vertical: true)
                 DSRow(icon: "plus", title: "") {
                     TextField("Новое пространство", text: $newName)
@@ -116,7 +115,7 @@ struct ClipboardView: View {
                         .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            caption("Закрепляй записи правым кликом по карточке в панели.")
+            caption("Записи в пространствах не вытесняются лимитом истории. Закрепляй правым кликом по карточке.")
         }
     }
 
@@ -225,6 +224,7 @@ private struct SpaceRow: View {
     let onDelete: () -> Void
     @ObservedObject private var controller = ClipboardController.shared
     @State private var name = ""
+    @State private var picking = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -252,19 +252,29 @@ private struct SpaceRow: View {
     }
 
     private var colorMenu: some View {
-        Menu {
-            ForEach(ClipPalette.all, id: \.id) { entry in
-                Button { controller.setColor(space.id, entry.id) } label: {
-                    Label(entry.name, systemImage: entry.id == space.colorID ? "checkmark" : "")
-                }
-            }
-        } label: {
+        Button { picking = true } label: {
             Circle().fill(ClipPalette.color(space.colorID)).frame(width: 16, height: 16)
                 .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
-                .padding(3)
+                .padding(4)
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .buttonStyle(.plain)
         .help("Цвет пространства")
+        .popover(isPresented: $picking, arrowEdge: .bottom) {
+            HStack(spacing: 8) {
+                ForEach(ClipPalette.all, id: \.id) { entry in
+                    Button {
+                        controller.setColor(space.id, entry.id)
+                        picking = false
+                    } label: {
+                        Circle().fill(entry.color).frame(width: 20, height: 20)
+                            .overlay(Circle().stroke(.white.opacity(entry.id == space.colorID ? 0.95 : 0.15),
+                                                     lineWidth: entry.id == space.colorID ? 2 : 1))
+                    }
+                    .buttonStyle(.plain).help(entry.name)
+                }
+            }
+            .padding(12)
+        }
     }
 
     private func iconButton(_ icon: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
