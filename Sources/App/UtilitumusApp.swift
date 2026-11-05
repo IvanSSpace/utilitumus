@@ -201,7 +201,10 @@ struct MainView: View {
         .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet().dsThemed() }
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
         .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
-        .onAppear { whatsNew.showIfUpdated() }
+        .onAppear {
+            whatsNew.showIfUpdated()
+            openStartPage()
+        }
         // После закрытия любого листа (в том числе alert и confirmationDialog) AppKit отдаёт фокус первой
         // фокусируемой кнопке окна, при включённой клавиатурной навигации это «Версия» в подвале панели, и вокруг
         // неё рисуется рамка. Сбрасываем фокус на следующем витке, но не трогаем поле ввода, если курсор в нём.
@@ -235,8 +238,21 @@ struct MainView: View {
         .background(WindowMinSize(width: 840, height: 540))
         .onChange(of: modules.hidden) {
             if let resolved = modules.resolve(selection), resolved != selection { selection = resolved }
+            // Скрыли последний установленный модуль: открывать больше нечего, идём в Стор.
+            if modules.resolve(selection) == nil, !showAbout { showStore = true }
             // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
             if let peeked, !modules.isHidden(peeked) { self.peeked = nil }
+        }
+    }
+
+    /// Стартовая страница: последний выбранный модуль, если он установлен; иначе первый установленный;
+    /// если установленных нет — Стор. Дашборд и открытие Стора флагом запуска не трогаем.
+    private func openStartPage() {
+        guard !showStore, !showDashboard, !modules.isInstalled(selection) else { return }
+        if let first = modules.firstInstalled {
+            selection = first
+        } else {
+            showStore = true
         }
     }
 

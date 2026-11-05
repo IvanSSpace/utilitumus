@@ -148,17 +148,31 @@ struct DSSidebar: View {
     /// Сдвиг и прозрачность списка модулей при смене вкладки: только слой, layout не трогают.
     @State private var listShift: CGFloat = 0
     @State private var listOpacity: Double = 1
+    /// Нажатая вкладка без модулей: страница остаётся прежней, в списке заглушка.
+    @State private var emptyTab: ModuleCategory?
     @AppStorage(PageMode.storageKey) private var pageModeRaw = PageMode.fast.rawValue
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
-        (showDashboard && !showAbout) || showStore ? nil : (peeked ?? current ?? selection).category
+        if (showDashboard && !showAbout) || showStore { return nil }
+        return emptyTab ?? (peeked ?? current ?? selection).category
+    }
+
+    /// Модуль, чья страница открыта прямо сейчас. Его могли выключить тумблером на этой странице:
+    /// строка остаётся до ухода со страницы.
+    private var openModule: Module? {
+        showDashboard || showAbout || showStore || peeked != nil ? nil : current
+    }
+
+    /// Модули панели: только установленные (как в Сторе) и открытый сейчас.
+    private var visible: [Module] {
+        let open = openModule
+        return modules.shownModules.filter { modules.isInstalled($0) || $0 == open }
     }
 
     var body: some View {
         // Список модулей панели считаем один раз за body.
-        let shown = modules.shownModules
-        let enabledCategories = Set(shown.map { $0.category.id })
+        let shown = visible
         return VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
@@ -173,7 +187,7 @@ struct DSSidebar: View {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
-            DSCategoryTabs(active: activeCategory, enabled: { enabledCategories.contains($0.id) }, pick: pick)
+            DSCategoryTabs(active: activeCategory, pick: pick)
                 .padding(.horizontal, 10).padding(.bottom, 6)
             list(shown)
             DSSidebarFooter(showAbout: $showAbout, showStore: $showStore, peeked: $peeked)
@@ -182,6 +196,12 @@ struct DSSidebar: View {
             if let module { last[module.category.id] = module }
         }
         .onChange(of: activeCategory) { old, new in slideList(from: old, to: new) }
+        // Любой переход на другую страницу снимает заглушку пустой вкладки.
+        .onChange(of: current) { emptyTab = nil }
+        .onChange(of: showDashboard) { emptyTab = nil }
+        .onChange(of: showAbout) { emptyTab = nil }
+        .onChange(of: showStore) { emptyTab = nil }
+        .onChange(of: peeked) { emptyTab = nil }
         // Рамку фокуса клавиатуры в панели не рисуем: после клика кнопка получала фокус, и вокруг неё
         // появлялась синяя рамка. Строки и ссылки подвала кликаются мышью, Tab по ним не нужен.
         .focusEffectDisabled()
@@ -213,7 +233,16 @@ struct DSSidebar: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 if let category = activeCategory {
-                    rows(category, shown: shown)
+                    if shown.contains(where: { $0.category == category }) {
+                        rows(category, shown: shown)
+                    } else {
+                        DSEmptyCategory(category: category) {
+                            StoreModel.shared.show(category: category)
+                            peeked = nil
+                            showAbout = false
+                            showStore = true
+                        }
+                    }
                 } else {
                     // На дашборде и в сторе — все модули подряд (без статусов, чтобы влезли над футером),
                     // перетаскивать здесь нечего: порядок меняют внутри вкладки.
@@ -231,7 +260,7 @@ struct DSSidebar: View {
     }
 
     private func shownModules(in category: ModuleCategory) -> [Module] {
-        modules.shownModules.filter { $0.category == category }
+        visible.filter { $0.category == category }
     }
 
     @ViewBuilder
@@ -260,7 +289,12 @@ struct DSSidebar: View {
     private func pick(_ category: ModuleCategory) {
         if category == activeCategory && !showAbout && !showStore && peeked == nil { return }
         let shown = shownModules(in: category)
-        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else { return }
+        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else {
+            // Пустая вкладка нажимается: в списке заглушка со ссылкой в Стор.
+            emptyTab = category
+            return
+        }
+        emptyTab = nil
         selection = target
         peeked = nil
         showAbout = false
@@ -272,6 +306,7 @@ struct DSSidebar: View {
         let on = modules.isOn(module)
         let selected = !showDashboard && !showAbout && !showStore && peeked == nil && current == module
         let open = {
+            emptyTab = nil
             selection = module
             peeked = nil
             showAbout = false
@@ -334,7 +369,6 @@ private struct DSDashboardRow: View {
 /// Три вкладки-пилюли: Фоном, Под рукой, С ИИ. Выбранная залита цветом категории.
 private struct DSCategoryTabs: View {
     let active: ModuleCategory?
-    let enabled: (ModuleCategory) -> Bool
     let pick: (ModuleCategory) -> Void
     @Environment(\.dsTheme) private var theme
 
@@ -343,7 +377,6 @@ private struct DSCategoryTabs: View {
             ForEach(ModuleCategory.all) { category in
                 let selected = category == active
                 let tint = theme.categoryColor(category)
-                let available = enabled(category)
                 VStack(spacing: 4) {
                     Image(systemName: category.icon).font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(tint.opacity(selected ? 1 : 0.65))
@@ -359,15 +392,34 @@ private struct DSCategoryTabs: View {
                             .stroke(tint.opacity(0.35), lineWidth: 0.6))
                         .opacity(selected ? 1 : 0)
                 )
-                .opacity(available ? 1 : 0.4)
                 .contentShape(Rectangle())
-                .onTapGesture { if available { pick(category) } }
+                .onTapGesture { pick(category) }
                 .help(category.subtitle)
                 .accessibilityAddTraits(.isButton)
             }
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.05)))
+    }
+}
+
+/// Вместо списка во вкладке, где нет ни одного установленного модуля.
+private struct DSEmptyCategory: View {
+    let category: ModuleCategory
+    let openStore: () -> Void
+    @Environment(\.dsTheme) private var theme
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: category.icon).font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(theme.categoryColor(category).opacity(0.7))
+            Text("В этой категории пока нет модулей")
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+            DSButton("Открыть Стор", icon: "bag", small: true, action: openStore)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 14).padding(.top, 36)
     }
 }
 
