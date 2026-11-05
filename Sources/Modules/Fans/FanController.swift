@@ -22,15 +22,16 @@ enum SensorSource: String, Codable, CaseIterable, Identifiable {
 /// Настройка одного вентилятора — как в Macs Fan Control: система сама,
 /// фиксированные обороты, или линейно от температуры датчика.
 struct FanConfig: Codable, Equatable {
-    var mode: FanMode = .auto
+    // По умолчанию — «По датчику» 50–80 °C: выбор пользователя как оптимальный для новых установок.
+    // Пока помощник не установлен, вентиляторами всё равно управляет macOS.
+    var mode: FanMode = .sensor
     /// Для `.constant`. 0 — ещё не выбирали, UI подставит минимум вентилятора.
     var rpm: Double = 0
     var sensor: SensorSource = .cpu
     /// Для `.sensor`: до `fromTemp` — минимум оборотов, от `toTemp` — максимум,
     /// между ними линейно.
-    // По самому горячему из датчиков: в простое у M1 Pro он держит 53–66 °C,
-    // поэтому нижняя граница 50 °C не отпускала вентиляторы никогда. 60/80 — выбор пользователя.
-    var fromTemp: Double = 60
+    // 50/80 — выбор пользователя (2026-11-05): тише в простое не нужно, к 80 °C — максимум.
+    var fromTemp: Double = 50
     var toTemp: Double = 80
 }
 
@@ -124,10 +125,10 @@ final class FanController: ObservableObject {
     private init() {
         if let data = UserDefaults.standard.data(forKey: Self.configsKey),
            let saved = try? JSONDecoder().decode([FanConfig].self, from: data) {
-            // Прежние умолчания (50/85, 70/90), которые пользователь не трогал, — на новые 60/80.
+            // Прежние умолчания (50/85, 70/90), которые пользователь не трогал, — на новые 50/80.
             configs = saved.map { c in
                 guard (c.fromTemp == 50 && c.toTemp == 85) || (c.fromTemp == 70 && c.toTemp == 90) else { return c }
-                var n = c; n.fromTemp = 60; n.toTemp = 80; return n
+                var n = c; n.fromTemp = 50; n.toTemp = 80; return n
             }
             if configs != saved { persist() }
         } else {
