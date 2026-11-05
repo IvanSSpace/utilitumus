@@ -145,12 +145,8 @@ struct DSSidebar: View {
     /// Модуль, который тянут, и место, куда он ляжет, если отпустить.
     @State private var dragging: Module?
     @State private var drop: DropMark?
-    /// Сдвиг и прозрачность списка модулей при смене вкладки: только слой, layout не трогают.
-    @State private var listShift: CGFloat = 0
-    @State private var listOpacity: Double = 1
     /// Нажатая вкладка без модулей: страница остаётся прежней, в списке заглушка.
     @State private var emptyTab: ModuleCategory?
-    @AppStorage(PageMode.storageKey) private var pageModeRaw = PageMode.fast.rawValue
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
@@ -195,7 +191,6 @@ struct DSSidebar: View {
         .onChange(of: current, initial: true) { _, module in
             if let module { last[module.category.id] = module }
         }
-        .onChange(of: activeCategory) { old, new in slideList(from: old, to: new) }
         // Любой переход на другую страницу снимает заглушку пустой вкладки.
         .onChange(of: current) { emptyTab = nil }
         .onChange(of: showDashboard) { emptyTab = nil }
@@ -205,28 +200,6 @@ struct DSSidebar: View {
         // Рамку фокуса клавиатуры в панели не рисуем: после клика кнопка получала фокус, и вокруг неё
         // появлялась синяя рамка. Строки и ссылки подвала кликаются мышью, Tab по ним не нужен.
         .focusEffectDisabled()
-    }
-
-    /// Список модулей коротко сдвигается в ту же сторону, что и страница: вкладка правее — приезжает справа.
-    /// В «Экономном» режиме анимаций нет.
-    private func slideList(from old: ModuleCategory?, to new: ModuleCategory?) {
-        guard (PageMode(rawValue: pageModeRaw) ?? .fast) == .fast,
-              let old, let new, old != new,
-              let from = ModuleCategory.all.firstIndex(of: old), let to = ModuleCategory.all.firstIndex(of: new)
-        else { return }
-        var start = Transaction()
-        start.disablesAnimations = true
-        withTransaction(start) {
-            listShift = to > from ? 24 : -24
-            listOpacity = 0
-        }
-        // Конечное значение — на следующем витке, иначе SwiftUI склеит оба изменения и начало не отрисует.
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.22)) {
-                listShift = 0
-                listOpacity = 1
-            }
-        }
     }
 
     private func list(_ shown: [Module]) -> some View {
@@ -255,8 +228,6 @@ struct DSSidebar: View {
             .padding(.horizontal, 10).padding(.vertical, 2)
         }
         .scrollIndicators(.never)
-        .offset(x: listShift)
-        .opacity(listOpacity)
     }
 
     private func shownModules(in category: ModuleCategory) -> [Module] {
