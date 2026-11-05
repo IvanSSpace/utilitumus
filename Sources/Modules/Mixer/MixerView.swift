@@ -28,13 +28,11 @@ private struct MixerRow: View, Equatable {
     let onVolume: (Double) -> Void
     let onCommit: () -> Void
     let onToggleMute: () -> Void
-    /// Строка в узкой колонке: имя короче, чтобы остался ход у ползунка.
-    var narrow = false
     @Environment(\.dsTint) private var tint
     /// Значение под пальцем: слайдер двигается сразу, а список публикуется позже.
     @State private var dragging: Double?
 
-    static func == (a: MixerRow, b: MixerRow) -> Bool { a.app == b.app && a.narrow == b.narrow }
+    static func == (a: MixerRow, b: MixerRow) -> Bool { a.app == b.app }
 
     private var shownVolume: Double { dragging ?? app.volume }
 
@@ -47,7 +45,7 @@ private struct MixerRow: View, Equatable {
                     Text("без звука").font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
                 }
             }
-            .frame(width: narrow ? 108 : 150, alignment: .leading)
+            .frame(width: 150, alignment: .leading)
 
             Slider(value: Binding(
                 get: { shownVolume },
@@ -119,6 +117,7 @@ private struct Note: View {
 /// Сворачивающая строка «Остальных»: компактная, подсказка вместо пояснения.
 private struct OthersToggle: View {
     let expanded: Bool
+    let count: Int
     @Environment(\.dsTint) private var tint
 
     var body: some View {
@@ -126,7 +125,7 @@ private struct OthersToggle: View {
             RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint.opacity(0.18))
                 .frame(width: 26, height: 26)
                 .overlay(Image(systemName: "square.stack").font(.system(size: 12, weight: .semibold)).foregroundStyle(tint))
-            Text(expanded ? "Скрыть" : "Показать").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+            Text(expanded ? "Скрыть (\(count))" : "Показать (\(count))").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
             Spacer(minLength: 6)
             Image(systemName: expanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: 11, weight: .semibold))
@@ -141,21 +140,20 @@ struct MixerView: View {
     @ObservedObject private var controller = MixerController.shared
     @State private var showOthers = false
 
-    private func row(_ app: MixerApp, narrow: Bool = false) -> some View {
+    private func row(_ app: MixerApp) -> some View {
         let id = app.id
         return MixerRow(
             app: app,
             onVolume: { controller.setVolume($0, for: id) },
             onCommit: { controller.commitVolumes() },
-            onToggleMute: { controller.setMuted(!controller.isMuted(id), for: id) },
-            narrow: narrow
+            onToggleMute: { controller.setMuted(!controller.isMuted(id), for: id) }
         ).equatable()
     }
 
-    private func idleSection(narrow: Bool) -> some View {
+    private func idleSection() -> some View {
         DSSection("Молчат сейчас", trailing: "\(controller.idleApps.count)") {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(controller.idleApps) { app in row(app, narrow: narrow) }
+                ForEach(controller.idleApps) { app in row(app) }
             }
         }
         .help("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать")
@@ -170,30 +168,26 @@ struct MixerView: View {
         }
     }
 
-    private func othersSection(narrow: Bool) -> some View {
-        DSSection("Остальные запущенные", trailing: "\(controller.otherApps.count)") {
+    private func othersSection() -> some View {
+        DSSection("Остальные запущенные") {
             // Кликается вся строка, а не только стрелка.
             Button {
                 showOthers.toggle()
             } label: {
-                OthersToggle(expanded: showOthers)
+                OthersToggle(expanded: showOthers, count: controller.otherApps.count)
             }
             .buttonStyle(.plain)
             .focusable(false)
             .help("Звука от них обычно нет. Зазвучат — переедут наверх")
             if showOthers {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(controller.otherApps) { app in row(app, narrow: narrow) }
+                    ForEach(controller.otherApps) { app in row(app) }
                 }
             }
         }
     }
 
     var body: some View {
-        let left = !controller.idleApps.isEmpty || !controller.presetApps.isEmpty
-        let right = !controller.otherApps.isEmpty
-        // Две колонки, когда есть что поставить рядом: на стандартном окне это экономит высоту.
-        let narrow = left && right
         DSPage(
             module: .mixer,
             subtitle: controller.apps.isEmpty ? "Сейчас ничего не играет" : "Играют: \(controller.apps.count)"
@@ -224,18 +218,10 @@ struct MixerView: View {
                     ForEach(controller.apps) { app in row(app) }
                 }
 
-                HStack(alignment: .top, spacing: 14) {
-                    if left {
-                        VStack(alignment: .leading, spacing: 14) {
-                            if !controller.idleApps.isEmpty { idleSection(narrow: narrow) }
-                            if !controller.presetApps.isEmpty { presetSection() }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .top)
-                    }
-                    if right {
-                        othersSection(narrow: narrow).frame(maxWidth: .infinity, alignment: .top)
-                    }
-                }
+                // Все секции на всю ширину и теми же строками: громкость молчащим ставят заранее.
+                if !controller.idleApps.isEmpty { idleSection() }
+                if !controller.presetApps.isEmpty { presetSection() }
+                if !controller.otherApps.isEmpty { othersSection() }
 
                 Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
             }
