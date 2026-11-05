@@ -414,6 +414,7 @@ private struct GameModeCard: View {
 
     var body: some View {
         FlatCard {
+            // Всё в одну строку: заголовок, «Добавить», лаунчеры и переключатель.
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.18))
                     .frame(width: 26, height: 26)
@@ -421,33 +422,27 @@ private struct GameModeCard: View {
                         .foregroundStyle(tint))
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Максимум в играх").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
-                    Text("Игра на переднем плане — вентиляторы сами идут на максимум")
-                        .font(.system(size: 11.5)).foregroundStyle(dim)
+                    Text("Игра на переднем плане — вентиляторы на максимум")
+                        .font(.system(size: 11.5)).foregroundStyle(dim).lineLimit(1)
                 }
                 Spacer(minLength: 10)
+                if game.isEnabled {
+                    addMenu
+                    launchersLink
+                }
                 DSToggle("Максимум в играх", isOn: $game.isEnabled)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
 
-            if game.isEnabled {
+            // Вторая строка нужна только когда есть свои игры.
+            if game.isEnabled && !game.myGames.isEmpty {
                 Separator()
-                HStack(spacing: 8) {
-                    if game.myGames.isEmpty {
-                        Text("Игры определяются сами. Остальные, например из CrossOver, добавь сюда.")
-                            .font(.system(size: 11.5)).foregroundStyle(dim)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        ChipFlow(spacing: 6) {
-                            ForEach(game.myGames) { entry in
-                                GameChip(entry: entry, icon: game.icon(for: entry)) { game.removeGame(entry) }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                ChipFlow(spacing: 6) {
+                    ForEach(game.myGames) { entry in
+                        GameChip(entry: entry, icon: game.icon(for: entry)) { game.removeGame(entry) }
                     }
-                    addMenu
-                    launchersLink
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 14).padding(.vertical, 7)
             }
         }
@@ -472,6 +467,7 @@ private struct GameModeCard: View {
             }
         } label: {
             Text("Добавить…")
+                .help("Игры определяются сами; остальные, например из CrossOver, добавь сюда")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.92))
                 .padding(.horizontal, 11).padding(.vertical, 4)
@@ -487,7 +483,7 @@ private struct GameModeCard: View {
             launchersOpen.toggle()
         } label: {
             HStack(spacing: 4) {
-                Text("Лаунчеры-игры: \(gameLauncherCount) из \(GameRules.defaultLaunchers.count)")
+                Text("Лаунчеры: \(gameLauncherCount) из \(GameRules.defaultLaunchers.count)")
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
             .font(.system(size: 12, weight: .medium)).foregroundStyle(tint)
@@ -613,42 +609,47 @@ struct FansView: View {
     }
 
     private var fansSection: some View {
-        DSSection("Вентиляторы", trailing: rangeText) {
-            if controller.fans.isEmpty {
-                Text("Вентиляторы не найдены").font(DS.rowSubtitle).foregroundStyle(dim)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-            } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 10, alignment: .top)],
-                          alignment: .leading, spacing: 10) {
-                    ForEach(controller.fans) { fan in
-                        if fan.index < controller.configs.count {
-                            FanCard(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
-                                    fullPower: controller.fullPower,
-                                    cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax,
-                                    gameName: gameName, sharedSensor: sharedSensor)
-                        }
-                    }
-                }
-                .padding(10)
-
-                if sharedSensor && !overridden {
-                    Separator()
-                    SensorSettings(config: sharedConfig, cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax)
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .disabled(!canControl)
-                        .opacity(canControl ? 1 : 0.5)
-                }
-            }
-            Separator()
+        VStack(alignment: .leading, spacing: 8) {
+            // Заголовок как у DSSection, но «Всё авто» стоит в нём же: отдельная строка внизу не нужна.
             HStack(spacing: 10) {
-                Text("«Авто» — оборотами управляет macOS")
-                    .font(.system(size: 11.5)).foregroundStyle(dim)
-                Spacer(minLength: 10)
+                Text("ВЕНТИЛЯТОРЫ").font(DS.sectionTitle).tracking(0.8).foregroundStyle(.white.opacity(0.42))
+                Spacer()
+                if let rangeText {
+                    Text(rangeText).font(.system(size: 11.5, weight: .medium)).foregroundStyle(dim)
+                }
                 DSButton("Всё авто", icon: "arrow.uturn.backward", small: true) { controller.setAllAuto() }
-                    .help("Вернуть все вентиляторы в «Авто»")
+                    .help("Вернуть все вентиляторы в «Авто»: оборотами управляет macOS")
                     .disabled(!canControl)
             }
-            .padding(.horizontal, 14).padding(.vertical, 5)
+            .padding(.leading, 6)
+
+            FlatCard {
+                if controller.fans.isEmpty {
+                    Text("Вентиляторы не найдены").font(DS.rowSubtitle).foregroundStyle(dim)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 10, alignment: .top)],
+                              alignment: .leading, spacing: 10) {
+                        ForEach(controller.fans) { fan in
+                            if fan.index < controller.configs.count {
+                                FanCard(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
+                                        fullPower: controller.fullPower,
+                                        cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax,
+                                        gameName: gameName, sharedSensor: sharedSensor)
+                            }
+                        }
+                    }
+                    .padding(10)
+
+                    if sharedSensor && !overridden {
+                        Separator()
+                        SensorSettings(config: sharedConfig, cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .disabled(!canControl)
+                            .opacity(canControl ? 1 : 0.5)
+                    }
+                }
+            }
         }
     }
 
