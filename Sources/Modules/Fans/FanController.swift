@@ -78,6 +78,7 @@ final class FanController: ObservableObject {
     @Published var fullPower = false {
         didSet {
             Self.log("fullPower → \(fullPower)")
+            lastSent = [:]
             scheduleApply()
         }
     }
@@ -87,6 +88,8 @@ final class FanController: ObservableObject {
             guard configs != oldValue else { return }
             Self.log("настройки → " + configs.map { "\($0.mode.rawValue)/\(Int($0.rpm))" }.joined(separator: ", "))
             schedulePersist()
+            // Новая настройка применяется сразу, без гистерезиса.
+            lastSent = [:]
             scheduleApply()
         }
     }
@@ -114,6 +117,14 @@ final class FanController: ObservableObject {
     /// Между start() и stop(). Отложенные tick/apply после stop() ничего не делают,
     /// иначе они снова взяли бы вентиляторы под ручное управление.
     private var isRunning = false
+    /// Последняя отправленная помощником цель по вентиляторам: от неё считается гистерезис.
+    private var lastSent: [Int: (rpm: Double, at: Date)] = [:]
+    /// Сглаженные температуры для кривой «По датчику»; безопасность смотрит на сырые.
+    private var cpuSmoother = TempSmoother()
+    private var gpuSmoother = TempSmoother()
+    private var smoothedCPU: Double?
+    private var smoothedGPU: Double?
+    private var lastSmoothAt = Date.distantPast
     private var pendingApply: DispatchWorkItem?
     private var pendingPersist: DispatchWorkItem?
     /// Вентиляторы, для которых команда помощнику ещё выполняется.
@@ -214,6 +225,9 @@ final class FanController: ObservableObject {
         asleep = false
         screensAsleep = false
         sensorEngaged = []
+        lastSent = [:]
+        cpuSmoother.reset(); gpuSmoother.reset()
+        smoothedCPU = nil; smoothedGPU = nil
         pendingApply?.cancel()
         pendingApply = nil
         // «Полная мощность» не должна сама включиться при возврате модуля.
@@ -227,7 +241,7 @@ final class FanController: ObservableObject {
     }
 
     /// Режим «Максимум в играх» включился или выключился.
-    func gameModeChanged() { scheduleApply() }
+    func gameModeChanged() { lastSent = [:]; scheduleApply() }
 
     func setAllAuto() {
         fullPower = false
@@ -297,6 +311,14 @@ final class FanController: ObservableObject {
         if s.cpu != cpuSensors { cpuSensors = s.cpu }
         if s.gpu != gpuSensors { gpuSensors = s.gpu }
 
+        // Внеочередное чтение после команды помощнику в среднее не берём.
+        let now = Date()
+        if now.timeIntervalSince(lastSmoothAt) >= 1.5 {
+            lastSmoothAt = now
+            smoothedCPU = cpuMax.map { cpuSmoother.add($0) }
+            smoothedGPU = gpuMax.map { gpuSmoother.add($0) }
+        }
+
         if let cpu = cpuMax {
             if cpu >= Self.safetyTrip { safetyTripped = true }
             else if cpu < Self.safetyRelease { safetyTripped = false }
@@ -333,8 +355,17 @@ final class FanController: ObservableObject {
             if let rpm = desired {
                 // Дрожание датчика на пару градусов не стоит запуска процесса.
                 guard !isManual || abs(target - rpm) >= 50 else { continue }
+                // Шум датчика качает цель на десятки об/мин, а запуск помощника дорог:
+                // в «По датчику» шлём не чаще порога/таймера. Остальное — сразу.
+                let urgent = configs[i].mode != .sensor || fullPower || GameModeController.shared.isActive
+                    || safetyTripped || !isManual
+                let last = lastSent[i]
+                guard FanGate.shouldSend(desired: rpm, lastSent: last?.rpm, lastSentAt: last?.at,
+                                         now: Date(), urgent: urgent) else { continue }
+                lastSent[i] = (rpm.rounded(), Date())
                 args = ["set", String(i), String(Int(rpm))]
             } else {
+                lastSent[i] = nil
                 guard isManual else { continue }
                 args = ["auto", String(i)]
             }
@@ -368,7 +399,7 @@ final class FanController: ObservableObject {
         case .constant:
             return min(max(config.rpm, fan.min), fan.max)
         case .sensor:
-            guard let temp = (config.sensor == .cpu ? cpuMax : gpuMax),
+            guard let temp = (config.sensor == .cpu ? (smoothedCPU ?? cpuMax) : (smoothedGPU ?? gpuMax)),
                   config.toTemp > config.fromTemp else { return nil }
             // Холодно — решает система: в простое она останавливает вентиляторы,
             // а минимум кривой держал бы их крутиться всегда.
