@@ -3,6 +3,18 @@ import SwiftUI
 // Экраны настройки модуля: чек-лист (на весь экран модуля), плашка «Настройка: 2 из 3» над ним,
 // строка шага (в чек-листе и в компактном виде — в «Понадобится» и в подробностях Стора).
 
+private extension Module {
+    /// «Заработала / заработал / заработали» по роду названия.
+    var worksWord: String {
+        switch self {
+        case .keyboard, .mouse, .load: return "заработала"
+        case .fans: return "заработали"
+        case .awake: return "заработало"
+        case .sound, .stash, .mixer, .browser, .voice, .clipboard: return "заработал"
+        }
+    }
+}
+
 // MARK: - Чек-лист
 
 /// «Чтобы «Клавиатура» заработала: 2 из 3». Статусы опрашиваются раз в секунду, пока чек-лист на экране
@@ -26,9 +38,9 @@ struct SetupChecklistView: View {
         let ready = progress.requiredDone
         return ModuleCentered(
             module: module,
-            title: "Чтобы «\(module.title)» заработала: \(progress.done) из \(progress.total)",
+            title: "Чтобы «\(module.title)» \(module.worksWord): \(progress.done) из \(progress.total)",
             lead: ready
-                ? "Всё нужное есть. Необязательное можно сделать сейчас или потом."
+                ? "Всё нужное есть. Необязательное можно и потом."
                 : "Шаги по порядку. Экран обновится сам, когда шаг будет сделан.") {
             VStack(spacing: 0) {
                 let visible = Array(zip(progress.steps, progress.statuses))
