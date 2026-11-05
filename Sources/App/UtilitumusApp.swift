@@ -129,7 +129,6 @@ struct MainView: View {
     @State private var showDashboard = true
     /// Стор (прототип): открывается сразу, если запуск с `-OpenStore YES`.
     @State private var showStore = UserDefaults.standard.bool(forKey: "OpenStore")
-    @ObservedObject private var store = StoreModel.shared
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
@@ -145,12 +144,14 @@ struct MainView: View {
         let current = modules.resolve(selection)
         let displayed = peeked ?? current
         // Для фона и акцента на «О проекте» и пустой панели берём последний выбранный модуль.
-        let tintModule = showStore && !showAbout ? store.tintModule : (displayed ?? selection)
+        let tintModule = displayed ?? selection
+        let onStore = showStore && !showAbout
+        let pageTint = onStore ? theme.storeTint() : theme.accent(tintModule)
         let onDashboard = showDashboard && !showAbout && !showStore
         let detail = displayed == nil ? nil : (built ?? displayed)
         let pageKey: PageKey = showAbout ? .about : showStore ? .store : (showDashboard ? .dashboard : (displayed.map { .module($0) } ?? .empty))
         ZStack {
-            DSBackground(module: tintModule, neutral: onDashboard)
+            DSBackground(module: tintModule, neutral: onDashboard || onStore)
             HStack(spacing: 0) {
                 if !sidebarHidden {
                     DSSidebar(current: current, showDashboard: $showDashboard, showStore: $showStore, showAbout: $showAbout,
@@ -166,7 +167,7 @@ struct MainView: View {
                         PageStack(target: pageKey, animated: true) { key, active in
                             AnyView(page(key)
                                 .environment(\.pageActive, active)
-                                .environment(\.dsTint, theme.accent(tintModule))
+                                .environment(\.dsTint, pageTint)
                                 .dsThemed()
                                 .ignoresSafeArea())
                         }
@@ -191,7 +192,7 @@ struct MainView: View {
                 .opacity(0).frame(width: 0, height: 0)
         }
         .overlay(alignment: .topLeading) { DSSidebarToggle(hidden: $sidebarHidden) }
-        .environment(\.dsTint, theme.accent(tintModule))
+        .environment(\.dsTint, pageTint)
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
         .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet().dsThemed() }

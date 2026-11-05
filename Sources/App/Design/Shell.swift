@@ -475,7 +475,7 @@ private struct DSSidebarRow: View {
                 Text(module.title)
                     .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
                     .foregroundStyle(.white.opacity(on ? (selected ? 1 : 0.85) : 0.5))
-                    .lineLimit(1)
+                    .lineLimit(1).minimumScaleFactor(0.85)
                 if let status {
                     Text(status.text).font(.system(size: 11)).lineLimit(1)
                         .foregroundStyle(status.attention ? AnyShapeStyle(Color.orange)

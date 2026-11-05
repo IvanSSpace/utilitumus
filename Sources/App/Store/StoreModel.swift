@@ -5,7 +5,7 @@ import SwiftUI
 
 // MARK: - Разрешения
 
-enum StorePermission: String {
+enum StorePermission: String, CaseIterable {
     case accessibility, microphone, inputMonitoring, rootHelper, systemAudio
 
     var title: String {
@@ -65,6 +65,31 @@ enum StoreCatalog {
         }
     }
 
+    /// Одна короткая строка для плитки: помещается в одну строку без обрезания.
+    static func line(_ m: Module) -> String {
+        switch m {
+        case .sound: return "Возвращает выбранный звук"
+        case .load: return "Что ест память и процессор"
+        case .stash: return "Чистит Mac перед игрой"
+        case .fans: return "Обороты вентиляторов Mac"
+        case .mixer: return "Громкость по программам"
+        case .mouse: return "Своя прокрутка для мыши"
+        case .browser: return "Браузер на каждую ссылку"
+        case .voice: return "Диктовка в любое поле"
+        case .clipboard: return "История буфера обмена"
+        case .keyboard: return "Смена раскладки по Fn"
+        case .awake: return "Mac не засыпает за работой"
+        }
+    }
+
+    /// Что сотрётся при удалении.
+    static func removal(_ m: Module) -> String {
+        if let d = downloads(m) { return "Скачанная \(d.kind) (\(d.megabytes) МБ) и настройки модуля" }
+        if needs(m).contains(where: { $0.permission == .rootHelper }) { return "Настройки модуля и root-помощник" }
+        if m == .clipboard { return "Сохранённая история, пространства и настройки" }
+        return "Только настройки модуля, программа остаётся целой"
+    }
+
     /// Короткая подпись размера для плитки и карточки.
     static func sizeText(_ m: Module, short: Bool = false) -> String {
         if short { return downloads(m).map { "+\($0.megabytes) МБ" } ?? "без загрузки" }
@@ -81,9 +106,9 @@ struct StoreSoon: Identifiable {
     let categoryID: String
 
     static let all = [
-        StoreSoon(id: "battery", title: "Батарея 80%", tagline: "Останавливает зарядку на 80%",
+        StoreSoon(id: "battery", title: "Батарея 80%", tagline: "Стоп зарядки на 80%",
                   icon: "battery.75percent", categoryID: "background"),
-        StoreSoon(id: "agents", title: "Агент-центр", tagline: "Все сессии агентов в одном окне",
+        StoreSoon(id: "agents", title: "Агент-центр", tagline: "Агенты в одном окне",
                   icon: "person.3.fill", categoryID: "ai"),
     ]
 }
@@ -188,8 +213,8 @@ final class StoreModel: ObservableObject {
     @Published private(set) var updates: Set<StoreItemID> = []
     @Published var tab: StoreTab = .showcase
     @Published var detail: Module?
-    /// Чьим оттенком красить фон окна: открытый модуль или рекомендуемый.
-    @Published var tintModule: Module = StoreModel.featured
+    /// Разрешения, выданные до стора: у уже включённых модулей они есть.
+    let baseGranted: Set<StorePermission>
 
     /// Рекомендация дня.
     static let featured: Module = .voice
@@ -200,6 +225,8 @@ final class StoreModel: ObservableObject {
     private var before: [StoreItemID: StoreState] = [:]
 
     init() {
+        baseGranted = Set(Module.allCases.filter { ModuleManager.shared.isOn($0) }
+            .flatMap { StoreCatalog.needs($0).map(\.permission) })
         // Старт — из реального «включён», дальше состояние живёт только здесь.
         for module in Module.allCases {
             states[.module(module)] = ModuleManager.shared.isOn(module) ? .installed : .available
@@ -217,13 +244,32 @@ final class StoreModel: ObservableObject {
     // MARK: Окно подробностей
 
     func open(_ module: Module) {
-        tintModule = module
         withAnimation(.easeInOut(duration: 0.2)) { detail = module }
     }
 
     func close() {
         withAnimation(.easeInOut(duration: 0.2)) { detail = nil }
-        tintModule = StoreModel.featured
+    }
+
+    // MARK: Сборка
+
+    /// Модули, которые стоят или ставятся.
+    var buildModules: [Module] {
+        Module.allCases.filter { m in
+            switch state(m) {
+            case .available: return false
+            default: return true
+            }
+        }
+    }
+
+    var buildMegabytes: Int { buildModules.reduce(0) { $0 + (StoreCatalog.downloads($1)?.megabytes ?? 0) } }
+
+    /// Разрешения сборки, которых до стора не было.
+    var newPermissions: [StorePermission] {
+        let all = buildModules.flatMap { StoreCatalog.needs($0).map(\.permission) }
+        let new = Set(all).subtracting(baseGranted)
+        return StorePermission.allCases.filter(new.contains)
     }
 
     // MARK: Установка (имитация)
@@ -282,5 +328,12 @@ final class StoreModel: ObservableObject {
             updates.remove(id)
             tasks[id] = nil
         }
+    }
+}
+
+extension DSTheme {
+    /// Акцент страницы стора: спокойный серо-синий, не цвет рекомендованного модуля.
+    func storeTint() -> Color {
+        self == .graphite ? Color.accentColor : Color(hue: 0.60, saturation: 0.28, brightness: 0.90)
     }
 }

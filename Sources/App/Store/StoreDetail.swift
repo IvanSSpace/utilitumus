@@ -1,6 +1,7 @@
 import SwiftUI
 
-// Подробности модуля: разрешения с объяснением, что скачается и куда, кнопки. Лежит поверх страницы стора.
+// Плавающая панель подробностей (V3 + «новое / уже выдано» из V2): лежит справа поверх страницы стора,
+// раскладка под ней не меняется. Закрытие: крестик, клик по затемнению или Esc.
 
 struct StoreDetail: View {
     let module: Module
@@ -13,97 +14,100 @@ struct StoreDetail: View {
         let state = store.state(id)
         let needs = StoreCatalog.needs(module)
         let download = StoreCatalog.downloads(module)
-        ZStack {
-            Color.black.opacity(0.5)
-                .contentShape(Rectangle())
-                .onTapGesture { store.close() }
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 14) {
-                    ModuleIconBadge(module: module, size: 56)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(module.title).font(.system(size: 22, weight: .bold, design: .rounded))
-                        HStack(spacing: 6) {
-                            DSChip(module.category.title, color: cat, icon: module.category.icon)
-                            if state == .installed {
-                                DSChip(store.hasUpdate(id) ? "Есть обновление" : "Установлен",
-                                       color: store.hasUpdate(id) ? .orange : .green,
-                                       icon: store.hasUpdate(id) ? "arrow.down" : "checkmark")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                ModuleIconBadge(module: module, size: 42)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(module.title).font(.system(size: 18, weight: .bold, design: .rounded)).lineLimit(1)
+                    HStack(spacing: 5) {
+                        // Рядом с пометкой состояния категория не влезает в узкую панель.
+                        if state == .installed {
+                            DSChip(store.hasUpdate(id) ? "Есть обновление" : "Установлен",
+                                   color: store.hasUpdate(id) ? .orange : .green)
+                        } else {
+                            DSChip(module.category.title, color: cat)
+                        }
+                    }
+                    .fixedSize()
+                }
+                Spacer(minLength: 4)
+                DSButton("", icon: "xmark", style: .plain, small: true) { store.close() }
+                    .help("Закрыть (Esc)")
+            }
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    if case .installing(let stage, let p) = state {
+                        StoreStages(stage: stage, progress: p, tint: cat)
+                    }
+                    DSSection("Что делает") {
+                        Text(module.summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14).padding(.vertical, 11)
+                    }
+
+                    DSSection("Разрешения", trailing: needs.isEmpty ? "не нужны" : nil) {
+                        if needs.isEmpty {
+                            DSRow(icon: "checkmark.shield.fill", title: "Ничего не просит",
+                                  subtitle: "Работает без особых разрешений", iconTint: .green)
+                        } else {
+                            ForEach(needs) { need in
+                                let granted = state == .installed || store.baseGranted.contains(need.permission)
+                                StoreNeedRow(need: need, granted: granted, tint: cat)
                             }
                         }
                     }
-                    Spacer(minLength: 8)
-                    DSButton("", icon: "xmark", style: .plain, small: true) { store.close() }
-                        .help("Закрыть")
-                }
-                Text(module.summary).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.7))
-                    .fixedSize(horizontal: false, vertical: true)
 
-                DSSection("Разрешения", trailing: needs.isEmpty ? "не нужны" : "спросим при установке") {
-                    if needs.isEmpty {
-                        DSRow(icon: "checkmark.shield.fill", title: "Ничего не просит",
-                              subtitle: "Работает без особых разрешений", iconTint: .green)
-                    } else {
-                        ForEach(needs) { need in
-                            DSRow(icon: need.permission.icon, title: need.permission.title,
-                                  subtitle: need.why, iconTint: cat)
+                    DSSection("Что скачается", trailing: download == nil ? "без загрузки" : "подпись проверим") {
+                        if let download {
+                            DSRow(icon: "arrow.down.circle.fill", title: "+\(download.megabytes) МБ, \(download.kind)",
+                                  subtitle: download.path, iconTint: cat)
+                        } else {
+                            DSRow(icon: "shippingbox.fill", title: "Всё уже в приложении",
+                                  subtitle: "Ничего не скачивается", iconTint: cat)
                         }
                     }
-                }
 
-                DSSection("Что скачается и куда", trailing: StoreCatalog.sizeText(module)) {
-                    if let download {
-                        DSRow(icon: "arrow.down.circle.fill", title: "+\(download.megabytes) МБ, \(download.kind)",
-                              subtitle: download.path, iconTint: cat)
-                        DSRow(icon: "checkmark.seal.fill", title: "Подпись Utilitumus",
-                              subtitle: "Проверим до распаковки", iconTint: .green)
-                    } else {
-                        DSRow(icon: "shippingbox.fill", title: "Всё уже в приложении",
-                              subtitle: "Ничего не скачивается, хранятся только настройки", iconTint: cat)
+                    DSSection("Что удалится") {
+                        DSRow(icon: "trash.fill", title: StoreCatalog.removal(module), iconTint: cat)
                     }
                 }
-
-                if case .installing(let stage, let p) = state {
-                    StoreStages(stage: stage, progress: p, tint: cat)
-                }
-
-                HStack(spacing: 8) {
-                    Text(state == .installed ? "Удаление сотрёт скачанное и настройки модуля"
-                                             : "Прототип: установка имитируется")
-                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.4)).lineLimit(2)
-                    Spacer(minLength: 8)
-                    HStack(spacing: 8) { buttons(id: id, state: state) }.fixedSize()
-                }
             }
-            .padding(22)
-            .frame(width: 520)
-            .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
-                .fill(Color(hue: module.category.hue, saturation: 0.40, brightness: 0.17)))
-            .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
-                .stroke(cat.opacity(0.45), lineWidth: 0.8))
-            .environment(\.dsTint, theme.accent(module))
+
+            HStack(spacing: 8) { buttons(id: id, state: state) }
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .padding(16)
+        .frame(maxHeight: .infinity, alignment: .top)
+        // Стеклянный фон поверх затемнённой витрины.
+        .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(.regularMaterial))
+        .background(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous).fill(.black.opacity(0.35)))
+        .overlay(RoundedRectangle(cornerRadius: DS.cardRadius, style: .continuous)
+            .stroke(.white.opacity(0.12), lineWidth: 0.8))
+        .environment(\.dsTint, theme.accent(module))
+        // Esc закрывает панель.
+        .background(Button("") { store.close() }.keyboardShortcut(.escape, modifiers: []).opacity(0).frame(width: 0, height: 0))
     }
 
     @ViewBuilder
     private func buttons(id: StoreItemID, state: StoreState) -> some View {
         switch state {
         case .available:
-            DSButton("Закрыть", style: .secondary) { store.close() }
             DSButton("Установить", icon: "arrow.down.circle.fill", style: .primary) { store.install(id) }
         case .installing:
             DSButton("Отменить", style: .secondary) { store.cancel(id) }
         case .installed:
-            DSButton("Удалить", icon: "trash", style: .secondary) { store.remove(id) }
+            DSButton("Удалить", icon: "trash", style: .secondary, small: true) { store.remove(id) }
             if store.hasUpdate(id) {
-                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary) { store.update(id) }
-            } else {
-                DSButton("Готово", style: .primary) { store.close() }
+                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: true) {
+                    store.update(id)
+                }
             }
         }
     }
 }
 
-/// Три этапа установки: скачивание → проверка подписи → разрешения. Текущий с полосой.
+/// Три этапа установки столбиком: скачивание, проверка подписи, разрешения. У текущего — полоса.
 private struct StoreStages: View {
     let stage: StoreStage
     let progress: Double
@@ -111,28 +115,45 @@ private struct StoreStages: View {
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
             ForEach(StoreStage.allCases, id: \.rawValue) { s in
                 let done = s.rawValue < stage.rawValue
                 let current = s == stage
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: done ? "checkmark.circle.fill" : (current ? "circle.dotted" : "circle"))
-                            .foregroundStyle(done ? Color.green : (current ? tint : .white.opacity(0.3)))
-                        Text(s.title).font(.system(size: 11.5, weight: current ? .semibold : .medium))
-                            .foregroundStyle(.white.opacity(done || current ? 0.95 : 0.4))
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                    }
+                HStack(spacing: 8) {
+                    Image(systemName: done ? "checkmark.circle.fill" : (current ? "circle.dotted" : "circle"))
+                        .foregroundStyle(done ? Color.green : (current ? tint : .white.opacity(0.3)))
+                    Text(s.title).font(.system(size: 12, weight: current ? .semibold : .medium))
+                        .foregroundStyle(.white.opacity(done || current ? 0.95 : 0.4))
+                        .frame(width: 118, alignment: .leading)
                     StoreProgressBar(value: done ? 1 : (current ? progress : 0), tint: done ? .green : tint)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if s != StoreStage.allCases.last {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.25)).padding(.top, 4)
                 }
             }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+    }
+}
+
+/// Разрешение: название и пометка «новое / уже выдано» в одной строке, пояснение под ними.
+private struct StoreNeedRow: View {
+    let need: StoreNeed
+    let granted: Bool
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(need.permission.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.95))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 4)
+                DSChip(granted ? "уже выдано" : "новое", color: granted ? .green : .orange).fixedSize()
+            }
+            Text(need.why).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14)
+        }
     }
 }

@@ -1,15 +1,18 @@
 import SwiftUI
 
-// Страница «Стор», направление V1 «Витрина»: крупная рекомендация, ниже ряды плиток по категориям.
-// Клик по плитке открывает подробности поверх страницы. Переходы — 0,2 с, без пружин.
+// Страница «Стор», V4: витрина V1 (рекомендация и ряды плиток по категориям), подробности как в V3 —
+// плавающая панель справа поверх страницы, снизу полоса «Твоя сборка» из V2. Переходы 0,2 с, без пружин.
+// Цвет страницы нейтральный (см. `DSTheme.storeTint`): модуль красит только свою плитку и карточку.
 
 struct StoreView: View {
     @ObservedObject private var store = StoreModel.shared
     @Environment(\.dsTheme) private var theme
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .leading, spacing: 14) {
+        // Панель живёт только на «Витрине» и лежит поверх неё: раскладка страницы не меняется.
+        let detail = store.tab == .showcase ? store.detail : nil
+        ZStack(alignment: .trailing) {
+            VStack(alignment: .leading, spacing: 12) {
                 DSHeaderLayout(title: "Стор", subtitle: "Ресурсы и доступы видно до установки",
                                primary: nil, badge: { DSBadge(icon: "bag.fill") },
                                controls: {
@@ -20,35 +23,41 @@ struct StoreView: View {
                 case .packs: StorePacksTab()
                 }
                 Spacer(minLength: 0)
+                StoreBar()
             }
             .padding(DS.pagePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            if let module = store.detail {
-                StoreDetail(module: module)
+            if let detail {
+                Color.black.opacity(0.25)
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.close() }
                     .transition(.opacity)
-                    .zIndex(1)
+                StoreDetail(module: detail)
+                    .frame(width: 380)
+                    .padding(12)
+                    .shadow(color: .black.opacity(0.4), radius: 18, x: -4, y: 4)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .animation(.easeInOut(duration: 0.2), value: detail)
     }
 }
 
 // MARK: - Витрина
 
 private struct StoreShowcase: View {
-    @Environment(\.dsTheme) private var theme
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             StoreFeatured(module: StoreModel.featured)
-            ForEach(ModuleCategory.all) { category in
-                StoreShelf(category: category)
-            }
+            ForEach(ModuleCategory.all) { StoreShelf(category: $0) }
         }
     }
 }
 
-/// Крупная рекомендация сверху.
+/// Крупная рекомендация: свой цвет только внутри карточки.
 private struct StoreFeatured: View {
     let module: Module
     @ObservedObject private var store = StoreModel.shared
@@ -57,32 +66,32 @@ private struct StoreFeatured: View {
     var body: some View {
         let cat = theme.categoryColor(module.category)
         HStack(spacing: 16) {
-            ModuleIconBadge(module: module, size: 68)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 6) {
+            ModuleIconBadge(module: module, size: 58)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
                     DSChip("Рекомендуем", color: cat, icon: "star.fill")
-                    DSChip(module.category.title, color: .white.opacity(0.7))
+                    StoreMeta(module: module)
                 }
-                Text(module.title).font(.system(size: 21, weight: .bold, design: .rounded))
-                Text(module.info.tagline).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
-                StoreMeta(module: module)
+                Text(module.title).font(.system(size: 20, weight: .bold, design: .rounded))
+                Text(module.info.tagline).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
             }
             Spacer(minLength: 12)
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 StoreActionButton(id: .module(module), small: false)
                 DSButton("Подробнее", style: .plain, small: true) { store.open(module) }
             }
             .fixedSize()
         }
-        .padding(.horizontal, 18).padding(.vertical, 12)
-        .frame(height: 112)
+        .padding(.horizontal, 16)
+        .frame(height: 92)
         .background(
             RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous)
-                .fill(LinearGradient(colors: [cat.opacity(0.34), cat.opacity(0.10)],
+                .fill(LinearGradient(colors: [cat.opacity(0.30), cat.opacity(0.08)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
         )
         .overlay(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous)
             .stroke(cat.opacity(0.4), lineWidth: 0.8))
+        .environment(\.dsTint, theme.accent(module))
         .contentShape(Rectangle())
         .onTapGesture { store.open(module) }
     }
@@ -106,13 +115,14 @@ private struct StoreMeta: View {
                 }
             }
         }
-        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).lineLimit(1).fixedSize()
     }
 }
 
-/// Ряд категории: заголовок с цветной меткой и плитки по три в строке.
+/// Ряд категории: заголовок с цветной меткой и плитки по `columns` в строке.
 private struct StoreShelf: View {
     let category: ModuleCategory
+    private let columns = 3
     @Environment(\.dsTheme) private var theme
 
     private enum Item: Identifiable {
@@ -127,15 +137,15 @@ private struct StoreShelf: View {
 
     var body: some View {
         let items = category.modules.map(Item.module) + StoreSoon.all.filter { $0.categoryID == category.id }.map(Item.soon)
-        let rows = stride(from: 0, to: items.count, by: 3).map { Array(items[$0..<min($0 + 3, items.count)]) }
-        VStack(alignment: .leading, spacing: 6) {
+        let rows = stride(from: 0, to: items.count, by: columns).map { Array(items[$0..<min($0 + columns, items.count)]) }
+        VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
                 Capsule().fill(theme.categoryColor(category)).frame(width: 3, height: 12)
                 Text(category.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-                Text(category.subtitle).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42))
+                Text(category.subtitle).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42)).lineLimit(1)
             }
             .padding(.horizontal, 4)
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     HStack(spacing: 8) {
                         ForEach(row) { item in
@@ -144,7 +154,9 @@ private struct StoreShelf: View {
                             case .soon(let s): StoreSoonTile(soon: s, category: category)
                             }
                         }
-                        if row.count < 3 { ForEach(0..<(3 - row.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) } }
+                        if row.count < columns {
+                            ForEach(0..<(columns - row.count), id: \.self) { _ in Color.clear.frame(maxWidth: .infinity) }
+                        }
                     }
                 }
             }
@@ -152,7 +164,7 @@ private struct StoreShelf: View {
     }
 }
 
-/// Плитка модуля: значок, имя, строка «что делает», размер и разрешения, справа состояние.
+/// Плитка модуля: значок с состоянием, имя целиком, одна строка описания, размер и разрешения; сбоку (i).
 private struct StoreTile: View {
     let module: Module
     @ObservedObject private var store = StoreModel.shared
@@ -162,28 +174,58 @@ private struct StoreTile: View {
         let cat = theme.categoryColor(module.category)
         let state = store.state(module)
         let installed = state == .installed
+        let selected = store.detail == module
         HStack(spacing: 10) {
             ModuleIconBadge(module: module, size: 36)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(module.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text(module.info.tagline).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                .overlay(alignment: .bottomTrailing) {
+                    StoreGlyph(state: state, update: store.hasUpdate(.module(module)), tint: cat).offset(x: 5, y: 5)
+                }
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(module.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        .fixedSize().layoutPriority(2)
+                    Spacer(minLength: 2)
+                    StoreInfoButton(module: module)
+                }
+                Text(StoreCatalog.line(module)).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.62))
+                    .lineLimit(1)
                 StoreMeta(module: module, short: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            StoreGlyph(state: state, update: store.hasUpdate(.module(module)), tint: cat)
         }
         .padding(.horizontal, 11)
         .frame(height: 62)
         .hoverFill(RoundedRectangle(cornerRadius: 12, style: .continuous),
-                   normal: cat.opacity(installed ? 0.16 : 0.08), hovered: cat.opacity(0.22))
+                   normal: cat.opacity(installed ? 0.15 : 0.08), hovered: cat.opacity(0.22))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(cat.opacity(installed ? 0.38 : 0.16), lineWidth: 0.7))
+            .stroke(selected ? Color.white.opacity(0.6) : cat.opacity(installed ? 0.36 : 0.16),
+                    lineWidth: selected ? 1.2 : 0.7))
+        .contentShape(Rectangle())
         .onTapGesture { store.open(module) }
         .accessibilityAddTraits(.isButton)
     }
 }
 
-/// Плитка «Скоро»: серая, не открывается.
+/// Кнопка (i): открывает боковую панель с подробностями.
+private struct StoreInfoButton: View {
+    let module: Module
+    @ObservedObject private var store = StoreModel.shared
+    @State private var hover = false
+
+    var body: some View {
+        Button { store.open(module) } label: {
+            Image(systemName: store.detail == module ? "info.circle.fill" : "info.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(hover || store.detail == module ? 0.95 : 0.5))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .onHover { hover = $0 }
+        .help("Что скачается и какие нужны доступы")
+    }
+}
+
+/// Плитка «Скоро»: пунктир, нормальная плашка в третьей строке, не открывается.
 private struct StoreSoonTile: View {
     let soon: StoreSoon
     let category: ModuleCategory
@@ -196,23 +238,57 @@ private struct StoreSoonTile: View {
                 .strokeBorder(cat.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 .frame(width: 36, height: 36)
                 .overlay(Image(systemName: soon.icon).font(.system(size: 16)).foregroundStyle(cat))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(soon.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(soon.title).font(.system(size: 13, weight: .semibold)).lineLimit(1).fixedSize()
                 Text(soon.tagline).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                DSChip("Скоро", color: cat).fixedSize()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            DSChip("Скоро", color: cat)
         }
         .padding(.horizontal, 11)
         .frame(height: 62)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.03)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(.white.opacity(0.12), style: StrokeStyle(lineWidth: 0.7, dash: [4, 3])))
-        .opacity(0.8)
+            .strokeBorder(.white.opacity(0.14), style: StrokeStyle(lineWidth: 0.7, dash: [4, 3])))
     }
 }
 
-/// Значок состояния справа в плитке: установлен, можно поставить, идёт установка.
+/// Нижняя полоса: что получится в сборке и какие доступы придётся выдать.
+private struct StoreBar: View {
+    @ObservedObject private var store = StoreModel.shared
+
+    var body: some View {
+        let count = store.buildModules.count
+        let new = store.newPermissions
+        HStack(spacing: 8) {
+            Image(systemName: "shippingbox.fill").foregroundStyle(.white.opacity(0.6))
+            if count > 0 { Text("Твоя сборка:").fontWeight(.semibold) }
+            if count == 0 {
+                Text("Пока ничего не установлено").foregroundStyle(.white.opacity(0.7))
+            } else {
+                Text("\(count) \(Self.plural(count)) · \(store.buildMegabytes) МБ · новые разрешения:")
+                    .foregroundStyle(.white.opacity(0.7))
+                if new.isEmpty {
+                    Text("нет").foregroundStyle(.white.opacity(0.7))
+                } else {
+                    ForEach(new, id: \.rawValue) { DSChip($0.title, color: .orange, icon: $0.icon) }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .font(.system(size: 12)).lineLimit(1)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.white.opacity(0.06)))
+    }
+
+    static func plural(_ n: Int) -> String {
+        let last = n % 10, tens = n % 100
+        if tens >= 11 && tens <= 14 { return "модулей" }
+        return last == 1 ? "модуль" : (2...4).contains(last) ? "модуля" : "модулей"
+    }
+}
+
+/// Значок состояния на углу иконки плитки: установлен, обновить, идёт установка. «Не стоит» — без значка.
 struct StoreGlyph: View {
     let state: StoreState
     let update: Bool
@@ -223,21 +299,23 @@ struct StoreGlyph: View {
             switch state {
             case .installed:
                 Image(systemName: update ? "arrow.down.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(update ? Color.orange : Color.green)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, update ? Color.orange : Color.green)
             case .available:
-                Image(systemName: "plus.circle").foregroundStyle(.white.opacity(0.55))
+                EmptyView()
             case .installing(let stage, let p):
                 let done = (Double(stage.rawValue) + p) / Double(StoreStage.allCases.count)
                 ZStack {
-                    Circle().stroke(.white.opacity(0.15), lineWidth: 2.5)
-                    Circle().trim(from: 0, to: done).stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    Circle().fill(.black.opacity(0.6))
+                    Circle().stroke(.white.opacity(0.2), lineWidth: 2)
+                    Circle().trim(from: 0, to: done).stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
-                .frame(width: 17, height: 17)
             }
         }
-        .font(.system(size: 19))
-        .frame(width: 22)
+        .font(.system(size: 15))
+        .frame(width: 15, height: 15)
+        .background(Circle().fill(.black.opacity(state == .installed ? 0.35 : 0)))
     }
 }
 
