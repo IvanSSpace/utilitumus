@@ -6,8 +6,7 @@ struct KeyboardView: View {
 
     var body: some View {
         DSPage(module: .keyboard, subtitle: "Мгновенная смена раскладки по тапу Fn/🌐") {
-            if controller.systemUsage != 0 { systemWarning }
-            if controller.dictationConflict { dictationWarning }
+            if controller.systemUsage != 0 || controller.dictationConflict { warnings }
 
             DSSection("Как переключать") {
                 DSRow(icon: "hand.tap.fill", title: "Когда менять язык",
@@ -24,12 +23,12 @@ struct KeyboardView: View {
                 DSRow(icon: "keyboard.fill", title: "Сейчас включена") {
                     DSChip(controller.currentName, color: .secondary)
                 }
-                DSRow(icon: "globe", title: "Системное действие 🌐",
-                      subtitle: controller.systemUsage == 0 ? "Отключено, второго переключения не будет"
-                                                            : "Включено в macOS, язык может переключиться второй раз") {
-                    DSChip(FnSystemAction.title(for: controller.systemUsage),
-                           color: controller.systemUsage == 0 ? .green : .orange,
-                           icon: controller.systemUsage == 0 ? "checkmark" : "exclamationmark.triangle.fill")
+                // Пока есть предупреждение, оно само говорит про системное действие.
+                if controller.systemUsage == 0 {
+                    DSRow(icon: "globe", title: "Системное действие 🌐",
+                          subtitle: "Отключено, второго переключения не будет") {
+                        DSChip(FnSystemAction.title(for: controller.systemUsage), color: .green, icon: "checkmark")
+                    }
                 }
                 DSRow(title: status.text) {
                     Image(systemName: status.icon).foregroundStyle(status.color)
@@ -39,29 +38,27 @@ struct KeyboardView: View {
         .onPageActive { if $0 { controller.refreshAccess(); controller.refreshSystem() } }
     }
 
-    private var systemWarning: some View {
-        DSSection("Конфликт с системой", trailing: "Нужно отключить") {
-            DSRow(icon: "exclamationmark.triangle.fill", title: "Система тоже переключит язык",
-                  subtitle: "Нажатие 🌐 в macOS сейчас: «\(FnSystemAction.title(for: controller.systemUsage))». С ним язык поменяется дважды.",
-                  iconTint: .orange) { EmptyView() }
-            DSRow(title: "Что сделать") {
-                HStack(spacing: 8) {
-                    DSButton("Отключить системное действие", icon: "bolt.slash.fill", style: .primary, small: true) {
-                        controller.disableSystemAction()
-                    }
-                    DSButton("Открыть настройки клавиатуры", icon: "gearshape", small: true) {
-                        controller.openKeyboardSettings()
+    private var warnings: some View {
+        DSSection("Конфликты с системой", trailing: "Лучше отключить") {
+            if controller.systemUsage != 0 {
+                DSRow(icon: "exclamationmark.triangle.fill", title: "Система тоже переключит язык",
+                      subtitle: "Нажатие 🌐 в macOS сейчас: «\(FnSystemAction.title(for: controller.systemUsage))». С ним язык поменяется дважды.",
+                      iconTint: .orange) {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        DSButton("Отключить системное действие", icon: "bolt.slash.fill", style: .primary, small: true) {
+                            controller.disableSystemAction()
+                        }
+                        DSButton("Открыть настройки клавиатуры", icon: "gearshape", small: true) {
+                            controller.openKeyboardSettings()
+                        }
                     }
                 }
             }
-        }
-    }
-
-    private var dictationWarning: some View {
-        DSSection("Диктовка") {
-            DSRow(icon: "mic.fill", title: "Диктовка включается двойным нажатием 🌐",
-                  subtitle: "Она будет срабатывать вместе с переключением. Поменяй сочетание в «Клавиатура → Диктовка».",
-                  iconTint: .orange) { EmptyView() }
+            if controller.dictationConflict {
+                DSRow(icon: "mic.fill", title: "Диктовка включается двойным нажатием 🌐",
+                      subtitle: "Она будет срабатывать вместе с переключением. Поменяй сочетание в «Клавиатура → Диктовка».",
+                      iconTint: .orange) { EmptyView() }
+            }
         }
     }
 
