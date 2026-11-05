@@ -132,6 +132,8 @@ struct MainView: View {
     /// Скрытый модуль, открытый со страницы «О проекте»: показываем один раз,
     /// состояние не меняем, в панели его по-прежнему нет.
     @State private var peeked: Module?
+    /// Приветствие поверх окна: один раз (флаг `Welcome.seenKey`), потом открывается Стор.
+    @State private var showWelcome = !Welcome.isSeen
     /// Режим страниц: «Быстрый» держит экраны в кэше, «Экономный» собирает экран при открытии.
     @AppStorage(PageMode.storageKey) private var pageModeRaw = PageMode.fast.rawValue
     /// Только для «Экономного»: модуль, чей экран сейчас построен. Догоняет `displayed` следующим кадром,
@@ -195,6 +197,12 @@ struct MainView: View {
             }
         }
         .overlay(alignment: .topLeading) { DSSidebarToggle(hidden: $sidebarHidden) }
+        .overlay {
+            if showWelcome {
+                WelcomeScene { finishWelcome() }
+                    .transition(.opacity)
+            }
+        }
         .environment(\.dsTint, pageTint)
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
@@ -255,6 +263,16 @@ struct MainView: View {
             // Разовый показ имеет смысл только пока модуль скрыт: вернули в панель — сбрасываем.
             if let peeked, !modules.isHidden(peeked) { self.peeked = nil }
         }
+    }
+
+    /// Приветствие закончено (или пропущено): запоминаем и открываем Стор.
+    private func finishWelcome() {
+        Welcome.markSeen()
+        peeked = nil
+        showAbout = false
+        showDashboard = false
+        showStore = true
+        withAnimation(.easeInOut(duration: 0.35)) { showWelcome = false }
     }
 
     /// Стартовая страница: последний выбранный модуль, если он установлен; иначе первый установленный;
