@@ -156,6 +156,8 @@ enum Advice {
         var name: String
         var memMB: Double
         var age: Double
+        /// Где запущен: проект и папка. nil — рабочую папку узнать не вышло.
+        var place: ProcessPlace?
         var id: Int32 { pid }
     }
 
@@ -170,7 +172,8 @@ enum Advice {
             guard Kinds.interpreters.contains(name) || name.hasPrefix("python")
                     || p.args.joined(separator: " ").lowercased().contains("mcp") else { continue }
             let mem = tree.subtree(of: p.pid).reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }
-            out.append(Orphan(pid: p.pid, name: Kinds.label(p), memMB: mem.rounded(), age: p.age(now: now) ?? 0))
+            out.append(Orphan(pid: p.pid, name: Kinds.label(p), memMB: mem.rounded(), age: p.age(now: now) ?? 0,
+                             place: ProcessPlaces.place(cwd: p.cwd)))
         }
         return out.sorted { $0.memMB > $1.memMB }
     }

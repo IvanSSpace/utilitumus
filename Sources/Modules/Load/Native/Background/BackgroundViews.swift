@@ -99,6 +99,7 @@ struct AgentRow: View {
             if !agent.note.isEmpty {
                 Text(agent.note).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            if let place = agent.place { PlaceLabel(place: place, showHome: false) }
             HStack(spacing: 8) {
                 Text(agent.label).font(.caption.monospaced()).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle).help(agent.plist ?? agent.label)

@@ -62,7 +62,7 @@ struct SnapshotKey: Equatable {
         let d = s.sessions
         var acts: [SessionActivity] = []
         func child(_ c: SessionChild) {
-            h.combine(c.pid); h.combine(c.name); h.combine(c.kind.rawValue); h.combine(Self.q(c.memMB ?? -1)); h.combine(c.stoppable)
+            h.combine(c.pid); h.combine(c.name); h.combine(c.place?.path); h.combine(c.kind.rawValue); h.combine(Self.q(c.memMB ?? -1)); h.combine(c.stoppable)
             h.combine(Self.minutes(c.age))
         }
         func session(_ c: ClaudeSession) {
@@ -84,7 +84,7 @@ struct SnapshotKey: Equatable {
         for t in d.tmux.sessions { h.combine(t.name); h.combine(t.windows); h.combine(t.attached) }
         h.combine(d.docker.running)
         for c in d.docker.containers { h.combine(c.id); h.combine(c.state); h.combine(c.status) }
-        for o in d.orphans { h.combine(o.pid); h.combine(Self.q(o.memMB)); h.combine(Self.minutes(o.age)) }
+        for o in d.orphans { h.combine(o.pid); h.combine(o.place?.path); h.combine(Self.q(o.memMB)); h.combine(Self.minutes(o.age)) }
         for p in d.stoppableOrphans.sorted() { h.combine(p) }
         for p in d.ai.parts { h.combine(p.label); h.combine(Self.q(p.memMB)); h.combine(p.count) }
 

@@ -152,10 +152,7 @@ final class ProcessScanner {
                 $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
             } == 0
 
-            var vnode = proc_vnodepathinfo()
-            let vnodeSize = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-            let cwd: String? = proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vnode, vnodeSize) == vnodeSize
-                ? cString(vnode.pvi_cdir.vip_path) : nil
+            let cwd = ProcessPlaces.cwd(ofPid: pid)
 
             // Время CPU в тиках mach (на Apple Silicon тик ≠ наносекунда).
             let cpuNs = ticksToNs(task.ptinfo.pti_total_user &+ task.ptinfo.pti_total_system)

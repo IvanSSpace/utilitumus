@@ -26,6 +26,8 @@ struct SessionChild: Sendable, Identifiable {
     var age: Double
     /// Можно показать кнопку «Остановить» (dev-сервер или от 500 MB, и процесс не под защитой).
     var stoppable: Bool
+    /// Где запущен, если не там же, где его хозяин (сессия или шелл).
+    var place: ProcessPlace?
     var id: Int32 { pid }
 
     /// Dev-сервер или от 500 MB: на такие смотрим в первую очередь.
