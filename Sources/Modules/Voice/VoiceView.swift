@@ -201,7 +201,7 @@ struct VoiceView: View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Не включать в приложениях") {
                 // Длинный список прокручивается внутри, чтобы не растягивать колонку.
-                ScrollView {
+                DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(controller.excludedApps, id: \.self) { id in
                             HStack(spacing: 10) {

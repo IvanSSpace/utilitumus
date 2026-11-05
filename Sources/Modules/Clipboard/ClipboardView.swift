@@ -94,7 +94,7 @@ struct ClipboardView: View {
     private var spacesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Пространства", trailing: controller.spaces.isEmpty ? nil : "\(controller.spaces.count)") {
-                ScrollView {
+                DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(controller.spaces) { space in
                             SpaceRow(space: space,
@@ -131,7 +131,7 @@ struct ClipboardView: View {
     private var excludedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Не запоминать из приложений") {
-                ScrollView {
+                DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(controller.excludedApps, id: \.self) { id in
                             HStack(spacing: 10) {

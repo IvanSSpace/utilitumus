@@ -36,10 +36,10 @@ struct SettingsView: View {
     }
 }
 
-/// «Тема»: пять мини-окошек (четыре пресета и «Своя»), применяется сразу.
+/// «Тема»: шесть мини-окошек (пять пресетов и «Своя»), применяется сразу.
 /// У «Своей» ниже раскрывается редактор палитры.
 private struct ThemeSection: View {
-    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.calm.rawValue
+    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.dusk.rawValue
     @ObservedObject private var store = CustomPaletteStore.shared
     @Environment(\.dsTint) private var tint
     /// Черновик: ползунки двигают его, в хранилище он уходит по отпусканию (и по тапу на образец).
