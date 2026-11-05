@@ -96,6 +96,7 @@ final class DashSlot: ObservableObject {
             subs = [
                 ModuleManager.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
                 AccessState.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
+                SatelliteRegistry.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
             ]
         }
         update()
@@ -103,7 +104,7 @@ final class DashSlot: ObservableObject {
 
     /// Выключенный модуль ничего не публикует: на контроллер подписываемся, только пока он включён.
     private func syncSource() {
-        if ModuleManager.shared.isOn(module) {
+        if ModuleManager.shared.runsBuiltIn(module) {
             guard sourceSub == nil else { return }
             // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
             sourceSub = DashboardLive.source(module)
@@ -175,6 +176,7 @@ enum DashboardLive {
     }
 
     fileprivate static func compute(_ module: Module) -> DashState {
+        if ModuleManager.shared.isExternal(module) { return satellite(module) }
         guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
         if module.isBlocked { return DashState(text: "нужен доступ", attention: true) }
         switch module {
@@ -190,6 +192,14 @@ enum DashboardLive {
         case .load: return load()
         case .keyboard: return keyboard()
         }
+    }
+
+    private static func satellite(_ module: Module) -> DashState {
+        guard let status = SatelliteRegistry.shared.entries[module]?.status else {
+            return DashState(text: "не отвечает", attention: true)
+        }
+        if status.needsSetup > 0 { return DashState(text: "нужны доступы: \(status.needsSetup)", attention: true) }
+        return DashState(text: status.line)
     }
 
     private static func sound() -> DashState {

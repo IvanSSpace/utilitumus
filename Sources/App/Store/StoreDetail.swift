@@ -12,7 +12,12 @@ struct StoreDetail: View {
         let cat = theme.categoryColor(module.category)
         let state = store.state(module)
         let steps = module.setupSteps
-        let download = StoreCatalog.downloads(module)
+        let app = store.satellites.catalogApp(module)
+        let download = app.map {
+            StoreDownload(megabytes: $0.sizeMB, kind: "приложение", path: "/Applications/Utilitumus/",
+                          name: SatelliteRegistry.bundleName(module) + " " + $0.version)
+        } ?? StoreCatalog.downloads(module)
+        let isSatellite = store.satellites.hasBundle(module)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 ModuleIconBadge(module: module, size: 42)
@@ -21,7 +26,7 @@ struct StoreDetail: View {
                     HStack(spacing: 5) {
                         // Рядом с пометкой состояния категория не влезает в узкую панель.
                         if state == .installed {
-                            DSChip(store.hasUpdate(module) ? "Нет модели" : "Установлен",
+                            DSChip(store.hasUpdate(module) ? (isSatellite ? "Есть обновление" : "Нет модели") : "Установлен",
                                    color: store.hasUpdate(module) ? .orange : .green)
                             if store.isHidden(module) { DSChip("скрыт из панели", color: .gray, icon: "eye.slash") }
                         } else {
@@ -37,6 +42,13 @@ struct StoreDetail: View {
 
             DSScroll(inset: DS.groupRadius) {
                 VStack(alignment: .leading, spacing: 14) {
+                    if let failure = store.failure, failure.module == module {
+                        VStack(spacing: 0) {
+                            noteRow(icon: "exclamationmark.triangle.fill", tint: .orange, title: "Не получилось",
+                                    subtitle: failure.message, button: "Закрыть") { store.dismissFailure() }
+                        }
+                        .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+                    }
                     if case .installing(let stage, let p) = state {
                         StoreStages(stage: stage, progress: p, tint: cat)
                     }
@@ -136,7 +148,8 @@ struct StoreDetail: View {
         case .installed:
             DSButton("Удалить", icon: "trash", style: .secondary, small: true) { store.requestRemoval(module) }
             if store.hasUpdate(module) {
-                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .secondary, small: true) {
+                DSButton(store.satellites.hasBundle(module) ? "Обновить" : "Обновить ресурсы",
+                         icon: "arrow.triangle.2.circlepath", style: .secondary, small: true) {
                     store.downloadResources(module)
                 }
             }

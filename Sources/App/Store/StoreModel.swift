@@ -8,6 +8,8 @@ import Combine
 // но остаётся в Сторе: настройку и переход в модуль человек выбирает сам.
 // Удаление выключает модуль, стирает скачанное и снимает скрытие; настройки модуля остаются.
 // «Скрыть из панели» — отдельное действие, на «установлен» не влияет.
+// Модуль с записью в каталоге ставится отдельным приложением через `SatelliteRegistry`; плитка та же, разница
+// только в том, что делает «＋». Каталог недоступен или записи нет — всё как у встроенного.
 
 // MARK: - Разрешения
 
@@ -113,6 +115,9 @@ enum StoreCatalog {
     /// Что сотрётся при удалении: пункты для подтверждения.
     @MainActor static func removal(_ m: Module) -> [String] {
         var items = ["Модуль выключится и пропадёт из боковой панели и из «Скрытых»"]
+        if SatelliteRegistry.shared.hasBundle(m) {
+            items.append("Приложение \(SatelliteRegistry.bundleName(m)) из папки «Программы/Utilitumus»")
+        }
         if m == .voice {
             for model in VoiceModel.allCases where VoiceModelStore.shared.status(model) != .notInstalled {
                 items.append("Скачанная модель \(model.title) (\(megabytes(model)) МБ)")
@@ -227,6 +232,12 @@ enum StoreState: Equatable {
     case installed
 }
 
+/// Установка или удаление через установщик сорвались. Висит внизу Стора, пока её не закроют или не начнут новое.
+struct StoreFailure: Equatable {
+    let module: Module
+    let message: String
+}
+
 enum StoreTab: String, CaseIterable, Hashable {
     case showcase, packs
     var title: String { self == .showcase ? "Витрина" : "Наборы контента" }
@@ -257,6 +268,11 @@ final class StoreModel: ObservableObject {
 
     private let modules = ModuleManager.shared
     private let voice = VoiceModelStore.shared
+    let satellites = SatelliteRegistry.shared
+    @Published private(set) var failure: StoreFailure?
+    /// Идущие установки и удаления: отсюда их отменяет кнопка с процентом. Запись появляется сразу, раньше
+    /// старта задачи: иначе «＋» успел бы нажаться дважды.
+    @Published private var operations: [Module: Task<Void, Never>] = [:]
     private var subs: [AnyCancellable] = []
 
     /// Рекомендация дня.
@@ -266,12 +282,15 @@ final class StoreModel: ObservableObject {
         // Состояние берём у менеджера модулей и стора моделей: их изменения перерисовывают стор.
         subs.append(modules.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
         subs.append(voice.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
+        subs.append(satellites.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
     }
 
     /// «Установлен» = модуль включён.
     func isInstalled(_ module: Module) -> Bool { modules.isInstalled(module) }
 
     func state(_ module: Module) -> StoreState {
+        // Установщик долю не сообщает: только этап.
+        if operations[module] != nil { return .installing(.download, 0) }
         if module == .voice {
             switch voice.status(voice.selected) {
             case .downloading(let p): return .installing(.download, p)
@@ -284,7 +303,8 @@ final class StoreModel: ObservableObject {
 
     /// Установленному модулю не хватает ресурсов: у «Голоса» не скачана модель.
     func hasUpdate(_ module: Module) -> Bool {
-        module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
+        if satellites.hasBundle(module) { return satellites.hasUpdate(module) }
+        return module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
     }
 
     /// Витрина с подсвеченной на пару секунд категорией.
@@ -324,7 +344,8 @@ final class StoreModel: ObservableObject {
 
     /// Доступы установленных модулей, которых ещё нет (системе придётся о них спросить).
     var newPermissions: [StorePermission] {
-        let all = Set(buildModules.flatMap { StoreCatalog.needs($0).map(\.permission) })
+        // Доступы утилиты выдаются ей, а не центру.
+        let all = Set(buildModules.filter { !modules.isExternal($0) }.flatMap { StoreCatalog.needs($0).map(\.permission) })
         return StorePermission.allCases.filter { all.contains($0) && $0.isGranted != true }
     }
 
@@ -333,6 +354,11 @@ final class StoreModel: ObservableObject {
     /// Включить, поставить в панель и скачать ресурсы. Остаёмся в Сторе: плитка станет «Установлен»,
     /// недостающая настройка — в плашке «Настроить», переход в модуль — кнопка «Открыть».
     func install(_ module: Module) {
+        if let app = satellites.catalogApp(module) {
+            modules.setHidden(module, false)
+            runInstall(module, app)
+            return
+        }
         modules.setHidden(module, false)
         modules.setOn(module, true)
         downloadResources(module)
@@ -341,7 +367,8 @@ final class StoreModel: ObservableObject {
 
     /// Незавершённая настройка установленного модуля: «Настройка 1 из 3». nil — всё готово или шагов нет.
     func pendingSetup(_ module: Module) -> SetupProgress? {
-        guard isInstalled(module) else { return nil }
+        // Чек-лист утилиты у неё самой, здесь были бы доступы центра.
+        guard isInstalled(module), !modules.isExternal(module) else { return nil }
         let progress = module.setupProgress
         return progress.total > 0 && !progress.allDone ? progress : nil
     }
@@ -363,6 +390,53 @@ final class StoreModel: ObservableObject {
     /// «Показать в панели» у установленного скрытого модуля.
     func showInPanel(_ module: Module) { modules.setHidden(module, false) }
 
+    private func runInstall(_ module: Module, _ app: CatalogApp) {
+        run(module, fallback: "Не удалось установить модуль") {
+            try await self.satellites.install(module, app: app)
+            self.showToast(module)
+        }
+    }
+
+    private func run(_ module: Module, fallback: String, _ work: @escaping () async throws -> Void) {
+        guard operations[module] == nil else { return }
+        failure = nil
+        operations[module] = Task {
+            do {
+                try await work()
+            } catch {
+                show(error, module: module, fallback: fallback)
+            }
+            operations[module] = nil
+        }
+    }
+
+    private func show(_ error: Error, module: Module, fallback: String) {
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+        NSLog("Utilitumus: модуль %@: %@", module.rawValue, String(describing: error))
+        failure = StoreFailure(module: module, message: Self.failureMessage(error, fallback: fallback))
+    }
+
+    func dismissFailure() { failure = nil }
+
+    /// `localizedDescription` здесь не годится: у `LinkError` он системный и английский, и он же лежит
+    /// в `rollbackFailed.cause`. Сырое остаётся в журнале.
+    static func failureMessage(_ error: Error, fallback: String) -> String {
+        switch error {
+        case SatelliteInstallError.rollbackFailed:
+            return "Не получилось, и прежнее состояние вернуть не удалось. Поставь модуль заново"
+        case let error as SatelliteInstallError:
+            return error.errorDescription ?? fallback
+        case let error as KitSigning.Failure:
+            return error.errorDescription ?? fallback
+        case is LinkError:
+            return "Модуль не ответил после запуска, прежняя версия возвращена"
+        case is URLError:
+            return "Не удалось скачать модуль: проверь сеть"
+        default:
+            return fallback
+        }
+    }
+
     private func showToast(_ module: Module) {
         withAnimation(.easeInOut(duration: 0.2)) { justInstalled = module }
         toastTask?.cancel()
@@ -374,10 +448,15 @@ final class StoreModel: ObservableObject {
 
     /// Скачивание ресурсов модуля; там, где их нет, ничего не делает.
     func downloadResources(_ module: Module) {
+        if satellites.hasUpdate(module), let app = satellites.catalogApp(module) {
+            runInstall(module, app)
+            return
+        }
         if module == .voice, !VoiceModelStore.isInstalled(voice.selected) { voice.download(voice.selected) }
     }
 
     func cancel(_ module: Module) {
+        operations[module]?.cancel()
         if module == .voice { voice.cancel(voice.selected) }
     }
 
@@ -385,6 +464,18 @@ final class StoreModel: ObservableObject {
 
     /// Выключить, стереть скачанное, снять скрытие (иначе модуль висел бы в «Скрытых»). Настройки модуля не трогаем.
     func remove(_ module: Module) {
+        guard satellites.hasBundle(module) else {
+            removeBuiltIn(module)
+            return
+        }
+        pendingRemoval = nil
+        run(module, fallback: "Не удалось удалить модуль") {
+            try await self.satellites.uninstall(module)
+            self.removeBuiltIn(module)
+        }
+    }
+
+    private func removeBuiltIn(_ module: Module) {
         modules.setOn(module, false)
         modules.setHidden(module, false)
         if module == .voice {
