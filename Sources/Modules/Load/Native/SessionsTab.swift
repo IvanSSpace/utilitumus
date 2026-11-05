@@ -8,9 +8,9 @@ struct SessionsTab: View {
     @ObservedObject var store: LoadStore
     let mode: LoadViewMode
 
-    /// Раскрытые и свёрнутые руками «Потомки»: у кого есть горячий потомок, список открыт сам, пока его не свернули.
-    @State private var opened: Set<Int32> = []
-    @State private var closed: Set<Int32> = []
+    /// Раскрытые руками «Потомки» — только на время показа вкладки. Ключ — pid + время старта, чтобы
+    /// переиспользованный pid не унаследовал чужое раскрытие. Нигде не сохраняется.
+    @State private var opened: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
@@ -21,6 +21,7 @@ struct SessionsTab: View {
                 ProgressView("Считаю…").frame(maxWidth: .infinity, minHeight: 160)
             }
         }
+        .onDisappear { opened = [] }
     }
 
     @ViewBuilder
@@ -47,10 +48,9 @@ struct SessionsTab: View {
     }
 
     private func expandedBinding(_ s: ClaudeSession) -> Binding<Bool> {
-        Binding(
-            get: { opened.contains(s.pid) || (s.children.contains(where: \.isHot) && !closed.contains(s.pid)) },
-            set: { on in
-                if on { opened.insert(s.pid); closed.remove(s.pid) } else { opened.remove(s.pid); closed.insert(s.pid) }
-            })
+        let key = "\(s.pid)-\(Int(s.startedAt))"
+        return Binding(
+            get: { opened.contains(key) },
+            set: { on in if on { opened.insert(key) } else { opened.remove(key) } })
     }
 }

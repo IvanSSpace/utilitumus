@@ -276,7 +276,7 @@ private struct ProcessRow: View {
     let mb: Int?
     var onStop: (Int32) -> Void
 
-    private static let kindNames: [ProcessKind: String] = [.devServer: "dev-сервер", .mcp: "MCP", .shell: "шелл"]
+    private static let kindNames: [ProcessKind: String] = [.devServer: "dev-сервер", .build: "сборка", .mcp: "MCP", .shell: "шелл"]
 
     var body: some View {
         let p = process

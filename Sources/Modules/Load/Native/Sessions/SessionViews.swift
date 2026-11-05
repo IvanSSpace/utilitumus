@@ -70,6 +70,7 @@ struct SessionChildRow: View {
     private var kindName: String? {
         switch child.kind {
         case .devServer: return "dev-сервер"
+        case .build: return "сборка"
         case .mcp: return "MCP"
         case .shell: return "шелл"
         case .other: return nil
@@ -94,6 +95,84 @@ struct SessionChildRow: View {
             }
         }
         .padding(.vertical, 1)
+    }
+}
+
+// MARK: Потомки сессии
+
+/// Курсор-рука над кликабельной строкой. Пара push/pop не должна разойтись, поэтому pop ещё и при исчезновении.
+private struct PointerCursor: ViewModifier {
+    @State private var inside = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                if hovering, !inside { NSCursor.pointingHand.push(); inside = true }
+                if !hovering, inside { NSCursor.pop(); inside = false }
+            }
+            .onDisappear { if inside { NSCursor.pop(); inside = false } }
+    }
+}
+
+/// Блок «Потомки» карточки сессии: по умолчанию свёрнут в одну строку-кнопку со сводкой; открывается
+/// только нажатием. Открытыми показываем самых тяжёлых, остальных — за «Ещё N».
+struct SessionChildrenBlock: View {
+    let children: [SessionChild]
+    @Binding var expanded: Bool
+    var onStopChild: (SessionChild) -> Void
+    @State private var showAll = false
+
+    private static let visibleCount = 6
+    private static let animation = Animation.easeOut(duration: 0.2)
+
+    private var kidsMB: Double { children.reduce(0) { $0 + ($1.memMB ?? 0) } }
+
+    var body: some View {
+        Button {
+            withAnimation(Self.animation) {
+                expanded.toggle()
+                if !expanded { showAll = false }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(expanded ? "Скрыть" : "Показать потомков (\(children.count))").font(.callout.weight(.medium))
+                if let hot = hotLabel(children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
+                Spacer()
+                Text(Fmt.mb(kidsMB)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+                    .frame(width: 12)
+            }
+            .contentShape(Rectangle())
+            .hoverRow(selected: expanded)
+        }
+        .buttonStyle(.plain)
+        .modifier(PointerCursor())
+        .accessibilityLabel(expanded ? "Скрыть потомков" : "Показать потомков, \(children.count)")
+        if expanded {
+            let shown = showAll ? children : Array(children.prefix(Self.visibleCount))
+            VStack(spacing: 0) {
+                ForEach(shown) { c in SessionChildRow(child: c) { onStopChild(c) } }
+                if shown.count < children.count {
+                    Button {
+                        withAnimation(Self.animation) { showAll = true }
+                    } label: {
+                        HStack {
+                            Text("Ещё \(children.count - shown.count)").font(.callout).foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
+                        .hoverRow()
+                    }
+                    .buttonStyle(.plain)
+                    .modifier(PointerCursor())
+                    .padding(.top, 4)
+                }
+            }
+            .transition(.opacity)
+        }
     }
 }
 
@@ -162,30 +241,9 @@ struct SessionCard: View {
         }
     }
 
-    /// «Потомки» со своим шевроном: раскрывается нажатием на строку.
     @ViewBuilder
     private var children: some View {
-        let s = session
-        Button {
-            expanded.toggle()
-        } label: {
-            HStack(spacing: 8) {
-                Text("Потомки").font(.callout)
-                Text("\(s.children.count)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                if let hot = hotLabel(s.children) { SessionChip(text: hot, tint: .orange).monospacedDigit() }
-                Spacer()
-                Text(Fmt.mb(s.kidsMB)).font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                DisclosureChevron(open: expanded)
-            }
-            .contentShape(Rectangle())
-            .hoverRow(selected: expanded)
-        }
-        .buttonStyle(.plain)
-        if expanded {
-            VStack(spacing: 0) {
-                ForEach(s.children) { c in SessionChildRow(child: c) { onStopChild(c) } }
-            }
-        }
+        SessionChildrenBlock(children: session.children, expanded: $expanded, onStopChild: onStopChild)
     }
 
     private var meta: String {
