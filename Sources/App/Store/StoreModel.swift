@@ -307,11 +307,12 @@ final class StoreModel: ObservableObject {
 
     // MARK: Действия
 
-    /// Показать в панели, включить, скачать ресурсы и открыть модуль: его экран «сначала доступы» попросит разрешения.
+    /// Показать в панели, включить, скачать ресурсы и открыть модуль: на его экране встретит чек-лист настройки.
     func install(_ module: Module) {
         modules.setHidden(module, false)
         modules.setOn(module, true)
         downloadResources(module)
+        SetupFlow.shared.show(module)
         close()
         NotificationCenter.default.post(name: .storeOpenModule, object: module)
     }

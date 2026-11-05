@@ -11,7 +11,7 @@ struct StoreDetail: View {
     var body: some View {
         let cat = theme.categoryColor(module.category)
         let state = store.state(module)
-        let needs = StoreCatalog.needs(module)
+        let steps = module.setupSteps
         let download = StoreCatalog.downloads(module)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
@@ -45,14 +45,13 @@ struct StoreDetail: View {
                             .padding(.horizontal, 14).padding(.vertical, 11)
                     }
 
-                    DSSection("Разрешения", trailing: needs.isEmpty ? "не нужны" : nil) {
-                        if needs.isEmpty {
+                    DSSection(steps.allSatisfy { $0.kind == .permission } ? "Разрешения" : "Разрешения и настройка",
+                              trailing: steps.isEmpty ? "не нужны" : nil) {
+                        if steps.isEmpty {
                             DSRow(icon: "checkmark.shield.fill", title: "Ничего не просит",
                                   subtitle: "Работает без особых разрешений", iconTint: .green)
                         } else {
-                            ForEach(needs) { need in
-                                StoreNeedRow(need: need, granted: need.permission.isGranted, tint: cat)
-                            }
+                            ForEach(steps) { StoreNeedRow(step: $0, status: $0.status) }
                         }
                     }
 
@@ -135,23 +134,29 @@ private struct StoreStages: View {
     }
 }
 
-/// Разрешение: название и пометка «новое / уже выдано» в одной строке, пояснение под ними.
+/// Шаг настройки: название и пометка («новое», «сделаем сами», «уже выдано») в одной строке, пояснение под ними.
 private struct StoreNeedRow: View {
-    let need: StoreNeed
-    /// nil — заранее не проверить, система спросит сама.
-    let granted: Bool?
-    let tint: Color
+    let step: SetupStep
+    let status: SetupStep.Status
+
+    private var chip: (text: String, color: Color) {
+        switch status {
+        case .done: return ("уже выдано", .green)
+        case .onDemand: return ("спросит сама", .gray)
+        case .optional: return ("необязательно", .gray)
+        case .needed: return (step.isAutomatic ? "сделаем сами" : "новое", .orange)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(need.permission.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.95))
+                Text(step.title).font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.95))
                     .lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
-                DSChip(granted == nil ? "спросит сама" : (granted == true ? "уже выдано" : "новое"),
-                       color: granted == nil ? .gray : (granted == true ? .green : .orange)).fixedSize()
+                DSChip(chip.text, color: chip.color).fixedSize()
             }
-            Text(need.why).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
+            Text(step.why).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
