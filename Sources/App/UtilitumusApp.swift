@@ -219,8 +219,13 @@ struct NoShownModules: View {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MicGuardMigration.run()
+        DockMode.start()
         ModuleManager.shared.startEnabled()
         Updater.shared.check(quiet: true)
+        // Без значка в Dock окно при обычном запуске должно появиться впереди.
+        if !DockMode.showsInDock, !CommandLine.arguments.contains("--background") {
+            DispatchQueue.main.async { DockMode.bringToFront() }
+        }
 
         // Запуск из LaunchAgent при входе в систему передаёт `--background`:
         // окно закрываем сразу, приложение остаётся в Dock. Не через
@@ -267,7 +272,7 @@ enum Launcher {
 struct UtilitumusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    var body: some Scene {
+    @SceneBuilder var body: some Scene {
         Window("Utilitumus", id: "main") {
             MainView().dsThemed()
         }
@@ -280,6 +285,7 @@ struct UtilitumusApp: App {
                 SidebarCommand()
             }
         }
+        AppMenuBarScene()
     }
 }
 
