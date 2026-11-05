@@ -142,9 +142,6 @@ struct DSSidebar: View {
     @ObservedObject private var modules = ModuleManager.shared
     /// Последний открытый модуль каждой категории: вкладка возвращает на него.
     @State private var last: [String: Module] = [:]
-    /// Модуль, который тянут, и место, куда он ляжет, если отпустить.
-    @State private var dragging: Module?
-    @State private var drop: DropMark?
     /// Нажатая вкладка без модулей: страница остаётся прежней, в списке заглушка.
     @State private var emptyTab: ModuleCategory?
 
@@ -234,26 +231,14 @@ struct DSSidebar: View {
         visible.filter { $0.category == category }
     }
 
-    @ViewBuilder
+    /// Строки категории с живым перетаскиванием. Состояние перетаскивания — внутри `DSReorderList`,
+    /// окно целиком при движении не перерисовывается.
     private func rows(_ category: ModuleCategory, shown: [Module]) -> some View {
         let items = shown.filter { $0.category == category }
-        ForEach(items) { module in
-            let status = category.showsStatus
-            row(module, withStatus: status)
-                .overlay(alignment: drop?.below == true ? .bottom : .top) {
-                    // Линия вставки: сверху или снизу строки, куда ляжет модуль.
-                    if drop?.module == module { DSDropLine() }
-                }
-                .onDrag {
-                    dragging = module
-                    return NSItemProvider(object: module.rawValue as NSString)
-                }
-                .onDrop(of: [.text], delegate: SidebarDrop(module: module, height: status ? 46 : 38, items: items,
-                                                           dragging: dragging, mark: $drop) { from, to in
-                    dragging = nil
-                    move(items, from: IndexSet(integer: from), to: to)
-                })
-        }
+        let status = category.showsStatus
+        return DSReorderList(items: items, rowHeight: status ? 46 : 38) { from, to in
+            move(items, from: IndexSet(integer: from), to: to)
+        } content: { row($0, withStatus: status) }
     }
 
     /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
@@ -375,7 +360,7 @@ private struct DSCategoryTabs: View {
 }
 
 /// Вместо списка во вкладке, где нет ни одного установленного модуля.
-private struct DSEmptyCategory: View {
+struct DSEmptyCategory: View {
     let category: ModuleCategory
     let openStore: () -> Void
     @Environment(\.dsTheme) private var theme
@@ -407,55 +392,129 @@ private struct DSAllModulesHeading: View {
 
 // MARK: - Перетаскивание
 
-/// Куда ляжет перетаскиваемый модуль: перед строкой `module` или после неё.
-struct DropMark: Equatable {
-    let module: Module
-    let below: Bool
-}
+/// Список с живым перетаскиванием: взятая строка приподнимается и едет за курсором по вертикали
+/// (только внутри списка), остальные плавно расступаются. Отпустили — строка встаёт на место,
+/// `move(откуда, куда)` — индексы как в `moveItems`. Esc или уход курсора вбок отменяют.
+/// Всё состояние локальное, поэтому на каждый пиксель перерисовывается только этот список.
+private struct DSReorderList<Content: View>: View {
+    let items: [Module]
+    /// Высота строки у всей категории одинакова: 46 со статусом, 38 без.
+    let rowHeight: CGFloat
+    let move: (Int, Int) -> Void
+    @ViewBuilder let content: (Module) -> Content
 
-/// Линия вставки между строками.
-private struct DSDropLine: View {
-    @Environment(\.dsTint) private var tint
+    @State private var dragging: Module?
+    @State private var start = 0
+    @State private var target = 0
+    @State private var offset: CGFloat = 0
+    @State private var cancelled = false
+    @State private var escMonitor: Any?
+
+    private let spacing: CGFloat = 2
+    private let settle = Animation.easeOut(duration: 0.15)
+    private var stride: CGFloat { rowHeight + spacing }
 
     var body: some View {
-        Capsule().fill(tint).frame(height: 2).padding(.horizontal, 4).offset(y: 0)
-            .allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(Array(items.enumerated()), id: \.element) { index, module in
+                let lifted = dragging == module
+                let shift = lifted ? 0 : gap(at: index)
+                content(module)
+                    .background {
+                        if lifted {
+                            RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous).fill(.white.opacity(0.08))
+                        }
+                    }
+                    .scaleEffect(lifted ? 1.02 : 1)
+                    .shadow(color: .black.opacity(lifted ? 0.4 : 0), radius: lifted ? 8 : 0, y: lifted ? 3 : 0)
+                    .offset(y: lifted ? offset : shift)
+                    .zIndex(lifted ? 1 : 0)
+                    .animation(lifted ? nil : settle, value: shift)
+                    .animation(settle, value: lifted)
+                    // Приоритетный жест: клик без движения (менее 4 pt) проходит строке как раньше.
+                    .highPriorityGesture(drag(module, index: index))
+            }
+        }
+        .onDisappear { stopMonitor() }
+    }
+
+    /// Насколько сдвинута строка `index`, пока тянут другую.
+    private func gap(at index: Int) -> CGFloat {
+        guard dragging != nil else { return 0 }
+        if index > start && index <= target { return -stride }
+        if index < start && index >= target { return stride }
+        return 0
+    }
+
+    private func drag(_ module: Module, index: Int) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                if dragging == nil {
+                    dragging = module
+                    start = index
+                    target = index
+                    cancelled = false
+                    startMonitor()
+                }
+                guard dragging == module, !cancelled else { return }
+                // Ушли за боковые края панели: отмена.
+                if value.location.x < -8 || value.location.x > DS.sidebarWidth - 12 { return cancel() }
+                let low = -CGFloat(start) * stride
+                let high = CGFloat(items.count - 1 - start) * stride
+                offset = min(max(value.translation.height, low), high)
+                let new = min(max(start + Int((offset / stride).rounded()), 0), items.count - 1)
+                if new != target { target = new }
+            }
+            .onEnded { _ in
+                guard dragging == module else { return }
+                let drop = cancelled ? start : target
+                withAnimation(settle) { offset = CGFloat(drop - start) * stride }
+                finish(drop: drop)
+            }
+    }
+
+    private func cancel() {
+        guard dragging != nil, !cancelled else { return }
+        cancelled = true
+        withAnimation(settle) {
+            target = start
+            offset = 0
+        }
+    }
+
+    /// Строка встаёт на место за 0,15 с; порядок сохраняем и сбрасываем состояние без анимации.
+    private func finish(drop: Int) {
+        stopMonitor()
+        let from = start
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            var plain = Transaction()
+            plain.disablesAnimations = true
+            withTransaction(plain) {
+                if drop != from { move(from, drop > from ? drop + 1 : drop) }
+                dragging = nil
+                offset = 0
+                cancelled = false
+            }
+        }
+    }
+
+    private func startMonitor() {
+        guard escMonitor == nil else { return }
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {
+                cancel()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func stopMonitor() {
+        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
+        escMonitor = nil
     }
 }
 
-/// Приём перетаскивания на строку: только из своей категории; верхняя половина строки — «перед ней»,
-/// нижняя — «после». Сам перенос делает `done(откуда, куда)` в индексах категории.
-private struct SidebarDrop: DropDelegate {
-    let module: Module
-    let height: CGFloat
-    let items: [Module]
-    let dragging: Module?
-    @Binding var mark: DropMark?
-    let done: (Int, Int) -> Void
-
-    private var allowed: Bool { dragging.map { $0.category == module.category } ?? false }
-
-    func validateDrop(info: DropInfo) -> Bool { allowed }
-
-    func dropEntered(info: DropInfo) { mark = allowed ? DropMark(module: module, below: info.location.y > height / 2) : nil }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard allowed else { return DropProposal(operation: .forbidden) }
-        let new = DropMark(module: module, below: info.location.y > height / 2)
-        if new != mark { mark = new }
-        return DropProposal(operation: .move)
-    }
-
-    func dropExited(info: DropInfo) { if mark?.module == module { mark = nil } }
-
-    func performDrop(info: DropInfo) -> Bool {
-        defer { mark = nil }
-        guard allowed, let dragging, let from = items.firstIndex(of: dragging), let at = items.firstIndex(of: module)
-        else { return false }
-        done(from, info.location.y > height / 2 ? at + 1 : at)
-        return true
-    }
-}
 // MARK: - Скрытие панели
 
 extension DS {
