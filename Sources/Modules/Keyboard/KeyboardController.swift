@@ -2,10 +2,14 @@ import Foundation
 import AppKit
 import CoreGraphics
 
-/// Модуль «Клавиатура»: мгновенная смена раскладки по тапу Fn/🌐.
-/// Tap только слушает (listenOnly) и ничего не меняет в потоке событий. Он создаётся при включении
-/// модуля и снимается при выключении. Пока модуль включён, раз в 30 с дешёвая проверка, что tap жив;
+/// Модуль «Клавиатура» — набор фишек (`KeyboardFeature`). Работают включённые; ресурсы поднимаются только
+/// под них: без «Языка по Fn» tap не создаётся, без «Раскладки для каждого приложения» нет слежения за приложениями.
+///
+/// «Язык по Fn»: tap только слушает (listenOnly) и ничего не меняет в потоке событий. Он создаётся при включении
+/// фишки и снимается при выключении. Пока она включена, раз в 30 с дешёвая проверка, что tap жив;
 /// после сна, разблокировки и смены сессии он пересоздаётся. Висит на главном цикле: TIS можно звать только оттуда.
+///
+/// «Раскладка для каждого приложения»: слушает активацию приложений, раскладку каждого помнит по bundle id.
 @MainActor
 final class KeyboardController: ObservableObject {
     static let shared = KeyboardController()
@@ -29,6 +33,28 @@ final class KeyboardController: ObservableObject {
     @Published private(set) var logCount = 0
     /// Итог последнего нажатия «Починить».
     @Published private(set) var repairResult: String?
+    /// Включённые фишки.
+    @Published private(set) var features: Set<KeyboardFeature>
+    /// Включённые в системе раскладки: для выбора «Новые приложения начинают с».
+    @Published private(set) var layouts: [LayoutItem] = []
+    /// Раскладка для приложений, которых ещё не видели; nil — «как было».
+    @Published var newAppLayout: String? {
+        didSet {
+            memory.newAppLayout = newAppLayout
+            UserDefaults.standard.set(newAppLayout, forKey: Self.newAppKey)
+        }
+    }
+    /// Приложения, где раскладку не трогаем (в порядке добавления).
+    @Published private(set) var excludedApps: [String]
+
+    struct LayoutItem: Identifiable, Equatable {
+        let id: String
+        let name: String
+    }
+
+    private static let savedKey = "Keyboard.AppLayout.Saved"
+    private static let excludedKey = "Keyboard.AppLayout.Excluded"
+    private static let newAppKey = "Keyboard.AppLayout.NewStart"
 
     private var detector: FnTapDetector
     private var picker = LayoutPicker()
@@ -36,7 +62,14 @@ final class KeyboardController: ObservableObject {
     private var source: CFRunLoopSource?
     private var observer: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
+    /// Модуль включён.
     private var started = false
+    /// Какие фишки сейчас держат ресурсы.
+    private var fnRunning = false
+    private var appRunning = false
+    private var memory: AppLayoutMemory
+    /// Приложение на переднем плане, которому приписываются смены раскладки; nil — наше или не знаем.
+    private var frontApp: String?
     private var tapObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
     private var healthTimer: Timer?
 
@@ -46,6 +79,13 @@ final class KeyboardController: ObservableObject {
         let mode = LayoutMode(rawValue: defaults.string(forKey: "Keyboard.Mode") ?? "") ?? .lastTwo
         self.trigger = trigger
         self.mode = mode
+        features = Set(KeyboardFeature.enabled)
+        let excluded = defaults.stringArray(forKey: Self.excludedKey) ?? []
+        excludedApps = excluded
+        let newApp = defaults.string(forKey: Self.newAppKey)
+        newAppLayout = newApp
+        memory = AppLayoutMemory(saved: defaults.dictionary(forKey: Self.savedKey) as? [String: String] ?? [:],
+                                 excluded: Set(excluded), newAppLayout: newApp)
         detector = FnTapDetector(trigger: trigger)
         picker.mode = mode
     }
@@ -59,19 +99,91 @@ final class KeyboardController: ObservableObject {
             picker.didChange(to: now.id)
             currentName = now.name
         }
-        // Смену раскладки следим сами: «между двумя последними» должен знать и о смене из меню.
-        observer = DistributedNotificationCenter.default().addObserver(
-            forName: InputSources.changedNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.layoutChanged() }
+        applyFeatures()
+        let names = features.isEmpty ? "ни одной фишки" : KeyboardFeature.enabled.map(\.shortName).joined(separator: ", ")
+        note("модуль включён (\(names)), tap \(fnRunning ? (port == nil ? "не создан" : "создан") : "не нужен")")
+    }
+
+    /// Выключение модуля пользователем: всё снято, системное действие 🌐 возвращено, если его меняли мы.
+    func stop() {
+        teardown()
+        FnSystemAction.restore()
+        refreshSystem()
+    }
+
+    /// Выход из приложения: всё снято, а «отключено» остаётся в системе и применится при следующем запуске.
+    func quit() {
+        teardown()
+    }
+
+    private func teardown() {
+        started = false
+        stopFn(restore: false)
+        stopApp()
+        syncShared()
+    }
+
+    // MARK: Фишки
+
+    func isOn(_ feature: KeyboardFeature) -> Bool { features.contains(feature) }
+
+    /// Переключатель фишки на экране. Поднимает или снимает её ресурсы, если модуль включён.
+    func setFeature(_ feature: KeyboardFeature, on: Bool) {
+        guard feature.isAvailable, on != features.contains(feature) else { return }
+        feature.isOn = on
+        features = Set(KeyboardFeature.enabled)
+        if started {
+            applyFeatures()
+            note("фишка «\(feature.title)» \(on ? "включена" : "выключена")")
         }
-        // Защищённый ввод проверяем при смене активного приложения, без таймера.
-        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshSecureInput()
-                self?.enforceSystemAction()
+        // Шаги настройки модуля зависят от включённых фишек.
+        AccessState.shared.refresh()
+    }
+
+    /// Привести ресурсы в соответствие с включёнными фишками. Идемпотентно.
+    private func applyFeatures() {
+        guard started else { return }
+        let fn = features.contains(.fnLanguage), app = features.contains(.perAppLayout)
+        if fn && !fnRunning { startFn() }
+        if !fn && fnRunning { stopFn(restore: true) }
+        if app && !appRunning { startApp() }
+        if !app && appRunning { stopApp() }
+        syncShared()
+    }
+
+    /// Наблюдатели, общие для фишек: смена раскладки и активация приложения. Нужны, пока работает хоть одна.
+    private func syncShared() {
+        let need = started && (fnRunning || appRunning)
+        if need && observer == nil {
+            // Смену раскладки следим сами: «между двумя последними» должен знать и о смене из меню.
+            observer = DistributedNotificationCenter.default().addObserver(
+                forName: InputSources.changedNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutChanged() }
             }
+            activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                MainActor.assumeIsolated { self?.appActivated(app) }
+            }
+        } else if !need {
+            if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
+            observer = nil
+            if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+            activationObserver = nil
         }
+    }
+
+    private func appActivated(_ app: NSRunningApplication?) {
+        // Защищённый ввод проверяем при смене активного приложения, без таймера.
+        if fnRunning {
+            refreshSecureInput()
+            enforceSystemAction()
+        }
+        if appRunning { enterApp(app) }
+    }
+
+    private func startFn() {
+        fnRunning = true
         observeTapEvents()
         // Пользователь просил отключить системное действие: после перезапуска применяем снова.
         FnSystemAction.migrateKeepOff()
@@ -79,34 +191,79 @@ final class KeyboardController: ObservableObject {
         refreshAccess()
         refreshSystem()
         createTap()
-        note("модуль включён, tap \(port == nil ? "не создан" : "создан")")
     }
 
-    /// Выключение модуля пользователем: tap снят, системное действие 🌐 возвращено, если его меняли мы.
-    func stop() {
-        teardown()
-        FnSystemAction.restore()
-        refreshSystem()
-    }
-
-    /// Выход из приложения: tap снят, а «отключено» остаётся в системе и применится при следующем запуске.
-    func quit() {
-        teardown()
-    }
-
-    private func teardown() {
-        started = false
+    /// `restore` — фишку выключил пользователь: системное действие 🌐 возвращаем, как при выключении модуля.
+    private func stopFn(restore: Bool) {
+        guard fnRunning else { return }
+        fnRunning = false
         removeTap()
-        if let observer { DistributedNotificationCenter.default().removeObserver(observer) }
-        observer = nil
-        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
-        activationObserver = nil
         for item in tapObservers { item.center.removeObserver(item.token) }
         tapObservers = []
         healthTimer?.invalidate()
         healthTimer = nil
         secureInputApp = nil
+        if restore {
+            FnSystemAction.restore()
+            refreshSystem()
+        }
     }
+
+    // MARK: Раскладка для каждого приложения
+
+    private func startApp() {
+        appRunning = true
+        enterApp(NSWorkspace.shared.frontmostApplication, restore: false)
+    }
+
+    private func stopApp() {
+        appRunning = false
+        frontApp = nil
+    }
+
+    /// Вошли в приложение: вернуть его раскладку. `restore: false` — только запомнить текущую (старт фишки).
+    private func enterApp(_ app: NSRunningApplication?, restore: Bool = true) {
+        // Наше окно раскладку не меняет и смены в нём ни к какому приложению не приписываем.
+        guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else {
+            frontApp = nil
+            return
+        }
+        frontApp = id
+        let list = InputSources.enabled()
+        let current = InputSources.current()
+        if restore, let wanted = memory.layout(for: id, enabled: list.map(\.id)),
+           wanted != current?.id, let target = list.first(where: { $0.id == wanted }) {
+            InputSources.select(target)
+            note("\(app?.localizedName ?? id) → \(target.name)")
+        } else if let current {
+            // Нечего возвращать: приложение начинает с текущей раскладки, её и запоминаем.
+            rememberLayout(current.id, in: id)
+        }
+    }
+
+    private func rememberLayout(_ layout: String, in app: String) {
+        guard memory.remember(layout: layout, in: app) else { return }
+        UserDefaults.standard.set(memory.saved, forKey: Self.savedKey)
+    }
+
+    func addExcluded(_ id: String) {
+        guard !excludedApps.contains(id) else { return }
+        excludedApps.append(id)
+        saveExcluded()
+    }
+
+    func removeExcluded(_ id: String) {
+        excludedApps.removeAll { $0 == id }
+        saveExcluded()
+    }
+
+    private func saveExcluded() {
+        memory.excluded = Set(excludedApps)
+        UserDefaults.standard.set(excludedApps, forKey: Self.excludedKey)
+    }
+
+    /// Название раскладки по id для экрана; удалённую из системы показываем как есть.
+    func layoutName(_ id: String) -> String { layouts.first { $0.id == id }?.name ?? id }
 
     // MARK: Самовосстановление tap
 
@@ -132,7 +289,7 @@ final class KeyboardController: ObservableObject {
     }
 
     private func rebuildTap(reason: String) {
-        guard started else { return }
+        guard fnRunning else { return }
         removeTap()
         refreshAccess()
         if port == nil && inputAccess { createTap() }
@@ -163,7 +320,7 @@ final class KeyboardController: ObservableObject {
     /// их вернула (в том числе «OK» в окне «Включить диктовку?»), молча чиним. Дёшево: два чтения
     /// настроек; пока всё на месте, систему не трогаем. Зовётся при активации приложения и раз в 30 с.
     private func enforceSystemAction() {
-        guard started else { return }
+        guard fnRunning else { return }
         let fixed = FnSystemAction.reapplyAll()
         if fixed.usageFixed {
             note("macOS вернула действие 🌐 (было \(fixed.previousUsage.map(String.init) ?? "нет значения")) — исправлено")
@@ -174,8 +331,8 @@ final class KeyboardController: ObservableObject {
 
     /// «Починить»: системное действие 0, перезапуск системного переключателя, новый tap, сверка раскладки.
     func repair() {
-        guard started else {
-            repairResult = "Модуль выключен: сначала включи его"
+        guard fnRunning else {
+            repairResult = started ? "Фишка «Язык по Fn» выключена: сначала включи её" : "Модуль выключен: сначала включи его"
             return
         }
         // Если там уже 0, настройки и переключатель macOS не трогаем.
@@ -225,8 +382,10 @@ final class KeyboardController: ObservableObject {
         let granted = CGPreflightListenEventAccess()
         if granted != inputAccess { inputAccess = granted }
         // Доступ могли выдать, пока модуль включён: tap создаём, как только можно.
-        if started && port == nil && granted { createTap() }
+        if fnRunning && port == nil && granted { createTap() }
         if let now = InputSources.current(), now.name != currentName { currentName = now.name }
+        let list = InputSources.enabled().map { LayoutItem(id: $0.id, name: $0.name) }
+        if list != layouts { layouts = list }
     }
 
     func requestAccess() {
@@ -245,7 +404,7 @@ final class KeyboardController: ObservableObject {
     }
 
     func refreshSecureInput() {
-        let owner = started ? SecureInput.owner() : nil
+        let owner = fnRunning ? SecureInput.owner() : nil
         if owner != secureInputApp {
             secureInputApp = owner
             note(owner.map { "защищённый ввод в \($0): Fn не слышно" } ?? "защищённый ввод снят")
@@ -366,7 +525,7 @@ final class KeyboardController: ObservableObject {
     private func verifySwitch(from: String, to id: String, retried: Bool) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(80)) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.started else { return }
+                guard let self, self.fnRunning else { return }
                 let actual = InputSources.current()?.id
                 switch SwitchCheck.after(target: id, actual: actual, retried: retried) {
                 case .done:
@@ -385,5 +544,7 @@ final class KeyboardController: ObservableObject {
         guard let now = InputSources.current() else { return }
         picker.didChange(to: now.id)
         currentName = now.name
+        // Смену в приложении (наша, системная или из меню) запоминаем за ним.
+        if appRunning, let frontApp { rememberLayout(now.id, in: frontApp) }
     }
 }
