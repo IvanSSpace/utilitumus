@@ -382,7 +382,7 @@ private struct ClassicAddRuleSheet: View {
     @State private var browserID = ""
     @State private var isPrivate = false
 
-    private var normalizedDomain: String? { BrowserRuleMatcher.normalizeDomain(domain) }
+    private var normalizedDomain: String? { BrowserRuleMatcher.normalizePattern(domain) }
     private var browser: InstalledBrowser? { catalog.browser(id: browserID) }
 
     private var valid: Bool {
@@ -400,9 +400,9 @@ private struct ClassicAddRuleSheet: View {
                 }
 
                 if kind == .domain {
-                    TextField("Домен", text: $domain, prompt: Text("google.com"))
+                    TextField("Домен", text: $domain, prompt: Text("google.com или github.com/flowfast"))
                     if let normalizedDomain, normalizedDomain != domain.trimmingCharacters(in: .whitespaces) {
-                        Text("Будет сохранён как \(normalizedDomain). Поддомены тоже подойдут.")
+                        Text(normalizedDomain.contains("/") ? "Только ссылки на \(normalizedDomain)/…" : "Будет сохранён как \(normalizedDomain). Поддомены тоже подойдут.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -40,7 +40,7 @@ final class BrowserRouter {
             }
             let available = Set(catalog.browsers.map(\.id))
             let usable = catalog.rules.filter { available.contains($0.browserID) }
-            if let rule = BrowserRuleMatcher.firstMatch(rules: usable, host: BrowserRuleMatcher.host(of: url),
+            if let rule = BrowserRuleMatcher.firstMatch(rules: usable, url: url,
                                                          sourceBundleID: source?.bundleIdentifier),
                let browser = catalog.browser(id: rule.browserID) {
                 open(url, in: browser, private: rule.isPrivate)

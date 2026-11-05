@@ -6,7 +6,8 @@ import Foundation
 /// Хранится в UserDefaults. Формат менять только совместимо: новые поля опциональные.
 struct BrowserRule: Codable, Equatable, Identifiable {
     enum Kind: String, Codable {
-        /// `value` — домен: ловит сам домен и его поддомены.
+        /// `value` — домен: ловит сам домен и его поддомены. Может быть с началом пути:
+        /// «github.com/flowfast» ловит только ссылки на github.com/flowfast/…
         case domain
         /// `value` — bundle id приложения, из которого пришла ссылка.
         case app
@@ -50,19 +51,56 @@ enum BrowserRuleMatcher {
         host == domain || host.hasSuffix("." + domain)
     }
 
-    /// Первое подошедшее правило по порядку списка. Домен сравнивается с хостом ссылки,
-    /// приложение — с bundle id отправителя.
-    static func firstMatch(rules: [BrowserRule], host: String?, sourceBundleID: String?) -> BrowserRule? {
-        rules.first { rule in
+    /// Домен с началом пути из того, что вписал пользователь:
+    /// «https://github.com/FlowFast/kaiten/pull/1» оставляет путь как есть → «github.com/flowfast/kaiten/pull/1»,
+    /// «github.com/flowfast/» → «github.com/flowfast». Без пути — как `normalizeDomain`.
+    static func normalizePattern(_ input: String) -> String? {
+        var text = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let range = text.range(of: "://") { text = String(text[range.upperBound...]) }
+        if let end = text.firstIndex(where: { "?#".contains($0) }) { text = String(text[..<end]) }
+        guard let slash = text.firstIndex(of: "/") else { return normalizeDomain(text) }
+        guard let domain = normalizeDomain(String(text[..<slash])) else { return nil }
+        let path = text[slash...].split(separator: "/").joined(separator: "/")
+        return path.isEmpty ? domain : domain + "/" + path
+    }
+
+    /// Правило-домен → домен и начало пути (без крайних «/», в нижнем регистре; пустое — без пути).
+    static func split(pattern: String) -> (domain: String, path: String) {
+        let text = pattern.lowercased()
+        guard let slash = text.firstIndex(of: "/") else { return (text, "") }
+        return (String(text[..<slash]), text[slash...].split(separator: "/").joined(separator: "/"))
+    }
+
+    /// Путь ссылки начинается с `prefix` целыми кусками: «flowfast» ловит «/flowfast/kaiten»,
+    /// но не «/flowfast-old». Регистр не важен: у GitHub и большинства сайтов имена без регистра.
+    static func pathMatches(urlPath: String, prefix: String) -> Bool {
+        guard !prefix.isEmpty else { return true }
+        let path = urlPath.lowercased().split(separator: "/").joined(separator: "/")
+        return path == prefix || path.hasPrefix(prefix + "/")
+    }
+
+    /// Какое правило сработает. Правило с путём точнее правила на весь сайт, поэтому сначала —
+    /// подошедшие правила с путём (самый длинный путь), потом остальные по порядку списка:
+    /// домен сравнивается с хостом ссылки, приложение — с bundle id отправителя.
+    static func firstMatch(rules: [BrowserRule], url: URL?, sourceBundleID: String?) -> BrowserRule? {
+        let host = url.flatMap(host(of:))
+        let urlPath = url?.path ?? ""
+        func matches(_ rule: BrowserRule) -> Bool {
             switch rule.kind {
             case .domain:
                 guard let host else { return false }
-                return hostMatches(host: host, domain: rule.value.lowercased())
+                let (domain, path) = split(pattern: rule.value)
+                return hostMatches(host: host, domain: domain) && pathMatches(urlPath: urlPath, prefix: path)
             case .app:
                 guard let sourceBundleID else { return false }
                 return rule.value == sourceBundleID
             }
         }
+        let withPath = rules.filter { $0.kind == .domain && !split(pattern: $0.value).path.isEmpty && matches($0) }
+        if let best = withPath.max(by: { split(pattern: $0.value).path.count < split(pattern: $1.value).path.count }) {
+            return best
+        }
+        return rules.first(where: matches)
     }
 }
 

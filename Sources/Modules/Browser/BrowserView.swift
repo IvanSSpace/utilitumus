@@ -542,7 +542,7 @@ private struct AddRuleSheet: View {
     @State private var browserID = ""
     @State private var isPrivate = false
 
-    private var normalizedDomain: String? { BrowserRuleMatcher.normalizeDomain(domain) }
+    private var normalizedDomain: String? { BrowserRuleMatcher.normalizePattern(domain) }
     private var browser: InstalledBrowser? { catalog.browser(id: browserID) }
 
     private var valid: Bool {
@@ -551,7 +551,11 @@ private struct AddRuleSheet: View {
     }
 
     private var domainNote: String? {
-        guard let normalizedDomain, normalizedDomain != domain.trimmingCharacters(in: .whitespaces) else { return nil }
+        guard let normalizedDomain else { return nil }
+        if normalizedDomain.contains("/") {
+            return "Только ссылки на \(normalizedDomain)/…: правило с путём важнее правила на весь сайт."
+        }
+        guard normalizedDomain != domain.trimmingCharacters(in: .whitespaces) else { return nil }
         return "Сохранится как \(normalizedDomain). Поддомены тоже подойдут."
     }
 
@@ -572,7 +576,7 @@ private struct AddRuleSheet: View {
                 }
                 if kind == .domain {
                     DSRow(icon: "globe", title: "Домен", subtitle: domainNote) {
-                        TextField("", text: $domain, prompt: Text("google.com"))
+                        TextField("", text: $domain, prompt: Text("google.com или github.com/flowfast"))
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 170)
