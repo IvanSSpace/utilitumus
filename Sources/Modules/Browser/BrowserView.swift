@@ -35,6 +35,36 @@ private struct BRow<Leading: View, Trailing: View>: View {
     }
 }
 
+/// Чипы в несколько строк с переносом.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        layout(proposal.width ?? 360, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = layout(bounds.width, subviews)
+        for (subview, point) in zip(subviews, result.points) {
+            subview.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        }
+    }
+
+    private func layout(_ width: CGFloat, _ subviews: Subviews) -> (size: CGSize, points: [CGPoint]) {
+        var points: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, maxX: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            points.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            maxX = max(maxX, x - spacing)
+        }
+        return (CGSize(width: maxX, height: y + rowHeight), points)
+    }
+}
+
 /// Экран модуля «Браузер».
 struct BrowserView: View {
     @Environment(\.pageActive) private var pageActive
@@ -48,7 +78,7 @@ struct BrowserView: View {
     @Environment(\.dsTheme) private var theme
 
     private let probe = URL(string: "https://example.com")!
-    private let rowHeight: CGFloat = 46
+    private let rowHeight: CGFloat = 44
 
     private var isDefault: Bool { defaultID == BrowserHelper.bundleID }
     /// Акцент модуля: `DSPage` кладёт его в окружение только для содержимого, а здесь он нужен в самом экране.
@@ -62,14 +92,16 @@ struct BrowserView: View {
 
     var body: some View {
         DSPage(module: .browser, primary: primary) {
-            if !introHidden { introSection }
-            browsersSection
+            if !introHidden && !isDefault { introStrip }
+            // Две колонки: слева браузеры и правила, справа статус и клавиши. Узкое окно — одна колонка.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 16) {
-                    rulesColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
-                    statusColumn.frame(minWidth: 300, idealWidth: 300, maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 14) { browsersSection; rulesColumn }
+                        .frame(minWidth: 350, idealWidth: 350, maxWidth: .infinity)
+                    statusColumn.frame(width: 300)
                 }
                 VStack(alignment: .leading, spacing: DS.blockSpacing) {
+                    browsersSection
                     rulesColumn
                     statusColumn
                 }
@@ -99,48 +131,33 @@ struct BrowserView: View {
 
     // MARK: - Быстрый старт
 
-    private var introSection: some View {
-        DSSection("Быстрый старт") {
-            HStack(alignment: .top, spacing: 6) {
-                introStep(icon: isDefault ? "checkmark.circle.fill" : "globe",
-                          title: "Сделай браузером по умолчанию",
-                          color: isDefault ? .green : tint) {
-                    if !isDefault {
-                        DSButton("Сделать", style: .primary, small: true) { setDefault(to: BrowserHelper.appURL) }
-                            .disabled(busy)
-                    }
-                }
-                introArrow
-                introStep(icon: "link", title: "Кликни любую ссылку", color: .white.opacity(0.6)) {
-                    DSButton("Попробовать", small: true) { openTest() }
-                }
-                introArrow
-                introStep(icon: "cursorarrow.click.2", title: "Выбери браузер у курсора",
-                          color: .white.opacity(0.6)) { EmptyView() }
-                DSButton("", icon: "xmark", style: .plain, small: true) { introHidden = true }
-                    .help("Скрыть быстрый старт")
-            }
-            .padding(.horizontal, 12).padding(.vertical, 12)
+    /// Одна строка вместо карточки: показывается, пока Utilitumus не стал браузером по умолчанию.
+    private var introStrip: some View {
+        HStack(spacing: 8) {
+            introStep("globe", "Сделай браузером по умолчанию")
+            introArrow
+            introStep("link", "Кликни любую ссылку")
+            introArrow
+            introStep("cursorarrow.click.2", "Выбери браузер у курсора")
+            Spacer(minLength: 0)
+            DSButton("", icon: "xmark", style: .plain, small: true) { introHidden = true }
+                .help("Скрыть быстрый старт")
         }
+        .padding(.horizontal, 14).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
     }
 
     private var introArrow: some View {
         Image(systemName: "chevron.right")
-            .font(.system(size: 10, weight: .semibold))
+            .font(.system(size: 9, weight: .semibold))
             .foregroundStyle(.white.opacity(0.25))
-            .frame(height: 24)
     }
 
-    private func introStep<Extra: View>(icon: String, title: String, color: Color,
-                                        @ViewBuilder extra: () -> Extra) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 18)).foregroundStyle(color).frame(height: 24)
-            Text(title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.85))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            extra()
+    private func introStep(_ icon: String, _ title: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(tint)
+            Text(title).font(.system(size: 12)).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     // MARK: - Статус
@@ -156,29 +173,35 @@ struct BrowserView: View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Статус") {
                 if isDefault {
-                    DSRow(icon: "checkmark.circle.fill", title: "Utilitumus — браузер по умолчанию",
-                          subtitle: catalog.fallback == nil
-                              ? "Отметь звёздочкой основной браузер: его можно вернуть системе."
-                              : nil)
+                    BRow(title: "Браузер по умолчанию", subtitle: "Utilitumus", minHeight: 44) {
+                        symbolTile("checkmark.circle.fill")
+                    } trailing: { EmptyView() }
                     if let fallback = catalog.fallback {
-                        DSRow(icon: "arrow.uturn.backward", title: "Вернуть системе",
-                              subtitle: "Ссылки откроет \(fallback.name)") {
-                            DSButton("Вернуть", small: true) { setDefault(to: fallback.url) }
-                                .disabled(busy)
+                        BRow(title: "Вернуть системе", subtitle: fallback.name, minHeight: 44) {
+                            symbolTile("arrow.uturn.backward")
+                        } trailing: {
+                            DSButton("Вернуть", small: true) { setDefault(to: fallback.url) }.disabled(busy)
                         }
+                    } else {
+                        BRow(title: "Нет основного браузера", subtitle: "Отметь звёздочкой, чтобы вернуть", minHeight: 44) {
+                            symbolTile("arrow.uturn.backward")
+                        } trailing: { EmptyView() }
                     }
                 } else {
-                    DSRow(icon: "globe", title: "Пока не браузер по умолчанию",
-                          subtitle: defaultName.map { "Сейчас ссылки открывает \($0)" })
+                    BRow(title: "Не по умолчанию", subtitle: defaultName.map { "Сейчас: \($0)" }, minHeight: 44) {
+                        symbolTile("globe")
+                    } trailing: { EmptyView() }
                 }
                 if let errorText {
-                    DSRow(icon: "exclamationmark.triangle", title: errorText)
+                    BRow(title: errorText, minHeight: 44) { symbolTile("exclamationmark.triangle") } trailing: { EmptyView() }
                 }
-                DSRow(icon: "checkmark.seal", title: "Тестовая ссылка", subtitle: "Панель для example.com") {
-                    DSButton("Проверить…", small: true) { openTest() }
+                BRow(title: "Тест-ссылка", subtitle: "example.com", minHeight: 44) {
+                    symbolTile("checkmark.seal")
+                } trailing: {
+                    DSButton("Проверить", small: true) { openTest() }
                 }
-                if introHidden {
-                    DSRow(icon: "lightbulb", title: "Быстрый старт") {
+                if introHidden && !isDefault {
+                    BRow(title: "Быстрый старт", minHeight: 44) { symbolTile("lightbulb") } trailing: {
                         DSButton("Показать", small: true) { introHidden = false }
                     }
                 }
@@ -229,48 +252,89 @@ struct BrowserView: View {
     // MARK: - Браузеры
 
     private var browsersSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let shown = catalog.pickerBrowsers
+        let hiddenList = catalog.browsers.filter { catalog.hidden.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 6) {
             DSSection("Браузеры", trailing: "Порядок — перетаскиванием") {
                 if catalog.browsers.isEmpty {
                     BRow(title: "Браузеры не найдены", dimmed: true, inset: 14) { EmptyView() } trailing: { EmptyView() }
                 } else {
-                    List {
-                        ForEach(catalog.browsers) { browser in
-                            browserRow(browser)
-                                .frame(height: rowHeight)
-                                .listRowInsets(EdgeInsets())
-                                .listRowSeparator(.hidden)
-                                .listRowBackground(Color.clear)
+                    if shown.isEmpty {
+                        BRow(title: "Все браузеры скрыты", dimmed: true, inset: 14, minHeight: rowHeight) { EmptyView() } trailing: { EmptyView() }
+                    } else {
+                        List {
+                            ForEach(shown) { browser in
+                                browserRow(browser)
+                                    .frame(height: rowHeight)
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
+                            }
+                            .onMove { moveShown(shown, from: $0, to: $1) }
                         }
-                        .onMove { catalog.move(from: $0, to: $1) }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .scrollDisabled(true)
+                        .frame(height: CGFloat(shown.count) * rowHeight)
                     }
-                    .listStyle(.plain)
-                    .scrollContentBackground(.hidden)
-                    .scrollDisabled(true)
-                    .frame(height: CGFloat(catalog.browsers.count) * rowHeight)
+                    if !hiddenList.isEmpty { hiddenStrip(hiddenList) }
                 }
             }
-            caption("Своя клавиша — клик по значку с цифрой. Звёздочка — основной браузер.")
+            caption("Клик по цифре — своя клавиша. Звёздочка — основной.")
         }
     }
 
+    /// Порядок перетаскивают среди показанных; в полном списке сдвигаем на места этих же браузеров.
+    private func moveShown(_ shown: [InstalledBrowser], from source: IndexSet, to destination: Int) {
+        let all = catalog.browsers
+        guard let from = source.first, let src = all.firstIndex(of: shown[from]) else { return }
+        let dst = destination < shown.count
+            ? all.firstIndex(of: shown[destination]) ?? all.count
+            : (all.firstIndex(of: shown[shown.count - 1]).map { $0 + 1 } ?? all.count)
+        catalog.move(from: IndexSet(integer: src), to: dst)
+    }
+
+    /// Скрытые браузеры: компактные чипы, клик возвращает в панель.
+    private func hiddenStrip(_ list: [InstalledBrowser]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ещё \(list.count) — клик вернёт в панель")
+                .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+            FlowLayout(spacing: 6) {
+                ForEach(list) { browser in
+                    Button {
+                        catalog.setHidden(browser.id, false)
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(nsImage: browser.icon).resizable().frame(width: 16, height: 16)
+                            Text(browser.name).font(.system(size: 12)).lineLimit(1)
+                            Image(systemName: "plus").font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.45))
+                        }
+                        .foregroundStyle(.white.opacity(0.8))
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .background(Capsule().fill(.white.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Показывать \(browser.name) в панели")
+                }
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14) }
+    }
+
     private func browserRow(_ browser: InstalledBrowser) -> some View {
-        let shown = !catalog.hidden.contains(browser.id)
         let isMain = catalog.fallbackID == browser.id
         let keyCode = catalog.effectiveKeys[browser.id]
         let recording = recorder.recordingID == browser.id
         return BRow(title: browser.name,
-                    subtitle: recording ? "нажми клавишу · Delete — снять · Esc — отмена" : nil,
+                    subtitle: recording ? "нажми клавишу · ⌫ снять · Esc" : nil,
                     subtitleColor: recording ? tint : nil,
-                    dimmed: !shown, minHeight: rowHeight) {
+                    minHeight: rowHeight) {
             Image(nsImage: browser.icon).resizable().frame(width: 28, height: 28)
-                .opacity(shown ? 1 : 0.4)
         } trailing: {
             HStack(spacing: 10) {
-                if !shown { DSChip("скрыт") }
-                if shown {
-                    keyBadge(browser, keyCode: keyCode, recording: recording)
-                }
+                keyBadge(browser, keyCode: keyCode, recording: recording)
                 Button {
                     catalog.setFallback(isMain ? nil : browser.id)
                 } label: {
@@ -281,7 +345,7 @@ struct BrowserView: View {
                 .buttonStyle(.plain)
                 .help(isMain ? "Основной браузер" : "Сделать основным")
                 DSToggle("Показывать в панели", isOn: Binding(
-                    get: { shown },
+                    get: { true },
                     set: { catalog.setHidden(browser.id, !$0) }
                 ))
             }
@@ -322,10 +386,10 @@ struct BrowserView: View {
                     DSButton("Добавить правило", icon: "plus", small: true) { addingRule = true }
                     Spacer()
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10)
+                .padding(.horizontal, 14).padding(.vertical, 8)
                 .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14) }
             }
-            caption("Подошло правило — ссылка открывается без панели. Работает первое подходящее сверху.")
+            caption("Подошло правило — ссылка открывается без панели. Первое сверху главнее.")
         }
     }
 
@@ -336,16 +400,16 @@ struct BrowserView: View {
         case .domain: title = rule.value
         case .app: title = "из \(rule.title ?? rule.value)"
         }
-        return BRow(title: title) {
+        return BRow(title: title, minHeight: 44) {
             ruleIcon(rule)
         } trailing: {
             HStack(spacing: 8) {
-                if rule.isPrivate { DSChip("приватно", icon: "eyeglasses") }
+                if rule.isPrivate { Image(systemName: "eyeglasses").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6)).help("Приватное окно") }
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.4))
                 if let browser {
                     HStack(spacing: 5) {
                         Image(nsImage: browser.icon).resizable().frame(width: 16, height: 16)
-                        Text(browser.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Text(browser.name).font(.system(size: 12, weight: .semibold)).lineLimit(1).fixedSize()
                     }
                     .foregroundStyle(.white.opacity(0.9))
                     .padding(.horizontal, 9).padding(.vertical, 4)
@@ -388,17 +452,24 @@ struct BrowserView: View {
 
     private var hotkeysSection: some View {
         DSSection("Клавиши на панели") {
-            hotkeyRow("1–9", "открыть в браузере с этим номером")
+            hotkeyRow("1–9", "браузер по номеру")
             hotkeyRow("↑ ↓ ⏎", "выбрать и открыть")
-            hotkeyRow("⌥", "зажми при выборе: приватное окно")
-            hotkeyRow("⇧", "зажми: запомнить для сайта")
+            hotkeyRow("⌥", "приватное окно")
+            hotkeyRow("⇧", "запомнить для сайта")
             hotkeyRow("⌘C", "скопировать ссылку")
-            hotkeyRow("Esc", "отмена, клик мимо — тоже")
+            hotkeyRow("Esc", "отмена")
         }
     }
 
     private func hotkeyRow(_ keys: String, _ text: String) -> some View {
-        BRow(title: text, inset: 14, minHeight: 40) { EmptyView() } trailing: { DSKeyCaps(keys) }
+        HStack(spacing: 10) {
+            DSKeyCaps(keys).frame(width: 74, alignment: .leading)
+            Text(text).font(.system(size: 12)).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 4)
+        .frame(minHeight: 30)
+        .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 14) }
     }
 }
 
