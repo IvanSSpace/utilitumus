@@ -360,7 +360,7 @@ struct DSPage<Content: View>: View {
     }
 
     var body: some View {
-        ScrollView {
+        DSScroll {
             VStack(alignment: .leading, spacing: DS.blockSpacing) {
                 DSPageHeader(module: module, subtitle: subtitle, primary: primary, controls: controls)
                 content
@@ -391,7 +391,7 @@ struct DSPlainPage<Content: View>: View {
     }
 
     var body: some View {
-        ScrollView {
+        DSScroll {
             VStack(alignment: .leading, spacing: DS.blockSpacing) {
                 DSHeaderLayout(title: title, subtitle: subtitle, primary: primary,
                                badge: { DSBadge(icon: icon) }, controls: { EmptyView() })

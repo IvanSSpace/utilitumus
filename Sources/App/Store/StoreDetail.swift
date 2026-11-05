@@ -34,7 +34,7 @@ struct StoreDetail: View {
                     .help("Закрыть (Esc)")
             }
 
-            ScrollView(showsIndicators: false) {
+            DSScroll(inset: DS.groupRadius) {
                 VStack(alignment: .leading, spacing: 14) {
                     if case .installing(let stage, let p) = state {
                         StoreStages(stage: stage, progress: p, tint: cat)

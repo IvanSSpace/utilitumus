@@ -19,14 +19,13 @@ struct SettingsView: View {
                 }
                 // Шапка с «Готово» стоит на месте, остальное прокручивается внутри листа,
                 // если окно меньше содержимого.
-                ScrollView {
+                DSScroll(inset: DS.groupRadius) {
                     VStack(alignment: .leading, spacing: DS.blockSpacing) {
                         ThemeSection()
                         DockSection()
                         PageModeSection()
                     }
                 }
-                .scrollIndicators(.automatic)
             }
             .padding(DS.pagePadding)
         }
