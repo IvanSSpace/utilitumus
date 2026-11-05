@@ -274,6 +274,21 @@ func onlyHello(in dir: String, _ label: String) {
         let connections = recordedCalls(in: dir, file: "connections.log").count
         check(connections == 2, "подмена: после отказа соединение закрыто, новая попытка — новое (\(connections))")
 
+    case "rejected-race":
+        // Отказ подписи пришёл, а главный поток занят: команда, поданная в этот промежуток,
+        // не должна уйти по соединению, которое уже отвергнуто.
+        let client = LinkClient(id: testID)
+        let first = Task { @MainActor in try? await client.hello() }
+        await Task.yield()
+        usleep(500_000)  // именно занять главный поток, а не отпустить его
+        let second = try? await client.hello()
+        check(second == nil, "подмена, занятый главный поток: второй вызов не прошёл")
+        _ = await first.value
+        await pause(0.3)
+        let hellos = recordedCalls(in: dir).filter { $0 == "hello" }.count
+        let connections = recordedCalls(in: dir, file: "connections.log").count
+        check(hellos == 1, "подмена, занятый главный поток: по отвергнутому соединению ничего не ушло (hello: \(hellos), соединений: \(connections))")
+
     case "silent":
         let client = LinkClient(id: testID)
         do {

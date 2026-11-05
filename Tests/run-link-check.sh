@@ -136,6 +136,8 @@ fake fake-adhoc ok
 scenario client rejected
 fake fake-foreign ok
 scenario client rejected
+fake fake-adhoc ok
+scenario client rejected-race
 fake fake-ours silent
 scenario client silent
 fake fake-ours v99

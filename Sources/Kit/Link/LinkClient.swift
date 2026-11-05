@@ -128,15 +128,19 @@ final class LinkClient {
         _ deadline: DispatchTime,
         _ send: (LinkXPC, @escaping @Sendable (T) -> Void) -> Void
     ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
+        let connection = session.connection
+        return try await withCheckedThrowingContinuation { continuation in
             let pending = PendingReply(continuation)
             DispatchQueue.main.asyncAfter(deadline: deadline) {
                 pending.finish(.failure(LinkError.timeout))
             }
-            let proxy = session.connection.remoteObjectProxyWithErrorHandler { error in
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 let nsError = error as NSError
                 let rejected = nsError.domain == NSCocoaErrorDomain
                     && nsError.code == NSXPCConnectionCodeSigningRequirementFailure
+                // Здесь, а не после перехода на главный поток: пока он занят, новая команда
+                // ушла бы по этому же соединению подменённому сервису.
+                if rejected { connection.invalidate() }
                 pending.finish(.failure(rejected ? LinkError.rejected : error))
             } as! LinkXPC
             send(proxy) { pending.finish(.success($0)) }
