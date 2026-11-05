@@ -11,7 +11,7 @@ import SwiftUI
 // MARK: - Тема
 
 /// Цветовая тема окна. Все цвета считаются от модуля, чтобы тема сама решала, красить ли в его оттенок.
-enum DSTheme: String, CaseIterable, Identifiable {
+enum DSTheme: Hashable, Identifiable {
     /// Приглушённые оттенки модулей (по умолчанию).
     case calm
     /// Почти монохромная: нейтральный серый, один общий акцент системы.
@@ -20,9 +20,34 @@ enum DSTheme: String, CaseIterable, Identifiable {
     case vivid
     /// Глубокий сине-фиолетовый фон для всех; оттенок модуля — только у значка и главной кнопки.
     case midnight
+    /// Своя палитра: оттенки трёх категорий, насыщенность и яркость фона задаёт пользователь.
+    case custom(CustomPalette)
 
     var id: String { rawValue }
     static let storageKey = "Design.Theme"
+    /// Готовые темы (без «Своей»).
+    static let presets: [DSTheme] = [.calm, .graphite, .vivid, .midnight]
+
+    var rawValue: String {
+        switch self {
+        case .calm: return "calm"
+        case .graphite: return "graphite"
+        case .vivid: return "vivid"
+        case .midnight: return "midnight"
+        case .custom: return "custom"
+        }
+    }
+
+    /// Только пресеты: у «Своей» есть палитра, её подставляет `DSThemed`.
+    init?(rawValue: String) {
+        switch rawValue {
+        case "calm": self = .calm
+        case "graphite": self = .graphite
+        case "vivid": self = .vivid
+        case "midnight": self = .midnight
+        default: return nil
+        }
+    }
 
     var title: String {
         switch self {
@@ -30,6 +55,7 @@ enum DSTheme: String, CaseIterable, Identifiable {
         case .graphite: return "Графит"
         case .vivid: return "Цветная"
         case .midnight: return "Полночь"
+        case .custom: return "Своя"
         }
     }
 
@@ -42,17 +68,25 @@ enum DSTheme: String, CaseIterable, Identifiable {
         case .graphite: return (0.20, 0.72)
         case .vivid: return (0.72, 0.98)
         case .midnight: return (0.52, 0.88)
+        case .custom(let p): return (0.10 + 0.80 * p.sat, 0.70 + 0.28 * p.sat)
         }
     }
 
     /// Градиент фона окна (сверху вниз) для модуля.
     func background(_ m: Module) -> [Color] {
         switch self {
-        case .calm: return [m.hsb(0.46, 0.27), m.hsb(0.42, 0.10)]
-        case .vivid: return [m.hsb(0.74, 0.43), m.hsb(0.72, 0.13)]
+        case .calm: return [hsb(m, 0.46, 0.27), hsb(m, 0.42, 0.10)]
+        case .vivid: return [hsb(m, 0.74, 0.43), hsb(m, 0.72, 0.13)]
         case .graphite: return [Color(white: 0.15), Color(white: 0.085)]
         case .midnight: return [Color(hue: 0.69, saturation: 0.55, brightness: 0.25),
                                 Color(hue: 0.72, saturation: 0.62, brightness: 0.09)]
+        case .custom(let p):
+            // Верх не ярче потолка: белый текст остаётся читаемым при любом оттенке.
+            let b = p.backgroundBrightness
+            let s = 0.05 + 0.85 * p.sat
+            let h = hue(m)
+            return [Color(hue: h, saturation: s, brightness: b),
+                    Color(hue: h, saturation: s * 0.9, brightness: b * 0.37)]
         }
     }
 
@@ -68,7 +102,7 @@ enum DSTheme: String, CaseIterable, Identifiable {
     /// Акцент модуля: главная кнопка, переключатели, активные контролы.
     func accent(_ m: Module) -> Color {
         if self == .graphite { return Color.accentColor }
-        return m.hsb(accentSB.s, accentSB.b)
+        return hsb(m, accentSB.s, accentSB.b)
     }
 
     /// Мягкая подложка акцента: значки в строках, чипы.
@@ -86,25 +120,110 @@ enum DSTheme: String, CaseIterable, Identifiable {
     /// Плашка значка модуля: у «Графита» приглушена, чтобы значки не пестрили.
     func badge(_ m: Module) -> Color {
         switch self {
-        case .graphite: return m.hsb(0.36, 0.64)
-        case .midnight, .calm: return m.hsb(0.50, 0.78)
-        case .vivid: return m.hsb(0.75, 0.95)
+        case .graphite: return hsb(m, 0.36, 0.64)
+        case .midnight, .calm: return hsb(m, 0.50, 0.78)
+        case .vivid: return hsb(m, 0.75, 0.95)
+        case .custom(let p): return hsb(m, 0.15 + 0.70 * p.sat, 0.78)
         }
     }
 
     /// Цвет текста и значка на заливке акцентом.
     var onAccent: Color { self == .graphite ? .white : Color.black.opacity(0.78) }
 
-    /// Три цвета для предпросмотра в настройках: фон сверху, фон снизу, акцент.
-    var preview: [Color] { [background(.voice)[0], background(.voice)[1], accent(.voice)] }
+    /// Оттенок модуля (0…1): из таблицы `ModuleCategory.all`, а у «Своей» — из её палитры.
+    func hue(_ m: Module) -> Double {
+        if case .custom(let p) = self { return p.hue(of: m) }
+        return m.categoryHue
+    }
+
+    /// Оттенок категории (метка в панели, заголовки групп).
+    func hue(_ c: ModuleCategory) -> Double {
+        if case .custom(let p) = self { return p.hue(of: c) }
+        return c.hue
+    }
+
+    fileprivate func hsb(_ m: Module, _ s: Double, _ b: Double) -> Color {
+        Color(hue: hue(m), saturation: s, brightness: b)
+    }
+
+    /// Образец оттенка в редакторе «Своей»: так акцент выглядит в интерфейсе.
+    func swatch(hue: Double) -> Color { Color(hue: hue, saturation: accentSB.s, brightness: accentSB.b) }
 }
 
-extension Module {
-    /// Оттенок модуля (0…1) берётся из таблицы `ModuleCategory.all`.
-    fileprivate var dsHue: Double { categoryHue }
+// MARK: - Своя палитра
 
-    fileprivate func hsb(_ s: Double, _ b: Double) -> Color {
-        Color(hue: dsHue, saturation: s, brightness: b)
+/// Настройки «Своей» темы: оттенок на категорию (ключ — `ModuleCategory.id`) и два общих числа 0…1.
+struct CustomPalette: Hashable {
+    var hues: [String: Double]
+    /// Насыщенность акцентов и фона.
+    var sat: Double
+    /// Яркость фона: 0 — почти чёрный, 1 — приглушённый (потолок читаемости).
+    var bright: Double
+
+    /// Потолок яркости верха фона: даже серый 0,42 даёт белому тексту контраст больше 5, цветной ещё темнее.
+    static let maxBackground = 0.42
+
+    var backgroundBrightness: Double { min(Self.maxBackground, 0.12 + 0.30 * bright.clamped01) }
+
+    func hue(of c: ModuleCategory) -> Double { hues[c.id] ?? c.hue }
+    func hue(of m: Module) -> Double { m.category.hue(of: m, base: hue(of: m.category)) }
+
+    /// Значения, при которых «Своя» выглядит как пресет (оттенки — штатные).
+    static func from(_ preset: DSTheme) -> CustomPalette {
+        let (sat, bright): (Double, Double)
+        switch preset {
+        case .graphite: (sat, bright) = (0.0, 0.1)
+        case .vivid: (sat, bright) = (0.8, 1.0)
+        case .midnight: (sat, bright) = (0.55, 0.43)
+        case .custom(let p): return p
+        case .calm: (sat, bright) = (0.5, 0.5)
+        }
+        return CustomPalette(hues: [:], sat: sat, bright: bright)
+    }
+}
+
+private extension Double {
+    var clamped01: Double { Swift.min(Swift.max(self, 0), 1) }
+}
+
+/// Хранит палитру в UserDefaults (по ключу на категорию + насыщенность и яркость) и рассылает изменения.
+/// Пишут сюда только по отпусканию ползунка, поэтому интерфейс пересобирается редко.
+@MainActor
+final class CustomPaletteStore: ObservableObject {
+    static let shared = CustomPaletteStore()
+    private static let satKey = "Design.Custom.Sat"
+    private static let brightKey = "Design.Custom.Bright"
+    private static func hueKey(_ c: ModuleCategory) -> String { "Design.Custom.Hue." + c.id }
+    /// Пресет, выбранный до «Своей»: к нему возвращает «Сбросить».
+    static let lastPresetKey = "Design.LastPreset"
+
+    @Published private(set) var palette: CustomPalette
+
+    /// Настраивали ли «Свою» раньше.
+    var isSaved: Bool { UserDefaults.standard.object(forKey: Self.satKey) != nil }
+
+    private init() {
+        let d = UserDefaults.standard
+        var hues: [String: Double] = [:]
+        for c in ModuleCategory.all { if let h = d.object(forKey: Self.hueKey(c)) as? Double { hues[c.id] = h } }
+        let base = CustomPalette.from(.calm)
+        palette = CustomPalette(hues: hues,
+                                sat: d.object(forKey: Self.satKey) as? Double ?? base.sat,
+                                bright: d.object(forKey: Self.brightKey) as? Double ?? base.bright)
+    }
+
+    func set(_ new: CustomPalette) {
+        guard new != palette else { return }
+        let d = UserDefaults.standard
+        for c in ModuleCategory.all { d.set(new.hue(of: c), forKey: Self.hueKey(c)) }
+        d.set(new.sat, forKey: Self.satKey)
+        d.set(new.bright, forKey: Self.brightKey)
+        palette = new
+    }
+
+    /// Последний выбранный пресет (по умолчанию «Спокойная»).
+    static var lastPreset: DSTheme {
+        DSTheme(rawValue: UserDefaults.standard.string(forKey: lastPresetKey) ?? "") ?? .calm
     }
 }
 
@@ -112,12 +231,12 @@ extension DSTheme {
     /// Цвет категории: метка у заголовка в панели и в «О проекте». У «Графита» приглушён, но отличим.
     func categoryColor(_ c: ModuleCategory) -> Color {
         let p: (s: Double, b: Double) = self == .graphite ? (0.42, 0.80) : accentSB
-        return Color(hue: c.hue, saturation: p.s, brightness: p.b)
+        return Color(hue: hue(c), saturation: p.s, brightness: p.b)
     }
 
     /// Цвет модуля там, где «Графит» всё равно должен выдать категорию (точка «включён» в панели).
     func tone(_ m: Module) -> Color {
-        self == .graphite ? m.hsb(0.40, 0.80) : accent(m)
+        self == .graphite ? hsb(m, 0.40, 0.80) : accent(m)
     }
 }
 
@@ -141,9 +260,13 @@ extension EnvironmentValues {
 
 private struct DSThemed: ViewModifier {
     @AppStorage(DSTheme.storageKey) private var raw = DSTheme.calm.rawValue
+    @ObservedObject private var custom = CustomPaletteStore.shared
+    private var theme: DSTheme {
+        raw == "custom" ? .custom(custom.palette) : DSTheme(rawValue: raw) ?? .calm
+    }
     func body(content: Content) -> some View {
         content
-            .environment(\.dsTheme, DSTheme(rawValue: raw) ?? .calm)
+            .environment(\.dsTheme, theme)
             .preferredColorScheme(.dark)
     }
 }

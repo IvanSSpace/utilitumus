@@ -36,9 +36,11 @@ struct ModuleCategory: Identifiable, Hashable {
     ]
 
     /// Оттенок модуля внутри гаммы категории.
-    func hue(of module: Module) -> Double {
-        guard let index = modules.firstIndex(of: module) else { return hue }
-        let value = hue + (Double(index) - Double(modules.count - 1) / 2) * spread
+    /// `base` — средний оттенок вместо штатного (у «Своей» темы).
+    func hue(of module: Module, base: Double? = nil) -> Double {
+        let center = base ?? hue
+        guard let index = modules.firstIndex(of: module) else { return center }
+        let value = center + (Double(index) - Double(modules.count - 1) / 2) * spread
         return value - value.rounded(.down)
     }
 

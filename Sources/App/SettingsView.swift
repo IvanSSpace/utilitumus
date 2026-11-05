@@ -41,42 +41,97 @@ struct SettingsView: View {
     }
 }
 
-/// «Тема»: выбор цветовой темы, применяется сразу. Предпросмотр — кружок с фоном и точкой акцента.
+/// «Тема»: пять мини-окошек (четыре пресета и «Своя»), применяется сразу.
+/// У «Своей» ниже раскрывается редактор палитры.
 private struct ThemeSection: View {
     @AppStorage(DSTheme.storageKey) private var raw = DSTheme.calm.rawValue
+    @ObservedObject private var store = CustomPaletteStore.shared
+    @Environment(\.dsTint) private var tint
+    /// Черновик: ползунки двигают его, в хранилище он уходит по отпусканию (и по тапу на образец).
+    @State private var draft = CustomPaletteStore.shared.palette
+
+    private static let hueChoices: [Double] = [0.00, 0.06, 0.11, 0.20, 0.33, 0.44, 0.55, 0.66, 0.80, 0.92]
 
     var body: some View {
         DSSection("Оформление") {
-            DSRow(icon: "paintpalette", title: "Тема", subtitle: "Цвета окна и боковой панели") {
-                HStack(spacing: 14) {
-                    ForEach(DSTheme.allCases) { theme in
-                        Button { raw = theme.rawValue } label: { swatch(theme) }
-                            .buttonStyle(.plain)
-                            .help(theme.title)
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(DSTheme.presets) { theme in
+                    Button { pick(theme) } label: { ThemePreview(theme: theme, selected: raw == theme.rawValue) }
+                        .buttonStyle(.plain)
+                        .frame(maxWidth: .infinity)
+                }
+                Button { pickCustom() } label: { ThemePreview(theme: .custom(draft), selected: raw == "custom") }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.vertical, 12).padding(.horizontal, 4)
+            if raw == "custom" { editor }
+        }
+        .onChange(of: store.palette) { _, new in if new != draft { draft = new } }
+    }
+
+    private func pick(_ theme: DSTheme) {
+        raw = theme.rawValue
+        UserDefaults.standard.set(theme.rawValue, forKey: CustomPaletteStore.lastPresetKey)
+    }
+
+    /// Первый раз «Своя» стартует с цветов выбранного пресета.
+    private func pickCustom() {
+        if !store.isSaved {
+            draft = CustomPalette.from(CustomPaletteStore.lastPreset)
+            store.set(draft)
+        }
+        raw = "custom"
+    }
+
+    private func commit() { store.set(draft) }
+
+    // MARK: Редактор
+
+    private var editor: some View {
+        let probe = DSTheme.custom(draft)
+        return VStack(spacing: 0) {
+            ForEach(ModuleCategory.all) { category in
+                DSRow(icon: category.icon, title: category.title, iconTint: probe.categoryColor(category)) {
+                    HStack(spacing: 6) {
+                        ForEach(Self.hueChoices, id: \.self) { hue in
+                            hueDot(hue, probe: probe, category: category)
+                        }
                     }
+                }
+            }
+            DSRow(icon: "drop.fill", title: "Насыщенность", subtitle: "Общая для фона и акцентов") {
+                Slider(value: $draft.sat, in: 0...1) { if !$0 { commit() } }
+                    .tint(tint).frame(width: 200)
+            }
+            DSRow(icon: "sun.max.fill", title: "Яркость фона", subtitle: "От почти чёрного до приглушённого") {
+                Slider(value: $draft.bright, in: 0...1) { if !$0 { commit() } }
+                    .tint(tint).frame(width: 200)
+            }
+            DSRow(icon: "arrow.counterclockwise", title: "Как в пресете",
+                  subtitle: "Вернуть цвета «\(CustomPaletteStore.lastPreset.title)»") {
+                DSButton("Сбросить", style: .plain, small: true) {
+                    draft = CustomPalette.from(CustomPaletteStore.lastPreset)
+                    commit()
                 }
             }
         }
     }
 
-    private func swatch(_ theme: DSTheme) -> some View {
-        let selected = theme.rawValue == raw
-        let colors = theme.preview
-        return VStack(spacing: 4) {
-            Circle()
-                .fill(LinearGradient(colors: [colors[0], colors[1]], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 28, height: 28)
-                .overlay(Circle().fill(colors[2]).frame(width: 10, height: 10).offset(x: 6, y: 6))
-                .overlay(Circle().stroke(.white.opacity(0.18), lineWidth: 0.7))
-                .padding(3)
-                .overlay(Circle().stroke(.white.opacity(selected ? 0.9 : 0), lineWidth: 1.5))
-            Text(theme.title)
-                .font(.system(size: 10.5, weight: selected ? .semibold : .regular))
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundStyle(.white.opacity(selected ? 0.95 : 0.55))
+    private func hueDot(_ hue: Double, probe: DSTheme, category: ModuleCategory) -> some View {
+        let current = draft.hue(of: category)
+        let distance = abs(current - hue)
+        let selected = min(distance, 1 - distance) < 0.045
+        return Button {
+            draft.hues[category.id] = hue
+            commit()
+        } label: {
+            Circle().fill(probe.swatch(hue: hue))
+                .frame(width: 16, height: 16)
+                .padding(2)
+                .overlay(Circle().stroke(.white.opacity(selected ? 0.95 : 0), lineWidth: 1.5))
         }
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
     }
 }
 

@@ -60,7 +60,12 @@ private struct BlendedGradient: View, Animatable {
 
 extension DSTheme {
     /// Меняется ли фон от модуля к модулю (иначе кроссфейд не нужен).
-    var followsModule: Bool { self == .calm || self == .vivid }
+    var followsModule: Bool {
+        switch self {
+        case .calm, .vivid, .custom: return true
+        case .graphite, .midnight: return false
+        }
+    }
 }
 
 // MARK: - Минимальный размер окна
