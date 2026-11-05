@@ -271,13 +271,19 @@ enum DashboardLive {
 
     private static func keyboard() -> DashState {
         let c = KeyboardController.shared
-        guard c.tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
-        if let app = c.secureInputApp {
-            return DashState(text: "Сейчас Fn не слышно: защищённый ввод в \(app)", attention: true)
+        let fn = c.isOn(.fnLanguage), perApp = c.isOn(.perAppLayout)
+        guard fn || perApp else { return DashState(text: "нет включённых фишек", attention: true) }
+        if fn {
+            guard c.tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
+            if let app = c.secureInputApp {
+                return DashState(text: "Сейчас Fn не слышно: защищённый ввод в \(app)", attention: true)
+            }
+            // Второе переключение от системы ломает смену языка: показываем сразу.
+            if c.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
         }
-        // Второе переключение от системы ломает смену языка: показываем сразу.
-        if KeyboardController.shared.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
-        return DashState(text: "\(c.currentName) · \(c.mode.title.lowercased())")
+        // Включённые фишки коротко; одна — просто текущий язык.
+        if fn && perApp { return DashState(text: "\(KeyboardFeature.fnLanguage.shortName) · \(KeyboardFeature.perAppLayout.shortName)") }
+        return DashState(text: fn ? c.currentName : "\(KeyboardFeature.perAppLayout.shortName) · \(c.currentName)")
     }
 
     private static func awake() -> DashState {

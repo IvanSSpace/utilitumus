@@ -100,6 +100,35 @@ extension SetupStep {
     }
 }
 
+extension KeyboardFeature {
+    /// Шаги настройки фишки. «Раскладке для каждого приложения» разрешения не нужны.
+    @MainActor var setupSteps: [SetupStep] {
+        switch self {
+        case .fnLanguage:
+            return [
+                // Tap только слушает, поэтому нужен именно «Мониторинг ввода».
+                SetupStep(id: "keyboard.input", title: "Мониторинг ввода",
+                          why: "Чтобы заметить тап по Fn/🌐; ничего не записывается",
+                          kind: .permission, icon: "keyboard.fill",
+                          isDone: { CGPreflightListenEventAccess() },
+                          perform: { KeyboardController.shared.requestAccess() }),
+                SetupStep(id: "keyboard.globe", title: "Отключить системное действие 🌐",
+                          why: "Иначе macOS тоже переключит язык, и он сменится дважды",
+                          kind: .system, icon: "globe", buttonTitle: "Сделать",
+                          isDone: { FnSystemAction.usage == 0 },
+                          perform: { KeyboardController.shared.disableSystemAction() }),
+                SetupStep(id: "keyboard.dictation", title: "Убрать диктовку с двойного Fn",
+                          why: "Иначе двойной тап Fn вызовет диктовку. Если macOS спросит «Включить диктовку?» — нажми «Не сейчас»",
+                          kind: .recommendation, icon: "mic.slash.fill", buttonTitle: "Сделать", required: false,
+                          isDone: { !FnSystemAction.dictationOnDoubleFn },
+                          perform: { KeyboardController.shared.disableDictationDoubleFn() }),
+            ]
+        case .perAppLayout, .capsLock:
+            return []
+        }
+    }
+}
+
 extension Module {
     /// Шаги настройки по порядку: сначала разрешения, потом наши системные настройки, потом рекомендации.
     @MainActor var setupSteps: [SetupStep] {
@@ -122,24 +151,8 @@ extension Module {
             return [.accessibility(id: "mouse.ax", why: "Чтобы менять направление и плавность прокрутки",
                                    request: { MouseController.shared.requestAccess() })]
         case .keyboard:
-            return [
-                // Tap только слушает, поэтому нужен именно «Мониторинг ввода».
-                SetupStep(id: "keyboard.input", title: "Мониторинг ввода",
-                          why: "Чтобы заметить тап по Fn/🌐; ничего не записывается",
-                          kind: .permission, icon: "keyboard.fill",
-                          isDone: { CGPreflightListenEventAccess() },
-                          perform: { KeyboardController.shared.requestAccess() }),
-                SetupStep(id: "keyboard.globe", title: "Отключить системное действие 🌐",
-                          why: "Иначе macOS тоже переключит язык, и он сменится дважды",
-                          kind: .system, icon: "globe", buttonTitle: "Сделать",
-                          isDone: { FnSystemAction.usage == 0 },
-                          perform: { KeyboardController.shared.disableSystemAction() }),
-                SetupStep(id: "keyboard.dictation", title: "Убрать диктовку с двойного Fn",
-                          why: "Иначе двойной тап Fn вызовет диктовку. Если macOS спросит «Включить диктовку?» — нажми «Не сейчас»",
-                          kind: .recommendation, icon: "mic.slash.fill", buttonTitle: "Сделать", required: false,
-                          isDone: { !FnSystemAction.dictationOnDoubleFn },
-                          perform: { KeyboardController.shared.disableDictationDoubleFn() }),
-            ]
+            // Шаги модуля — шаги включённых фишек.
+            return KeyboardFeature.allCases.filter { KeyboardController.shared.isOn($0) }.flatMap(\.setupSteps)
         case .mixer:
             return [SetupStep(
                 id: "mixer.capture", title: "Запись системного звука", why: "Система спросит при первом звуке",
@@ -255,7 +268,7 @@ final class SetupFlow: ObservableObject {
     /// «Сделать всё автоматически»: все наши шаги, потом панель первого недостающего обязательного разрешения.
     func doAll(_ module: Module) {
         let steps = module.setupSteps
-        if module == .keyboard {
+        if module == .keyboard, KeyboardController.shared.isOn(.fnLanguage) {
             // 🌐 и диктовка — одной записью и одним применением: по шагу на каждое дёргало систему
             // дважды, и macOS показывала окно «Включить диктовку?».
             KeyboardController.shared.disableAllSystemActions()

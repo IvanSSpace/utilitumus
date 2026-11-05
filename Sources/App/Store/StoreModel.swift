@@ -82,7 +82,7 @@ enum StoreCatalog {
         case .fans: return [StoreNeed(permission: .rootHelper, why: "Пароль администратора, один раз: помощник управляет вентиляторами")]
         case .stash: return [StoreNeed(permission: .accessibility, why: "Чтобы вернуть окна программ на места")]
         case .mouse: return [StoreNeed(permission: .accessibility, why: "Чтобы менять направление и плавность прокрутки")]
-        case .keyboard: return [StoreNeed(permission: .inputMonitoring, why: "Чтобы заметить тап по Fn; ничего не записывается")]
+        case .keyboard: return [StoreNeed(permission: .inputMonitoring, why: "Для фишки «Язык по Fn»: чтобы заметить тап; ничего не записывается")]
         case .mixer: return [StoreNeed(permission: .systemAudio, why: "Система спросит при первом звуке")]
         case .clipboard: return [StoreNeed(permission: .accessibility, why: "Чтобы выбранная запись вставлялась сама")]
         case .voice: return [StoreNeed(permission: .microphone, why: "Чтобы слышать тебя; звук остаётся на этом Mac"),
@@ -103,7 +103,7 @@ enum StoreCatalog {
         case .browser: return "Браузер на каждую ссылку"
         case .voice: return "Диктовка в любое поле"
         case .clipboard: return "История буфера обмена"
-        case .keyboard: return "Смена раскладки по Fn"
+        case .keyboard: return "Фишки для клавиатуры и языка"
         case .awake: return "Mac не засыпает за работой"
         }
     }
