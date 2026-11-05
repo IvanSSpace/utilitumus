@@ -97,6 +97,18 @@ final class ModuleManager: ObservableObject {
     /// Модули в боковой панели (включённые и выключенные), в нужном порядке.
     var shownModules: [Module] { order.filter { !hidden.contains($0) } }
 
+    /// «Установлен» — как в Сторе: включён и не скрыт. Только такие модули видны в боковой панели.
+    func isInstalled(_ module: Module) -> Bool { enabled.contains(module) && !hidden.contains(module) }
+
+    /// Установленные модули в порядке панели.
+    var installedModules: [Module] { order.filter(isInstalled) }
+
+    /// Первый установленный модуль так, как их показывает панель: по вкладкам, внутри вкладки по порядку.
+    var firstInstalled: Module? {
+        let installed = installedModules
+        return ModuleCategory.all.lazy.compactMap { category in installed.first { $0.category == category } }.first
+    }
+
     /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели.
     var hiddenModules: [Module] { order.filter { hidden.contains($0) } }
 
@@ -135,9 +147,10 @@ final class ModuleManager: ObservableObject {
         defaults.set(new.map(\.rawValue), forKey: Self.orderKey)
     }
 
-    /// Выбранный модуль, если он в панели; иначе первый в панели; иначе nil.
+    /// Выбранный модуль, если он не скрыт (выключенный остаётся, пока страница открыта);
+    /// иначе первый установленный; иначе nil.
     func resolve(_ selection: Module) -> Module? {
-        hidden.contains(selection) ? shownModules.first : selection
+        hidden.contains(selection) ? firstInstalled : selection
     }
 
     /// Запуск приложения: стартуют включённые (скрытые тоже работают).

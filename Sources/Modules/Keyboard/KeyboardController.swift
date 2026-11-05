@@ -74,6 +74,7 @@ final class KeyboardController: ObservableObject {
         }
         observeTapEvents()
         // Пользователь просил отключить системное действие: после перезапуска применяем снова.
+        FnSystemAction.migrateKeepOff()
         enforceSystemAction()
         refreshAccess()
         refreshSystem()
@@ -159,17 +160,16 @@ final class KeyboardController: ObservableObject {
     }
 
     /// Если пользователь просил отключить системное действие (и диктовку на двойном Fn), а система
-    /// их вернула, чиним сами. Дёшево: два чтения настроек.
+    /// их вернула (в том числе «OK» в окне «Включить диктовку?»), молча чиним. Дёшево: два чтения
+    /// настроек; пока всё на месте, систему не трогаем. Зовётся при активации приложения и раз в 30 с.
     private func enforceSystemAction() {
         guard started else { return }
-        if FnSystemAction.reapplyIfNeeded() {
-            note("системное действие 🌐 вернулось — исправлено")
-            refreshSystem()
+        let fixed = FnSystemAction.reapplyAll()
+        if fixed.usageFixed {
+            note("macOS вернула действие 🌐 (было \(fixed.previousUsage.map(String.init) ?? "нет значения")) — исправлено")
         }
-        if FnSystemAction.reapplyDictationIfNeeded() {
-            note("диктовка на двойном Fn вернулась — исправлено")
-            refreshSystem()
-        }
+        if fixed.dictationFixed { note("диктовка на двойном Fn вернулась — исправлено") }
+        if fixed.any { refreshSystem() }
     }
 
     /// «Починить»: системное действие 0, перезапуск системного переключателя, новый tap, сверка раскладки.
@@ -178,7 +178,8 @@ final class KeyboardController: ObservableObject {
             repairResult = "Модуль выключен: сначала включи его"
             return
         }
-        FnSystemAction.disable()  // пишет 0, activateSettings -u и перезапуск TextInputSwitcher идут фоном
+        // Если там уже 0, настройки и переключатель macOS не трогаем.
+        let changed = FnSystemAction.disable()
         rebuildTap(reason: "починка")
         if let now = InputSources.current() {
             picker.didChange(to: now.id)
@@ -186,7 +187,8 @@ final class KeyboardController: ObservableObject {
         }
         refreshSystem()
         let tap = port == nil ? "tap не создан (нет доступа «Мониторинг ввода»?)" : "tap пересоздан"
-        repairResult = "Системное действие 🌐 отключено, переключатель macOS перезапущен, \(tap), раскладка «\(currentName)»"
+        let action = changed ? "Системное действие 🌐 отключено, переключатель macOS перезапущен" : "Системное действие 🌐 уже отключено"
+        repairResult = "\(action), \(tap), раскладка «\(currentName)»"
         note("починка: \(repairResult ?? "")")
     }
 
@@ -195,6 +197,13 @@ final class KeyboardController: ObservableObject {
         FnSystemAction.disableDictation()
         refreshSystem()
         note("диктовка снята с двойного Fn")
+    }
+
+    /// Сразу и действие 🌐, и диктовка на двойном Fn: все записи, потом одно применение настроек.
+    func disableAllSystemActions() {
+        let changed = FnSystemAction.disableAll()
+        refreshSystem()
+        note(changed ? "системное действие 🌐 и диктовка отключены" : "системное действие 🌐 и диктовка уже отключены")
     }
 
     // MARK: Журнал

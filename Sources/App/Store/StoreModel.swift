@@ -241,6 +241,9 @@ final class StoreModel: ObservableObject {
 
     @Published var tab: StoreTab = .showcase
     @Published var detail: Module?
+    /// Категория, которую витрина подсвечивает после перехода из пустой вкладки панели.
+    @Published var highlighted: ModuleCategory?
+    private var highlightTask: Task<Void, Never>?
     /// Модуль, удаление которого ждёт подтверждения.
     @Published var pendingRemoval: Module?
 
@@ -258,7 +261,7 @@ final class StoreModel: ObservableObject {
     }
 
     /// «Установлен» = модуль в боковой панели и включён.
-    func isInstalled(_ module: Module) -> Bool { modules.isOn(module) && !modules.isHidden(module) }
+    func isInstalled(_ module: Module) -> Bool { modules.isInstalled(module) }
 
     func state(_ module: Module) -> StoreState {
         if module == .voice {
@@ -274,6 +277,18 @@ final class StoreModel: ObservableObject {
     /// Установленному модулю не хватает ресурсов: у «Голоса» не скачана модель.
     func hasUpdate(_ module: Module) -> Bool {
         module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
+    }
+
+    /// Витрина с подсвеченной на пару секунд категорией.
+    func show(category: ModuleCategory) {
+        tab = .showcase
+        detail = nil
+        highlighted = category
+        highlightTask?.cancel()
+        highlightTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.4)) { self?.highlighted = nil } }
+        }
     }
 
     // MARK: Окно подробностей

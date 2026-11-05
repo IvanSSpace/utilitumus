@@ -135,7 +135,7 @@ extension Module {
                           isDone: { FnSystemAction.usage == 0 },
                           perform: { KeyboardController.shared.disableSystemAction() }),
                 SetupStep(id: "keyboard.dictation", title: "Убрать диктовку с двойного Fn",
-                          why: "Иначе двойной тап Fn вызовет диктовку. Верну, когда выключишь модуль",
+                          why: "Иначе двойной тап Fn вызовет диктовку. Если macOS спросит «Включить диктовку?» — нажми «Не сейчас»",
                           kind: .recommendation, icon: "mic.slash.fill", buttonTitle: "Сделать", required: false,
                           isDone: { !FnSystemAction.dictationOnDoubleFn },
                           perform: { KeyboardController.shared.disableDictationDoubleFn() }),
@@ -255,7 +255,13 @@ final class SetupFlow: ObservableObject {
     /// «Сделать всё автоматически»: все наши шаги, потом панель первого недостающего обязательного разрешения.
     func doAll(_ module: Module) {
         let steps = module.setupSteps
-        for step in steps where step.isAutomatic && !step.isDone() { step.perform() }
+        if module == .keyboard {
+            // 🌐 и диктовка — одной записью и одним применением: по шагу на каждое дёргало систему
+            // дважды, и macOS показывала окно «Включить диктовку?».
+            KeyboardController.shared.disableAllSystemActions()
+        } else {
+            for step in steps where step.isAutomatic && !step.isDone() { step.perform() }
+        }
         if let first = steps.first(where: { $0.kind == .permission && $0.status == .needed }) { first.perform() }
         AccessState.shared.refresh()
     }
