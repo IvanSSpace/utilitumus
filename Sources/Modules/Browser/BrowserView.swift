@@ -576,7 +576,7 @@ private struct AddRuleSheet: View {
                 }
                 if kind == .domain {
                     DSRow(icon: "globe", title: "Домен", subtitle: domainNote) {
-                        TextField("", text: $domain, prompt: Text("google.com или github.com/flowfast"))
+                        TextField("", text: $domain, prompt: Text("google.com или github.com/apple"))
                             .textFieldStyle(.plain)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 170)

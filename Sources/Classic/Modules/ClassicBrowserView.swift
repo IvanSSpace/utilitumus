@@ -400,7 +400,7 @@ private struct ClassicAddRuleSheet: View {
                 }
 
                 if kind == .domain {
-                    TextField("Домен", text: $domain, prompt: Text("google.com или github.com/flowfast"))
+                    TextField("Домен", text: $domain, prompt: Text("google.com или github.com/apple"))
                     if let normalizedDomain, normalizedDomain != domain.trimmingCharacters(in: .whitespaces) {
                         Text(normalizedDomain.contains("/") ? "Только ссылки на \(normalizedDomain)/…" : "Будет сохранён как \(normalizedDomain). Поддомены тоже подойдут.")
                             .font(.caption)

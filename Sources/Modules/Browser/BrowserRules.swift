@@ -7,7 +7,7 @@ import Foundation
 struct BrowserRule: Codable, Equatable, Identifiable {
     enum Kind: String, Codable {
         /// `value` — домен: ловит сам домен и его поддомены. Может быть с началом пути:
-        /// «github.com/flowfast» ловит только ссылки на github.com/flowfast/…
+        /// «github.com/apple» ловит только ссылки на github.com/apple/…
         case domain
         /// `value` — bundle id приложения, из которого пришла ссылка.
         case app
@@ -52,8 +52,8 @@ enum BrowserRuleMatcher {
     }
 
     /// Домен с началом пути из того, что вписал пользователь:
-    /// «https://github.com/FlowFast/kaiten/pull/1» оставляет путь как есть → «github.com/flowfast/kaiten/pull/1»,
-    /// «github.com/flowfast/» → «github.com/flowfast». Без пути — как `normalizeDomain`.
+    /// «https://github.com/Apple/swift/pull/1» оставляет путь как есть → «github.com/apple/swift/pull/1»,
+    /// «github.com/apple/» → «github.com/apple». Без пути — как `normalizeDomain`.
     static func normalizePattern(_ input: String) -> String? {
         var text = input.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if let range = text.range(of: "://") { text = String(text[range.upperBound...]) }
@@ -71,8 +71,8 @@ enum BrowserRuleMatcher {
         return (String(text[..<slash]), text[slash...].split(separator: "/").joined(separator: "/"))
     }
 
-    /// Путь ссылки начинается с `prefix` целыми кусками: «flowfast» ловит «/flowfast/kaiten»,
-    /// но не «/flowfast-old». Регистр не важен: у GitHub и большинства сайтов имена без регистра.
+    /// Путь ссылки начинается с `prefix` целыми кусками: «apple» ловит «/apple/swift»,
+    /// но не «/apple-old». Регистр не важен: у GitHub и большинства сайтов имена без регистра.
     static func pathMatches(urlPath: String, prefix: String) -> Bool {
         guard !prefix.isEmpty else { return true }
         let path = urlPath.lowercased().split(separator: "/").joined(separator: "/")
