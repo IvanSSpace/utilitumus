@@ -23,6 +23,7 @@ struct StoreDetail: View {
                         if state == .installed {
                             DSChip(store.hasUpdate(module) ? "Нет модели" : "Установлен",
                                    color: store.hasUpdate(module) ? .orange : .green)
+                            if store.isHidden(module) { DSChip("скрыт из панели", color: .gray, icon: "eye.slash") }
                         } else {
                             DSChip(module.category.title, color: cat)
                         }
@@ -39,6 +40,7 @@ struct StoreDetail: View {
                     if case .installing(let stage, let p) = state {
                         StoreStages(stage: stage, progress: p, tint: cat)
                     }
+                    if state == .installed { installedNotes }
                     DSSection("Что делает") {
                         Text(module.summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
                             .fixedSize(horizontal: false, vertical: true)
@@ -89,6 +91,41 @@ struct StoreDetail: View {
         .background(Button("") { store.close() }.keyboardShortcut(.escape, modifiers: []).opacity(0).frame(width: 0, height: 0))
     }
 
+    /// Что сделать с уже установленным: дойти до конца настройки, вернуть строку в панель.
+    @ViewBuilder
+    private var installedNotes: some View {
+        let progress = store.pendingSetup(module)
+        let hidden = store.isHidden(module)
+        if progress != nil || hidden {
+            VStack(spacing: 0) {
+                if let progress {
+                    noteRow(icon: "exclamationmark.circle.fill", tint: .orange,
+                            title: "Настройка: \(progress.done) из \(progress.total)",
+                            subtitle: "Без этого «\(module.title)» работает не полностью", button: "Настроить") { store.configure(module) }
+                }
+                if hidden {
+                    noteRow(icon: "eye.slash", tint: .gray, title: "Скрыт из панели",
+                            subtitle: "Работает в фоне, строка в «Скрытых»", button: "Показать в панели") { store.showInPanel(module) }
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+        }
+    }
+
+    private func noteRow(icon: String, tint: Color, title: String, subtitle: String, button: String,
+                         action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white.opacity(0.95))
+                Text(subtitle).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5)).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            DSButton(button, style: .secondary, small: true, action: action).fixedSize()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
     @ViewBuilder
     private func buttons(state: StoreState) -> some View {
         switch state {
@@ -99,10 +136,11 @@ struct StoreDetail: View {
         case .installed:
             DSButton("Удалить", icon: "trash", style: .secondary, small: true) { store.requestRemoval(module) }
             if store.hasUpdate(module) {
-                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: true) {
+                DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .secondary, small: true) {
                     store.downloadResources(module)
                 }
             }
+            DSButton("Открыть", icon: "arrow.right", style: .primary, small: true) { store.openInApp(module) }
         }
     }
 }

@@ -224,15 +224,27 @@ struct MainView: View {
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false; showStore = false } }
         .onChange(of: showAbout) { if showAbout { showStore = false } }
-        // Стор установил модуль: открываем его, там чек-лист настройки.
+        // Стор просит открыть модуль («Открыть» и «Настроить»): скрытый открывается разовым показом.
         .onReceive(NotificationCenter.default.publisher(for: .storeOpenModule)) { note in
             guard let module = note.object as? Module else { return }
-            selection = module
-            peeked = nil
+            if modules.isHidden(module) {
+                peeked = module
+            } else {
+                selection = module
+                peeked = nil
+            }
             showAbout = false
             showStore = false
             showDashboard = false
         }
+        // Модуль удалили (из Стора или из панели): если он открыт, уходим на другой.
+        .onReceive(NotificationCenter.default.publisher(for: .moduleRemoved)) { note in
+            guard let module = note.object as? Module else { return }
+            if peeked == module { peeked = nil }
+            guard selection == module, !showStore, !showDashboard, !showAbout else { return }
+            if let first = modules.firstInPanel { selection = first } else { showStore = true }
+        }
+        .modifier(StoreRemovalAlert())
         // Минимальный размер окна задаёт `WindowMinSize`: `.frame(minWidth:)` на корне заставлял
         // NSHostingView перемерять всё дерево при каждом изменении.
         .background(WindowMinSize(width: 840, height: 540))
@@ -248,8 +260,8 @@ struct MainView: View {
     /// Стартовая страница: последний выбранный модуль, если он установлен; иначе первый установленный;
     /// если установленных нет — Стор. Дашборд и открытие Стора флагом запуска не трогаем.
     private func openStartPage() {
-        guard !showStore, !showDashboard, !modules.isInstalled(selection) else { return }
-        if let first = modules.firstInstalled {
+        guard !showStore, !showDashboard, !modules.isInPanel(selection) else { return }
+        if let first = modules.firstInPanel {
             selection = first
         } else {
             showStore = true

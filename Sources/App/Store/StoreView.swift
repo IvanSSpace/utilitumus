@@ -25,6 +25,11 @@ struct StoreView: View {
                 Spacer(minLength: 0)
                 StoreBar()
             }
+            .overlay(alignment: .bottom) {
+                if let module = store.justInstalled {
+                    StoreToast(module: module).padding(.bottom, 1).transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
             .padding(DS.pagePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
@@ -43,7 +48,15 @@ struct StoreView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .animation(.easeInOut(duration: 0.2), value: detail)
-        .alert("Удалить «\(store.pendingRemoval?.title ?? "")»?", isPresented: removalShown, presenting: store.pendingRemoval) { module in
+    }
+}
+
+/// Подтверждение удаления: общее для Стора и боковой панели, висит на главном окне.
+struct StoreRemovalAlert: ViewModifier {
+    @ObservedObject private var store = StoreModel.shared
+
+    func body(content: Content) -> some View {
+        content.alert("Удалить «\(store.pendingRemoval?.title ?? "")»?", isPresented: shown, presenting: store.pendingRemoval) { module in
             Button("Удалить", role: .destructive) { store.remove(module) }
             Button("Отмена", role: .cancel) {}
         } message: { module in
@@ -51,7 +64,7 @@ struct StoreView: View {
         }
     }
 
-    private var removalShown: Binding<Bool> {
+    private var shown: Binding<Bool> {
         Binding(get: { store.pendingRemoval != nil }, set: { if !$0 { store.pendingRemoval = nil } })
     }
 }
@@ -203,7 +216,19 @@ private struct StoreTile: View {
                 }
                 Text(StoreCatalog.line(module)).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
-                StoreMeta(module: module, short: true)
+                if installed {
+                    if let progress = store.pendingSetup(module) {
+                        StoreSetupChip(module: module, progress: progress)
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark")
+                            Text(store.isHidden(module) ? "Установлен · скрыт" : "Установлен")
+                        }
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green).lineLimit(1)
+                    }
+                } else {
+                    StoreMeta(module: module, short: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -217,6 +242,47 @@ private struct StoreTile: View {
         .contentShape(Rectangle())
         .onTapGesture { store.open(module) }
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Мелкая плашка на плитке: «Настройка 1 из 3 · Настроить». Нажатие открывает чек-лист модуля.
+struct StoreSetupChip: View {
+    let module: Module
+    let progress: SetupProgress
+    @ObservedObject private var store = StoreModel.shared
+
+    var body: some View {
+        Button { store.configure(module) } label: {
+            Text("Настройка \(progress.done) из \(progress.total) · Настроить")
+                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.orange)
+                .lineLimit(1).minimumScaleFactor(0.75)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(Capsule().fill(Color.orange.opacity(0.16)))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help("Открыть чек-лист настройки модуля")
+    }
+}
+
+/// Подтверждение внизу Стора после установки: без перехода, исчезает само.
+private struct StoreToast: View {
+    let module: Module
+    @ObservedObject private var store = StoreModel.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Text("Установлен: \(module.title)").fontWeight(.medium)
+            Text("·").foregroundStyle(.white.opacity(0.4))
+            DSButton("Открыть", style: .plain, small: true) { store.openInApp(module) }
+        }
+        .font(.system(size: 12.5))
+        .padding(.leading, 14).padding(.trailing, 8).padding(.vertical, 6)
+        .background(Capsule().fill(.regularMaterial))
+        .background(Capsule().fill(.black.opacity(0.4)))
+        .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 0.7))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 3)
     }
 }
 
@@ -352,6 +418,8 @@ struct StoreActionButton: View {
                 DSButton("Обновить ресурсы", icon: "arrow.triangle.2.circlepath", style: .primary, small: small) {
                     store.downloadResources(module)
                 }
+            } else if let progress = store.pendingSetup(module) {
+                StoreSetupChip(module: module, progress: progress)
             } else {
                 DSChip("Установлен", color: .green, icon: "checkmark")
             }

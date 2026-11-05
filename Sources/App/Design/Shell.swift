@@ -276,12 +276,12 @@ struct DSSidebar: View {
                 DSSidebarRow(module: module, on: on, status: nil, selected: selected, action: open)
             }
         }
+        // «Выключить» убран: он делал то же, что «Удалить», только оставлял скачанное и путал.
         .contextMenu {
-            let on = modules.isOn(module)
-            Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
-            Button("Скрыть из панели") { modules.setHidden(module, true) }
+            Button("Как это работает") { modules.infoModule = module }
             Divider()
-            Button("Настройки…") { modules.settingsShown = true }
+            Button("Скрыть из панели") { modules.setHidden(module, true) }
+            Button("Удалить модуль…", role: .destructive) { StoreModel.shared.requestRemoval(module) }
         }
     }
 
@@ -756,16 +756,18 @@ struct DSSidebarFooter: View {
                        chevron: hiddenExpanded) { hiddenExpanded.toggle() }
             if hiddenExpanded {
                 ForEach(hidden) { module in
-                    HiddenRow(module: module, selected: peeked == module && !showAbout) {
+                    HiddenRow(module: module, selected: peeked == module && !showAbout,
+                              show: { modules.setHidden(module, false) },
+                              remove: { StoreModel.shared.requestRemoval(module) }) {
                         // Разовый показ: состояние не меняем, выделение в основном списке снимается через peeked.
                         peeked = module
                         showAbout = false
                     }
                     .contextMenu {
                         Button("Показать в панели") { modules.setHidden(module, false) }
-                        Button(modules.isOn(module) ? "Выключить модуль" : "Включить модуль") {
-                            modules.setOn(module, !modules.isOn(module))
-                        }
+                        Button("Как это работает") { modules.infoModule = module }
+                        Divider()
+                        Button("Удалить модуль…", role: .destructive) { StoreModel.shared.requestRemoval(module) }
                     }
                 }
             }
@@ -818,14 +820,22 @@ private struct FooterLink: View {
 private struct HiddenRow: View {
     let module: Module
     let selected: Bool
+    /// «Показать» и «Удалить…» появляются при наведении; те же пункты есть в контекстном меню.
+    let show: () -> Void
+    let remove: () -> Void
     let action: () -> Void
     @Environment(\.dsTint) private var tint
+    @State private var hover = false
 
     var body: some View {
         HStack(spacing: 10) {
             ModuleIconBadge(module: module, size: 18).opacity(0.6).frame(width: 24)
             Text(module.title).font(.system(size: 12.5))
             Spacer(minLength: 0)
+            if hover {
+                rowButton("eye", help: "Показать в панели", action: show)
+                rowButton("trash", help: "Удалить модуль…", action: remove)
+            }
         }
         .foregroundStyle(.white.opacity(selected ? 1 : 0.55))
         .padding(.horizontal, 10)
@@ -833,7 +843,17 @@ private struct HiddenRow: View {
         .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
                    normal: selected ? tint.opacity(0.26) : .clear,
                    hovered: selected ? tint.opacity(0.26) : .white.opacity(0.06))
+        .onHover { hover = $0 }
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)
+    }
+
+    private func rowButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
+                .frame(width: 20, height: 20).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }

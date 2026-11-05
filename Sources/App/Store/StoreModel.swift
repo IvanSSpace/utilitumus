@@ -3,9 +3,11 @@ import AVFoundation
 import ApplicationServices
 import Combine
 
-// Стор: витрина-настройщик. Код модулей уже в приложении, «установлен» = модуль в боковой панели и включён.
-// Установка показывает модуль и включает его, качает ресурсы (пока это модель «Голоса») и открывает модуль.
-// Удаление выключает и убирает из панели, стирает скачанное; настройки модуля остаются.
+// Стор: витрина-настройщик. Код модулей уже в приложении, «установлен» = модуль включён (скрыт он из панели
+// или нет, не важно). Установка включает модуль, ставит его в панель и качает ресурсы (пока это модель «Голоса»),
+// но остаётся в Сторе: настройку и переход в модуль человек выбирает сам.
+// Удаление выключает модуль, стирает скачанное и снимает скрытие; настройки модуля остаются.
+// «Скрыть из панели» — отдельное действие, на «установлен» не влияет.
 
 // MARK: - Разрешения
 
@@ -110,7 +112,7 @@ enum StoreCatalog {
 
     /// Что сотрётся при удалении: пункты для подтверждения.
     @MainActor static func removal(_ m: Module) -> [String] {
-        var items = ["Модуль выключится и пропадёт из боковой панели"]
+        var items = ["Модуль выключится и пропадёт из боковой панели и из «Скрытых»"]
         if m == .voice {
             for model in VoiceModel.allCases where VoiceModelStore.shared.status(model) != .notInstalled {
                 items.append("Скачанная модель \(model.title) (\(megabytes(model)) МБ)")
@@ -233,6 +235,8 @@ enum StoreTab: String, CaseIterable, Hashable {
 extension Notification.Name {
     /// Стор просит главное окно открыть модуль (после установки): в `object` — `Module`.
     static let storeOpenModule = Notification.Name("Utilitumus.StoreOpenModule")
+    /// Модуль удалён (из Стора или из боковой панели): в `object` — `Module`. Главное окно уходит с его страницы.
+    static let moduleRemoved = Notification.Name("Utilitumus.ModuleRemoved")
 }
 
 @MainActor
@@ -247,6 +251,10 @@ final class StoreModel: ObservableObject {
     /// Модуль, удаление которого ждёт подтверждения.
     @Published var pendingRemoval: Module?
 
+    /// Короткое подтверждение внизу Стора после установки: на 3–4 с, без перехода.
+    @Published private(set) var justInstalled: Module?
+    private var toastTask: Task<Void, Never>?
+
     private let modules = ModuleManager.shared
     private let voice = VoiceModelStore.shared
     private var subs: [AnyCancellable] = []
@@ -260,7 +268,7 @@ final class StoreModel: ObservableObject {
         subs.append(voice.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
     }
 
-    /// «Установлен» = модуль в боковой панели и включён.
+    /// «Установлен» = модуль включён.
     func isInstalled(_ module: Module) -> Bool { modules.isInstalled(module) }
 
     func state(_ module: Module) -> StoreState {
@@ -322,14 +330,46 @@ final class StoreModel: ObservableObject {
 
     // MARK: Действия
 
-    /// Показать в панели, включить, скачать ресурсы и открыть модуль: на его экране встретит чек-лист настройки.
+    /// Включить, поставить в панель и скачать ресурсы. Остаёмся в Сторе: плитка станет «Установлен»,
+    /// недостающая настройка — в плашке «Настроить», переход в модуль — кнопка «Открыть».
     func install(_ module: Module) {
         modules.setHidden(module, false)
         modules.setOn(module, true)
         downloadResources(module)
+        showToast(module)
+    }
+
+    /// Незавершённая настройка установленного модуля: «Настройка 1 из 3». nil — всё готово или шагов нет.
+    func pendingSetup(_ module: Module) -> SetupProgress? {
+        guard isInstalled(module) else { return nil }
+        let progress = module.setupProgress
+        return progress.total > 0 && !progress.allDone ? progress : nil
+    }
+
+    /// Открыть чек-лист модуля поверх его экрана.
+    func configure(_ module: Module) {
         SetupFlow.shared.show(module)
+        openInApp(module)
+    }
+
+    /// Перейти в модуль в главном окне.
+    func openInApp(_ module: Module) {
         close()
         NotificationCenter.default.post(name: .storeOpenModule, object: module)
+    }
+
+    func isHidden(_ module: Module) -> Bool { modules.isHidden(module) }
+
+    /// «Показать в панели» у установленного скрытого модуля.
+    func showInPanel(_ module: Module) { modules.setHidden(module, false) }
+
+    private func showToast(_ module: Module) {
+        withAnimation(.easeInOut(duration: 0.2)) { justInstalled = module }
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !Task.isCancelled { withAnimation(.easeInOut(duration: 0.2)) { self?.justInstalled = nil } }
+        }
     }
 
     /// Скачивание ресурсов модуля; там, где их нет, ничего не делает.
@@ -343,14 +383,16 @@ final class StoreModel: ObservableObject {
 
     func requestRemoval(_ module: Module) { pendingRemoval = module }
 
-    /// Выключить, убрать из панели, стереть скачанное. Настройки модуля не трогаем.
+    /// Выключить, стереть скачанное, снять скрытие (иначе модуль висел бы в «Скрытых»). Настройки модуля не трогаем.
     func remove(_ module: Module) {
         modules.setOn(module, false)
-        modules.setHidden(module, true)
+        modules.setHidden(module, false)
         if module == .voice {
             for model in VoiceModel.allCases where voice.status(model) != .notInstalled { voice.delete(model) }
         }
         pendingRemoval = nil
+        if justInstalled == module { justInstalled = nil }
+        NotificationCenter.default.post(name: .moduleRemoved, object: module)
     }
 }
 
