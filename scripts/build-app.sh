@@ -1,12 +1,16 @@
 #!/bin/bash
 # Собирает отдельную утилиту из Sources/Apps/<Имя>, Sources/Modules/<Имя> и Sources/Kit.
 #   scripts/build-app.sh awake Awake 1.0.0 build/apps
+# Пятый аргумент --test-seam только для стендов: настройки в своём suite, состояние центра подставное.
 set -euo pipefail
 # Установщик отвергает архив с файлами, доступными на запись группе или всем.
 umask 022
 
-if [ $# -ne 4 ]; then
-  echo "Использование: scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода>" >&2
+SWIFT_FLAGS=()
+if [ $# -eq 5 ] && [ "$5" = "--test-seam" ]; then
+  SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS)
+elif [ $# -ne 4 ]; then
+  echo "Использование: scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода> [--test-seam]" >&2
   exit 1
 fi
 ID="$1"
@@ -57,7 +61,7 @@ rm -rf -- "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Без -parse-as-library: точка входа утилиты — Sources/Apps/<Имя>/main.swift.
-swiftc -O -target "arm64-apple-macos$MIN_SYSTEM" \
+swiftc -O -target "arm64-apple-macos$MIN_SYSTEM" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} \
   -o "$APP/Contents/MacOS/$NAME" \
   $(find "Sources/Apps/$NAME" "Sources/Modules/$NAME" Sources/Kit -name '*.swift') \
   -framework SwiftUI -framework AppKit

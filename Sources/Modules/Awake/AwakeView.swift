@@ -3,6 +3,8 @@ import SwiftUI
 /// Экран модуля «Не спать».
 struct AwakeView: View {
     @ObservedObject var controller = AwakeController.shared
+    /// Можно ли включить блокировку. Отдельное приложение запрещает это, пока модуль ведёт центр.
+    var canStart = true
 
     var body: some View {
         DSPage(module: .awake, subtitle: "Mac не засыпает, пока ты работаешь") {
@@ -17,14 +19,22 @@ struct AwakeView: View {
                     DSButton(controller.isActive ? "Можно спать" : "Не спать сейчас",
                              icon: controller.isActive ? "moon.zzz.fill" : "cup.and.saucer.fill",
                              style: controller.isActive ? .secondary : .primary) { controller.toggle() }
+                        .disabled(!canStart && !controller.isActive)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 16)
             }
 
             DSSection("Как долго") {
-                DSRow(icon: "timer", title: "Длительность",
-                      subtitle: "По истечении Mac снова может засыпать") {
-                    DSSegmented(AwakeDuration.allCases, selection: $controller.duration) { $0.title }
+                // Отдельное окно уже страницы в центре: «Пока не выключу» в четырёх равных сегментах туда не влезает.
+                ViewThatFits(in: .horizontal) {
+                    DSRow(icon: "timer", title: "Длительность", subtitle: durationHint) {
+                        DSSegmented(AwakeDuration.allCases, selection: $controller.duration) { $0.title }
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        DSRow(icon: "timer", title: "Длительность", subtitle: durationHint) { EmptyView() }
+                        DSSegmented(AwakeDuration.allCases, selection: $controller.duration) { $0 == .forever ? "Без срока" : $0.title }
+                            .padding(.horizontal, 14).padding(.bottom, 10)
+                    }
                 }
                 DSRow(icon: "display", title: "И экран не гаснет",
                       subtitle: "Иначе экран гаснет по таймеру системы, а Mac работает") {
@@ -37,6 +47,8 @@ struct AwakeView: View {
                 .padding(.horizontal, 6)
         }
     }
+
+    private var durationHint: String { "По истечении Mac снова может засыпать" }
 
     /// Остаток пересчитываем раз в секунду, пока экран открыт.
     @ViewBuilder private var status: some View {

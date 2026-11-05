@@ -102,7 +102,7 @@ func recordedCalls(in dir: String, file name: String = "calls.log") -> [String] 
 }
 
 func runServer(dir: String, peer: String) -> Never {
-    let server = MainActor.assumeIsolated { LinkServer(id: testID, handler: TestHandler(dir: dir), peerIdentifier: peer) }
+    let server = MainActor.assumeIsolated { LinkServer(id: testID, handler: TestHandler(dir: dir), peerIdentifiers: [peer]) }
     server.resume()
     RunLoop.main.run()
     exit(0)

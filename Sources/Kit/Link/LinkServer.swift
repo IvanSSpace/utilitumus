@@ -6,9 +6,9 @@ final class LinkServer: NSObject, NSXPCListenerDelegate {
     private let requirement: String
     private let exported: LinkExportedObject
 
-    init(id: String, handler: LinkHandler, peerIdentifier: String = Kit.hubBundleID) {
+    init(id: String, handler: LinkHandler, peerIdentifiers: [String] = [Kit.hubBundleID]) {
         listener = NSXPCListener(machServiceName: KitLink.machService(id))
-        requirement = KitLink.requirement(identifier: peerIdentifier)
+        requirement = KitLink.requirement(identifiers: peerIdentifiers)
         exported = LinkExportedObject(handler: handler)
         super.init()
         // Требование на слушателе не пускает чужого клиента даже до делегата (отчёт о пробе, п. 1).

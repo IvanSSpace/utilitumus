@@ -14,6 +14,11 @@ enum KitLink {
         hashes.map { "(" + KitSigning.requirement(identifier: identifier, leafHash: $0) + ")" }.joined(separator: " or ")
     }
 
+    /// Любой из собеседников: утилита принимает центр и свою же копию, запущенную из Finder.
+    static func requirement(identifiers: [String], hashes: [String] = KitSigning.trustedLeafHashes) -> String {
+        identifiers.map { requirement(identifier: $0, hashes: hashes) }.joined(separator: " or ")
+    }
+
     /// «Перечитай мой статус». Уведомление никем не проверяется, поэтому без данных:
     /// получатель читает статус по проверенному XPC.
     static func postStatusChanged(_ id: String) {

@@ -26,12 +26,12 @@ final class AwakeController: ObservableObject {
     @Published private(set) var endDate: Date?
     @Published var keepDisplay: Bool {
         didSet {
-            UserDefaults.standard.set(keepDisplay, forKey: Self.displayKey)
+            Kit.defaults.set(keepDisplay, forKey: Self.displayKey)
             if isActive { applyAssertions() }
         }
     }
     @Published var duration: AwakeDuration {
-        didSet { UserDefaults.standard.set(duration.rawValue, forKey: Self.durationKey) }
+        didSet { Kit.defaults.set(duration.rawValue, forKey: Self.durationKey) }
     }
 
     private static let displayKey = "AwakeKeepDisplay"
@@ -44,7 +44,7 @@ final class AwakeController: ObservableObject {
     private var timer: DispatchSourceTimer?
 
     private init() {
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         keepDisplay = defaults.bool(forKey: Self.displayKey)
         duration = AwakeDuration(rawValue: defaults.integer(forKey: Self.durationKey)) ?? .forever
     }

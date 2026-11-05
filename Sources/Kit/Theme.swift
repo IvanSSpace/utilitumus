@@ -218,13 +218,23 @@ final class CustomPaletteStore: ObservableObject {
     var isSaved: Bool { Kit.defaults.object(forKey: Self.satKey) != nil }
 
     private init() {
+        palette = Self.stored()
+    }
+
+    /// Утилита: палитру меняет центр, это другой процесс.
+    func reload() {
+        let stored = Self.stored()
+        if stored != palette { palette = stored }
+    }
+
+    private static func stored() -> CustomPalette {
         let d = Kit.defaults
         var hues: [String: Double] = [:]
-        for c in ModuleCategory.all { if let h = d.object(forKey: Self.hueKey(c)) as? Double { hues[c.id] = h } }
+        for c in ModuleCategory.all { if let h = d.object(forKey: hueKey(c)) as? Double { hues[c.id] = h } }
         let base = CustomPalette.from(.calm)
-        palette = CustomPalette(hues: hues,
-                                sat: d.object(forKey: Self.satKey) as? Double ?? base.sat,
-                                bright: d.object(forKey: Self.brightKey) as? Double ?? base.bright)
+        return CustomPalette(hues: hues,
+                             sat: d.object(forKey: satKey) as? Double ?? base.sat,
+                             bright: d.object(forKey: brightKey) as? Double ?? base.bright)
     }
 
     func set(_ new: CustomPalette) {
