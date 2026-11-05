@@ -21,7 +21,8 @@ struct GameEntry: Codable, Hashable, Identifiable {
 }
 
 struct GameRules {
-    /// Лаунчеры: у них игровая категория, но играть в них не значит нагружать машину.
+    /// Лаунчеры. По умолчанию не игры (у многих игровая категория, но сам лаунчер машину не греет);
+    /// отмеченный пользователем лаунчер считается игрой, пока он на переднем плане.
     static let defaultLaunchers: [GameEntry] = [
         GameEntry(key: "com.valvesoftware.steam", name: "Steam"),
         GameEntry(key: "com.epicgames.EpicGamesLauncher", name: "Epic Games Launcher"),
@@ -30,10 +31,13 @@ struct GameRules {
         GameEntry(key: "com.ea.EADesktop", name: "EA app"),
         GameEntry(key: "com.heroicgameslauncher.hgl", name: "Heroic Games Launcher"),
         GameEntry(key: "io.itch.mac", name: "itch"),
+        GameEntry(key: "com.codeweavers.CrossOver", name: "CrossOver"),
     ]
+    static let launcherKeys = Set(defaultLaunchers.map(\.key))
 
     var myGames: Set<String> = []
-    var excludedLaunchers: Set<String> = []
+    /// Лаунчеры, отмеченные как игра.
+    var gameLaunchers: Set<String> = []
 
     /// Bundle id, а если его нет — имя исполняемого файла.
     static func key(bundleID: String?, executableName: String?) -> String? {
@@ -50,9 +54,11 @@ struct GameRules {
 
     func isGame(_ app: AppInfo) -> Bool {
         guard let key = app.key else { return false }
-        // Явный выбор пользователя сильнее исключения: добавил лаунчер сам — значит, надо.
+        // «Мои игры» проверяются первыми: добавил лаунчер сам — значит, игра.
         if myGames.contains(key) { return true }
-        return Self.isGameCategory(app.category) && !excludedLaunchers.contains(key)
+        // Лаунчер — игра только если отмечен, категория тут не важна (у CrossOver её нет).
+        if Self.launcherKeys.contains(key) { return gameLaunchers.contains(key) }
+        return Self.isGameCategory(app.category)
     }
 }
 

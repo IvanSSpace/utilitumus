@@ -18,7 +18,9 @@ final class GameModeController: ObservableObject {
 
     private static let enabledKey = "GameModeEnabled"
     private static let gamesKey = "GameModeMyGames"
-    private static let liftedKey = "GameModeLiftedLaunchers"
+    private static let launchersKey = "GameModeGameLaunchers"
+    /// Старый ключ: хранил лаунчеры, у которых снято исключение, то есть уже «лаунчер = игра».
+    private static let legacyLiftedKey = "GameModeLiftedLaunchers"
 
     @Published var isEnabled: Bool {
         didSet {
@@ -34,8 +36,8 @@ final class GameModeController: ObservableObject {
         }
     }
     @Published private(set) var myGames: [GameEntry]
-    /// Лаунчеры, у которых пользователь снял исключение.
-    @Published private(set) var liftedLaunchers: Set<String>
+    /// Лаунчеры, отмеченные как игра.
+    @Published private(set) var gameLaunchers: Set<String>
     @Published private(set) var running: [RunningCandidate] = []
     @Published private(set) var phase: GameModeMachine.Phase = .idle
 
@@ -53,12 +55,18 @@ final class GameModeController: ObservableObject {
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         myGames = defaults.data(forKey: Self.gamesKey)
             .flatMap { try? JSONDecoder().decode([GameEntry].self, from: $0) } ?? []
-        liftedLaunchers = Set(defaults.stringArray(forKey: Self.liftedKey) ?? [])
+        // Миграция: раньше тумблер значил «исключить», а в хранилище лежали снятые исключения.
+        // Снятое исключение = лаунчер считался игрой, то есть ровно новое «отмечен». Поведение сохраняется.
+        if let old = defaults.stringArray(forKey: Self.legacyLiftedKey) {
+            let merged = Set(defaults.stringArray(forKey: Self.launchersKey) ?? []).union(old)
+            defaults.set(Array(merged), forKey: Self.launchersKey)
+            defaults.removeObject(forKey: Self.legacyLiftedKey)
+        }
+        gameLaunchers = Set(defaults.stringArray(forKey: Self.launchersKey) ?? [])
     }
 
     private var rules: GameRules {
-        GameRules(myGames: Set(myGames.map(\.key)),
-                  excludedLaunchers: Set(GameRules.defaultLaunchers.map(\.key)).subtracting(liftedLaunchers))
+        GameRules(myGames: Set(myGames.map(\.key)), gameLaunchers: gameLaunchers)
     }
 
     // MARK: - Запуск и остановка
@@ -186,11 +194,11 @@ final class GameModeController: ObservableObject {
         persistGames()
     }
 
-    func isLauncherExcluded(_ key: String) -> Bool { !liftedLaunchers.contains(key) }
+    func isLauncherGame(_ key: String) -> Bool { gameLaunchers.contains(key) }
 
-    func setLauncherExcluded(_ key: String, _ excluded: Bool) {
-        if excluded { liftedLaunchers.remove(key) } else { liftedLaunchers.insert(key) }
-        UserDefaults.standard.set(Array(liftedLaunchers), forKey: Self.liftedKey)
+    func setLauncherGame(_ key: String, _ isGame: Bool) {
+        if isGame { gameLaunchers.insert(key) } else { gameLaunchers.remove(key) }
+        UserDefaults.standard.set(Array(gameLaunchers), forKey: Self.launchersKey)
     }
 
     /// Программы, которые можно добавить: обычные, ещё не в списке, не сам Utilitumus.

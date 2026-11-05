@@ -402,14 +402,14 @@ private struct ChipFlow: Layout {
     }
 }
 
-/// «Максимум в играх»: переключатель, свои игры плашками и лаунчеры-исключения во всплывающем окне.
+/// «Максимум в играх»: переключатель, свои игры плашками и лаунчеры-игры во всплывающем окне.
 private struct GameModeCard: View {
     @ObservedObject var game: GameModeController
     @State private var launchersOpen = false
     @Environment(\.dsTint) private var tint
 
-    private var excludedCount: Int {
-        GameRules.defaultLaunchers.filter { game.isLauncherExcluded($0.key) }.count
+    private var gameLauncherCount: Int {
+        GameRules.defaultLaunchers.filter { game.isLauncherGame($0.key) }.count
     }
 
     var body: some View {
@@ -487,7 +487,7 @@ private struct GameModeCard: View {
             launchersOpen.toggle()
         } label: {
             HStack(spacing: 4) {
-                Text("Лаунчеры: \(excludedCount) из \(GameRules.defaultLaunchers.count)")
+                Text("Лаунчеры-игры: \(gameLauncherCount) из \(GameRules.defaultLaunchers.count)")
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
             .font(.system(size: 12, weight: .medium)).foregroundStyle(tint)
@@ -495,23 +495,23 @@ private struct GameModeCard: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .help("Лаунчеры — не игры")
+        .help("Отмеченный лаунчер считается игрой: пока он открыт, вентиляторы на максимуме")
         .popover(isPresented: $launchersOpen, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Лаунчеры — не игры").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                Text("Лаунчер = игра").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
                     .padding(.bottom, 8)
                 ForEach(GameRules.defaultLaunchers) { launcher in
                     HStack {
                         Text(launcher.name).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
                         Spacer(minLength: 16)
                         DSToggle(launcher.name, isOn: Binding(
-                            get: { game.isLauncherExcluded(launcher.key) },
-                            set: { game.setLauncherExcluded(launcher.key, $0) }
+                            get: { game.isLauncherGame(launcher.key) },
+                            set: { game.setLauncherGame(launcher.key, $0) }
                         ))
                     }
                     .padding(.vertical, 5)
                 }
-                Text("Лаунчер — не игра. Выключи, если нужно иначе.")
+                Text("Включённый лаунчер считается игрой: пока он открыт, вентиляторы на максимуме.")
                     .font(.system(size: 11.5)).foregroundStyle(dim).padding(.top, 6)
             }
             .padding(14).frame(width: 290)

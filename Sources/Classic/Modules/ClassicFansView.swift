@@ -264,14 +264,14 @@ private struct ClassicChipFlow: Layout {
     }
 }
 
-/// «Максимум в играх»: переключатель, статус, список своих игр и лаунчеры-исключения.
+/// «Максимум в играх»: переключатель, статус, список своих игр и лаунчеры-игры.
 private struct ClassicGameModeSection: View {
     @ObservedObject var game: GameModeController
     let canControl: Bool
     @State private var launchersOpen = false
 
-    private var excludedCount: Int {
-        GameRules.defaultLaunchers.filter { game.isLauncherExcluded($0.key) }.count
+    private var gameLauncherCount: Int {
+        GameRules.defaultLaunchers.filter { game.isLauncherGame($0.key) }.count
     }
 
     var body: some View {
@@ -331,9 +331,9 @@ private struct ClassicGameModeSection: View {
                     withAnimation(.easeInOut(duration: 0.15)) { launchersOpen.toggle() }
                 } label: {
                     HStack {
-                        Text("Лаунчеры — не игры")
+                        Text("Лаунчер = игра")
                         Spacer()
-                        Text("\(excludedCount) из \(GameRules.defaultLaunchers.count)")
+                        Text("\(gameLauncherCount) из \(GameRules.defaultLaunchers.count)")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                         Image(systemName: "chevron.right")
@@ -349,11 +349,11 @@ private struct ClassicGameModeSection: View {
                 if launchersOpen {
                     ForEach(GameRules.defaultLaunchers) { launcher in
                         Toggle(launcher.name, isOn: Binding(
-                            get: { game.isLauncherExcluded(launcher.key) },
-                            set: { game.setLauncherExcluded(launcher.key, $0) }
+                            get: { game.isLauncherGame(launcher.key) },
+                            set: { game.setLauncherGame(launcher.key, $0) }
                         ))
                     }
-                    Text("Лаунчер — не игра. Сними галочку, если нужно иначе.")
+                    Text("Включённый лаунчер считается игрой: пока он открыт, вентиляторы на максимуме.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
