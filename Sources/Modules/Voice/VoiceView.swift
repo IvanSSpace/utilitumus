@@ -28,18 +28,12 @@ struct VoiceView: View {
 
     var body: some View {
         DSPage(module: .voice, subtitle: "Голосовой ввод в любом приложении", primary: primary) {
-            // Две колонки: слева модели и управление, справа исключения и проверка.
+            // Управление и проверка идут подряд на всю ширину, ниже в две колонки модели и исключения.
+            controlSection
+            testSection
             HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 20) {
-                    modelsSection
-                    controlSection
-                }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                VStack(alignment: .leading, spacing: 20) {
-                    excludedSection
-                    testSection
-                }
-                .frame(width: 280, alignment: .topLeading)
+                modelsSection.frame(maxWidth: .infinity, alignment: .topLeading)
+                excludedSection.frame(maxWidth: .infinity, alignment: .topLeading)
             }
             accessibilityHint
         }
@@ -143,34 +137,28 @@ struct VoiceView: View {
     // MARK: - Управление
 
     private var controlSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            DSSection("Управление") {
-                DSRow(icon: "command", title: "Клавиша") {
-                    if recorder.isRecording {
-                        TintedChip(text: "Нажми сочетание…")
-                    } else {
-                        DSKeyCaps(controller.hotKeyLabel).fixedSize()
-                    }
-                    DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
-                        if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
-                    }
-                    .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
+        DSSection("Управление") {
+            DSRow(icon: "command", title: "Клавиша", subtitle: "Esc — отмена, Delete — вернуть ⌃⌥Space") {
+                if recorder.isRecording {
+                    TintedChip(text: "Нажми сочетание…")
+                } else {
+                    DSKeyCaps(controller.hotKeyLabel).fixedSize()
                 }
-                if let error = controller.hotKeyError {
-                    DSRow(icon: "exclamationmark.triangle.fill", title: error)
+                DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
+                    if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
                 }
-                DSRow(icon: "hand.tap.fill", title: "Режим") {
-                    DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
-                }
-                DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
-                    micMenu
-                }
+                .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
             }
-            caption(recorder.isRecording
-                    ? "Esc — отмена, Delete — вернуть ⌃⌥Space"
-                    : (controller.mode == .toggle
-                        ? "Нажал, сказал, нажал ещё раз. Esc — отмена"
-                        : "Говори, пока держишь. Esc — отмена"))
+            if let error = controller.hotKeyError {
+                DSRow(icon: "exclamationmark.triangle.fill", title: error)
+            }
+            DSRow(icon: "hand.tap.fill", title: "Режим",
+                  subtitle: controller.mode == .toggle ? "Нажал, сказал, нажал ещё раз" : "Говорю, пока держу клавишу") {
+                DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
+            }
+            DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
+                micMenu
+            }
         }
     }
 
@@ -212,7 +200,7 @@ struct VoiceView: View {
     private var excludedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Не включать в приложениях") {
-                // Длинный список прокручивается внутри, чтобы не выталкивать поле проверки.
+                // Длинный список прокручивается внутри, чтобы не растягивать колонку.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(controller.excludedApps, id: \.self) { id in
@@ -265,7 +253,7 @@ struct VoiceView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .frame(height: 220)
+            .frame(height: 110)
         }
     }
 
