@@ -226,6 +226,13 @@ private struct StoreTile: View {
                         }
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(.green).lineLimit(1)
                     }
+                } else if state == .available {
+                    // Кнопка прямо на плитке: без неё не было понятно, как ставить (только через (i)).
+                    HStack(spacing: 6) {
+                        StoreMeta(module: module, short: true).layoutPriority(0)
+                        Spacer(minLength: 4)
+                        StoreTileInstall(module: module).layoutPriority(1)
+                    }
                 } else {
                     StoreMeta(module: module, short: true)
                 }
@@ -242,6 +249,24 @@ private struct StoreTile: View {
         .contentShape(Rectangle())
         .onTapGesture { store.open(module) }
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Кнопка «＋» на плитке Стора: ставит модуль сразу.
+private struct StoreTileInstall: View {
+    let module: Module
+    @ObservedObject private var store = StoreModel.shared
+
+    var body: some View {
+        Button { store.install(module) } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.accentColor))
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help("Установить модуль")
     }
 }
 
