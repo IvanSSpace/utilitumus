@@ -251,6 +251,7 @@ func programs(_ n: Int) -> String {
 
 /// Экран модуля «Стеш программ».
 struct StashView: View {
+    @Environment(\.pageActive) private var pageActive
     @ObservedObject var store = StashStore.shared
     @State private var confirmStash = false
     @State private var pendingScenario: StashScenario?
@@ -458,10 +459,10 @@ struct StashView: View {
             Button("Сохранить") { commitName() }
             Button("Отмена", role: .cancel) {}
         }
-        .onAppear { store.start() }
-        // Замеры — только пока экран открыт.
-        .task {
-            while !Task.isCancelled {
+        .onPageActive { if $0 { store.start() } }
+        // Замеры — только пока страница показана.
+        .task(id: pageActive) {
+            while pageActive, !Task.isCancelled {
                 // Доступ дают в Системных настройках — заметить без возврата в окно.
                 store.refreshAccess()
                 await store.refreshUsage()

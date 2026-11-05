@@ -203,7 +203,6 @@ struct MixerView: View {
 
             Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
         }
-        .onAppear { controller.setScreenVisible(true) }
-        .onDisappear { controller.setScreenVisible(false) }
+        .onPageActive { controller.setScreenVisible($0) }
     }
 }
