@@ -61,9 +61,9 @@ struct KeyboardView: View {
     // MARK: Язык по Fn
 
     private var fnSettings: some View {
-        Group {
+        FeatureSettings {
             DSRow(title: "Когда менять язык",
-                  subtitle: "«При нажатии» быстрее, но сработает и при Fn+другая клавиша") {
+                  subtitle: "«При нажатии» быстрее, но сработает и при Fn+клавиша") {
                 DSSegmented(FnTrigger.allCases, selection: $controller.trigger) { $0.title }
             }
             DSRow(title: "Какой язык следующий", subtitle: "Порядок раскладок — как в системе") {
@@ -81,7 +81,6 @@ struct KeyboardView: View {
                        icon: controller.systemUsage == 0 ? "checkmark" : "exclamationmark.triangle.fill")
             }
         }
-        .background(.white.opacity(0.03))
     }
 
     private var status: (text: String, icon: String, color: Color) {
@@ -107,7 +106,7 @@ struct KeyboardView: View {
     // MARK: Раскладка для каждого приложения
 
     private var perAppSettings: some View {
-        Group {
+        FeatureSettings {
             DSRow(title: "Новые приложения начинают с:",
                   subtitle: "Для приложения, где ещё не меняли язык") {
                 newAppMenu
@@ -123,7 +122,6 @@ struct KeyboardView: View {
             }
             if !controller.excludedApps.isEmpty { excludedList }
         }
-        .background(.white.opacity(0.03))
     }
 
     private var newAppMenu: some View {
@@ -182,7 +180,7 @@ struct KeyboardView: View {
     private var commonSection: some View {
         DSSection("Общее") {
             DSRow(icon: "wrench.and.screwdriver.fill", title: "Починить",
-                  subtitle: controller.repairResult ?? "Если «Язык по Fn» не работает: сбросит системное действие, пересоздаст прослушивание и сверит раскладку") {
+                  subtitle: controller.repairResult ?? "Если «Язык по Fn» не работает: сбросит системное действие и пересоздаст прослушивание") {
                 DSButton("Починить", small: true) { controller.repair() }
             }
             DSRow(icon: "doc.text", title: "Журнал (\(controller.logCount))",
@@ -198,5 +196,18 @@ struct KeyboardView: View {
                 }
             }
         }
+    }
+}
+
+/// Настройки раскрытой фишки: чуть правее строк фишек и с цветной полосой слева, чтобы было видно, чьи они.
+private struct FeatureSettings<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.dsTint) private var tint
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .padding(.leading, 18)
+            .background(.white.opacity(0.03))
+            .overlay(alignment: .leading) { Rectangle().fill(tint.opacity(0.7)).frame(width: 3) }
     }
 }
