@@ -183,7 +183,7 @@
 
 **Interfaces:**
 - Produces:
-  - `scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода>` собирает `<Имя>.app` из `Sources/Apps/<Имя>`, `Sources/Modules/<Имя>`, `Sources/Kit`; identifier `local.utilitumus.app.<id>`; `--options runtime`.
+  - `scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода>` (с `umask 022`: установщик отвергает архив с файлами, доступными на запись группе или всем) собирает `<Имя>.app` из `Sources/Apps/<Имя>`, `Sources/Modules/<Имя>`, `Sources/Kit`; identifier `local.utilitumus.app.<id>`; `--options runtime`.
   - `scripts/release-app.sh <id> <Имя> X.Y.Z [--dry-run]`: предусловия как у `release.sh`; тег `<id>-vX.Y.Z`, ассет `<Имя>.zip`, `gh release create --latest=false`; **после** успешной выкладки — запись в `Catalog/catalog.json`, коммит, push. `--dry-run` печатает команды `gh`/`git`, изменённый каталог пишет во временный файл и ничего не выкладывает.
   - `release.sh` передаёт `--latest=true`.
   - `install.sh [<id>]`: без аргумента как сейчас; с аргументом ставит утилиту по каталогу с той же проверкой подписи.
