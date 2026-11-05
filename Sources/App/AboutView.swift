@@ -50,6 +50,10 @@ struct AboutView: View, Equatable {
                     DSButton("Что нового", icon: "sparkles", style: .primary, small: true) {
                         WhatsNew.shared.isShown = true
                     }
+                    DSButton("Приветствие", icon: "play.fill", small: true) {
+                        NotificationCenter.default.post(name: Welcome.replay, object: nil)
+                    }
+                    .help("Показать приветственный ролик ещё раз")
                     DSButton("Проверить обновления", icon: "arrow.triangle.2.circlepath", small: true) {
                         updater.check()
                     }

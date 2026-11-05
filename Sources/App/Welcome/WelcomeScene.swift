@@ -11,6 +11,8 @@ enum Welcome {
 
     static var isSeen: Bool { UserDefaults.standard.bool(forKey: seenKey) }
     static func markSeen() { UserDefaults.standard.set(true, forKey: seenKey) }
+    /// «Посмотреть приветствие» из «О проекте»: показать ещё раз, без перехода в Стор.
+    static let replay = Notification.Name("Welcome.replay")
 
     /// Цвета категорий на тёмном фоне: насыщеннее, чем в боковой панели.
     static func tint(_ category: ModuleCategory) -> Color {

@@ -134,6 +134,8 @@ struct MainView: View {
     @State private var peeked: Module?
     /// Приветствие поверх окна: один раз (флаг `Welcome.seenKey`), потом открывается Стор.
     @State private var showWelcome = !Welcome.isSeen
+    /// Повтор из «О проекте»: по окончании просто закрываем, никуда не переходим.
+    @State private var welcomeReplay = false
     /// Режим страниц: «Быстрый» держит экраны в кэше, «Экономный» собирает экран при открытии.
     @AppStorage(PageMode.storageKey) private var pageModeRaw = PageMode.fast.rawValue
     /// Только для «Экономного»: модуль, чей экран сейчас построен. Догоняет `displayed` следующим кадром,
@@ -203,6 +205,10 @@ struct MainView: View {
                     .transition(.opacity)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: Welcome.replay)) { _ in
+            welcomeReplay = true
+            withAnimation(.easeInOut(duration: 0.35)) { showWelcome = true }
+        }
         .environment(\.dsTint, pageTint)
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
@@ -267,6 +273,11 @@ struct MainView: View {
 
     /// Приветствие закончено (или пропущено): запоминаем и открываем Стор.
     private func finishWelcome() {
+        if welcomeReplay {
+            welcomeReplay = false
+            withAnimation(.easeInOut(duration: 0.35)) { showWelcome = false }
+            return
+        }
         Welcome.markSeen()
         peeked = nil
         showAbout = false
