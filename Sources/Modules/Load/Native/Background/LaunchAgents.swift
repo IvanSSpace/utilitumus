@@ -35,6 +35,8 @@ struct AgentItem: Sendable, Identifiable {
     var loaded: Bool
     /// Почему панель не трогает задание (терминал, сама панель, macOS…).
     var refusal: String?
+    /// Где запущен главный процесс; у служб с cwd «/» и из домашней папки — nil.
+    var place: ProcessPlace? = nil
 
     var id: String { label }
     var isRunning: Bool { !pids.isEmpty }
@@ -334,7 +336,8 @@ extension LaunchAgents {
                 note: root ? rootNote : why.map { "Не трогаю: \($0)" } ?? v.note,
                 sudoHint: root ? sudoHint(label) : nil,
                 verbs: why != nil ? [] : verbs(loaded: launchd.keys.contains(label), running: !sub.isEmpty, disabled: off, hasPlist: job != nil),
-                targets: targets(sub, main: main, procs: procs), loaded: launchd.keys.contains(label), refusal: why))
+                targets: targets(sub, main: main, procs: procs), loaded: launchd.keys.contains(label), refusal: why,
+                place: main.flatMap { ProcessPlaces.place(cwd: procs[$0]?.cwd) }.flatMap { $0.isHome ? nil : $0 }))
         }
 
         // Запущенные системные службы root без метки в launchctl list gui: только подсказка sudo.

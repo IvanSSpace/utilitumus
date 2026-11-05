@@ -80,7 +80,10 @@ struct SessionChildRow: View {
         HStack(spacing: 8) {
             Text(kindName ?? " ").font(.caption).foregroundStyle(child.isHot ? Color.orange : .secondary)
                 .frame(width: 68, alignment: .leading)
-            Text(child.name).lineLimit(1).truncationMode(.middle).help("\(child.name) · PID \(String(child.pid))")
+            VStack(alignment: .leading, spacing: 0) {
+                Text(child.name).lineLimit(1).truncationMode(.middle).help("\(child.name) · PID \(String(child.pid))")
+                if let place = child.place { PlaceLabel(place: place, showHome: false) }
+            }
             Spacer()
             Text(child.memMB.map { Fmt.mb($0) } ?? "—").monospacedDigit().frame(width: 76, alignment: .trailing)
             Text(Fmt.duration(child.age)).font(.caption).foregroundStyle(.secondary).monospacedDigit().frame(width: 44, alignment: .trailing)
@@ -374,6 +377,7 @@ struct OrphansSection: View {
                             Text(o.name).font(.body.monospaced()).lineLimit(1).truncationMode(.middle)
                             Text("PID \(String(o.pid)) · родитель завершился, launchd им не управляет")
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            if let place = o.place { PlaceLabel(place: place) }
                         }
                         Spacer()
                         Text(Fmt.mb(o.memMB)).monospacedDigit()

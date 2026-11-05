@@ -91,7 +91,7 @@ final class SessionsBuilder: @unchecked Sendable {
                 pid: p.pid, sessionID: sid, name: name, project: proj?.name, cwd: cwd, status: status,
                 startedAt: started, lastActivity: last > 0 ? TimeInterval(last) : p.startTime, activity: activity,
                 memMB: order.reduce(0.0) { $0 + (i.procs[$1]?.mem ?? 0) }, version: version,
-                children: order.dropLast().compactMap { child($0, i) }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) },
+                children: order.dropLast().compactMap { child($0, i, ownerCwd: cwd) }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) },
                 resumeCommand: sid.map(TranscriptReader.isSafeID) == true && app == nil ? "claude --resume \(sid!)" : "",
                 hostApp: app, isSelf: above.contains(p.pid), stoppable: i.planner.canStop(p)))
         }
@@ -99,12 +99,15 @@ final class SessionsBuilder: @unchecked Sendable {
         return out.sorted { $0.memMB != $1.memMB ? $0.memMB > $1.memMB : $0.pid < $1.pid }
     }
 
-    private func child(_ pid: Int32, _ i: Input) -> SessionChild? {
+    /// `ownerCwd` — рабочая папка хозяина: место потомка показываем, только если оно другое.
+    private func child(_ pid: Int32, _ i: Input, ownerCwd: String?) -> SessionChild? {
         guard let p = i.procs[pid] else { return nil }
+        var place = ProcessPlaces.place(cwd: p.cwd)
+        if let pl = place, pl.isHome || pl == ProcessPlaces.place(cwd: ownerCwd) { place = nil }
         let kind = Kinds.childKind(p)
         let heavy = kind == .devServer || p.mem >= Self.heavyMB
         return SessionChild(pid: pid, name: Kinds.label(p), kind: kind, memMB: p.memMB, age: p.age(now: i.now) ?? 0,
-                            stoppable: heavy && i.planner.canStop(p))
+                            stoppable: heavy && i.planner.canStop(p), place: place)
     }
 
     // MARK: Вкладки терминалов
@@ -123,7 +126,7 @@ final class SessionsBuilder: @unchecked Sendable {
             let order = i.tree.subtree(of: p.pid)
             // dev-серверы и тяжёлые процессы вкладки, кроме сессий Claude в ней (у них своя карточка).
             let kids = order.dropLast().compactMap { q -> SessionChild? in
-                guard !inSessions.contains(q), let c = child(q, i), c.isHot else { return nil }
+                guard !inSessions.contains(q), let c = child(q, i, ownerCwd: p.cwd), c.isHot else { return nil }
                 return c
             }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) }
             let shell = TerminalShell(
