@@ -72,6 +72,7 @@ final class VoiceController: ObservableObject {
         static let modifiers = "Voice.HotKeyModifiers"
         static let mode = "Voice.Mode"
         static let mic = "Voice.MicUID"
+        static let excluded = "Voice.ExcludedApps"
     }
 
     @Published private(set) var keyCode: UInt32
@@ -83,6 +84,9 @@ final class VoiceController: ObservableObject {
     @Published var micUID: String? {
         didSet { UserDefaults.standard.set(micUID, forKey: Key.mic) }
     }
+
+    /// Bundle id программ, где голос Utilitumus не включается (у них свой ввод).
+    @Published private(set) var excludedApps: [String]
 
     // MARK: Состояние
 
@@ -103,6 +107,9 @@ final class VoiceController: ObservableObject {
     private var mainHotKey: EventHotKeyRef?
     private var escHotKey: EventHotKeyRef?
     private var hotKeySuspended = false
+    /// Переднее приложение в списке исключений: клавишу не занимаем, она идёт самому приложению.
+    private var frontmostExcluded = false
+    private var activationObserver: NSObjectProtocol?
     nonisolated fileprivate static let signature: OSType = 0x564F4943  // 'VOIC'
     private static let mainID: UInt32 = 1
     private static let escID: UInt32 = 2
@@ -113,6 +120,7 @@ final class VoiceController: ObservableObject {
         modifiers = d.object(forKey: Key.modifiers) as? UInt32 ?? VoiceHotKey.defaultModifiers
         mode = d.string(forKey: Key.mode).flatMap(Mode.init(rawValue:)) ?? .toggle
         micUID = d.string(forKey: Key.mic)
+        excludedApps = d.stringArray(forKey: Key.excluded) ?? []
         micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         axTrusted = AXIsProcessTrusted()
     }
@@ -125,6 +133,12 @@ final class VoiceController: ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         installHandler()
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { VoiceController.shared.updateExclusion() }
+        }
+        frontmostExcluded = Self.isExcluded(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, in: excludedApps)
         registerMain()
     }
 
@@ -133,6 +147,9 @@ final class VoiceController: ObservableObject {
         isRunning = false
         cancelAll()
         unregisterMain()
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        activationObserver = nil
+        frontmostExcluded = false
         if let handlerRef { RemoveEventHandler(handlerRef) }
         handlerRef = nil
         VoiceHUD.shared.hide()
@@ -173,8 +190,48 @@ final class VoiceController: ObservableObject {
         InstallEventHandler(GetApplicationEventTarget(), voiceHotKeyCallback, 2, &types, nil, &handlerRef)
     }
 
+    // MARK: Исключения
+
+    /// Входит ли приложение в список «не включать голос».
+    nonisolated static func isExcluded(_ bundleID: String?, in list: [String]) -> Bool {
+        guard let bundleID else { return false }
+        return list.contains(bundleID)
+    }
+
+    func addExcluded(_ bundleID: String) {
+        guard bundleID != Bundle.main.bundleIdentifier, !excludedApps.contains(bundleID) else { return }
+        excludedApps.append(bundleID)
+        persistExcluded()
+    }
+
+    func removeExcluded(_ bundleID: String) {
+        excludedApps.removeAll { $0 == bundleID }
+        persistExcluded()
+    }
+
+    private func persistExcluded() {
+        UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
+        updateExclusion()
+    }
+
+    /// Горячая клавиша — Carbon: пока она занята, система не отдаёт её приложению. Поэтому в исключённом
+    /// приложении снимаем регистрацию совсем, и клавиша доходит до него как обычная; вышли — занимаем снова.
+    private func updateExclusion() {
+        guard isRunning else { return }
+        frontmostExcluded = Self.isExcluded(NSWorkspace.shared.frontmostApplication?.bundleIdentifier, in: excludedApps)
+        if frontmostExcluded {
+            cancelAll()
+            VoiceHUD.shared.hide()
+            unregisterMain()
+            hotKeyError = nil
+        } else if mainHotKey == nil && !hotKeySuspended {
+            registerMain()
+        }
+    }
+
     private func registerMain() {
         unregisterMain()
+        if frontmostExcluded { return }
         let id = EventHotKeyID(signature: Self.signature, id: Self.mainID)
         let status = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &mainHotKey)
         hotKeyError = status == noErr ? nil : "Это сочетание занято, выбери другое"
