@@ -100,7 +100,7 @@ struct AppMenuBarScene: Scene {
     }
 }
 
-/// Настройка «Показывать в Dock» — новый интерфейс.
+/// Настройка «Показывать в Dock».
 struct DockSection: View {
     @AppStorage(DockMode.storageKey) private var showInDock = true
 
@@ -111,25 +111,5 @@ struct DockSection: View {
                 DSToggle("Показывать в Dock", isOn: $showInDock)
             }
         }
-    }
-}
-
-/// Та же настройка — классический интерфейс.
-struct ClassicDockSection: View {
-    @AppStorage(DockMode.storageKey) private var showInDock = true
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Показывать в Dock").fontWeight(.medium)
-                Text("Выключено — Utilitumus живёт в меню-баре, окно открывается оттуда")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("Показывать в Dock", isOn: $showInDock)
-                .toggleStyle(.switch).controlSize(.small).labelsHidden()
-        }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 14)
     }
 }

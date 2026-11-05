@@ -145,6 +145,10 @@ struct DSSidebar: View {
     /// Модуль, который тянут, и место, куда он ляжет, если отпустить.
     @State private var dragging: Module?
     @State private var drop: DropMark?
+    /// Сдвиг и прозрачность списка модулей при смене вкладки: только слой, layout не трогают.
+    @State private var listShift: CGFloat = 0
+    @State private var listOpacity: Double = 1
+    @AppStorage(PageMode.storageKey) private var pageModeRaw = PageMode.fast.rawValue
 
     /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
     private var activeCategory: ModuleCategory? {
@@ -177,6 +181,32 @@ struct DSSidebar: View {
         .onChange(of: current, initial: true) { _, module in
             if let module { last[module.category.id] = module }
         }
+        .onChange(of: activeCategory) { old, new in slideList(from: old, to: new) }
+        // Рамку фокуса клавиатуры в панели не рисуем: после клика кнопка получала фокус, и вокруг неё
+        // появлялась синяя рамка. Строки и ссылки подвала кликаются мышью, Tab по ним не нужен.
+        .focusEffectDisabled()
+    }
+
+    /// Список модулей коротко сдвигается в ту же сторону, что и страница: вкладка правее — приезжает справа.
+    /// В «Экономном» режиме анимаций нет.
+    private func slideList(from old: ModuleCategory?, to new: ModuleCategory?) {
+        guard (PageMode(rawValue: pageModeRaw) ?? .fast) == .fast,
+              let old, let new, old != new,
+              let from = ModuleCategory.all.firstIndex(of: old), let to = ModuleCategory.all.firstIndex(of: new)
+        else { return }
+        var start = Transaction()
+        start.disablesAnimations = true
+        withTransaction(start) {
+            listShift = to > from ? 24 : -24
+            listOpacity = 0
+        }
+        // Конечное значение — на следующем витке, иначе SwiftUI склеит оба изменения и начало не отрисует.
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.22)) {
+                listShift = 0
+                listOpacity = 1
+            }
+        }
     }
 
     private func list(_ shown: [Module]) -> some View {
@@ -196,6 +226,8 @@ struct DSSidebar: View {
             .padding(.horizontal, 10).padding(.vertical, 2)
         }
         .scrollIndicators(.never)
+        .offset(x: listShift)
+        .opacity(listOpacity)
     }
 
     private func shownModules(in category: ModuleCategory) -> [Module] {
@@ -258,7 +290,7 @@ struct DSSidebar: View {
             Button(on ? "Выключить модуль" : "Включить модуль") { modules.setOn(module, !on) }
             Button("Скрыть из панели") { modules.setHidden(module, true) }
             Divider()
-            Button("Настроить модули…") { modules.settingsShown = true }
+            Button("Настройки…") { modules.settingsShown = true }
         }
     }
 
@@ -551,7 +583,7 @@ private struct DSSidebarRow: View {
     }
 }
 
-/// Внизу панели: обновление, «Скрытые», «Что нового», «Настроить модули», «О проекте», версия.
+/// Внизу панели: обновление, «Скрытые», «Стор», «Что нового», «Настройки», «О проекте», версия.
 struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
@@ -591,20 +623,21 @@ struct DSSidebarFooter: View {
                 EmptyView()
             }
             hiddenSection
-            // Стор внизу, рядом с настройкой модулей: открывают его редко, а наверху он занимал много места.
+            // Стор внизу, рядом с настройками: открывают его редко, а наверху он занимал много места.
             FooterLink(icon: "bag", title: "Стор", selected: showStore) {
                 peeked = nil
                 showAbout = false
                 showStore = true
             }
             FooterLink(icon: "sparkles", title: "Что нового") { WhatsNew.shared.isShown = true }
-            // Порядок, скрытие и выключение модулей — в Настройках; без этой строки туда попадали только через Cmd+, или контекстное меню.
-            FooterLink(icon: "slider.horizontal.3", title: "Настроить модули") { modules.settingsShown = true }
+            // Оформление, Dock и режим страниц; без этой строки туда попадали только через Cmd+, или контекстное меню.
+            FooterLink(icon: "gearshape", title: "Настройки") { modules.settingsShown = true }
             FooterLink(icon: "info.circle", title: "О проекте", selected: showAbout) { showStore = false; showAbout = true }
             HStack {
                 // Клик по версии — «Обновление стороннего программного обеспечения»: что нового.
                 Button("Версия \(updater.currentVersion)") { WhatsNew.shared.isShown = true }
                     .buttonStyle(.plain)
+                    .focusable(false)
                     .help("Что изменилось в последних версиях")
                 Spacer()
                 Button {
@@ -619,6 +652,7 @@ struct DSSidebarFooter: View {
                     }
                 }
                 .buttonStyle(.borderless)
+                .focusable(false)
                 .help(updater.state == .upToDate ? "Установлена последняя версия" : "Проверить обновления")
                 .disabled(updater.state == .checking || updater.state == .installing)
             }
@@ -627,7 +661,8 @@ struct DSSidebarFooter: View {
             .padding(.horizontal, 10).padding(.top, 6)
         }
         .padding(.horizontal, 10)
-        .padding(.bottom, 12)
+        // Воздух снизу и слева такой же, как у карточки страницы (10 pt).
+        .padding(.bottom, 10)
     }
 
     /// «Скрытые · N» над «Что нового»: без скрытых модулей строки нет совсем.

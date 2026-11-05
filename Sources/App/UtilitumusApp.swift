@@ -59,7 +59,7 @@ enum Module: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Одна строка о модуле — для списка в настройках.
+    /// Одна строка о модуле — для витрины Стора.
     var summary: String {
         switch self {
         case .sound: return "Держит основной микрофон по приоритету, не даёт Bluetooth-наушникам стать входом"
@@ -156,8 +156,9 @@ struct MainView: View {
                 if !sidebarHidden {
                     DSSidebar(current: current, showDashboard: $showDashboard, showStore: $showStore, showAbout: $showAbout,
                               peeked: $peeked, selection: $selection)
+                        // Без собственной заливки и границы: панель лежит прямо на фоне окна,
+                        // единственный поднятый элемент — карточка страницы.
                         .frame(width: DS.sidebarWidth)
-                        .background(theme.sidebar)
                 }
                 Group {
                     if fast {
@@ -201,6 +202,19 @@ struct MainView: View {
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
         .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
         .onAppear { whatsNew.showIfUpdated() }
+        // После закрытия любого листа (в том числе alert и confirmationDialog) AppKit отдаёт фокус первой
+        // фокусируемой кнопке окна, при включённой клавиатурной навигации это «Версия» в подвале панели, и вокруг
+        // неё рисуется рамка. Сбрасываем фокус на следующем витке, но не трогаем поле ввода, если курсор в нём.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { note in
+            guard let window = note.object as? NSWindow else { return }
+            // Второй сброс с задержкой: фокус могут вернуть уже после анимации закрытия листа.
+            for delay in [0.0, 0.25] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    if window.firstResponder is NSText { return }
+                    window.makeFirstResponder(nil)
+                }
+            }
+        }
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
@@ -316,21 +330,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// Точка входа. Стиль окна задаётся сценой `App` и на лету не меняется, поэтому интерфейс
-/// выбирается при запуске (`UIStyle.launched`): запускаем одно из двух приложений-сцен.
-/// Смену в настройках применяет перезапуск.
+/// Точка входа.
 @main
-enum Launcher {
-    @MainActor
-    static func main() {
-        switch UIStyle.launched {
-        case .new: UtilitumusApp.main()
-        case .classic: ClassicApp.main()
-        }
-    }
-}
-
-/// Новый интерфейс.
 struct UtilitumusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 

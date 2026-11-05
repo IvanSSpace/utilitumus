@@ -39,6 +39,12 @@ enum PageKey: Hashable {
         }
     }
 
+    /// Номер вкладки категории (Фоном, Под рукой, С ИИ); у страниц без модуля — nil.
+    var categoryIndex: Int? {
+        guard case .module(let m) = self else { return nil }
+        return ModuleCategory.all.firstIndex(of: m.category)
+    }
+
     private static let moduleOrder: [Module] = ModuleCategory.all.flatMap(\.modules)
         + Module.allCases.filter { m in !ModuleCategory.all.contains { $0.modules.contains(m) } }
 
@@ -141,10 +147,24 @@ final class PageContainer: NSView {
             old.removeFromSuperview()
             return
         }
-        // Куда сдвинуть: пункт ниже в панели — въезжает снизу (в слое AppKit ось y вверх), выше — сверху.
-        let offset: CGFloat = key.order > oldKey.order ? -24 : 24
-        let slide = CABasicAnimation(keyPath: "transform.translation.y")
-        slide.fromValue = offset
+        // Смена вкладки категории — сдвиг по горизонтали в сторону «смахивания»: новая страница приезжает
+        // справа (вкладка правее) или слева, старая уходит в обратную сторону. Внутри вкладки и для страниц без
+        // категории — вертикально: пункт ниже в панели въезжает снизу (в слое AppKit ось y вверх), выше — сверху.
+        // Анимируется только transform слоя: layout и размер окна не затрагиваются.
+        let horizontal: CGFloat?
+        if let from = oldKey.categoryIndex, let to = key.categoryIndex, from != to {
+            horizontal = to > from ? 1 : -1
+        } else {
+            horizontal = nil
+        }
+        let slide: CABasicAnimation
+        if let horizontal {
+            slide = CABasicAnimation(keyPath: "transform.translation.x")
+            slide.fromValue = horizontal * 40
+        } else {
+            slide = CABasicAnimation(keyPath: "transform.translation.y")
+            slide.fromValue = key.order > oldKey.order ? -24 : 24
+        }
         slide.toValue = 0
         let fadeIn = CABasicAnimation(keyPath: "opacity")
         fadeIn.fromValue = 0
@@ -159,9 +179,19 @@ final class PageContainer: NSView {
         let fadeOut = CABasicAnimation(keyPath: "opacity")
         fadeOut.fromValue = 1
         fadeOut.toValue = 0
-        fadeOut.duration = 0.12
-        fadeOut.fillMode = .forwards
-        fadeOut.isRemovedOnCompletion = false
+        let outGroup = CAAnimationGroup()
+        outGroup.animations = [fadeOut]
+        if let horizontal {
+            // Старая страница уходит в сторону, противоположную въезду новой.
+            let away = CABasicAnimation(keyPath: "transform.translation.x")
+            away.fromValue = 0
+            away.toValue = -horizontal * 40
+            outGroup.animations = [fadeOut, away]
+        }
+        outGroup.duration = horizontal == nil ? 0.12 : 0.22
+        outGroup.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        outGroup.fillMode = .forwards
+        outGroup.isRemovedOnCompletion = false
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self, weak old] in
             guard let self, let old else { return }
@@ -170,7 +200,7 @@ final class PageContainer: NSView {
             old.layer?.removeAllAnimations()
             old.removeFromSuperview()
         }
-        oldLayer.add(fadeOut, forKey: "pageOut")
+        oldLayer.add(outGroup, forKey: "pageOut")
         CATransaction.commit()
     }
 }
