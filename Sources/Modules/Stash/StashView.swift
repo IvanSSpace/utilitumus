@@ -12,11 +12,11 @@ private struct ChipView: View {
     let chip: StashChip
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             if let icon = chip.icon {
-                Image(nsImage: icon).resizable().frame(width: 18, height: 18)
+                Image(nsImage: icon).resizable().frame(width: 15, height: 15)
             }
-            Text(chip.name).font(.system(size: 12, weight: .medium))
+            Text(chip.name).font(.system(size: 11.5, weight: .medium))
             if chip.windows > 1 {
                 Text("\(chip.windows)")
                     .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
@@ -25,9 +25,9 @@ private struct ChipView: View {
                     .help("Окон: \(chip.windows)")
             }
         }
-        .padding(.leading, 5)
-        .padding(.trailing, 9)
-        .padding(.vertical, 3)
+        .padding(.leading, 4)
+        .padding(.trailing, 8)
+        .padding(.vertical, 2)
         .background(.white.opacity(0.12), in: Capsule())
     }
 }
@@ -54,7 +54,8 @@ private func appIcon(_ icon: NSImage?, size: CGFloat) -> some View {
     .frame(width: size, height: size)
 }
 
-/// Строка программы: значок, имя, «Тяжёлая», полоска памяти, цифры, тумблер.
+/// Плитка программы: значок, имя и «Тяжёлая», под ними полоска памяти и цифры, справа тумблер.
+/// Плитки встают в две колонки, поэтому цифры идут второй строкой.
 private struct StashAppRow: View {
     let entry: RunningEntry
     let usage: AppUsage?
@@ -65,29 +66,58 @@ private struct StashAppRow: View {
 
     var body: some View {
         let heavy = usage?.isHeavy == true
-        HStack(spacing: 12) {
-            appIcon(entry.icon, size: 30)
-            Text(entry.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95)).lineLimit(1)
-            if heavy { DSChip("Тяжёлая", color: .orange) }
-            Spacer(minLength: 10)
-            if let usage {
-                Capsule().fill(.white.opacity(0.1))
-                    .frame(width: 80, height: 5)
-                    .overlay(alignment: .leading) {
-                        Capsule().fill(heavy ? Color.orange : tint.opacity(0.7))
-                            .frame(width: max(5, 80 * share))
+        HStack(spacing: 10) {
+            appIcon(entry.icon, size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(entry.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95)).lineLimit(1)
+                    if heavy { DSChip("Тяжёлая", color: .orange) }
+                }
+                if let usage {
+                    HStack(spacing: 7) {
+                        Capsule().fill(.white.opacity(0.1))
+                            .frame(width: 44, height: 4)
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(heavy ? Color.orange : tint.opacity(0.7))
+                                    .frame(width: max(4, 44 * share))
+                            }
+                        Text(usageText(usage))
+                            .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                            .foregroundStyle(heavy ? Color.orange : .white.opacity(0.55))
+                            .lineLimit(1)
                     }
-                Text(usageText(usage))
-                    .font(.system(size: 12.5, weight: .medium).monospacedDigit())
-                    .foregroundStyle(heavy ? Color.orange : .white.opacity(0.6))
-                    .frame(width: 100, alignment: .trailing)
+                }
             }
+            Spacer(minLength: 6)
             DSToggle(entry.name, isOn: isOn)
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .frame(minHeight: 50)
-        .overlay(alignment: .top) {
-            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.leading, 56)
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous))
+    }
+}
+
+/// Блок страницы со своей шапкой: справа можно положить кнопку, у `DSSection` там только текст.
+private struct StashBlock<Trailing: View, Content: View>: View {
+    let title: String
+    @ViewBuilder var trailing: Trailing
+    @ViewBuilder var content: Content
+    @Environment(\.dsTheme) private var theme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(title.uppercased()).font(DS.sectionTitle).tracking(0.8).foregroundStyle(.white.opacity(0.42))
+                Spacer(minLength: 8)
+                trailing
+            }
+            .padding(.horizontal, 6)
+            .frame(minHeight: 24)
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+                .overlay(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous)
+                    .stroke(.white.opacity(0.06), lineWidth: 0.7))
         }
     }
 }
@@ -102,11 +132,11 @@ private struct RestoreCard: View {
     private let green = Color(hue: 0.38, saturation: 0.55, brightness: 0.85)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 9, style: .continuous).fill(green.opacity(0.2))
-                    .frame(width: 30, height: 30)
-                    .overlay(Image(systemName: "arrow.uturn.backward").font(.system(size: 13, weight: .bold))
+                    .frame(width: 28, height: 28)
+                    .overlay(Image(systemName: "arrow.uturn.backward").font(.system(size: 12, weight: .bold))
                         .foregroundStyle(green))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Вернуть \(programs(apps.count))").font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
@@ -116,7 +146,7 @@ private struct RestoreCard: View {
                 Button(action: action) {
                     Text("Вернуть").font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(Color.black.opacity(0.78))
-                        .padding(.horizontal, 17).padding(.vertical, 9)
+                        .padding(.horizontal, 17).padding(.vertical, 7)
                         .background(Capsule().fill(green))
                         .contentShape(Capsule())
                 }
@@ -125,15 +155,15 @@ private struct RestoreCard: View {
                 .disabled(!enabled)
                 .opacity(enabled ? 1 : 0.4)
             }
-            FlowLayout(spacing: 6) {
+            FlowLayout(spacing: 5) {
                 ForEach(apps) {
                     ChipView(chip: StashChip(id: $0.bundleID, icon: icons[$0.bundleID],
                                              name: $0.name, windows: $0.windows.count))
                 }
             }
-            .padding(.leading, 42)
+            .padding(.leading, 40)
         }
-        .padding(14)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(green.opacity(0.12)))
         .overlay(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous)
@@ -164,11 +194,17 @@ private struct ScenarioCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(scenario.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(scenario.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    // Сколько программ сценария запущено сейчас.
+                    Text("\(runningCount) из \(scenario.bundleIDs.count)")
+                        .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+                }
                 HStack(spacing: -4) {
                     ForEach(Array(icons.prefix(Self.maxIcons).enumerated()), id: \.offset) { _, icon in
-                        appIcon(icon, size: 22)
+                        appIcon(icon, size: 20)
                     }
                     if icons.count > Self.maxIcons {
                         Text("+\(icons.count - Self.maxIcons)")
@@ -176,14 +212,11 @@ private struct ScenarioCard: View {
                             .padding(.leading, 8)
                     }
                 }
-                Text("Запущено \(runningCount) из \(scenario.bundleIDs.count)")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.white.opacity(0.5))
             }
             .foregroundStyle(.white.opacity(0.92))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .frame(minWidth: 130, alignment: .leading)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .frame(minWidth: 140, alignment: .leading)
             .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous))
             .contentShape(Rectangle())
         }
@@ -298,40 +331,64 @@ struct StashView: View {
         return "Выбрано \(selectedCount) из \(store.running.count)\(tail)"
     }
 
+    /// Плитки программ в две колонки (одна, если окно узкое). Длинный список прокручивается сам,
+    /// чтобы остальная страница стояла на месте; строк до прокрутки меньше, когда сверху карточка «Вернуть».
     private var programsSection: some View {
         let entries = store.runningByWeight
         let maxMB = max(entries.compactMap { store.usage[$0.bundleID]?.memoryMB }.max() ?? 1, 1)
         let hasHeavy = entries.contains { store.usage[$0.bundleID]?.isHeavy == true }
-        return DSSection("Программы", trailing: "Память и процессор сейчас") {
-            if entries.isEmpty {
-                DSRow(title: "Нет запущенных программ")
-            }
+        let maxRows: CGFloat = store.stashed.isEmpty ? 7 : 4
+        let rowStep: CGFloat = 48 + 6
+        return StashBlock(title: "Программы") {
+            Text("Finder и Utilitumus не закрываются")
+                .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.4))
+                .lineLimit(1)
             if hasHeavy {
-                DSRow(icon: "flame", title: "Только тяжёлые",
-                      subtitle: "Тяжёлая — от 1 ГБ памяти или 25 % процессора") {
-                    DSButton("Отметить", small: true) { store.selectOnlyHeavy() }
-                        .help("Оставить отмеченными только тяжёлые программы")
-                }
+                DSButton("Только тяжёлые", icon: "flame", small: true) { store.selectOnlyHeavy() }
+                    .help("Оставить отмеченными только тяжёлые программы: от 1 ГБ памяти или 25 % процессора")
             }
-            ForEach(entries) { entry in
-                let usage = store.usage[entry.bundleID]
-                StashAppRow(
-                    entry: entry,
-                    usage: usage,
-                    share: (usage?.memoryMB ?? 0) / maxMB,
-                    isOn: Binding(
-                        get: { store.isClosing(entry.bundleID) },
-                        set: { store.setClosing(entry.bundleID, $0) }
-                    )
-                )
+        } content: {
+            if entries.isEmpty {
+                Text("Нет запущенных программ")
+                    .font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                    .padding(14)
+            } else {
+                let grid = LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 6)], spacing: 6) {
+                    ForEach(entries) { entry in
+                        let usage = store.usage[entry.bundleID]
+                        StashAppRow(
+                            entry: entry,
+                            usage: usage,
+                            share: (usage?.memoryMB ?? 0) / maxMB,
+                            isOn: Binding(
+                                get: { store.isClosing(entry.bundleID) },
+                                set: { store.setClosing(entry.bundleID, $0) }
+                            )
+                        )
+                    }
+                }
+                .padding(8)
+                // Две колонки: больше maxRows рядов — прокрутка только внутри списка.
+                if entries.count > Int(maxRows) * 2 {
+                    ScrollView { grid }
+                        .frame(height: maxRows * rowStep + 10)
+                } else {
+                    grid
+                }
             }
         }
     }
 
     private var scenariosSection: some View {
-        DSSection("Сценарии", trailing: store.scenarios.isEmpty ? nil : "Нажми, чтобы спрятать") {
+        StashBlock(title: "Сценарии") {
+            DSButton("Сохранить как сценарий", icon: "plus", small: true) { ask(.new) }
+                .disabled(selectedCount == 0)
+                .help(selectedCount == 0 ? "Сначала отметь программы выше" : "Запомнить отмеченные программы под именем")
+        } content: {
             if store.scenarios.isEmpty {
-                DSRow(title: "Сохрани набор программ и прячь его одним нажатием")
+                Text("Сохрани набор программ и прячь его одним нажатием")
+                    .font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.6))
+                    .padding(.horizontal, 14).padding(.vertical, 12)
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(store.scenarios) { scenario in
@@ -354,13 +411,8 @@ struct StashView: View {
                         }
                     }
                 }
-                .padding(12)
+                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            DSRow(icon: "plus", title: "Сохранить как сценарий…",
-                  subtitle: selectedCount == 0 ? "Сначала отметь программы выше" : "Запомнить отмеченные программы под именем") {
-                DSButton("Сохранить", small: true) { ask(.new) }
-                    .disabled(selectedCount == 0)
             }
         }
     }
@@ -426,10 +478,6 @@ struct StashView: View {
             programsSection
 
             scenariosSection
-
-            Text("Finder и Utilitumus не закрываются.")
-                .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.4))
-                .padding(.horizontal, 6)
         }
         // Один промах мышью закрыл бы терминалы с работой — сначала список.
         .confirmationDialog("Закрыть \(programs(selectedCount))?", isPresented: $confirmStash) {
