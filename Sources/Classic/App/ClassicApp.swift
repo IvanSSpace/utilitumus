@@ -4,11 +4,12 @@ import SwiftUI
 struct ClassicApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    var body: some Scene {
+    @SceneBuilder var body: some Scene {
         Window("Utilitumus", id: "main") {
             ClassicMainView()
         }
         .defaultSize(width: 760, height: 560)
         .commands { AppCommands() }
+        AppMenuBarScene()
     }
 }

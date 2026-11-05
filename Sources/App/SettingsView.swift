@@ -21,6 +21,7 @@ struct SettingsView: View {
                         .keyboardShortcut(.defaultAction)
                 }
                 ThemeSection()
+                DockSection()
                 UIStyleSection()
                 ModulesSettings()
             }

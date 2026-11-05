@@ -10,6 +10,8 @@ struct ClassicSettingsView: View {
             Divider()
             ClassicUIStyleSection()
             Divider()
+            ClassicDockSection()
+            Divider()
             HStack {
                 Spacer()
                 Button("Готово") { dismiss() }
