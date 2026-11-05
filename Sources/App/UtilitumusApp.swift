@@ -59,7 +59,7 @@ enum Module: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Одна строка о модуле — для списка в настройках.
+    /// Одна строка о модуле — для витрины Стора.
     var summary: String {
         switch self {
         case .sound: return "Держит основной микрофон по приоритету, не даёт Bluetooth-наушникам стать входом"
@@ -201,6 +201,19 @@ struct MainView: View {
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
         .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
         .onAppear { whatsNew.showIfUpdated() }
+        // После закрытия любого листа (в том числе alert и confirmationDialog) AppKit отдаёт фокус первой
+        // фокусируемой кнопке окна, при включённой клавиатурной навигации это «Версия» в подвале панели, и вокруг
+        // неё рисуется рамка. Сбрасываем фокус на следующем витке, но не трогаем поле ввода, если курсор в нём.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEndSheetNotification)) { note in
+            guard let window = note.object as? NSWindow else { return }
+            // Второй сброс с задержкой: фокус могут вернуть уже после анимации закрытия листа.
+            for delay in [0.0, 0.25] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    if window.firstResponder is NSText { return }
+                    window.makeFirstResponder(nil)
+                }
+            }
+        }
         .onChange(of: displayed) {
             DispatchQueue.main.async { built = displayed }
         }
