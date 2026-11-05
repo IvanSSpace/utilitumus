@@ -322,7 +322,7 @@ struct DashboardPage: View, Equatable {
     @Environment(\.dsTheme) private var theme
     @State private var confirmStash = false
 
-    private var shown: [Module] { modules.shownModules }
+    private var shown: [Module] { modules.panelModules }
 
     var body: some View {
         // В обычном окне всё помещается без прокрутки; в самом маленьком — прокручивается.

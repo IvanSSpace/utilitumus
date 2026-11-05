@@ -11,9 +11,10 @@ struct ModuleHooks {
 
 /// Порядок модулей, включён ли каждый и виден ли в боковой панели; запуск/остановка их фоновых частей.
 ///
-/// «Включён» и «в панели» — независимы: выключенный модуль виден (серым) и открывается — на его
-/// экране описание и кнопка «Включить»; скрытый может работать в фоне. На новой установке всё
-/// выключено: модуль начинает что-то делать, только когда его включили.
+/// «Установлен» (включён) и «скрыт из панели» — независимы. Установленный модуль работает; скрытый
+/// работает так же, но его строки нет в панели (он в подвале «Скрытые»). Выключенный модуль считается
+/// не установленным: в панели его нет, он только в Сторе. Открытый в панели модуль, который выключили
+/// тумблером на его странице, остаётся до ухода со страницы. На новой установке всё выключено.
 @MainActor
 final class ModuleManager: ObservableObject {
     /// Все модули в порядке боковой панели и настроек.
@@ -35,6 +36,7 @@ final class ModuleManager: ObservableObject {
 
     private static let orderKey = "ModuleOrder"
     private static let migratedKey = "ModulesV2"
+    private static let uninstallSplitKey = "ModulesV3"
     static func onKey(_ module: Module) -> String { "ModuleOn.\(module.rawValue)" }
     private static func hiddenKey(_ module: Module) -> String { "ModuleHidden.\(module.rawValue)" }
 
@@ -44,6 +46,10 @@ final class ModuleManager: ObservableObject {
         if defaults.object(forKey: Self.migratedKey) == nil {
             Self.migrate(defaults)
             defaults.set(true, forKey: Self.migratedKey)
+        }
+        if defaults.object(forKey: Self.uninstallSplitKey) == nil {
+            Self.splitUninstallFromHidden(defaults)
+            defaults.set(true, forKey: Self.uninstallSplitKey)
         }
         order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
@@ -79,6 +85,14 @@ final class ModuleManager: ObservableObject {
         }
     }
 
+    /// Раньше «удалить» в Сторе выключало модуль и прятало его. Теперь это разные вещи, а «скрытый» значит
+    /// «установлен»: у выключенных снимаем скрытие, иначе они висели бы в «Скрытых».
+    private static func splitUninstallFromHidden(_ defaults: UserDefaults) {
+        for module in Module.allCases where !defaults.bool(forKey: onKey(module)) && defaults.bool(forKey: hiddenKey(module)) {
+            defaults.set(false, forKey: hiddenKey(module))
+        }
+    }
+
     /// Сохранённый порядок: неизвестные id (модуль убрали) и повторы отбрасываются,
     /// модули, которых в нём нет (новые версии), добавляются в конец.
     static func normalizedOrder(_ stored: [String]) -> [Module] {
@@ -94,23 +108,30 @@ final class ModuleManager: ObservableObject {
     func isOn(_ module: Module) -> Bool { enabled.contains(module) }
     func isHidden(_ module: Module) -> Bool { hidden.contains(module) }
 
-    /// Модули в боковой панели (включённые и выключенные), в нужном порядке.
+    /// Модули в порядке панели без скрытых; выключенные тоже тут (панель сама оставляет только установленные
+    /// и открытый сейчас). Нужно для перетаскивания: переставляются места, занятые видимыми.
     var shownModules: [Module] { order.filter { !hidden.contains($0) } }
 
-    /// «Установлен» — как в Сторе: включён и не скрыт. Только такие модули видны в боковой панели.
-    func isInstalled(_ module: Module) -> Bool { enabled.contains(module) && !hidden.contains(module) }
+    /// «Установлен» = включён. Скрытие на это не влияет.
+    func isInstalled(_ module: Module) -> Bool { enabled.contains(module) }
 
-    /// Установленные модули в порядке панели.
+    /// Установленные модули в порядке панели, скрытые тоже.
     var installedModules: [Module] { order.filter(isInstalled) }
 
-    /// Первый установленный модуль так, как их показывает панель: по вкладкам, внутри вкладки по порядку.
-    var firstInstalled: Module? {
-        let installed = installedModules
-        return ModuleCategory.all.lazy.compactMap { category in installed.first { $0.category == category } }.first
+    /// Есть ли строка модуля в боковой панели: установлен и не скрыт.
+    func isInPanel(_ module: Module) -> Bool { isInstalled(module) && !hidden.contains(module) }
+
+    /// Модули, у которых есть строка в панели, в порядке панели.
+    var panelModules: [Module] { order.filter(isInPanel) }
+
+    /// Первый модуль панели так, как их показывает панель: по вкладкам, внутри вкладки по порядку.
+    var firstInPanel: Module? {
+        let inPanel = panelModules
+        return ModuleCategory.all.lazy.compactMap { category in inPanel.first { $0.category == category } }.first
     }
 
-    /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели.
-    var hiddenModules: [Module] { order.filter { hidden.contains($0) } }
+    /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели. Только установленные.
+    var hiddenModules: [Module] { order.filter { hidden.contains($0) && isInstalled($0) } }
 
     func setOn(_ module: Module, _ on: Bool) {
         defaults.set(on, forKey: Self.onKey(module))
@@ -148,9 +169,9 @@ final class ModuleManager: ObservableObject {
     }
 
     /// Выбранный модуль, если он не скрыт (выключенный остаётся, пока страница открыта);
-    /// иначе первый установленный; иначе nil.
+    /// иначе первый модуль панели; иначе nil.
     func resolve(_ selection: Module) -> Module? {
-        hidden.contains(selection) ? firstInstalled : selection
+        hidden.contains(selection) ? firstInPanel : selection
     }
 
     /// Запуск приложения: стартуют включённые (скрытые тоже работают).
