@@ -141,6 +141,7 @@ enum DashboardLive {
         case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         }
     }
 
@@ -165,7 +166,7 @@ enum DashboardLive {
             }
         case .load:
             LoadStore.shared.refreshNow()
-        case .sound, .mouse, .voice, .mixer, .clipboard:
+        case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard:
             break
         }
     }
@@ -183,6 +184,7 @@ enum DashboardLive {
         case .clipboard: return clipboard()
         case .mixer: return mixer()
         case .load: return load()
+        case .keyboard: return keyboard()
         }
     }
 
@@ -261,6 +263,14 @@ enum DashboardLive {
             return DashState(text: "\(controller.hotKeyLabel) · модель не скачана", attention: true)
         }
         return DashState(text: "\(controller.hotKeyLabel) · \(model)")
+    }
+
+    private static func keyboard() -> DashState {
+        let c = KeyboardController.shared
+        guard c.tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
+        // Второе переключение от системы ломает смену языка: показываем сразу.
+        if KeyboardController.shared.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
+        return DashState(text: "\(c.currentName) · \(c.mode.title.lowercased())")
     }
 
     private static func mixer() -> DashState {

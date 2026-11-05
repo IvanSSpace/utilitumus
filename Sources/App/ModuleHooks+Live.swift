@@ -33,6 +33,9 @@ extension ModuleHooks {
         case .clipboard:
             return ModuleHooks(start: { ClipboardController.shared.start() },
                                stop: { ClipboardController.shared.stop() })
+        case .keyboard:
+            return ModuleHooks(start: { KeyboardController.shared.start() },
+                               stop: { KeyboardController.shared.stop() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })

@@ -33,6 +33,7 @@ struct ClassicModuleDetail: View {
             case .browser: ClassicBrowserView()
             case .voice: ClassicVoiceView()
             case .clipboard: ClassicClipboardView()
+            case .keyboard: ClassicKeyboardView()
             }
         }
         // Свой экран на каждый модуль: состояние (лист «Об инструменте») не переезжает между ними.

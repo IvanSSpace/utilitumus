@@ -4,6 +4,7 @@ import AppKit
 /// Модули в боковой панели. Новый модуль = новый case + экран в `ModuleDetail`.
 enum Module: String, CaseIterable, Identifiable {
     case sound, load, stash, fans, mixer, mouse, browser, voice, clipboard
+    case keyboard
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .browser: return "Браузер"
         case .voice: return "Голос"
         case .clipboard: return "Буфер"
+        case .keyboard: return "Клавиатура"
         }
     }
 
@@ -32,6 +34,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .browser: return "globe"
         case .voice: return "waveform"
         case .clipboard: return "doc.on.clipboard.fill"
+        case .keyboard: return "keyboard"
         }
     }
 
@@ -48,6 +51,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .browser: return .indigo
         case .voice: return .green
         case .clipboard: return .mint
+        case .keyboard: return .cyan
         }
     }
 
@@ -63,6 +67,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .browser: return "Панель выбора браузера у курсора для каждой ссылки и правила «сайт или приложение — браузер»"
         case .voice: return "Голосовой ввод по горячей клавише: надиктовал — текст вставился туда, где курсор. Всё распознаётся на этом Mac"
         case .clipboard: return "История буфера обмена и цветные пространства для ссылок и текстов. Панель по горячей клавише, всё зашифровано на этом Mac"
+        case .keyboard: return "Мгновенная смена раскладки по тапу Fn/🌐 вместо медленной системной"
         }
     }
 }
@@ -100,6 +105,7 @@ struct ModuleDetail: View {
             case .browser: BrowserView()
             case .voice: VoiceView()
             case .clipboard: ClipboardView()
+            case .keyboard: KeyboardView()
             }
         }
     }

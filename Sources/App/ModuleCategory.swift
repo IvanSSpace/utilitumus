@@ -24,7 +24,7 @@ struct ModuleCategory: Identifiable, Hashable {
         ModuleCategory(id: "background", title: "Фоном",
                        subtitle: "Настроил и забыл — работает само",
                        icon: "moon.zzz.fill", showsStatus: true,
-                       hue: 0.55, spread: 0.03, modules: [.sound, .mouse, .fans, .browser]),
+                       hue: 0.55, spread: 0.03, modules: [.sound, .mouse, .fans, .browser, .keyboard]),
         ModuleCategory(id: "handy", title: "Под рукой",
                        subtitle: "Пользуешься каждый день",
                        icon: "hand.point.up.fill", showsStatus: false,
