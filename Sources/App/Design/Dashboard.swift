@@ -262,8 +262,8 @@ enum DashboardLive {
     private static func awake() -> DashState {
         let c = AwakeController.shared
         guard c.isActive else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
-        let tail = c.endDate.map { " · осталось \(AwakeController.remainingText(until: $0))" } ?? ""
-        return DashState(text: "не даёт спать\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
+        let tail = c.endDate.map { " · ещё \(AwakeController.remainingText(until: $0))" } ?? ""
+        return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
     }
 
     private static func mixer() -> DashState {

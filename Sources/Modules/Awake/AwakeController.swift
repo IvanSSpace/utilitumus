@@ -36,7 +36,8 @@ final class AwakeController: ObservableObject {
 
     private static let displayKey = "AwakeKeepDisplay"
     private static let durationKey = "AwakeDuration"
-    private static let reason = "Utilitumus: Не спать" as CFString
+    /// Имя в `pmset -g assertions`. Латиница: с кириллицей pmset показывает пустое имя.
+    private static let reason = "Utilitumus: Keep Awake" as CFString
 
     private var systemAssertion: IOPMAssertionID = 0
     private var displayAssertion: IOPMAssertionID = 0
