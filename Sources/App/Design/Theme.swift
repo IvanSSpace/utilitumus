@@ -12,7 +12,9 @@ import SwiftUI
 
 /// Цветовая тема окна. Все цвета считаются от модуля, чтобы тема сама решала, красить ли в его оттенок.
 enum DSTheme: Hashable, Identifiable {
-    /// Приглушённые оттенки модулей (по умолчанию).
+    /// Сумерки: голубой, индиго и золото на тёмно-синем фоне. Тема по умолчанию; считается как «Своя» с палитрой `.dusk`.
+    case dusk
+    /// Приглушённые оттенки модулей.
     case calm
     /// Почти монохромная: нейтральный серый, один общий акцент системы.
     case graphite
@@ -26,10 +28,11 @@ enum DSTheme: Hashable, Identifiable {
     var id: String { rawValue }
     static let storageKey = "Design.Theme"
     /// Готовые темы (без «Своей»).
-    static let presets: [DSTheme] = [.calm, .graphite, .vivid, .midnight]
+    static let presets: [DSTheme] = [.dusk, .calm, .graphite, .vivid, .midnight]
 
     var rawValue: String {
         switch self {
+        case .dusk: return "dusk"
         case .calm: return "calm"
         case .graphite: return "graphite"
         case .vivid: return "vivid"
@@ -41,6 +44,7 @@ enum DSTheme: Hashable, Identifiable {
     /// Только пресеты: у «Своей» есть палитра, её подставляет `DSThemed`.
     init?(rawValue: String) {
         switch rawValue {
+        case "dusk": self = .dusk
         case "calm": self = .calm
         case "graphite": self = .graphite
         case "vivid": self = .vivid
@@ -51,6 +55,7 @@ enum DSTheme: Hashable, Identifiable {
 
     var title: String {
         switch self {
+        case .dusk: return "Сумерки"
         case .calm: return "Спокойная"
         case .graphite: return "Графит"
         case .vivid: return "Цветная"
@@ -64,6 +69,7 @@ enum DSTheme: Hashable, Identifiable {
     /// Насыщенность и яркость акцента модуля.
     fileprivate var accentSB: (s: Double, b: Double) {
         switch self {
+        case .dusk: return DSTheme.custom(.dusk).accentSB
         case .calm: return (0.50, 0.82)
         case .graphite: return (0.20, 0.72)
         case .vivid: return (0.72, 0.98)
@@ -75,6 +81,7 @@ enum DSTheme: Hashable, Identifiable {
     /// Градиент фона окна (сверху вниз) для модуля.
     func background(_ m: Module) -> [Color] {
         switch self {
+        case .dusk: return DSTheme.custom(.dusk).background(m)
         case .calm: return [hsb(m, 0.46, 0.27), hsb(m, 0.42, 0.10)]
         case .vivid: return [hsb(m, 0.74, 0.43), hsb(m, 0.72, 0.13)]
         case .graphite: return [Color(white: 0.15), Color(white: 0.085)]
@@ -120,6 +127,7 @@ enum DSTheme: Hashable, Identifiable {
     /// Плашка значка модуля: у «Графита» приглушена, чтобы значки не пестрили.
     func badge(_ m: Module) -> Color {
         switch self {
+        case .dusk: return DSTheme.custom(.dusk).badge(m)
         case .graphite: return hsb(m, 0.36, 0.64)
         case .midnight, .calm: return hsb(m, 0.50, 0.78)
         case .vivid: return hsb(m, 0.75, 0.95)
@@ -132,12 +140,14 @@ enum DSTheme: Hashable, Identifiable {
 
     /// Оттенок модуля (0…1): из таблицы `ModuleCategory.all`, а у «Своей» — из её палитры.
     func hue(_ m: Module) -> Double {
+        if self == .dusk { return DSTheme.custom(.dusk).hue(m) }
         if case .custom(let p) = self { return p.hue(of: m) }
         return m.categoryHue
     }
 
     /// Оттенок категории (метка в панели, заголовки групп).
     func hue(_ c: ModuleCategory) -> Double {
+        if self == .dusk { return DSTheme.custom(.dusk).hue(c) }
         if case .custom(let p) = self { return p.hue(of: c) }
         return c.hue
     }
@@ -168,6 +178,10 @@ struct CustomPalette: Hashable {
     func hue(of c: ModuleCategory) -> Double { hues[c.id] ?? c.hue }
     func hue(of m: Module) -> Double { m.category.hue(of: m, base: hue(of: m.category)) }
 
+    /// «Сумерки»: палитра, на которой сидит пользователь (насыщенность и яркость фона — как были на ползунках).
+    static let dusk = CustomPalette(hues: ["background": 0.55, "handy": 0.66, "ai": 0.11],
+                                    sat: 0.5653, bright: 0.3487)
+
     /// Значения, при которых «Своя» выглядит как пресет (оттенки — штатные).
     static func from(_ preset: DSTheme) -> CustomPalette {
         let (sat, bright): (Double, Double)
@@ -176,6 +190,7 @@ struct CustomPalette: Hashable {
         case .vivid: (sat, bright) = (0.8, 1.0)
         case .midnight: (sat, bright) = (0.55, 0.43)
         case .custom(let p): return p
+        case .dusk: return .dusk
         case .calm: (sat, bright) = (0.5, 0.5)
         }
         return CustomPalette(hues: [:], sat: sat, bright: bright)
@@ -221,9 +236,9 @@ final class CustomPaletteStore: ObservableObject {
         palette = new
     }
 
-    /// Последний выбранный пресет (по умолчанию «Спокойная»).
+    /// Последний выбранный пресет (по умолчанию «Сумерки»).
     static var lastPreset: DSTheme {
-        DSTheme(rawValue: UserDefaults.standard.string(forKey: lastPresetKey) ?? "") ?? .calm
+        DSTheme(rawValue: UserDefaults.standard.string(forKey: lastPresetKey) ?? "") ?? .dusk
     }
 }
 
@@ -242,7 +257,7 @@ extension DSTheme {
 
 // MARK: - Окружение
 
-private struct DSThemeKey: EnvironmentKey { static let defaultValue = DSTheme.calm }
+private struct DSThemeKey: EnvironmentKey { static let defaultValue = DSTheme.dusk }
 private struct DSTintKey: EnvironmentKey { static let defaultValue = Color.accentColor }
 
 extension EnvironmentValues {
@@ -259,10 +274,10 @@ extension EnvironmentValues {
 }
 
 private struct DSThemed: ViewModifier {
-    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.calm.rawValue
+    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.dusk.rawValue
     @ObservedObject private var custom = CustomPaletteStore.shared
     private var theme: DSTheme {
-        raw == "custom" ? .custom(custom.palette) : DSTheme(rawValue: raw) ?? .calm
+        raw == "custom" ? .custom(custom.palette) : DSTheme(rawValue: raw) ?? .dusk
     }
     func body(content: Content) -> some View {
         content

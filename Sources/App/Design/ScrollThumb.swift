@@ -4,8 +4,9 @@ import SwiftUI
 // к краю и режется скруглением. На macOS 14 (там нет onScrollGeometryChange) остаётся
 // системная, но с отступами сверху и снизу.
 
-/// Прокручиваемая область: тонкая полоса цвета страницы (`dsTint`), с отступом от
-/// края и не ближе `inset` к верху и низу — чтобы не попадать под скругление.
+/// Прокручиваемая область: серая полупрозрачная полоса (белая с прозрачностью, без оттенка страницы),
+/// с отступом от края и не ближе `inset` к верху и низу — чтобы не попадать под скругление.
+/// Системная полоса при этом скрыта полностью, чтобы две не накладывались.
 struct DSScroll<Content: View>: View {
     var inset: CGFloat = DS.cardRadius
     @ViewBuilder var content: Content
@@ -33,7 +34,7 @@ private final class ThumbModel: ObservableObject {
     @Published var metrics = Metrics()
     /// Только что крутили: полоса ярче.
     @Published var scrolling = false
-    /// Полоса видна (крутили меньше секунды назад).
+    /// Полоса видна (крутили меньше 1,2 с назад).
     @Published var shown = false
     @Published var hovering = false
     @Published var dragging = false
@@ -50,7 +51,7 @@ private final class ThumbModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
             self?.scrolling = false
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 900_000_000)
             guard !Task.isCancelled else { return }
             self?.shown = false
         }
@@ -65,7 +66,7 @@ private struct DSThumbScroll<Content: View>: View {
     @State private var position = ScrollPosition()
 
     var body: some View {
-        ScrollView { content }
+        ScrollView { content.background(SystemScrollerHider()) }
             .scrollIndicators(.hidden)
             .scrollPosition($position)
             .onScrollGeometryChange(for: ThumbModel.Metrics.self) { g in
@@ -86,12 +87,12 @@ private struct DSThumb: View {
     @ObservedObject var model: ThumbModel
     let inset: CGFloat
     let scrollTo: (CGFloat) -> Void
-    @Environment(\.dsTint) private var tint
     /// Смещение страницы в начале перетаскивания.
     @State private var dragStart: CGFloat?
 
-    private let width: CGFloat = 5
-    private let edgeGap: CGFloat = 6
+    private let width: CGFloat = 8
+    private let hoverWidth: CGFloat = 10
+    private let edgeGap: CGFloat = 5
     private let minThumb: CGFloat = 28
 
     var body: some View {
@@ -105,8 +106,8 @@ private struct DSThumb: View {
             let active = model.scrolling || model.hovering || model.dragging
             let visible = model.shown || model.hovering || model.dragging
             Capsule()
-                .fill(tint.opacity(active ? 0.6 : 0.35))
-                .frame(width: width, height: thumb)
+                .fill(.white.opacity(active ? 0.32 : 0.18))
+                .frame(width: model.hovering || model.dragging ? hoverWidth : width, height: thumb)
                 // Зона нажатия шире видимой полосы.
                 .padding(.leading, 9)
                 .padding(.trailing, edgeGap)
@@ -117,6 +118,7 @@ private struct DSThumb: View {
                 .allowsHitTesting(visible)
                 .animation(.easeOut(duration: 0.2), value: visible)
                 .animation(.easeOut(duration: 0.15), value: active)
+                .animation(.easeOut(duration: 0.12), value: model.hovering || model.dragging)
                 .onHover { model.hovering = $0 }
                 .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
@@ -125,6 +127,25 @@ private struct DSThumb: View {
                         scrollTo(min(max(y, 0), scrollable))
                     }
                     .onEnded { _ in dragStart = nil; model.dragging = false })
+        }
+    }
+}
+
+/// Страховка: если системная полоса всё же рисуется (режим «Показывать полосы прокрутки: всегда» при
+/// подключённой мыши), выключает её у NSScrollView, внутри которого лежит этот вид.
+@available(macOS 15, *)
+private struct SystemScrollerHider: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { HiderView() }
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class HiderView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                guard let scroll = self?.enclosingScrollView else { return }
+                scroll.hasVerticalScroller = false
+                scroll.hasHorizontalScroller = false
+            }
         }
     }
 }

@@ -150,7 +150,7 @@ struct KeyboardView: View {
     }
 
     private var excludedList: some View {
-        ScrollView {
+        DSScroll(inset: 6) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(controller.excludedApps, id: \.self) { id in
                     HStack(spacing: 10) {

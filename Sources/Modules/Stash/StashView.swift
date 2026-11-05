@@ -370,7 +370,7 @@ struct StashView: View {
                 .padding(8)
                 // Две колонки: больше maxRows рядов — прокрутка только внутри списка.
                 if entries.count > Int(maxRows) * 2 {
-                    ScrollView { grid }
+                    DSScroll(inset: 6) { grid }
                         .frame(height: maxRows * rowStep + 10)
                 } else {
                     grid
