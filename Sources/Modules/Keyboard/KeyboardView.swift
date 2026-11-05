@@ -6,7 +6,7 @@ struct KeyboardView: View {
 
     var body: some View {
         DSPage(module: .keyboard, subtitle: "Мгновенная смена раскладки по тапу Fn/🌐") {
-            if controller.systemUsage != 0 || controller.dictationConflict || controller.secureInputApp != nil { warnings }
+            if controller.secureInputApp != nil { warnings }
 
             DSSection("Как переключать") {
                 DSRow(icon: "hand.tap.fill", title: "Когда менять язык",
@@ -23,12 +23,13 @@ struct KeyboardView: View {
                 DSRow(icon: "keyboard.fill", title: "Сейчас включена") {
                     DSChip(controller.currentName, color: .secondary)
                 }
-                // Пока есть предупреждение, оно само говорит про системное действие.
-                if controller.systemUsage == 0 {
-                    DSRow(icon: "globe", title: "Системное действие 🌐",
-                          subtitle: "Отключено, второго переключения не будет") {
-                        DSChip(FnSystemAction.title(for: controller.systemUsage), color: .green, icon: "checkmark")
-                    }
+                // Отключить действие можно в чек-листе настройки (плашка сверху).
+                DSRow(icon: "globe", title: "Системное действие 🌐",
+                      subtitle: controller.systemUsage == 0 ? "Отключено, второго переключения не будет"
+                          : "macOS тоже переключит язык, и он сменится дважды. Отключается в настройке модуля") {
+                    DSChip(FnSystemAction.title(for: controller.systemUsage),
+                           color: controller.systemUsage == 0 ? .green : .orange,
+                           icon: controller.systemUsage == 0 ? "checkmark" : "exclamationmark.triangle.fill")
                 }
                 DSRow(title: status.text) {
                     Image(systemName: status.icon).foregroundStyle(status.color)
@@ -44,39 +45,13 @@ struct KeyboardView: View {
         .onPageActive { if $0 { controller.refreshAccess(); controller.refreshSystem() } }
     }
 
+    /// Защищённый ввод: пока он включён, macOS не отдаёт нажатия. Остальные конфликты решает чек-лист настройки.
     private var warnings: some View {
-        DSSection("Конфликты с системой", trailing: "Лучше отключить") {
+        DSSection("Конфликты с системой") {
             if let app = controller.secureInputApp {
                 DSRow(icon: "lock.fill", title: "Сейчас Fn не слышно",
                       subtitle: "Защищённый ввод в «\(app)»: пока он включён, macOS не отдаёт нажатия. Выйди из поля пароля или отключи Secure Keyboard Entry.",
                       iconTint: .orange) { EmptyView() }
-            }
-            if controller.systemUsage != 0 {
-                DSRow(icon: "exclamationmark.triangle.fill", title: "Система тоже переключит язык",
-                      subtitle: "Нажатие 🌐 в macOS сейчас: «\(FnSystemAction.title(for: controller.systemUsage))». С ним язык поменяется дважды.",
-                      iconTint: .orange) {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        DSButton("Отключить системное действие", icon: "bolt.slash.fill", style: .primary, small: true) {
-                            controller.disableSystemAction()
-                        }
-                        DSButton("Открыть настройки клавиатуры", icon: "gearshape", small: true) {
-                            controller.openKeyboardSettings()
-                        }
-                    }
-                }
-            }
-            if controller.dictationConflict {
-                DSRow(icon: "mic.fill", title: "Диктовка включается двойным нажатием 🌐",
-                      subtitle: "Иначе двойной тап Fn вызовет диктовку. Верну, когда выключишь модуль.",
-                      iconTint: .orange) {
-                    VStack(alignment: .trailing, spacing: 6) {
-                        DSButton("Убрать диктовку с двойного Fn", icon: "mic.slash.fill", style: .primary, small: true) {
-                            controller.disableDictationDoubleFn()
-                        }
-                        Button("Открыть настройки диктовки") { controller.openKeyboardSettings() }
-                            .buttonStyle(.link).font(.caption)
-                    }
-                }
             }
         }
     }

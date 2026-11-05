@@ -207,7 +207,7 @@ struct MainView: View {
         // Скрытый модуль из списка «Скрытые» открывают поверх дашборда.
         .onChange(of: peeked) { if peeked != nil { showDashboard = false; showStore = false } }
         .onChange(of: showAbout) { if showAbout { showStore = false } }
-        // Стор установил модуль: открываем его, чтобы сработал шаг «сначала доступы».
+        // Стор установил модуль: открываем его, там чек-лист настройки.
         .onReceive(NotificationCenter.default.publisher(for: .storeOpenModule)) { note in
             guard let module = note.object as? Module else { return }
             selection = module

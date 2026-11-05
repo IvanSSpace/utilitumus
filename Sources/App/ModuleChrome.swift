@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить»,
-/// а если включён, но не выдан обязательный доступ, — экран «Осталось дать доступ».
+/// а если включён, но обязательный шаг настройки не сделан (или чек-лист открыли явно), — чек-лист настройки.
+/// Над содержимым — плашка «Настройка: 2 из 3», пока что-то не готово.
 /// «Как это работает» и переключатель «Включён» модуля рисует шапка `DSPage`. Экран, ещё не переведённый
 /// на `DSPage`, получает вместо неё компактную полоску с теми же кнопками.
 /// Выключенный модуль ничего не делает и экран его не запускает.
@@ -10,16 +11,18 @@ struct ModuleScreen<Content: View>: View {
     @ViewBuilder var content: Content
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var access = AccessState.shared
+    @ObservedObject private var flow = SetupFlow.shared
     @State private var hasPage = false
 
     var body: some View {
         if !modules.isOn(module) {
             ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
-        } else if access.blocked.contains(module) {
-            ModuleSetupView(module: module) { access.refresh() }
+        } else if flow.forced.contains(module) || (access.blocked.contains(module) && !flow.deferred.contains(module)) {
+            SetupChecklistView(module: module)
         } else {
             VStack(spacing: 0) {
                 if !hasPage { CompatBar(module: module) }
+                SetupBanner(module: module)
                 content
             }
             .onPreferenceChange(DSPageKey.self) { hasPage = $0 }
@@ -54,7 +57,7 @@ struct ModuleOffView: View {
     var body: some View {
         let info = module.info
         let abilities = Array((info.sections.first?.points ?? []).prefix(3))
-        let needs = module.requirements
+        let needs = module.setupSteps
         ModuleCentered(module: module, title: module.title, lead: info.lead) {
             VStack(spacing: 14) {
             if module == .mouse { DSChip("На доработке", color: .orange, icon: "hammer.fill") }
@@ -83,7 +86,7 @@ struct ModuleOffView: View {
                         .padding(14)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(needs) { ModuleRequirementRow(requirement: $0, compact: true) }
+                            ForEach(needs) { SetupStepRow(step: $0, status: $0.status, compact: true) }
                         }
                     }
                 }
