@@ -1,0 +1,403 @@
+import Foundation
+import Security
+
+// Проверка связи центра и утилиты. Запуск: Tests/run-link-check.sh
+// Без аргументов — чистая логика. С аргументом — роль в связке под launchd: один источник,
+// подписи разные (их ставит скрипт).
+
+var failures = 0
+func check(_ ok: Bool, _ name: String) {
+    print((ok ? "ok   " : "FAIL ") + name)
+    if !ok { failures += 1 }
+}
+func finish() -> Never {
+    print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
+    exit(failures == 0 ? 0 : 1)
+}
+
+let testID = "test.link"
+
+// MARK: - Чистая логика
+
+func pureChecks() {
+    check(KitLink.bundleID("awake") == "local.utilitumus.app.awake", "bundleID")
+    check(KitLink.machService("awake") == "local.utilitumus.app.awake.xpc", "machService")
+
+    let long = String(repeating: "я", count: 200)
+    check(LinkStatus(enabled: true, line: long, needsSetup: 0).line.count == 80, "init обрезает строку статуса до 80")
+    let rawStatus = #"{"enabled":true,"line":"\#(long)","needsSetup":2}"#
+    let decoded = try? JSONDecoder().decode(LinkStatus.self, from: Data(rawStatus.utf8))
+    check(decoded?.line.count == 80, "декодирование обрезает строку статуса до 80")
+    check(decoded?.needsSetup == 2 && decoded?.enabled == true, "остальные поля статуса декодируются")
+
+    let hello = LinkHello(id: "awake", version: "1.2.3", protocolVersion: KitLink.protocolVersion)
+    let status = LinkStatus(enabled: false, line: "строка", needsSetup: 3)
+    check((try? JSONDecoder().decode(LinkHello.self, from: JSONEncoder().encode(hello))) == hello, "LinkHello переживает кодирование")
+    check((try? JSONDecoder().decode(LinkStatus.self, from: JSONEncoder().encode(status))) == status, "LinkStatus переживает кодирование")
+
+    let helloData = try! JSONEncoder().encode(hello)
+    check((try? LinkClient.decodeHello(helloData)) == hello, "hello текущей версии принимается")
+    let future = try! JSONEncoder().encode(LinkHello(id: "awake", version: "9", protocolVersion: 99))
+    do {
+        _ = try LinkClient.decodeHello(future)
+        check(false, "hello с версией 99 отвергается")
+    } catch {
+        check((error as? LinkError) == .incompatible(99), "hello с версией 99 — incompatible(99)")
+    }
+    check((try? LinkClient.decodeHello(Data("{не json".utf8))) == nil, "битый JSON в hello — ошибка, не падение")
+    check((try? LinkClient.decodeStatus(Data("{не json".utf8))) == nil, "битый JSON в status — ошибка, не падение")
+
+    let one = KitLink.requirement(identifier: "local.utilitumus")
+    check(one == "(identifier \"local.utilitumus\" and certificate leaf = H\"\(KitSigning.trustedLeafHashes[0])\")", "требование: точный identifier и leaf")
+    let two = KitLink.requirement(identifier: "x.y", hashes: ["aa", "bb"])
+    check(two == #"(identifier "x.y" and certificate leaf = H"aa") or (identifier "x.y" and certificate leaf = H"bb")"#, "несколько хэшей — через or")
+    var parsed: SecRequirement?
+    check(SecRequirementCreateWithString(KitLink.requirement(identifier: "x.y", hashes: [String(repeating: "a", count: 40), String(repeating: "b", count: 40)]) as CFString, [], &parsed) == errSecSuccess, "требование с двумя хэшами разбирается системой")
+}
+
+// MARK: - Журнал вызовов на стороне сервиса
+
+func record(_ call: String, in dir: String, file name: String = "calls.log") {
+    guard let file = fopen(dir + "/" + name, "a") else { return }
+    fputs(call + "\n", file)
+    fclose(file)
+}
+func recordedCalls(in dir: String, file name: String = "calls.log") -> [String] {
+    ((try? String(contentsOfFile: dir + "/" + name, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+}
+
+// MARK: - Настоящий сервер: LinkServer и зависающий по просьбе обработчик
+
+@MainActor final class TestHandler: LinkHandler {
+    let dir: String
+    var enabled = false
+    init(dir: String) { self.dir = dir }
+
+    /// Завис как приложение: главный поток занят, ответа нет 10 с.
+    private func hangIfAsked(_ call: String) {
+        if (try? String(contentsOfFile: dir + "/hang", encoding: .utf8)) == call {
+            Thread.sleep(forTimeInterval: 10)
+        }
+    }
+    func linkHello() -> LinkHello {
+        record("hello", in: dir)
+        hangIfAsked("hello")
+        return LinkHello(id: testID, version: "1.2.3", protocolVersion: KitLink.protocolVersion)
+    }
+    func linkStatus() -> LinkStatus {
+        record("status", in: dir)
+        hangIfAsked("status")
+        return LinkStatus(enabled: enabled, line: "\(getpid())", needsSetup: 1)
+    }
+    func linkSetEnabled(_ on: Bool) {
+        record("setEnabled(\(on))", in: dir)
+        enabled = on
+        KitLink.postStatusChanged(testID)
+    }
+    func linkOpenWindow() { record("openWindow", in: dir) }
+    func linkQuit() {
+        record("quit", in: dir)
+        exit(0)
+    }
+}
+
+func runServer(dir: String, peer: String) -> Never {
+    let server = MainActor.assumeIsolated { LinkServer(id: testID, handler: TestHandler(dir: dir), peerIdentifier: peer) }
+    server.resume()
+    RunLoop.main.run()
+    exit(0)
+}
+
+// MARK: - Подменённый сервис: принимает всех, пишет всё, что до него дошло
+
+final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
+    let dir: String
+    let mode: String
+    var unanswered: [Any] = []
+    init(dir: String, mode: String) { self.dir = dir; self.mode = mode }
+
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        record("connection", in: dir, file: "connections.log")
+        connection.exportedInterface = NSXPCInterface(with: LinkXPC.self)
+        connection.exportedObject = self
+        connection.resume()
+        return true
+    }
+    func hello(reply: @escaping @Sendable (Data) -> Void) {
+        record("hello", in: dir)
+        let good = LinkHello(id: testID, version: "1", protocolVersion: KitLink.protocolVersion)
+        switch mode {
+        case "silent": unanswered.append(reply)  // держим блок: ответа просто нет
+        case "v99": reply(try! JSONEncoder().encode(LinkHello(id: testID, version: "1", protocolVersion: 99)))
+        case "garbage": reply(Data("{не json".utf8))
+        default: reply(try! JSONEncoder().encode(good))
+        }
+    }
+    func status(reply: @escaping @Sendable (Data) -> Void) {
+        record("status", in: dir)
+        reply(try! JSONEncoder().encode(LinkStatus(enabled: true, line: "подмена", needsSetup: 0)))
+    }
+    func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void) {
+        record("setEnabled(\(enabled))", in: dir)
+        reply()
+    }
+    func openWindow(reply: @escaping @Sendable () -> Void) {
+        record("openWindow", in: dir)
+        reply()
+    }
+    func quit(reply: @escaping @Sendable () -> Void) {
+        record("quit", in: dir)
+        reply()
+    }
+}
+
+func runFake(dir: String, mode: String) -> Never {
+    let fake = FakeService(dir: dir, mode: mode)
+    let listener = NSXPCListener(machServiceName: KitLink.machService(testID))
+    listener.delegate = fake
+    listener.resume()
+    RunLoop.main.run()
+    exit(0)
+}
+
+// MARK: - Клиент: сценарии
+
+func errorCode(_ error: Error) -> Int { (error as NSError).code }
+func onMainThread() -> Bool { Thread.isMainThread }
+
+/// Что принёс DistributedNotificationCenter: наблюдатель вызывается на главной очереди.
+@MainActor final class NoteBox {
+    var received = false
+    var hasData = false
+}
+
+/// Таймер главного потока: насколько надолго занят главный поток, пока ждём ответа.
+@MainActor final class TickWatch {
+    private var last = ProcessInfo.processInfo.systemUptime
+    private(set) var maxGap = 0.0
+    private var timer: Timer?
+    init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                self.maxGap = max(self.maxGap, now - self.last)
+                self.last = now
+            }
+        }
+    }
+    deinit { timer?.invalidate() }
+}
+
+@MainActor func pause(_ seconds: Double) async {
+    try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+}
+
+/// Вызов зависает на `call` (сервер спит 10 с): клиент должен сдаться сам и не занять главный поток.
+@MainActor func hangingCall(dir: String, call: String) async {
+    try! call.write(toFile: dir + "/hang", atomically: true, encoding: .utf8)
+    let client = LinkClient(id: testID)
+    let ticks = TickWatch()
+    let started = ProcessInfo.processInfo.systemUptime
+    var caught: Error?
+    do { _ = try await client.status() } catch { caught = error }
+    let elapsed = ProcessInfo.processInfo.systemUptime - started
+    check((caught as? LinkError) == .timeout, "завис \(call): клиент получил timeout (\(String(describing: caught)))")
+    check(elapsed <= 2.5, String(format: "завис \(call): timeout за %.2f с, не больше 2,5", elapsed))
+    check(ticks.maxGap <= 0.3, String(format: "завис \(call): пропуск тиков главного потока %.3f с, не больше 0,3", ticks.maxGap))
+}
+
+/// После отказа подменённому сервису не ушло ничего, кроме hello.
+func onlyHello(in dir: String, _ label: String) {
+    let calls = recordedCalls(in: dir)
+    check(!calls.isEmpty && calls.allSatisfy { $0 == "hello" }, "\(label): до сервиса дошёл только hello (\(calls))")
+}
+
+@MainActor func clientScenario(_ scenario: String, dir: String) async {
+    check(onMainThread(), "сценарий на главном потоке")
+    switch scenario {
+    case "basic":
+        let note = NoteBox()
+        let observer = DistributedNotificationCenter.default().addObserver(forName: KitLink.statusChanged(testID), object: nil, queue: .main) { received in
+            let hasData = received.userInfo != nil
+            MainActor.assumeIsolated {
+                note.received = true
+                note.hasData = hasData
+            }
+        }
+        let client = LinkClient(id: testID)
+        do {
+            try await client.setEnabled(true)
+            check(onMainThread(), "ответ на главном потоке")
+            let calls = recordedCalls(in: dir)
+            check(calls == ["hello", "setEnabled(true)"], "первый вызов соединения — hello, команда после него (\(calls))")
+            let status = try await client.status()
+            check(status.enabled && status.needsSetup == 1 && Int32(status.line) != nil, "status получен: \(status)")
+            try await client.openWindow()
+            check(recordedCalls(in: dir).filter { $0 == "hello" }.count == 1, "повторного рукопожатия на том же соединении нет")
+            check(recordedCalls(in: dir).last == "openWindow", "openWindow дошёл до обработчика")
+            let hello = try await client.hello()
+            check(hello == LinkHello(id: testID, version: "1.2.3", protocolVersion: KitLink.protocolVersion), "hello получен: \(hello)")
+        } catch {
+            check(false, "связь с настоящим сервером: \(error)")
+        }
+        for _ in 0..<40 where !note.received { await pause(0.05) }
+        check(note.received, "statusChanged доставлен")
+        check(!note.hasData, "statusChanged без данных")
+        DistributedNotificationCenter.default().removeObserver(observer)
+
+    case "rogue":
+        let client = LinkClient(id: testID)
+        for (name, call) in [("hello", { _ = try await client.hello() }), ("setEnabled", { try await client.setEnabled(true) })] as [(String, () async throws -> Void)] {
+            do {
+                try await call()
+                check(false, "rogue: \(name) не должен пройти")
+            } catch {
+                print("     rogue: \(name) — \(error)")
+                check((error as? LinkError) != .timeout, "rogue: \(name) отвергнут сразу, код \(errorCode(error))")
+            }
+        }
+        check(recordedCalls(in: dir).isEmpty, "rogue: обработчик сервера не вызывался (\(recordedCalls(in: dir)))")
+
+    case "rejected":
+        let client = LinkClient(id: testID)
+        for attempt in 1...2 {
+            do {
+                try await client.setEnabled(true)
+                check(false, "подмена: команда не должна пройти")
+            } catch {
+                check((error as? LinkError) == .rejected, "подмена: попытка \(attempt) — rejected (\(error))")
+            }
+        }
+        await pause(0.3)  // сообщение, если бы ушло, успело бы дойти
+        onlyHello(in: dir, "подмена")
+        let connections = recordedCalls(in: dir, file: "connections.log").count
+        check(connections == 2, "подмена: после отказа соединение закрыто, новая попытка — новое (\(connections))")
+
+    case "silent":
+        let client = LinkClient(id: testID)
+        do {
+            try await client.setEnabled(true)
+            check(false, "сервис молчит: команда не должна пройти")
+        } catch {
+            check((error as? LinkError) == .timeout, "сервис молчит: timeout (\(error))")
+        }
+        await pause(0.3)
+        onlyHello(in: dir, "сервис молчит")
+
+    case "v99":
+        let client = LinkClient(id: testID)
+        do {
+            try await client.setEnabled(true)
+            check(false, "чужая версия: команда не должна пройти")
+        } catch {
+            check((error as? LinkError) == .incompatible(99), "чужая версия: incompatible(99) (\(error))")
+        }
+        await pause(0.3)
+        onlyHello(in: dir, "чужая версия")
+
+    case "garbage":
+        let client = LinkClient(id: testID)
+        do {
+            try await client.setEnabled(true)
+            check(false, "битый ответ: команда не должна пройти")
+        } catch {
+            check(true, "битый ответ: ошибка (\(type(of: error)))")
+        }
+        await pause(0.3)
+        onlyHello(in: dir, "битый ответ")
+
+    case "hang-hello":
+        await hangingCall(dir: dir, call: "hello")
+
+    case "hang-status":
+        await hangingCall(dir: dir, call: "status")
+
+    case "killed":
+        // Вызов уже в пути, когда сервер убит: иначе клиенту незачем видеть ошибку, launchd просто поднимет новый.
+        let client = LinkClient(id: testID, timeout: 3)
+        do {
+            guard let pid = Int32(try await client.status().line) else { return check(false, "pid сервера") }
+            try! "status".write(toFile: dir + "/hang", atomically: true, encoding: .utf8)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { kill(pid, SIGKILL) }
+            let started = ProcessInfo.processInfo.systemUptime
+            do {
+                _ = try await client.status()
+                check(false, "kill -9: вызов не должен пройти")
+            } catch {
+                let elapsed = ProcessInfo.processInfo.systemUptime - started
+                check((error as? LinkError) != .timeout, String(format: "kill -9: ошибка за %.2f с, код %d", elapsed, errorCode(error)))
+            }
+            try? FileManager.default.removeItem(atPath: dir + "/hang")
+            // launchd придерживает до 10 с перезапуск процесса, прожившего меньше 10 с.
+            let restart = ProcessInfo.processInfo.systemUptime
+            var newPid: Int32?
+            while newPid == nil, ProcessInfo.processInfo.systemUptime - restart < 20 {
+                newPid = Int32((try? await client.status())?.line ?? "")
+                if newPid == nil { await pause(0.2) }
+            }
+            let waited = ProcessInfo.processInfo.systemUptime - restart
+            check(newPid != nil && newPid != pid, String(format: "после kill -9 launchd поднял новый процесс, вызов успешен за %.2f с", waited))
+            print("     старый pid \(pid), новый \(newPid.map(String.init) ?? "нет")")
+        } catch {
+            check(false, "kill -9: подготовка \(error)")
+        }
+
+    case "killed-idle":
+        // Убит между вызовами: новый процесс не должен получить команду без рукопожатия.
+        let client = LinkClient(id: testID, timeout: 3)
+        do {
+            guard let pid = Int32(try await client.status().line) else { return check(false, "pid сервера") }
+            kill(pid, SIGKILL)
+            await pause(0.3)
+            var answered = false
+            for _ in 0..<80 where !answered {
+                answered = (try? await client.status()) != nil
+                if !answered { await pause(0.2) }
+            }
+            let calls = recordedCalls(in: dir)
+            check(answered, "убит между вызовами: новый вызов успешен")
+            check(calls.count > 2 && calls[2] == "hello" && calls.last == "status", "убит между вызовами: новый процесс сначала получил hello (\(calls))")
+        } catch {
+            check(false, "убит между вызовами: подготовка \(error)")
+        }
+
+    case "quit":
+        let client = LinkClient(id: testID)
+        do {
+            guard let pid = Int32(try await client.status().line) else { return check(false, "pid сервера") }
+            try await client.quit()
+            check(true, "quit подтверждён ответом")
+            for _ in 0..<40 where kill(pid, 0) == 0 { await pause(0.05) }
+            check(kill(pid, 0) != 0, "quit: процесс вышел")
+        } catch {
+            check(false, "quit: \(error)")
+        }
+
+    default:
+        check(false, "неизвестный сценарий \(scenario)")
+    }
+}
+
+// MARK: - Вход
+
+let args = CommandLine.arguments
+switch args.count > 1 ? args[1] : "pure" {
+case "pure":
+    pureChecks()
+    finish()
+case "server":
+    guard args.count == 5, args[3] == "--peer" else { fatalError("server <папка> --peer <identifier>") }
+    runServer(dir: args[2], peer: args[4])
+case "fake":
+    runFake(dir: args[2], mode: args[3])
+case "client":
+    let scenario = args[2], dir = args[3]
+    Task { @MainActor in
+        await clientScenario(scenario, dir: dir)
+        finish()
+    }
+    RunLoop.main.run()
+default:
+    fatalError("неизвестная роль")
+}
