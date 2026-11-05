@@ -132,7 +132,6 @@ struct DSSidebar: View {
     @Binding var showDashboard: Bool
     @Binding var showStore: Bool
     @Binding var showAbout: Bool
-    @Binding var showStore: Bool
     @Binding var peeked: Module?
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
@@ -502,6 +501,7 @@ struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
     @Binding var showAbout: Bool
+    @Binding var showStore: Bool
     @Binding var peeked: Module?
     /// Свёрнутость списка помним между запусками: скрытые открывают редко, но привычка остаётся.
     @AppStorage("HiddenModulesExpanded") private var hiddenExpanded = false
