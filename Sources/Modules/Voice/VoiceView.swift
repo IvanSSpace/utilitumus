@@ -28,10 +28,19 @@ struct VoiceView: View {
 
     var body: some View {
         DSPage(module: .voice, subtitle: "Голосовой ввод в любом приложении", primary: primary) {
-            modelsSection
-            controlSection
-            excludedSection
-            testSection
+            // Две колонки: слева модели и управление, справа исключения и проверка.
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 20) {
+                    modelsSection
+                    controlSection
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                VStack(alignment: .leading, spacing: 20) {
+                    excludedSection
+                    testSection
+                }
+                .frame(width: 280, alignment: .topLeading)
+            }
             accessibilityHint
         }
         .onPageActive { active in
@@ -68,36 +77,55 @@ struct VoiceView: View {
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             DSSection("Модели распознавания",
-                      trailing: noneInstalled ? "Скачай одну, чтобы начать" : "Всё считается на этом Mac") {
+                      trailing: noneInstalled ? "Скачай одну" : "Всё на этом Mac") {
                 ForEach(VoiceModel.allCases) { model in
                     modelRow(model)
                 }
             }
-            Text("Звук нигде не сохраняется и никуда не уходит. Модель скачивается один раз, дальше интернет не нужен.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(.white.opacity(0.4))
-                .padding(.horizontal, 6)
+            caption("Звук не сохраняется. Модель качается один раз.")
+        }
+    }
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(.white.opacity(0.4))
+            .padding(.horizontal, 6)
+    }
+
+    /// Короткие название и подпись для узкой колонки.
+    private func shortTitle(_ model: VoiceModel) -> String {
+        switch model {
+        case .gigaam: return "GigaAM v3"
+        case .parakeet: return "Parakeet v3"
+        }
+    }
+
+    private func shortInfo(_ model: VoiceModel) -> String {
+        switch model {
+        case .gigaam: return "170 МБ · русский"
+        case .parakeet: return "487 МБ · 25 языков"
         }
     }
 
     private func modelRow(_ model: VoiceModel) -> some View {
         let status = store.status(model)
-        var subtitle = model.subtitle
+        var subtitle = shortInfo(model)
         if case let .failed(message) = status { subtitle = message }
-        return DSRow(icon: "cpu", title: model.title, subtitle: subtitle) {
+        return DSRow(icon: "cpu", title: shortTitle(model), subtitle: subtitle) {
             switch status {
             case .notInstalled:
                 DSButton("Скачать", icon: "arrow.down.circle.fill", small: true) { store.download(model) }
             case .failed:
-                DSChip("Ошибка", color: .red, icon: "exclamationmark.triangle.fill")
                 DSButton("Повторить", icon: "arrow.clockwise", small: true) { store.download(model) }
+                    .help("Ошибка загрузки: повторить")
             case let .downloading(progress):
                 TintedProgress(value: progress)
                 Text("\(Int(progress * 100)) %")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.5))
-                    .frame(width: 36, alignment: .trailing)
-                DSButton("Отмена", small: true) { store.cancel(model) }
+                    .frame(width: 34, alignment: .trailing)
+                CircleIconButton(icon: "xmark", help: "Отменить загрузку") { store.cancel(model) }
             case .verifying:
                 ProgressView().controlSize(.small)
                 Text("Проверяю…").font(.caption).foregroundStyle(.white.opacity(0.5))
@@ -107,7 +135,7 @@ struct VoiceView: View {
                 } else {
                     DSButton("Выбрать", small: true) { store.selected = model }
                 }
-                DSButton("Удалить", style: .plain, small: true) { store.delete(model) }
+                CircleIconButton(icon: "trash", help: "Удалить модель") { store.delete(model) }
             }
         }
     }
@@ -115,31 +143,34 @@ struct VoiceView: View {
     // MARK: - Управление
 
     private var controlSection: some View {
-        DSSection("Управление") {
-            DSRow(icon: "command", title: "Горячая клавиша",
-                  subtitle: recorder.isRecording ? "Esc — отмена, Delete — вернуть ⌃⌥Space" : nil) {
-                if recorder.isRecording {
-                    TintedChip(text: "Нажми сочетание…")
-                } else {
-                    DSKeyCaps(controller.hotKeyLabel)
+        VStack(alignment: .leading, spacing: 6) {
+            DSSection("Управление") {
+                DSRow(icon: "command", title: "Клавиша") {
+                    if recorder.isRecording {
+                        TintedChip(text: "Нажми сочетание…")
+                    } else {
+                        DSKeyCaps(controller.hotKeyLabel).fixedSize()
+                    }
+                    DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
+                        if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
+                    }
+                    .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
                 }
-                DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
-                    if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
+                if let error = controller.hotKeyError {
+                    DSRow(icon: "exclamationmark.triangle.fill", title: error)
                 }
-                .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
+                DSRow(icon: "hand.tap.fill", title: "Режим") {
+                    DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
+                }
+                DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
+                    micMenu
+                }
             }
-            if let error = controller.hotKeyError {
-                DSRow(icon: "exclamationmark.triangle.fill", title: error)
-            }
-            DSRow(icon: "hand.tap.fill", title: "Режим",
-                  subtitle: controller.mode == .toggle
-                      ? "Нажал, сказал, нажал ещё раз. Esc — отмена"
-                      : "Говори, пока держишь. Отпустил — текст вставится. Esc — отмена") {
-                DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
-            }
-            DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
-                micMenu
-            }
+            caption(recorder.isRecording
+                    ? "Esc — отмена, Delete — вернуть ⌃⌥Space"
+                    : (controller.mode == .toggle
+                        ? "Нажал, сказал, нажал ещё раз. Esc — отмена"
+                        : "Говори, пока держишь. Esc — отмена"))
         }
     }
 
@@ -180,33 +211,39 @@ struct VoiceView: View {
 
     private var excludedSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DSSection("Не включать голос в этих приложениях") {
-                ForEach(controller.excludedApps, id: \.self) { id in
-                    HStack(spacing: 12) {
-                        Group {
-                            if let icon = VoiceExcludedApps.icon(id) {
-                                Image(nsImage: icon).resizable()
-                            } else {
-                                Image(systemName: "app.dashed").foregroundStyle(.white.opacity(0.5))
+            DSSection("Не включать в приложениях") {
+                // Длинный список прокручивается внутри, чтобы не выталкивать поле проверки.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(controller.excludedApps, id: \.self) { id in
+                            HStack(spacing: 10) {
+                                Group {
+                                    if let icon = VoiceExcludedApps.icon(id) {
+                                        Image(nsImage: icon).resizable()
+                                    } else {
+                                        Image(systemName: "app.dashed").foregroundStyle(.white.opacity(0.5))
+                                    }
+                                }
+                                .frame(width: 26, height: 26)
+                                Text(VoiceExcludedApps.name(id)).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                DSButton("Убрать", style: .plain, small: true) { controller.removeExcluded(id) }
                             }
+                            .padding(.horizontal, 14).padding(.vertical, 6)
                         }
-                        .frame(width: 28, height: 28)
-                        Text(VoiceExcludedApps.name(id)).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
-                        Spacer(minLength: 10)
-                        DSButton("Убрать", style: .plain, small: true) { controller.removeExcluded(id) }
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 8)
                 }
-                DSRow(icon: "nosign", title: controller.excludedApps.isEmpty ? "Список пуст" : "Добавить ещё") {
+                .frame(maxHeight: 130)
+                .fixedSize(horizontal: false, vertical: true)
+                DSRow(title: controller.excludedApps.isEmpty ? "Список пуст" : "Ещё") {
                     DSButton("Добавить…", icon: "plus", small: true) {
                         if let id = VoiceExcludedApps.pick() { controller.addExcluded(id) }
                     }
+                    .fixedSize()
                 }
             }
-            Text("В этих программах сочетание голоса не срабатывает и доходит до самой программы: у неё свой ввод.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(.white.opacity(0.4))
-                .padding(.horizontal, 6)
+            caption("Сочетание в них доходит до программы.")
         }
     }
 
@@ -221,14 +258,14 @@ struct VoiceView: View {
                     .focused($testFocused)
                     .padding(.horizontal, 10).padding(.vertical, 8)
                 if testText.isEmpty {
-                    Text("Кликни сюда и надиктуй: текст появится здесь.")
+                    Text("Кликни сюда и надиктуй.")
                         .font(.system(size: 13.5))
                         .foregroundStyle(.white.opacity(0.35))
                         .padding(.horizontal, 15).padding(.vertical, 8)
                         .allowsHitTesting(false)
                 }
             }
-            .frame(height: 100)
+            .frame(height: 220)
         }
     }
 
@@ -251,10 +288,28 @@ struct VoiceView: View {
 
 // Акцент модуля задаёт `DSPage`, поэтому читать его надо ниже страницы — в этих мелких видах.
 
+/// Круглая кнопка-значок вместо текстовой: в узкой колонке строке не хватает места на подпись.
+private struct CircleIconButton: View {
+    let icon: String
+    let help: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 private struct TintedProgress: View {
     let value: Double
     @Environment(\.dsTint) private var tint
-    var body: some View { ProgressView(value: value).tint(tint).frame(width: 90) }
+    var body: some View { ProgressView(value: value).tint(tint).frame(width: 70) }
 }
 
 private struct ActiveChip: View {
