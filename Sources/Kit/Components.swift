@@ -336,7 +336,7 @@ struct DSPageKey: PreferenceKey {
     static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
-/// Страница модуля: скролл, шапка (значок, название, строка, главная кнопка, «Как это работает», «Включён»)
+/// Страница модуля: скролл, шапка (значок, название, строка, главная кнопка, кнопки модуля из `\.moduleControls`)
 /// и содержимое. Саму карточку со скруглением рисует окно.
 struct DSPage<Content: View>: View {
     let module: Module
@@ -349,7 +349,7 @@ struct DSPage<Content: View>: View {
     /// - Parameters:
     ///   - subtitle: одна строка под названием; по умолчанию — короткое описание модуля.
     ///   - primary: главная кнопка страницы (одна).
-    ///   - controls: показывать «Как это работает» и переключатель «Включён».
+    ///   - controls: показывать кнопки модуля из `\.moduleControls`.
     init(module: Module, subtitle: String? = nil, primary: DSAction? = nil, controls: Bool = true,
          @ViewBuilder content: () -> Content) {
         self.module = module
@@ -409,32 +409,12 @@ struct DSPageHeader: View {
     var subtitle: String?
     var primary: DSAction?
     var controls = true
+    @Environment(\.moduleControls) private var moduleControls
 
     var body: some View {
         DSHeaderLayout(title: module.title, subtitle: subtitle ?? module.info.tagline, primary: primary,
                        badge: { ModuleIconBadge(module: module, size: 50) },
-                       controls: { if controls { DSModuleControls(module: module) } })
-    }
-}
-
-/// «Как это работает» и переключатель «Включён» модуля.
-struct DSModuleControls: View {
-    let module: Module
-    @ObservedObject private var modules = ModuleManager.shared
-
-    var body: some View {
-        let on = modules.isOn(module)
-        HStack(spacing: 10) {
-            DSButton("Как это работает", icon: "info.circle", style: .plain, small: true) { modules.infoModule = module }
-                .help("Что умеет модуль и как им пользоваться")
-            HStack(spacing: 7) {
-                Text(on ? "Включён" : "Выключен")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(on ? 0.85 : 0.5))
-                DSToggle("Модуль включён", isOn: Binding(get: { on }, set: { modules.setOn(module, $0) }))
-            }
-            .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
-        }
+                       controls: { if controls { moduleControls(module) } })
     }
 }
 

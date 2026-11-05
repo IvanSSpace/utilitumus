@@ -215,10 +215,10 @@ final class CustomPaletteStore: ObservableObject {
     @Published private(set) var palette: CustomPalette
 
     /// Настраивали ли «Свою» раньше.
-    var isSaved: Bool { UserDefaults.standard.object(forKey: Self.satKey) != nil }
+    var isSaved: Bool { Kit.defaults.object(forKey: Self.satKey) != nil }
 
     private init() {
-        let d = UserDefaults.standard
+        let d = Kit.defaults
         var hues: [String: Double] = [:]
         for c in ModuleCategory.all { if let h = d.object(forKey: Self.hueKey(c)) as? Double { hues[c.id] = h } }
         let base = CustomPalette.from(.calm)
@@ -229,7 +229,7 @@ final class CustomPaletteStore: ObservableObject {
 
     func set(_ new: CustomPalette) {
         guard new != palette else { return }
-        let d = UserDefaults.standard
+        let d = Kit.defaults
         for c in ModuleCategory.all { d.set(new.hue(of: c), forKey: Self.hueKey(c)) }
         d.set(new.sat, forKey: Self.satKey)
         d.set(new.bright, forKey: Self.brightKey)
@@ -238,7 +238,7 @@ final class CustomPaletteStore: ObservableObject {
 
     /// Последний выбранный пресет (по умолчанию «Сумерки»).
     static var lastPreset: DSTheme {
-        DSTheme(rawValue: UserDefaults.standard.string(forKey: lastPresetKey) ?? "") ?? .dusk
+        DSTheme(rawValue: Kit.defaults.string(forKey: lastPresetKey) ?? "") ?? .dusk
     }
 }
 
@@ -274,7 +274,7 @@ extension EnvironmentValues {
 }
 
 private struct DSThemed: ViewModifier {
-    @AppStorage(DSTheme.storageKey) private var raw = DSTheme.dusk.rawValue
+    @AppStorage(DSTheme.storageKey, store: Kit.defaults) private var raw = DSTheme.dusk.rawValue
     @ObservedObject private var custom = CustomPaletteStore.shared
     private var theme: DSTheme {
         raw == "custom" ? .custom(custom.palette) : DSTheme(rawValue: raw) ?? .dusk

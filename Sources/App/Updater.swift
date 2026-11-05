@@ -148,7 +148,7 @@ final class Updater: ObservableObject {
         try fm.moveItem(at: downloaded, to: zip)
 
         let unpacked = work.appendingPathComponent("unpacked")
-        try run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
+        try KitSigning.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
         let app = unpacked.appendingPathComponent("Utilitumus.app")
 
         guard let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
@@ -159,20 +159,20 @@ final class Updater: ObservableObject {
         // Подпись проверяем ВСЕГДА и по вшитому в приложение списку хэшей, а не по
         // подписи текущей сборки: иначе, если текущая сборка ad-hoc (или подменена),
         // атакующий, получивший контроль над GitHub, подсунул бы любой архив.
-        try verifySignature(of: app, identifier: "local.utilitumus", strict: true)
+        try KitSigning.verifySignature(of: app, identifier: "local.utilitumus", strict: true)
         // Вложенные бинарники запечатаны подписью основного бандла, но личность их
         // подписанта отдельно не проверена — сверяем со своим identifier.
         let links = app.appendingPathComponent("Contents/Helpers/Utilitumus Links.app")
         if fm.fileExists(atPath: links.path) {
-            try verifySignature(of: links, identifier: "local.utilitumus.links", strict: true)
+            try KitSigning.verifySignature(of: links, identifier: "local.utilitumus.links", strict: true)
         }
         let fan = app.appendingPathComponent("Contents/MacOS/utilitumus-fan")
         if fm.fileExists(atPath: fan.path) {
-            try verifySignature(of: fan, identifier: "local.utilitumus.fan", strict: false)
+            try KitSigning.verifySignature(of: fan, identifier: "local.utilitumus.fan", strict: false)
         }
         let voice = app.appendingPathComponent("Contents/MacOS/utilitumus-voice")
         if fm.fileExists(atPath: voice.path) {
-            try verifySignature(of: voice, identifier: "local.utilitumus.voice", strict: false)
+            try KitSigning.verifySignature(of: voice, identifier: "local.utilitumus.voice", strict: false)
         }
 
         // Копия рядом с целью (тот же том) — тогда подмена атомарная.
@@ -206,50 +206,6 @@ final class Updater: ObservableObject {
                 ModuleManager.shared.stopAll()  // вентиляторы в «Авто» и т.п., как при обычном выходе
                 exit(0)
             }
-        }
-    }
-
-    /// SHA-1 листовых сертификатов, которыми разрешено подписывать релизы. Список
-    /// вшит в приложение: его не подменить через GitHub. Новый ключ добавляется
-    /// сюда ДО того, как им подписан первый релиз, старый убирается позже.
-    nonisolated static let trustedLeafHashes = [
-        "31e93f4b9e4ada7f6de82066c2194b35d92f7db4",  // «Utilitumus Signing»
-    ]
-
-    /// Требование к подписи: свой identifier и листовой сертификат из доверенного списка.
-    nonisolated static func requirement(identifier: String, leafHash: String) -> String {
-        "identifier \"\(identifier)\" and certificate leaf = H\"\(leafHash)\""
-    }
-
-    /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —
-    /// требование строкой (без `=` codesign принял бы это за путь к файлу).
-    nonisolated static func verifySignature(of path: URL, identifier: String, strict: Bool) throws {
-        var lastError: Error?
-        for hash in trustedLeafHashes {
-            var args = ["--verify"]
-            if strict { args += ["--deep", "--strict"] }
-            args += ["-R=" + requirement(identifier: identifier, leafHash: hash), path.path]
-            do {
-                try run("/usr/bin/codesign", args)
-                return
-            } catch {
-                lastError = error
-            }
-        }
-        throw UpdateError("Подпись \(path.lastPathComponent) не от автора Utilitumus: \(lastError?.localizedDescription ?? "")")
-    }
-
-    nonisolated private static func run(_ tool: String, _ args: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = args
-        let err = Pipe()
-        process.standardError = err
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let text = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw UpdateError("\((tool as NSString).lastPathComponent): \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
         }
     }
 

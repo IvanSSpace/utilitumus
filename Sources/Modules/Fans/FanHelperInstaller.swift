@@ -83,8 +83,8 @@ final class FanHelperInstaller: ObservableObject {
         // процесс успел бы подсунуть другой бинарь, и он получил бы root (setuid).
         // Временный каталог создаётся в /Library/PrivilegedHelperTools (пишет только root,
         // тот же том — mv атомарный) с правами 0700.
-        let verify = Updater.trustedLeafHashes.map {
-            "/usr/bin/codesign --verify " + Self.shQuote("-R=" + Updater.requirement(identifier: id, leafHash: $0)) + " \"$T\""
+        let verify = KitSigning.trustedLeafHashes.map {
+            "/usr/bin/codesign --verify " + Self.shQuote("-R=" + KitSigning.requirement(identifier: id, leafHash: $0)) + " \"$T\""
         }.joined(separator: " || ")
         let script = [
             "set -e",

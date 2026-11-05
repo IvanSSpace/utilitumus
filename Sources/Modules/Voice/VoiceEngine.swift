@@ -80,7 +80,7 @@ actor VoiceEngine {
     nonisolated static func verifyHelper(_ url: URL) throws {
         guard !Self.isSelfAdHoc() else { return }
         do {
-            try Updater.verifySignature(of: url, identifier: helperIdentifier, strict: false)
+            try KitSigning.verifySignature(of: url, identifier: helperIdentifier, strict: false)
         } catch {
             throw VoiceEngineError("Подпись помощника распознавания не прошла проверку: \(error.localizedDescription)")
         }

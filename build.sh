@@ -38,7 +38,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 swiftc -O -parse-as-library -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*') \
+  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*') \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 # Root-помощник вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ».

@@ -30,7 +30,7 @@ APP="$WORK/Utilitumus.app"
 
 # GitHub — недоверенный источник: проверяем подпись автора по вшитому здесь хэшу
 # листового сертификата, а не просто «подпись цела» (самоподписанную подделку
-# codesign --verify без требования пропустил бы). Хэш — тот же, что в Updater.swift.
+# codesign --verify без требования пропустил бы). Хэш — тот же, что в Sources/Kit/KitSigning.swift.
 echo "SHA-256 архива: $(shasum -a 256 "$WORK/Utilitumus.zip" | cut -d' ' -f1)"
 TRUSTED_LEAF_HASH="31e93f4b9e4ada7f6de82066c2194b35d92f7db4"
 refuse() {
