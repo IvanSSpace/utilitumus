@@ -35,7 +35,8 @@ extension ModuleHooks {
                                stop: { ClipboardController.shared.stop() })
         case .keyboard:
             return ModuleHooks(start: { KeyboardController.shared.start() },
-                               stop: { KeyboardController.shared.stop() })
+                               stop: { KeyboardController.shared.stop() },
+                               quit: { KeyboardController.shared.quit() })
         case .awake:
             return ModuleHooks(start: { AwakeController.shared.start() },
                                stop: { AwakeController.shared.stop() })

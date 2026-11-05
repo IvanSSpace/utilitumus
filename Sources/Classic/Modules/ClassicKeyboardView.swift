@@ -6,6 +6,14 @@ struct ClassicKeyboardView: View {
 
     var body: some View {
         Form {
+            if let app = controller.secureInputApp {
+                Section {
+                    Label("Сейчас Fn не слышно: защищённый ввод в «\(app)»",
+                          systemImage: "lock.fill")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if controller.systemUsage != 0 {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -24,10 +32,17 @@ struct ClassicKeyboardView: View {
             }
             if controller.dictationConflict {
                 Section {
-                    Label("Диктовка включается двойным нажатием 🌐 и будет срабатывать вместе с переключением. Поменяй сочетание в «Клавиатура → Диктовка».",
-                          systemImage: "mic.fill")
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Диктовка включается двойным нажатием 🌐: иначе двойной тап Fn её вызовет. Верну, когда выключишь модуль.",
+                              systemImage: "mic.fill")
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("Убрать диктовку с двойного Fn") { controller.disableDictationDoubleFn() }
+                                .buttonStyle(.borderedProminent)
+                            Button("Открыть настройки диктовки") { controller.openKeyboardSettings() }
+                        }
+                    }
                 }
             }
 
@@ -44,11 +59,28 @@ struct ClassicKeyboardView: View {
                 Text("Тап — нажал и отпустил Fn, ничего не нажимая между. «При нажатии» быстрее, но сработает и при Fn+другая клавиша.")
             }
 
+            Section {
+                DisclosureGroup("Журнал (\(controller.logCount))") {
+                    ForEach(Array(controller.logTail.enumerated()), id: \.offset) { _, entry in
+                        Text("\(KeyboardLog.shortTime(entry.date))  \(entry.text)")
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                    }
+                    Button("Скопировать журнал") { controller.copyLog() }
+                }
+            }
+
             Section("Состояние") {
                 LabeledContent("Сейчас включена", value: controller.currentName)
                 LabeledContent("Системное действие 🌐", value: FnSystemAction.title(for: controller.systemUsage))
                 Label(status.text, systemImage: status.icon)
                     .foregroundStyle(status.color)
+                LabeledContent("Если переключение не работает") {
+                    Button("Починить") { controller.repair() }
+                }
+                if let result = controller.repairResult {
+                    Text(result).font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

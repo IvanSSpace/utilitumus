@@ -6,7 +6,7 @@ struct KeyboardView: View {
 
     var body: some View {
         DSPage(module: .keyboard, subtitle: "Мгновенная смена раскладки по тапу Fn/🌐") {
-            if controller.systemUsage != 0 || controller.dictationConflict { warnings }
+            if controller.systemUsage != 0 || controller.dictationConflict || controller.secureInputApp != nil { warnings }
 
             DSSection("Как переключать") {
                 DSRow(icon: "hand.tap.fill", title: "Когда менять язык",
@@ -33,13 +33,24 @@ struct KeyboardView: View {
                 DSRow(title: status.text) {
                     Image(systemName: status.icon).foregroundStyle(status.color)
                 }
+                DSRow(icon: "wrench.and.screwdriver.fill", title: "Если переключение не работает",
+                      subtitle: controller.repairResult ?? "Сбросит системное действие Fn, пересоздаст прослушивание и сверит раскладку") {
+                    DSButton("Починить", small: true) { controller.repair() }
+                }
             }
+
+            KeyboardLogSection(controller: controller)
         }
         .onPageActive { if $0 { controller.refreshAccess(); controller.refreshSystem() } }
     }
 
     private var warnings: some View {
         DSSection("Конфликты с системой", trailing: "Лучше отключить") {
+            if let app = controller.secureInputApp {
+                DSRow(icon: "lock.fill", title: "Сейчас Fn не слышно",
+                      subtitle: "Защищённый ввод в «\(app)»: пока он включён, macOS не отдаёт нажатия. Выйди из поля пароля или отключи Secure Keyboard Entry.",
+                      iconTint: .orange) { EmptyView() }
+            }
             if controller.systemUsage != 0 {
                 DSRow(icon: "exclamationmark.triangle.fill", title: "Система тоже переключит язык",
                       subtitle: "Нажатие 🌐 в macOS сейчас: «\(FnSystemAction.title(for: controller.systemUsage))». С ним язык поменяется дважды.",
@@ -56,8 +67,16 @@ struct KeyboardView: View {
             }
             if controller.dictationConflict {
                 DSRow(icon: "mic.fill", title: "Диктовка включается двойным нажатием 🌐",
-                      subtitle: "Она будет срабатывать вместе с переключением. Поменяй сочетание в «Клавиатура → Диктовка».",
-                      iconTint: .orange) { EmptyView() }
+                      subtitle: "Иначе двойной тап Fn вызовет диктовку. Верну, когда выключишь модуль.",
+                      iconTint: .orange) {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        DSButton("Убрать диктовку с двойного Fn", icon: "mic.slash.fill", style: .primary, small: true) {
+                            controller.disableDictationDoubleFn()
+                        }
+                        Button("Открыть настройки диктовки") { controller.openKeyboardSettings() }
+                            .buttonStyle(.link).font(.caption)
+                    }
+                }
             }
         }
     }
@@ -69,5 +88,28 @@ struct KeyboardView: View {
         return controller.tapActive
             ? ("Слушаю клавишу Fn, тап переключает язык сразу", "checkmark.circle.fill", .green)
             : ("Запускаю прослушивание…", "hourglass", .secondary)
+    }
+}
+
+/// Сворачиваемая строка «Журнал (N)»: последние записи и кнопка «Скопировать журнал».
+private struct KeyboardLogSection: View {
+    @ObservedObject var controller: KeyboardController
+    @State private var expanded = false
+
+    var body: some View {
+        DSSection("Журнал") {
+            DSRow(icon: "doc.text", title: "Журнал (\(controller.logCount))",
+                  subtitle: "Пришли его, если переключение перестало работать") {
+                HStack(spacing: 8) {
+                    DSButton("Скопировать журнал", icon: "doc.on.doc", small: true) { controller.copyLog() }
+                    DSButton(expanded ? "Скрыть" : "Показать", small: true) { expanded.toggle() }
+                }
+            }
+            if expanded {
+                ForEach(Array(controller.logTail.enumerated()), id: \.offset) { _, entry in
+                    DSRow(title: "\(KeyboardLog.shortTime(entry.date))  \(entry.text)") { EmptyView() }
+                }
+            }
+        }
     }
 }

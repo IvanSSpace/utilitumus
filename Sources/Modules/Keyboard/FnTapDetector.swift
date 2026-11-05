@@ -24,11 +24,14 @@ struct FnTapDetector {
     var trigger: FnTrigger = .onRelease
     /// Fn зажат, и с момента нажатия ничего постороннего не случилось.
     private var clean = false
+    /// Что оборвало чистое нажатие Fn на последнем событии (для журнала); nil — ничего.
+    private(set) var cancelledBy: FnEvent?
 
     init(trigger: FnTrigger = .onRelease) { self.trigger = trigger }
 
     /// true — раскладку надо переключить прямо сейчас.
     mutating func handle(_ event: FnEvent) -> Bool {
+        cancelledBy = nil
         switch event {
         case .fn(let down, let others):
             if down {
@@ -39,6 +42,7 @@ struct FnTapDetector {
             clean = false
             return wasClean && !others && trigger == .onRelease
         case .modifier, .keyDown, .sysDefined, .mouseDown:
+            if clean && trigger == .onRelease { cancelledBy = event }
             clean = false
             return false
         }
