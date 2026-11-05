@@ -20,7 +20,7 @@
 - Требование подписи — точный identifier и `certificate leaf = H"<хэш из trustedLeafHashes>"`; префиксов нет.
 - Домен настроек один: `local.utilitumus`. В центре `.standard`, в утилите suite. Ключи модуля не переименовывать.
 - Комментарии и тексты интерфейса на русском; интерфейс говорит «модули», не «утилиты» внутри центра.
-- Коммиты только `Ivan MacOS <oldrum75@gmail.com>`, в git-сообщениях без строк атрибуции. git вызывать как `/usr/bin/git` (обычный `git` переписывается хуком rtk).
+- Коммиты только под автором из локального git config (его проверяет хук `pre-commit`), в git-сообщениях без строк атрибуции. git вызывать как `/usr/bin/git` (обычный `git` переписывается хуком rtk).
 - Перед коммитом: нет личного (пути `/Users`, почты, MAC-адреса, имена устройств). Репозиторий публичный.
 - Агентам нельзя: открывать видимые окна; трогать `/Applications/Utilitumus.app`, `/Applications/Utilitumus/` и настройки `local.utilitumus` этого Mac; запускать `release.sh`/`release-app.sh` без `--dry-run`; пушить. Проверка вида — окно за экраном (`x: -10000`) + `cacheDisplay` → PNG; такие стенды запускать только из папки стенда со своим именем бинарника (другой домен настроек).
 - launchd в тестах: метки только `local.utilitumus.test.*` (кроме Task 8), каждая снимается `launchctl bootout` даже при падении теста (`trap`). Плисты тестов — только с этими метками.
@@ -59,7 +59,7 @@
 | `probe-rogue` → `probe-sat` | отказ, `ping` не исполнен |
 | сервис подменён: `probe-sat` с ad-hoc подписью | `probe-hub` отказывается |
 | `launchctl print gui/$UID/<label>` после bootstrap | state не требует одобрения, сервис поднимается по подключению |
-| запуск `probe-sat` напрямую, не из launchd | второго слушателя нет: регистрация падает, процесс выходит |
+| запуск `probe-sat` напрямую, не из launchd | второго слушателя нет: слушатель не получает подключений (факт см. в отчёте о пробе) |
 
 - [ ] **Step 4: Записать отчёт: версия macOS, таблица, вердикт. Провал по спеке — любое из: rogue прошёл; наши не соединились; нужно ручное одобрение**
 
@@ -134,6 +134,8 @@
 
 - [ ] **Step 3: Реализовать**
 
+`LinkClient`: первым вызовом каждого соединения идёт `hello` без данных, остальное отправляется только после его ответа; при ошибке 4102 (`NSXPCConnectionCodeSigningRequirementFailure`) — `invalidate()` и `LinkError.rejected`, по этому соединению больше ничего не шлём: требование на клиенте отсекает только ответы, сообщения до подменённого сервиса доходят (отчёт о пробе, п. 1). Добавить в тест: подменённый сервис получает только `hello`, команда `setEnabled` до него не доходит.
+
 Ответ на вызов приходит на главный поток; ни одного синхронного ожидания. Сервер при каждом подключении ставит точное требование; соединение без него не возобновляется.
 
 - [ ] **Step 4: Оба теста проходят, `launchctl list` без тестовых меток**
@@ -145,7 +147,7 @@
 ### Task 4: Каталог и установщик
 
 **Files:**
-- Create: `Sources/App/Satellites/SatelliteCatalog.swift`, `Sources/App/Satellites/SatelliteInstaller.swift`, `Sources/App/Satellites/SatelliteAgent.swift`, `Catalog/catalog.json`, `Tests/SatelliteInstallerCheck.swift`, `Tests/run-satellite-installer-check.sh`
+- Create: `Sources/Kit/SatelliteCatalog.swift`, `Sources/App/Satellites/SatelliteInstaller.swift`, `Sources/App/Satellites/SatelliteAgent.swift`, `Catalog/catalog.json`, `Tests/SatelliteInstallerCheck.swift`, `Tests/run-satellite-installer-check.sh`
 
 **Interfaces:**
 - Consumes: `KitSigning.verifySignature`, `KitLink.bundleID`, `LinkClient.quit`.
@@ -210,6 +212,8 @@
   - `enum SatelliteRole { enum Mode: Equatable { case active, passive(reason: String), forwardAndExit }; static func decide(launchedByLaunchd: Bool, hubRunning: Bool, hubVersion: String?, hubModuleOn: Bool, handedOver: Bool) -> Mode }`
   - `enum SatelliteEnabled { static func key(_ id: String) -> String /* "App.<id>.Enabled" */; static func load(id: String, defaults: UserDefaults) -> Bool }` — нет ключа → значение `ModuleOn.<id>`, и оно записывается.
   - Ключ передачи `App.<id>.HandedOver` (`Bool`): пишет центр, выключив встроенный.
+
+`launchedByLaunchd` = `ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == <метка>`, только равенство: при запуске из оболочки значение `0`, из `open` — `application.<bundle id>.…` (см. отчёт о пробе).
 
 Таблица `decide`:
 
