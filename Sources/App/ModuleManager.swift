@@ -4,6 +4,9 @@ import Foundation
 struct ModuleHooks {
     let start: @MainActor () -> Void
     let stop: @MainActor () -> Void
+    /// Выход из приложения. Если не задан, вызывается `stop`; нужен тем, кому при выходе
+    /// возвращать нельзя то, что они настроили в системе (модуль «Клавиатура»).
+    var quit: (@MainActor () -> Void)? = nil
 }
 
 /// Порядок модулей, включён ли каждый и виден ли в боковой панели; запуск/остановка их фоновых частей.
@@ -155,7 +158,8 @@ final class ModuleManager: ObservableObject {
         isActive = false
         for module in Module.allCases where running.contains(module) {
             running.remove(module)
-            hooks(module).stop()
+            let hook = hooks(module)
+            (hook.quit ?? hook.stop)()
         }
     }
 

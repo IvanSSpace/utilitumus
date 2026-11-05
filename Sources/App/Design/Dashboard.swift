@@ -272,6 +272,9 @@ enum DashboardLive {
     private static func keyboard() -> DashState {
         let c = KeyboardController.shared
         guard c.tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
+        if let app = c.secureInputApp {
+            return DashState(text: "Сейчас Fn не слышно: защищённый ввод в \(app)", attention: true)
+        }
         // Второе переключение от системы ломает смену языка: показываем сразу.
         if KeyboardController.shared.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
         return DashState(text: "\(c.currentName) · \(c.mode.title.lowercased())")

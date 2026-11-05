@@ -28,3 +28,24 @@ struct LayoutPicker {
         return enabled[(index + 1) % enabled.count]
     }
 }
+
+/// Что делать после `TISSelectInputSource`, когда прочитали раскладку через ~80 мс.
+enum SwitchCheck: Equatable {
+    case done, retry, failed
+
+    static func after(target: String, actual: String?, retried: Bool) -> SwitchCheck {
+        if actual == target { return .done }
+        return retried ? .failed : .retry
+    }
+}
+
+/// Что делать с event tap по итогам дешёвой проверки.
+enum TapHealth: Equatable {
+    case ok, reenable, rebuild
+
+    /// `valid` — CFMachPortIsValid, `enabled` — CGEvent.tapIsEnabled.
+    static func check(valid: Bool, enabled: Bool) -> TapHealth {
+        if !valid { return .rebuild }
+        return enabled ? .ok : .reenable
+    }
+}
