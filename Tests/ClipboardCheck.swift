@@ -4,6 +4,7 @@ import CryptoKit
 
 // Проверка логики «Буфера» без интерфейса. Запуск: Tests/run-clipboard-check.sh
 // Реальный буфер обмена и Keychain пользователя не трогаются: свой NSPasteboard, свой каталог, свой сервис.
+// `ClipboardKeychain()` без аргументов здесь не вызывать: это настоящий сервис с ключом настоящей истории.
 
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
@@ -99,12 +100,16 @@ do {
 }
 
 // 5. Keychain: свой сервис, ключ создаётся один раз и стабилен
+func testKeychain() -> ClipboardKeychain {
+    ClipboardKeychain(service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t")
+}
+func keyBytes(_ key: SymmetricKey?) -> Data? { key?.withUnsafeBytes { Data($0) } }
+
 do {
-    let kc = ClipboardKeychain(service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t")
+    let kc = testKeychain()
     defer { kc.delete() }
-    let a = kc.key(), b = kc.key()
-    let same = a != nil && b != nil && a!.withUnsafeBytes { Data($0) } == b!.withUnsafeBytes { Data($0) }
-    check(same, "ключ в Keychain создан и читается тем же")
+    let a = try? kc.key(), b = try? kc.key()
+    check(a != nil && keyBytes(a) == keyBytes(b), "ключ в Keychain создан и читается тем же")
 }
 
 // 6. Реальный NSPasteboard (именованный): скрытый тип, текст, файлы, картинка
@@ -127,6 +132,149 @@ do {
     let count = pb.changeCount
     ClipboardPasteboard.write(store.items[1], imageData: nil, to: pb)
     check(pb.changeCount != count && pb.string(forType: .string) == "https://example.com/a", "запись в буфер возвращает текст")
+}
+
+// 7. Ключ: новый создаётся только при errSecItemNotFound
+do {
+    // Подставной ответ связки: отказ, отмена, запертая связка, сбой. Запись в связку не должна случиться.
+    for status in [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed, errSecNotAvailable, errSecInternalError] {
+        var added = false
+        var kc = testKeychain()
+        kc.copyItem = { _, _ in status }
+        kc.addItem = { _, _ in added = true; return errSecSuccess }
+        var thrown: OSStatus?
+        do { _ = try kc.key() } catch { thrown = (error as? ClipboardKeychainError)?.status }
+        check(thrown == status && !added, "ошибка \(status): ключ не выдан, новый не создан")
+    }
+
+    // Настоящая запись в тестовом сервисе: отказ при чтении её не меняет.
+    let real = testKeychain()
+    defer { real.delete() }
+    let original = keyBytes(try? real.key())
+    var denied = real
+    denied.copyItem = { _, _ in errSecAuthFailed }
+    check((try? denied.key()) == nil, "отказ связки: ключа нет")
+    check(original != nil && keyBytes(try? real.key()) == original, "отказ связки: прежний ключ на месте")
+
+    // Запись не того размера не заменяется молча.
+    let odd = testKeychain()
+    defer { odd.delete() }
+    let short = Data([1, 2, 3])
+    let attrs: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
+                                kSecAttrAccount as String: odd.account, kSecValueData as String: short]
+    check(SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess, "короткая запись положена")
+    check((try? odd.key()) == nil, "короткая запись: ключа нет")
+    var out: CFTypeRef?
+    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
+                                kSecAttrAccount as String: odd.account, kSecReturnData as String: true]
+    SecItemCopyMatching(query as CFDictionary, &out)
+    check(out as? Data == short, "короткая запись не заменена")
+
+    // Сбой записи нового ключа: ошибка, а не молчаливое продолжение.
+    var failing = testKeychain()
+    failing.addItem = { _, _ in errSecDuplicateItem }
+    check((try? failing.key()) == nil, "новый ключ не записался: ключа нет")
+}
+
+// 8. Индекс, который не открылся, не затирается
+do {
+    let fm = FileManager.default
+    let aside = { (dir: URL) in
+        ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("index-unreadable-") }.sorted()
+    }
+
+    // Чужой ключ: файл отложен байт в байт, новая история его не трогает, со старым ключом читается.
+    let d = root.appendingPathComponent("aside")
+    let first = ClipboardStore(directory: d, key: key)
+    first.ingest(snap("старая запись"))
+    let index = d.appendingPathComponent("index.bin")
+    let bytes = try! Data(contentsOf: index)
+    let other = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    check(other.items.isEmpty && other.isAvailable, "чужой ключ: история начата заново")
+    check(other.setAsideIndex != nil && !fm.fileExists(atPath: index.path), "чужой ключ: индекс отложен")
+    let name = other.setAsideIndex?.lastPathComponent ?? ""
+    check(name.range(of: #"^index-unreadable-\d{4}-\d{2}-\d{2}-\d{6}\.bin$"#, options: .regularExpression) != nil, "имя с датой: \(name)")
+    other.ingest(snap("новая запись"))
+    check((try? Data(contentsOf: d.appendingPathComponent(name))) == bytes, "отложенный файл не изменился")
+    check((try? Data(contentsOf: index)) != bytes, "новая история пишется в новый индекс")
+    let mode = (try? fm.attributesOfItem(atPath: d.appendingPathComponent(name).path))?[.posixPermissions] as? Int
+    check(mode == 0o600, "отложенный файл с правами 0600")
+
+    let back = root.appendingPathComponent("aside-back")
+    try! fm.createDirectory(at: back, withIntermediateDirectories: true)
+    try! bytes.write(to: back.appendingPathComponent("index.bin"))
+    let restored = ClipboardStore(directory: back, key: key)
+    check(restored.items.map { $0.text } == ["старая запись"] && restored.setAsideIndex == nil, "отложенное читается прежним ключом")
+
+    // Второй сбой в ту же секунду не затирает первый отложенный файл.
+    _ = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    _ = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    let names = aside(d)
+    check(names.count >= 2 && names.contains(name) && (try? Data(contentsOf: d.appendingPathComponent(name))) == bytes,
+          "повторный сбой не затирает отложенное (\(names.count) файла)")
+
+    // Расшифровался, но это не индекс: тоже откладывается.
+    let junkDir = root.appendingPathComponent("junk")
+    try! fm.createDirectory(at: junkDir, withIntermediateDirectories: true)
+    try! AES.GCM.seal(Data("не json".utf8), using: key).combined!.write(to: junkDir.appendingPathComponent("index.bin"))
+    let junk = ClipboardStore(directory: junkDir, key: key)
+    check(junk.setAsideIndex != nil && junk.isAvailable, "испорченный JSON отложен")
+
+    // Картинки прежней истории не удаляются при откладывании индекса.
+    let imgDir = root.appendingPathComponent("img")
+    let withImage = ClipboardStore(directory: imgDir, key: key)
+    let png = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        .representation(using: .png, properties: [:])!
+    withImage.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png))
+    let imageFile = withImage.items[0].imageFile!
+    _ = ClipboardStore(directory: imgDir, key: SymmetricKey(size: .bits256))
+    check(fm.fileExists(atPath: imgDir.appendingPathComponent(imageFile).path), "картинка прежней истории на месте")
+
+    // Не удалось прочитать (нет прав): файл не трогаем и ничего не пишем.
+    let lockedDir = root.appendingPathComponent("locked")
+    ClipboardStore(directory: lockedDir, key: key).ingest(snap("под замком"))
+    let lockedIndex = lockedDir.appendingPathComponent("index.bin")
+    let lockedBytes = try! Data(contentsOf: lockedIndex)
+    try! fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lockedIndex.path)
+    let locked = ClipboardStore(directory: lockedDir, key: key)
+    check(!locked.isAvailable && locked.setAsideIndex == nil, "нет прав на чтение: хранилище закрыто")
+    check(!locked.ingest(snap("новое")), "нет прав на чтение: запись не принимается")
+    locked.addSpace(name: "x", colorID: "red")
+    try! fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lockedIndex.path)
+    check((try? Data(contentsOf: lockedIndex)) == lockedBytes && aside(lockedDir).isEmpty, "нет прав на чтение: файл не изменён и не отложен")
+
+    // Не удалось отложить: файл на месте, запись закрыта.
+    let stuckDir = root.appendingPathComponent("stuck")
+    ClipboardStore(directory: stuckDir, key: key).ingest(snap("не сдвинуть"))
+    let stuckIndex = stuckDir.appendingPathComponent("index.bin")
+    let stuckBytes = try! Data(contentsOf: stuckIndex)
+    try! fm.setAttributes([.immutable: true], ofItemAtPath: stuckIndex.path)
+    let stuck = ClipboardStore(directory: stuckDir, key: SymmetricKey(size: .bits256))
+    check(!stuck.isAvailable && stuck.setAsideIndex == nil, "не удалось отложить: хранилище закрыто")
+    check(!stuck.ingest(snap("новое")), "не удалось отложить: запись не принимается")
+    try! fm.setAttributes([.immutable: false], ofItemAtPath: stuckIndex.path)
+    check((try? Data(contentsOf: stuckIndex)) == stuckBytes, "не удалось отложить: файл не изменён")
+
+    // Формат существующей истории: JSON старой версии читается, хэш прежний, повтор не дублируется.
+    let oldDir = root.appendingPathComponent("old-format")
+    try! fm.createDirectory(at: oldDir, withIntermediateDirectories: true)
+    let oldText = "запись старой версии"
+    var hasher = SHA256()
+    hasher.update(data: Data("text".utf8))
+    hasher.update(data: Data(oldText.utf8))
+    let oldHash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    let oldJSON = """
+    {"items":[{"id":"6E1B2C3D-0000-4000-8000-000000000001","hash":"\(oldHash)","kind":"text","text":"\(oldText)",\
+    "sourceBundleID":"com.example.app","sourceName":"App","date":700000000,\
+    "spaceID":"6E1B2C3D-0000-4000-8000-000000000002"}],\
+    "spaces":[{"id":"6E1B2C3D-0000-4000-8000-000000000002","name":"Старое","colorID":"blue"}]}
+    """
+    try! AES.GCM.seal(Data(oldJSON.utf8), using: key).combined!.write(to: oldDir.appendingPathComponent("index.bin"))
+    let old = ClipboardStore(directory: oldDir, key: key)
+    check(old.items.first?.text == oldText && old.spaces.first?.name == "Старое" && old.setAsideIndex == nil, "история старого формата читается")
+    old.ingest(snap(oldText))
+    check(old.items.count == 1 && old.items[0].spaceID != nil, "повтор находит старую запись по прежнему хэшу")
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")

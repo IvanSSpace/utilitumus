@@ -75,6 +75,9 @@ struct ClipboardView: View {
                 if let error = controller.storeError {
                     DSRow(icon: "key.slash", title: error)
                 }
+                if let notice = controller.storeNotice {
+                    DSRow(icon: "exclamationmark.triangle.fill", title: notice)
+                }
                 DSRow(icon: "clock.arrow.circlepath", title: "Размер истории") {
                     DSSegmented(ClipboardPolicy.limits, selection: Binding(
                         get: { controller.limit }, set: { controller.setLimit($0) })) { "\($0)" }

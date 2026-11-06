@@ -55,6 +55,8 @@ final class ClipboardPanelModel: ObservableObject {
     /// nil — вкладка «История».
     @Published var tab: UUID?
     @Published var selected = 0
+    /// Истории нет из-за ошибки хранилища: вместо «История пуста» говорим об этом.
+    @Published var storeError: String?
 
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
     var onPaste: (ClipItem) -> Void = { _ in }
@@ -210,6 +212,7 @@ struct ClipboardPanelView: View {
     }
 
     private var emptyText: String {
+        if let error = model.storeError { return error }
         if !model.query.isEmpty { return "Ничего не нашлось" }
         if let tab = model.tab, let space = model.spaces.first(where: { $0.id == tab }) {
             return "В «\(space.name)» пусто. Правый клик по карточке → «В пространство»"
@@ -413,6 +416,7 @@ final class ClipboardPanelHost {
         self.model = model
         model.allItems = controller.items
         model.spaces = controller.spaces
+        model.storeError = controller.storeError
         model.reset()
 
         let panel = self.panel ?? makePanel(model)

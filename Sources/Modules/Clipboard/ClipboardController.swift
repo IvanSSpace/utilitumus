@@ -27,6 +27,8 @@ final class ClipboardController: ObservableObject {
     @Published private(set) var hotKeyError: String?
     /// Не вышло получить ключ из Keychain: историю не ведём.
     @Published private(set) var storeError: String?
+    /// История работает, но прежний индекс не открылся и отложен в файл.
+    @Published private(set) var storeNotice: String?
     @Published private(set) var axTrusted = AXIsProcessTrusted()
 
     private(set) var store: ClipboardStore?
@@ -83,12 +85,18 @@ final class ClipboardController: ObservableObject {
 
     private func openStore() {
         guard store == nil else { return }
-        guard let key = ClipboardKeychain().key() else {
-            storeError = "Не удалось получить ключ из Связки ключей — история не ведётся"
+        guard let key = try? ClipboardKeychain().key() else {
+            storeError = "Не удалось получить ключ из Связки ключей — история не ведётся, старая не тронута"
+            return
+        }
+        let opened = ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit)
+        guard opened.isAvailable else {
+            storeError = "Не удалось открыть файл истории — история не ведётся, файл не тронут"
             return
         }
         storeError = nil
-        attach(ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit))
+        storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
+        attach(opened)
     }
 
     /// Подключить хранилище. Отдельно от `openStore`, чтобы стенд мог подставить своё, не трогая Keychain и диск.

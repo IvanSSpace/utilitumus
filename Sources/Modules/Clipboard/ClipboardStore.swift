@@ -2,31 +2,51 @@ import Foundation
 import CryptoKit
 import Security
 
+/// Связка ключей не отдала ключ. `status` — код ошибки Security.
+struct ClipboardKeychainError: Error {
+    let status: OSStatus
+}
+
 /// Ключ шифрования: случайный, лежит в Keychain (generic password). Больше нигде не хранится.
 struct ClipboardKeychain {
     var service = "local.utilitumus.clipboard"
     var account = "history-key"
+    /// Подменяются в проверке: настоящий отказ связки без диалога не получить.
+    var copyItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemCopyMatching
+    var addItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemAdd
 
     private var base: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: account]
     }
 
-    func key() -> SymmetricKey? {
+    /// Новый ключ появляется только при `errSecItemNotFound`. Отказ, запертая связка или странная запись
+    /// дают ошибку и ничего не меняют: новый ключ сделал бы старую историю нечитаемой навсегда.
+    func key() throws -> SymmetricKey {
         var out: CFTypeRef?
         let read = base.merging([kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]) { $1 }
-        if SecItemCopyMatching(read as CFDictionary, &out) == errSecSuccess, let data = out as? Data, data.count == 32 {
+        let status = copyItem(read as CFDictionary, &out)
+        switch status {
+        case errSecSuccess:
+            guard let data = out as? Data, data.count == 32 else { throw ClipboardKeychainError(status: errSecDecode) }
             return SymmetricKey(data: data)
+        case errSecItemNotFound:
+            return try createKey()
+        default:
+            throw ClipboardKeychainError(status: status)
         }
-        // Ключа нет (первый запуск) — создаём. Старую историю без ключа всё равно не прочитать.
+    }
+
+    private func createKey() throws -> SymmetricKey {
         var bytes = [UInt8](repeating: 0, count: 32)
-        guard SecRandomCopyBytes(kSecRandomDefault, 32, &bytes) == errSecSuccess else { return nil }
+        let random = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
+        guard random == errSecSuccess else { throw ClipboardKeychainError(status: random) }
         let data = Data(bytes)
-        delete()
         // Только на этом Mac и только пока он разблокирован: в iCloud-связку ключ не уходит.
         let add = base.merging([kSecValueData as String: data,
                                 kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]) { $1 }
-        guard SecItemAdd(add as CFDictionary, nil) == errSecSuccess else { return nil }
+        let status = addItem(add as CFDictionary, nil)
+        guard status == errSecSuccess else { throw ClipboardKeychainError(status: status) }
         return SymmetricKey(data: data)
     }
 
@@ -44,6 +64,10 @@ final class ClipboardStore {
     private(set) var spaces: [ClipSpace] = []
     /// Лимит записей без пространства. Закреплённое в него не входит.
     private(set) var limit: Int
+    /// Индекс не расшифровался и отложен сюда, история начата заново.
+    private(set) var setAsideIndex: URL?
+    /// Индекс есть, но его нельзя ни прочитать, ни отложить: запись закрыта, иначе он будет затёрт.
+    private var isBlocked = false
     /// nil — ключ получить не удалось: ничего не пишем и не запоминаем.
     private let key: SymmetricKey?
     private let directory: URL
@@ -63,7 +87,7 @@ final class ClipboardStore {
         load()
     }
 
-    var isAvailable: Bool { key != nil }
+    var isAvailable: Bool { key != nil && !isBlocked }
 
     static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -75,7 +99,7 @@ final class ClipboardStore {
     /// Запоминает снимок буфера. Возвращает false, если запись пропущена (скрытый тип, пусто, слишком большое).
     @discardableResult
     func ingest(_ snap: ClipSnapshot, now: Date = Date()) -> Bool {
-        guard key != nil, !ClipboardPolicy.shouldSkip(types: snap.types) else { return false }
+        guard isAvailable, !ClipboardPolicy.shouldSkip(types: snap.types) else { return false }
         var item = ClipItem(id: UUID(), hash: "", kind: .text, sourceBundleID: snap.sourceBundleID,
                             sourceName: snap.sourceName, date: now)
         var png: Data?
@@ -246,14 +270,45 @@ final class ClipboardStore {
     private var indexURL: URL { directory.appendingPathComponent("index.bin") }
 
     private func load() {
-        guard let sealed = try? Data(contentsOf: indexURL), let plain = open(sealed),
-              let index = try? JSONDecoder().decode(Index.self, from: plain) else { return }
+        let sealed: Data
+        do {
+            sealed = try Data(contentsOf: indexURL)
+        } catch {
+            // Файла нет — первый запуск. Любая другая ошибка чтения не значит, что истории нет.
+            let missing = (error as NSError).domain == NSCocoaErrorDomain && (error as NSError).code == NSFileReadNoSuchFileError
+            if !missing { isBlocked = true }
+            return
+        }
+        guard let plain = open(sealed), let index = try? JSONDecoder().decode(Index.self, from: plain) else {
+            setAside()
+            return
+        }
         items = index.items
         spaces = index.spaces
     }
 
+    /// Индекс, который не открылся, не затираем: со старым ключом его ещё можно прочитать.
+    private func setAside() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        let stamp = formatter.string(from: Date())
+        var target = directory.appendingPathComponent("index-unreadable-\(stamp).bin")
+        var attempt = 1
+        while fm.fileExists(atPath: target.path) {
+            attempt += 1
+            target = directory.appendingPathComponent("index-unreadable-\(stamp)-\(attempt).bin")
+        }
+        do {
+            try fm.moveItem(at: indexURL, to: target)
+            setAsideIndex = target
+        } catch {
+            isBlocked = true
+        }
+    }
+
     private func save() {
-        guard key != nil, let plain = try? JSONEncoder().encode(Index(items: items, spaces: spaces)),
+        guard isAvailable, let plain = try? JSONEncoder().encode(Index(items: items, spaces: spaces)),
               let sealed = seal(plain) else { return }
         write(sealed, to: indexURL)
     }
