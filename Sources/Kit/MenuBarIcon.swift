@@ -17,6 +17,16 @@ enum MenuBarIcon {
         defaults.set(on, forKey: key(module))
     }
 
+    /// Снова как до настройки: без центра значок у утилиты есть. Открепление и удаление снимают ключ, а `false` пишет
+    /// только явное «скрыть значок»: иначе открепление навсегда убирало бы запасной значок при закрытом центре.
+    static func clear(_ module: Module, defaults: UserDefaults = Kit.defaults) {
+        defaults.removeObject(forKey: key(module))
+    }
+
+    /// Больше значков не закрепить: и у центра, и в окне утилиты.
+    static let maxPins = 9
+    static let limitNotice = "Закреплено девять значков: сначала открепи один"
+
     /// Переключатель в окнах: включён только явным «да». Пока ключа нет, переключатель выключен у всех, и экраны
     /// не отличаются от прежних.
     static func switchOn(_ setting: Bool?) -> Bool { setting == true }

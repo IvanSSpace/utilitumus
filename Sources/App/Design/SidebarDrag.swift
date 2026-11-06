@@ -181,7 +181,38 @@ final class SidebarSession: ObservableObject {
     func up(_ point: CGPoint) {
         defer { press = nil }
         guard let press, !ignoring else { return }
-        if drag.module == press.module { drop(cancelled: false) } else if drag.module == nil { actions?.open(press.module) }
+        if drag.module == press.module {
+            drop(cancelled: false)
+        } else if drag.module == nil {
+            // Сперва фокус, потом переход: поле на новой странице может забрать фокус себе.
+            focusAfterClick(press.module)
+            actions?.open(press.module)
+        }
+    }
+
+    /// Клик ставит фокус на панель, иначе стрелки работали бы только после Tab. Клик по строке открытой страницы
+    /// не забирает его у поля, в котором на этой странице набирают текст.
+    private func focusAfterClick(_ module: Module) {
+        guard let tracker, let window = tracker.window else { return }
+        if module == openModule, window.firstResponder is NSText { return }
+        tracker.takeFocus()
+    }
+
+    /// Стрелки: переход по панели, с ⌘⌥ — сдвиг открытого модуля в его зоне. false — панели нечего делать.
+    func arrow(by delta: Int, reorder: Bool) -> Bool {
+        guard let current = actions?.selected ?? layout.flattened.first else { return false }
+        if reorder {
+            withAnimation(SidebarMotion.spring) { _ = SidebarModel.shared.nudge(current, by: delta, open: openModule) }
+            return true
+        }
+        let order = layout.pinned + layout.list + (expanded ? layout.hidden : [])
+        guard let at = order.firstIndex(of: current) else {
+            if let first = order.first { actions?.open(first) }
+            return true
+        }
+        let next = min(max(at + delta, 0), order.count - 1)
+        if next != at { actions?.open(order[next]) }
+        return true
     }
 
     /// Esc: копия возвращается, остаток нажатия игнорируется.
@@ -294,7 +325,7 @@ final class SidebarSession: ObservableObject {
         withTransaction(plain) {
             if let target {
                 var next = SidebarModel.shared.layout(open: openModule)
-                if next.move(module, to: target.zone, at: target.index) { SidebarModel.shared.apply(next, moved: module) }
+                if next.move(module, to: target.zone, at: target.index) { SidebarModel.shared.apply(next, moved: module, open: openModule) }
             }
             drag.module = nil
             drag.target = nil
@@ -338,10 +369,8 @@ final class SidebarSession: ObservableObject {
             window.makeFirstResponder(tracker)
         } else {
             tracker.capturing = false
-            if window.firstResponder === tracker {
-                let back = previousResponder === tracker ? nil : previousResponder
-                window.makeFirstResponder(back)
-            }
+            // Фокус был на панели после клика: там и остаётся, стрелки работают и после перетаскивания.
+            if window.firstResponder === tracker, previousResponder !== tracker { window.makeFirstResponder(previousResponder) }
             previousResponder = nil
         }
     }
@@ -425,10 +454,12 @@ final class SidebarTrackerView: NSView {
     var session: SidebarSession?
     /// Пока тянут, вид принимает клавиши (Esc), иначе не отбирает фокус у панели.
     var capturing = false
+    /// Сам вид фокус не берёт: окно отдало бы его при любом нажатии, и поле на странице теряло бы фокус. Только по `takeFocus`.
+    private var focusing = false
 
     override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
-    override var acceptsFirstResponder: Bool { capturing }
+    override var acceptsFirstResponder: Bool { capturing || focusing }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func isAccessibilityElement() -> Bool { false }
 
@@ -439,7 +470,17 @@ final class SidebarTrackerView: NSView {
 
     private func local(_ event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
 
-    override func mouseDown(with event: NSEvent) { MainActor.assumeIsolated { session?.down(local(event)) } }
+    func takeFocus() {
+        focusing = true
+        window?.makeFirstResponder(self)
+        focusing = false
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Ctrl-клик — та же правая кнопка, если окно само не показало меню через `menu(for:)`.
+        if event.modifierFlags.contains(.control) { return rightMouseDown(with: event) }
+        MainActor.assumeIsolated { session?.down(local(event)) }
+    }
     override func mouseDragged(with event: NSEvent) { MainActor.assumeIsolated { session?.moved(local(event)) } }
     override func mouseUp(with event: NSEvent) { MainActor.assumeIsolated { session?.up(local(event)) } }
 
@@ -456,6 +497,17 @@ final class SidebarTrackerView: NSView {
         }
     }
 
+    override func menu(for event: NSEvent) -> NSMenu? {
+        #if KIT_TEST_DEFAULTS
+        return nil
+        #else
+        return MainActor.assumeIsolated {
+            guard let session, let module = session.module(at: local(event)) else { return nil }
+            return session.menu(for: module)
+        }
+        #endif
+    }
+
     override func scrollWheel(with event: NSEvent) {
         MainActor.assumeIsolated {
             if let scroll = session?.scroll { scroll.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
@@ -465,6 +517,10 @@ final class SidebarTrackerView: NSView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53, capturing {
             MainActor.assumeIsolated { session?.cancel() }
+        } else if !capturing, event.keyCode == 125 || event.keyCode == 126,
+                  MainActor.assumeIsolated({ session?.arrow(by: event.keyCode == 126 ? -1 : 1,
+                                                            reorder: event.modifierFlags.isSuperset(of: [.command, .option])) == true }) {
+            return
         } else {
             super.keyDown(with: event)
         }

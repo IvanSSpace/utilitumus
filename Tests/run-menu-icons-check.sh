@@ -10,6 +10,13 @@ OUT="${MENU_ICONS_CHECK_DIR:-${TMPDIR:-/tmp}/menu-icons-check}"
 BIN="menu-icons-stand"
 SUITE="local.utilitumus.test.kit.menu-icons"
 
+# Сигнал через процессы: утилита после смены значка сообщает статус, центр по статусу перечитывает настройку.
+awk '/func setMenuIcon\(_ on: Bool\)/,/^    }$/' Sources/Kit/SatelliteHost.swift | grep -q 'postStatus()' || { echo "ПРОВАЛ: утилита не сообщает о смене значка"; exit 1; }
+awk '/func statusDidChange/,/^    }$/' Sources/App/Satellites/SatelliteRegistry.swift | grep -q 'statusPinged.send' || { echo "ПРОВАЛ: реестр не передаёт сигнал статуса"; exit 1; }
+# Снятый ключ словом `false` не передать: утилита перечитывает настройку, а не пишет её.
+awk '/func linkSetMenuIcon/,/^    }$/' Sources/Kit/SatelliteHost.swift | grep -q 'MenuBarIcon.set' && { echo "ПРОВАЛ: команда центра записала бы false поверх снятого ключа"; exit 1; }
+echo "ok   утилита и центр сообщают друг другу о значке"
+
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/work"
 sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"

@@ -62,7 +62,9 @@ struct AppMenuBarScene: Scene {
             Menu("Значки") {
                 ForEach(modules.order) { module in
                     Toggle(module.title, isOn: Binding(get: { menuIcons.isOn(module) }, set: { menuIcons.set(module, $0) }))
+                        .disabled(menuIcons.isFull && !menuIcons.isOn(module))
                 }
+                if let notice = menuIcons.notice ?? (menuIcons.isFull ? MenuBarIcon.limitNotice : nil) { Text(notice) }
             }
 
             // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.

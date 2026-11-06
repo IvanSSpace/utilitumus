@@ -248,6 +248,15 @@ struct BotSpec: Sendable, Equatable {
 }
 
 enum BotRegistry {
+    /// Похож ли процесс на бота из этой рабочей папки: интерпретатор или программа из неё самой.
+    static func isRuntime(exe: String, cwd: String) -> Bool {
+        guard !cwd.isEmpty, cwd != "/" else { return false }
+        let base = (exe as NSString).lastPathComponent.lowercased()
+        if base == "python" || base == "node" || base == "bun" || base == "deno" || base == "ruby" { return true }
+        if base.hasPrefix("python"), base.dropFirst(6).allSatisfy({ $0.isNumber || $0 == "." }) { return true }
+        return exe.hasPrefix(cwd + "/")
+    }
+
     /// `bots.toml` лежит в папке данных приложения; нет файла — нет ботов. Путь не
     /// переопределяется переменной окружения: bots.toml задаёт команды, которые
     /// запускает панель, и подсунуть другой файл через окружение нельзя.

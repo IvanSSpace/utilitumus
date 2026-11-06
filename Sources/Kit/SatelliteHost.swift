@@ -59,6 +59,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     private var statusItem: MenuBarIconItem?
     /// Что показывает переключатель «Значок в строке меню»: явное «да» (пока ключа нет, он выключен).
     @Published private(set) var menuIconOn = false
+    @Published private(set) var menuIconNotice: String?
     private var subscriptions: Set<AnyCancellable> = []
     private var observers: [NSObjectProtocol] = []
     private var runningApps: NSKeyValueObservation?
@@ -105,7 +106,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
                 guard let self else { return }
                 MenuBarIcon.requestOpen(self.module.module, hub: SatelliteHub.bundleURL)
             },
-            hide: { [weak self] in self?.linkSetMenuIcon(false) },
+            hide: { [weak self] in self?.setMenuIcon(false) },
             click: { [weak self] in self?.showWindow() })
         #endif
         refresh()
@@ -155,6 +156,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         let setting = MenuBarIcon.setting(module.module)
         let shows = MenuBarIcon.utilityShows(setting: setting, hubRunning: hubRunning, active: mode == .active)
         menuIconOn = MenuBarIcon.switchOn(setting)
+        menuIconNotice = nil
         statusItem?.isVisible = shows
         statusItem?.setUsesMenu(MenuBarIcon.utilityUsesMenu(hubRunning: hubRunning))
         #if KIT_TEST_DEFAULTS
@@ -162,10 +164,17 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         #endif
     }
 
-    /// Из окна утилиты и из «Скрыть значок»: записать и применить сразу.
+    /// Из окна утилиты и из «Скрыть значок»: записать и применить сразу. Центр читает ключ из другого процесса,
+    /// поэтому сперва `synchronize`, потом сигнал: по нему он перечитает настройку.
     func setMenuIcon(_ on: Bool) {
+        if on, !menuIconOn, Module.allCases.filter({ MenuBarIcon.setting($0) == true }).count >= MenuBarIcon.maxPins {
+            menuIconNotice = MenuBarIcon.limitNotice
+            return
+        }
         MenuBarIcon.set(on, module.module)
+        Kit.defaults.synchronize()
         applyMenuIcon()
+        postStatus()
     }
 
     /// Пассивная значит остановленная: рядом со встроенным модулем утилита не работает.
@@ -267,8 +276,12 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     }
 
     func linkSetEnabled(_ enabled: Bool) { setEnabled(enabled) }
-    /// Только служба центра: у копии из Finder такого вызова в интерфейсе нет.
-    func linkSetMenuIcon(_ on: Bool) { setMenuIcon(on) }
+    /// Только служба центра: у копии из Finder такого вызова в интерфейсе нет. Настройку центр уже записал или снял,
+    /// сама команда значения не несёт: снятый ключ словом `false` не передать.
+    func linkSetMenuIcon(_ on: Bool) {
+        Kit.defaults.synchronize()
+        applyMenuIcon()
+    }
     func linkOpenWindow() { showWindow() }
 
     func linkQuit(_ reason: LinkQuitReason) {
@@ -480,6 +493,9 @@ private struct SatelliteControls: View {
     @ObservedObject var host: SatelliteHost
     var body: some View {
         HStack(spacing: 10) {
+            if let notice = host.menuIconNotice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+            }
             DSMenuIconSwitch(isOn: Binding(get: { host.menuIconOn }, set: { host.setMenuIcon($0) }))
             HStack(spacing: 7) {
                 Text(host.enabled ? "Включён" : "Выключен")

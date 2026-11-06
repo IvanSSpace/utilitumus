@@ -5,7 +5,10 @@ import Foundation
 /// `.changes`: стору нужен ход загрузки и при закрытом экране.
 @MainActor
 final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceScreenModel {
-    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
+    private let installedVersion: () -> String?
+
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool, installedVersion: @escaping () -> String? = { nil }) {
+        self.installedVersion = installedVersion
         super.init(id: id, initial: VoiceController.storedState(), baseWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
@@ -69,7 +72,10 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
     var test: VoiceTestState? { state.test }
     func beginTest() { send(.beginTest) }
     var recording: Bool { state.recording }
-    func toggleTestRecording() { send(.toggleTestRecording) }
+    /// Старая утилита такого действия не знает и ответила бы «Непонятная команда»: как раньше, кнопка только ставит фокус в поле.
+    func toggleTestRecording() {
+        if !SatelliteRegistry.isOutdated(.voice, installed: installedVersion()) { send(.toggleTestRecording) }
+    }
     func endTest() {
         // Режим уже выключен и записи нет: лишнее действие не нужно, и утилиту ради него не будят.
         if state.test != nil || state.recording { send(.endTest) }

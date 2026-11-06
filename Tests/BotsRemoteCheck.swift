@@ -203,6 +203,15 @@ func isolationPure() {
     } catch { check(false, "BotRunner: \(error)") }
     check(!fm.fileExists(atPath: marker), "после отказа команда не выполнялась: маркера нет")
     do {
+        _ = try BotRunner.run(.start, id: "beta", file: BotRegistry.url, expected: ["/bin/другая"])
+        check(false, "команда не та, что подтвердили, а запуск принят")
+    } catch let e as BackgroundActionError {
+        check(e.message == BotRunner.changedMessage, "подтверждали другую команду: «\(e.message)»")
+    } catch {}
+    let tricky = BotsStore.shown(["/bin/x\u{202E}y", "a\u{200F}b\u{2066}c\nd\u{7}"])
+    check(!tricky.unicodeScalars.contains { [0x202E, 0x200F, 0x2066, 0x0A, 0x07].contains($0.value) }, "в показанной команде нет смены направления и управляющих символов: \(tricky)")
+    check(tricky.contains("/bin/x"), "и сама команда видна")
+    do {
         _ = try BotRunner.run(.start, id: "nobody", file: BotRegistry.url)
         check(false, "неизвестный бот принят")
     } catch let e as BackgroundActionError {
@@ -229,7 +238,7 @@ func wirePure() {
     let state = BotsState(file: .ok, bots: [card], prompt: BotsPrompt(id: UUID(), title: "t", message: "m", command: "c", confirmTitle: "b", destructive: true),
                           running: false, notice: BotsNotice(text: "x", isError: true))
     check((try? JSONDecoder().decode(BotsState.self, from: JSONEncoder().encode(state))) == state, "BotsState переживает кодирование")
-    let actions: [BotsAction] = [.refresh, .request(id: "alpha", verb: .restart), .cancel, .confirm(planID: UUID()), .dismissNotice, .quick(id: "a", verb: .stop)]
+    let actions: [BotsAction] = [.refresh, .request(id: "alpha", verb: .restart), .cancel, .confirm(planID: UUID()), .dismissNotice, .quick(id: "a", verb: .stop, sum: BotRunner.fingerprint(["/bin/x"]))]
     for action in actions {
         check((try? JSONDecoder().decode(BotsAction.self, from: JSONEncoder().encode(action))) == action, "BotsAction \(action) переживает кодирование")
         check(LinkWire.decodeAction(BotsAction.self, from: LinkWire.encoded(action), limit: BotsStore.maxActionBytes) == action, "BotsAction \(action): проходит канонический разбор")
@@ -350,6 +359,11 @@ func discoveryPure() {
     defer { chmod(home + "/proj/locked", 0o700); try? fm.removeItem(atPath: home) }
     let result = BotsDiscovery.scan(discoveryRoots(home), known: discoveryKnown(home))
     let byLabel = Dictionary(result.candidates.compactMap { c in c.label.map { ($0, c) } }, uniquingKeysWith: { a, _ in a })
+    for (exe, cwd) in [("/opt/homebrew/bin/python3.12", "/p"), ("/usr/bin/node", "/p"), ("/p/app/bot", "/p/app"), ("/bin/zsh", "/p"), ("/usr/bin/python3", "/"), ("/usr/bin/pythonx", "/p")] {
+        check(BotsDiscovery.isRuntime(exe: exe, cwd: cwd) == BotRegistry.isRuntime(exe: exe, cwd: cwd), "«Боты» и «Нагрузка» одинаково узнают процесс бота: \(exe)")
+    }
+    check(!BotsDiscovery.usable("/Volumes/net/bot", home: home) && !BotsDiscovery.usable("/Volumes", home: home), "том в /Volumes поиск не читает: мёртвое подключение его не повесит")
+    check(BotsDiscovery.usable("/Volumes/Data/Users/x/bot", home: "/Volumes/Data/Users/x"), "дом на отдельном томе остаётся обычной папкой")
     func c(_ label: String) -> BotsDiscovery.Candidate? { byLabel[label] }
 
     check(c("com.example.news-digest")?.strength == .confirmed && c("com.example.news-digest")?.why.contains("aiogram в requirements.txt") == true, "по библиотеке: aiogram в requirements.txt — уверенно")
@@ -583,11 +597,14 @@ func discoveryWirePure() {
     check(model.state.notice?.isError == true && model.state.notice?.text.contains("Стенд не запускает") == true, "стенд отказал в запуске: «\(model.state.notice?.text ?? "нет")»")
     check(!fm.fileExists(atPath: marker), "команда бота не выполнялась: маркера нет")
     // Быстрое действие идёт тем же путём.
-    await model.perform(.quick(id: "beta", verb: .start))
-    check(await until(5) { model.state.notice?.isError == true && !model.state.running }, "быстрое действие: тот же отказ стенда")
+    let betaSum = BotRunner.fingerprint(["/usr/bin/touch", marker])
+    await model.perform(.quick(id: "beta", verb: .start, sum: betaSum))
+    check(await until(5) { model.state.notice?.isError == true && !model.state.running && model.state.notice?.text.contains("Стенд не запускает") == true }, "быстрое действие: тот же отказ стенда")
     check(!fm.fileExists(atPath: marker), "быстрое действие: маркера нет")
-    await model.perform(.quick(id: "alpha", verb: .start))
+    await model.perform(.quick(id: "alpha", verb: .start, sum: betaSum))
     check(model.actionError != nil, "быстрое действие, которого у бота нет: отказ")
+    await model.perform(.quick(id: "beta", verb: .start, sum: BotRunner.fingerprint(["/bin/другая"])))
+    check(model.actionError == BotRunner.changedMessage && !model.state.running, "быстрое действие с другой командой: отказ, ничего не запущено")
     await model.perform(.dismissNotice)
     check(await until(2) { model.state.notice == nil }, "баннер закрывается")
 
@@ -598,6 +615,19 @@ func discoveryWirePure() {
     let quick = status?.quickActions ?? []
     check(quick.count == 2 && quick.allSatisfy { $0.confirm != nil }, "быстрых действий два (альфа выключить, бета включить), у каждого подтверждение: \(quick.map(\.title))")
     check(quick.first.map { LinkWire.decodeAction(BotsAction.self, from: $0.action, limit: 4096) } != nil, "быстрое действие — обычное действие утилиты, id и кнопка")
+    check(quick.allSatisfy { $0.confirm?.message.contains("Выполнит /") == true }, "вопрос быстрого действия показывает команду: \(quick.map { $0.confirm?.message ?? "" })")
+
+    // Файл поменяли, пока вопрос открыт: подтверждали другое, запускать нельзя.
+    await model.perform(.dismissNotice)
+    await model.perform(.request(id: "beta", verb: .start))
+    guard let open = model.state.prompt else { return check(false, "подтверждения для смены файла нет") }
+    let text = fixtureTOML()
+    writeBots(text.replacingOccurrences(of: "\"\(marker)\"", with: "\"\(marker)-другой\""))
+    await model.perform(.confirm(planID: open.id))
+    check(await until(5) { model.state.notice != nil }, "подтверждение после смены файла: пришёл результат")
+    check(model.state.notice?.text == BotRunner.changedMessage && model.state.notice?.isError == true, "команда сменилась: отказ, а не запуск: «\(model.state.notice?.text ?? "нет")»")
+    writeBots(text)
+    await model.perform(.dismissNotice)
 }
 
 @MainActor func fileProblems() async {
@@ -608,7 +638,7 @@ func discoveryWirePure() {
     check(await until(5) { model.state.file.kind == .unsafe && model.state.bots.isEmpty }, "bots.toml 0666: утилита его отвергла, ботов нет, на экране причина «\(model.state.file.detail)»")
     let status = try? await link.status()
     check(status?.attention == true && status?.line == "bots.toml небезопасен" && status?.quickActions.isEmpty == true, "статус: внимание, быстрых действий нет")
-    await model.perform(.quick(id: "beta", verb: .start))
+    await model.perform(.quick(id: "beta", verb: .start, sum: BotRunner.fingerprint(["/usr/bin/touch", marker])))
     check(model.actionError != nil && !fm.fileExists(atPath: marker), "быстрое действие при небезопасном файле отвергнуто")
     let unsafeShot = await Stand.open(.dusk)
     Stand.save(unsafeShot, "dusk-unsafe")
@@ -841,7 +871,7 @@ enum Main {
             }
         }
         MainActor.assumeIsolated {
-            ModuleCheck.main(.bots, foreignAction: LinkWire.encoded(BotsAction.quick(id: "beta", verb: .start))) { utility in
+            ModuleCheck.main(.bots, foreignAction: LinkWire.encoded(BotsAction.quick(id: "beta", verb: .start, sum: BotRunner.fingerprint(["/usr/bin/touch", marker])))) { utility in
                 let realFile = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Utilitumus/bots.toml").path
                 let realBefore = (try? fm.attributesOfItem(atPath: realFile))?[.modificationDate] as? Date
                 try? fm.createDirectory(atPath: markerDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

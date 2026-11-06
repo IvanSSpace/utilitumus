@@ -82,6 +82,8 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     @Published private(set) var entries: [Module: Entry] = [:]
     /// Модули, которые сейчас ставятся или удаляются.
     @Published private(set) var busy: Set<Module> = []
+    /// Утилита сообщила о смене. Опрос публикует только разницу в статусе, а о настройке значка статус не говорит.
+    let statusPinged = PassthroughSubject<Module, Never>()
 
     let environment: SatelliteEnvironment
     private var modules: ModuleManager { environment.modules }
@@ -179,6 +181,18 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     func isEnabled(_ module: Module) -> Bool {
         entries[module]?.status?.enabled ?? false
+    }
+
+    /// Утилита старше 1.1.0 не знает значка по просьбе центра и записи проверки из кнопки «Голоса»; центр обновляет её
+    /// только по кнопке в Сторе, так что рядом с новым центром она живёт долго. Боты вышли сразу со всем этим.
+    /// Версия неизвестна (опроса ещё не было) — не старая: лишнего предупреждения не нужно.
+    nonisolated static func isOutdated(_ module: Module, installed: String?) -> Bool {
+        guard let installed else { return false }
+        return Kit.isNewer(module == .bots ? "1.0.0" : "1.1.0", than: installed)
+    }
+
+    func isOutdated(_ module: Module) -> Bool {
+        Self.isOutdated(module, installed: entries[module]?.installedVersion)
     }
 
     // MARK: Команды
@@ -347,6 +361,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     @objc private func statusDidChange(_ note: Notification) {
         guard let module = Module.allCases.first(where: { KitLink.statusChanged($0.rawValue) == note.name }) else { return }
+        statusPinged.send(module)
         Task { await poll(module) }
     }
 

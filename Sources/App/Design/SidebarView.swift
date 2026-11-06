@@ -84,21 +84,7 @@ struct SidebarContent: View {
     // MARK: Клавиатура
 
     private func key(_ press: KeyPress) -> KeyPress.Result {
-        let delta = press.key == .upArrow ? -1 : 1
-        let reorder = press.modifiers.contains(.command) && press.modifiers.contains(.option)
-        guard let current = actions.selected ?? layout.flattened.first else { return .ignored }
-        if reorder {
-            withAnimation(SidebarMotion.spring) { _ = SidebarModel.shared.nudge(current, by: delta, open: openModule) }
-            return .handled
-        }
-        let order = layout.pinned + layout.list + (expanded ? layout.hidden : [])
-        guard let at = order.firstIndex(of: current) else {
-            if let first = order.first { actions.open(first) }
-            return .handled
-        }
-        let next = min(max(at + delta, 0), order.count - 1)
-        if next != at { actions.open(order[next]) }
-        return .handled
+        session.arrow(by: press.key == .upArrow ? -1 : 1, reorder: press.modifiers.isSuperset(of: [.command, .option])) ? .handled : .ignored
     }
 }
 
@@ -192,6 +178,7 @@ private struct PinnedZone: View {
                     .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.38))
                     .fixedSize(horizontal: false, vertical: true)
             }
+            MenuIconNotice()
         }
     }
 

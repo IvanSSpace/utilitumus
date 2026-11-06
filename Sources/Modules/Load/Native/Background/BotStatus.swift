@@ -22,7 +22,7 @@ struct BotItem: Sendable, Codable, Equatable, Identifiable {
 }
 
 extension BotRegistry {
-    /// Главные процессы бота: pid его меток launchd и запущенные .app с его bundle id.
+    /// Главные процессы бота: pid его меток launchd, запущенные .app с его bundle id и процессы из `watch_dir`.
     static func pids(of spec: BotSpec, procs: [Int32: LoadProcess], launchd: [String: Int32?]) -> [Int32] {
         var out = Set<Int32>()
         for label in spec.launchd {
@@ -32,6 +32,9 @@ extension BotRegistry {
             for p in procs.values where p.exe.contains(".app/Contents/MacOS/") {
                 if let id = bundleID(ofExe: p.exe), spec.bundleIDs.contains(id) { out.insert(p.pid) }
             }
+        }
+        if let dir = spec.watchDir {
+            for p in procs.values where p.cwd == dir && isRuntime(exe: p.exe, cwd: dir) { out.insert(p.pid) }
         }
         return out.sorted()
     }
@@ -57,6 +60,9 @@ extension BotRegistry {
         if !spec.launchd.isEmpty {
             up = spec.launchd.filter { label in (launchd[label] ?? nil).map { procs[$0] != nil } ?? false }.count
             total = spec.launchd.count
+        } else if spec.bundleIDs.isEmpty, spec.watchDir != nil {
+            up = mains.isEmpty ? 0 : 1
+            total = 1
         } else {
             let found = Set(mains.compactMap { procs[$0].flatMap { bundleID(ofExe: $0.exe) } })
             up = spec.bundleIDs.filter { found.contains($0) }.count

@@ -162,6 +162,7 @@ for i in "${!IDS[@]}"; do
   [[ "$found" == *"<string>$EPOCH</string>"* ]] || fail "$name: в собранном бандле нет UtilitumusSecurityEpoch ${EPOCH}."
   [ "$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist")" = "$version" ] \
     || fail "$name: версия в бандле не $version."
+  scripts/check-no-seam.sh "$app" || fail "$name: в сборке следы тестового шва — выпуск остановлен."
   # Вложенные помощники: каждый на месте и подписан тем же сертификатом со своим identifier.
   helpers="$(python3 -I -c '
 import json, sys

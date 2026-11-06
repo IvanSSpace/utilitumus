@@ -88,10 +88,10 @@ struct Harness: View {
 
     // MARK: События
 
-    private func send(_ type: NSEvent.EventType, _ point: CGPoint) {
+    private func send(_ type: NSEvent.EventType, _ point: CGPoint, flags: NSEvent.ModifierFlags = []) {
         event += 1
         let location = NSPoint(x: point.x, y: height - point.y)
-        guard let e = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        guard let e = NSEvent.mouseEvent(with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
                                          windowNumber: window.windowNumber, context: nil, eventNumber: event,
                                          clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { fatalError("нет события") }
         window.sendEvent(e)
@@ -102,6 +102,18 @@ struct Harness: View {
     func up(_ p: CGPoint) { send(.leftMouseUp, p) }
     func rightDown(_ p: CGPoint) { send(.rightMouseDown, p) }
     func rightUp(_ p: CGPoint) { send(.rightMouseUp, p) }
+    func controlDown(_ p: CGPoint) { send(.leftMouseDown, p, flags: .control) }
+
+    func arrow(down: Bool, flags: NSEvent.ModifierFlags = []) {
+        event += 1
+        let text = String(UnicodeScalar(down ? 0xF701 : 0xF700)!)
+        let e = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
+                                 windowNumber: window.windowNumber, context: nil, characters: text, charactersIgnoringModifiers: text,
+                                 isARepeat: false, keyCode: down ? 125 : 126)!
+        window.sendEvent(e)
+    }
+
+    var focusOnSidebar: Bool { window.firstResponder is SidebarTrackerView }
 
     func esc() {
         event += 1
@@ -338,6 +350,45 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     } else {
         print("skip правая кнопка: меню панели не перехватывается, настоящее блокирует цикл событий")
     }
+    if SidebarProbe.interceptsMenu {
+        SidebarProbe.menu = nil
+        let opened = rig.nav.selection
+        let other = lay().list[1]
+        p = center(rig.rest[other]!)
+        rig.controlDown(p); await pause(0.05); rig.up(p); await pause(0.2)
+        check((SidebarProbe.menu ?? []).contains("Удалить модуль…"), "ctrl-клик по строке открывает то же меню")
+        check(rig.nav.selection == opened && SidebarProbe.copy == nil, "ctrl-клик не открывает модуль и не начинает перетаскивание")
+    }
+
+    print("== стрелки после клика")
+    let text = NSTextView(frame: NSRect(x: 400, y: 100, width: 200, height: 60))
+    rig.host.addSubview(text)
+    rig.window.makeFirstResponder(text)
+    let start = lay().list[2]
+    p = center(rig.rest[start]!)
+    rig.down(p); await pause(0.03)
+    check(rig.window.firstResponder === text, "нажатие само по себе фокус не берёт")
+    rig.up(p); await pause(0.3)
+    check(rig.nav.selection == start && rig.focusOnSidebar, "клик по другой строке ставит фокус на панель, Tab не нужен")
+    rig.arrow(down: true); await pause(0.3)
+    check(rig.nav.selection == lay().list[3], "стрелка вниз после клика открывает следующий модуль")
+    rig.arrow(down: false); await pause(0.3)
+    check(rig.nav.selection == start, "стрелка вверх — обратно")
+    let moved = lay().list
+    rig.arrow(down: true, flags: [.command, .option]); await pause(0.3)
+    check(lay().list[3] == start && lay().list[2] == moved[3], "⌘⌥↓ после клика сдвигает открытый модуль")
+    rig.arrow(down: false, flags: [.command, .option]); await pause(0.3)
+    check(lay().list == moved, "⌘⌥↑ возвращает его")
+    rig.window.makeFirstResponder(text)
+    rig.down(p); await pause(0.03); rig.up(p); await pause(0.3)
+    check(rig.window.firstResponder === text, "клик по строке открытой страницы не забирает фокус у поля на ней")
+    rig.window.makeFirstResponder(nil)
+    rig.down(p); await pause(0.03); rig.up(p); await pause(0.3)
+    check(rig.focusOnSidebar, "поля в фокусе нет: клик ставит фокус на панель")
+    let end = CGPoint(x: p.x, y: p.y + 2 * (SidebarMetrics.rowHeight + SidebarMetrics.rowGap))
+    rig.down(p); await pause(0.03); rig.dragged(CGPoint(x: p.x, y: p.y + 20)); await pause(0.05); rig.dragged(end); await pause(0.05); rig.up(end); await pause(0.5)
+    check(rig.focusOnSidebar, "после перетаскивания фокус остаётся на панели")
+    text.removeFromSuperview()
     rig.close()
 }
 

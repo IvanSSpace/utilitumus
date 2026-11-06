@@ -19,12 +19,14 @@ final class BotsStore: ObservableObject, BotsModel {
         let id: UUID
         let botID: String
         let verb: BotVerb
+        /// Что человек увидел в вопросе. Запуск сверяет это с файлом.
+        let argv: [String]
     }
 
     private let file: URL
     private let readLaunchd: @Sendable () -> [String: Int32?]
     private let probe: BotsMonitor.Probe
-    private let execute: @Sendable (BotVerb, String, URL) throws -> String
+    private let execute: @Sendable (BotVerb, String, [String], URL) throws -> String
     private let discoveryRoots: @Sendable () -> BotsDiscovery.Roots
     /// Найденные боты с путями и меткой: на связь уходит только id, имя и пояснение.
     private var candidates: [String: BotsDiscovery.Candidate] = [:]
@@ -42,7 +44,7 @@ final class BotsStore: ObservableObject, BotsModel {
     init(file: URL = BotRegistry.url,
          readLaunchd: @escaping @Sendable () -> [String: Int32?] = { BotsMonitor.readLaunchd() },
          probe: @escaping BotsMonitor.Probe = { BotsMonitor.liveProbe($0) },
-         execute: @escaping @Sendable (BotVerb, String, URL) throws -> String = { try BotRunner.run($0, id: $1, file: $2) },
+         execute: @escaping @Sendable (BotVerb, String, [String], URL) throws -> String = { try BotRunner.run($0, id: $1, file: $3, expected: $2) },
          discoveryRoots: @escaping @Sendable () -> BotsDiscovery.Roots = { BotsDiscovery.live }) {
         self.discoveryRoots = discoveryRoots
         self.file = file
@@ -158,13 +160,14 @@ final class BotsStore: ObservableObject, BotsModel {
               let spec = BotRegistry.load(file).first(where: { $0.id == id }), let cmd = spec.commands[verb] else {
             return "Такого действия на экране уже нет — обнови экран"
         }
-        var command = ""
-        if case .argv(let argv) = cmd { command = Exec.display(argv) }
-        let plan = Plan(id: UUID(), botID: id, verb: verb)
+        var argv: [String] = []
+        if case .argv(let list) = cmd { argv = list }
+        let command = Self.shown(argv)
+        let plan = Plan(id: UUID(), botID: id, verb: verb, argv: argv)
         pending = plan
         state.prompt = BotsPrompt(
-            id: plan.id, title: "\(verb.title) \(spec.name)",
-            message: (command.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(command).") + (spec.note.isEmpty ? "" : " \(spec.note)"),
+            id: plan.id, title: BotsDiscovery.clean("\(verb.title) \(spec.name)", Self.maxShown),
+            message: BotsDiscovery.clean((command.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(command).") + (spec.note.isEmpty ? "" : " \(spec.note)"), Self.maxShown),
             command: command, confirmTitle: verb.title, destructive: verb == .stop)
         return nil
     }
@@ -183,16 +186,24 @@ final class BotsStore: ObservableObject, BotsModel {
     }
 
     /// Быстрое действие: тот же путь, но без листа: человека спросил центр. Кнопка проверяется по свежему файлу и состоянию.
-    fileprivate func handleQuick(id: String, verb: BotVerb) -> String? {
+    fileprivate func handleQuick(id: String, verb: BotVerb, sum: String) -> String? {
         guard id.utf8.count <= Self.maxIDBytes else { return "Непонятная команда" }
         guard !state.running else { return "Уже выполняется другое действие" }
         guard state.bots.first(where: { $0.id == id })?.verbs.contains(verb) == true,
-              let spec = BotRegistry.load(file).first(where: { $0.id == id }), spec.commands[verb] != nil else {
+              case .argv(let argv)? = BotRegistry.load(file).first(where: { $0.id == id })?.commands[verb] else {
             return "Такого действия уже нет — обнови экран"
         }
-        run(Plan(id: UUID(), botID: id, verb: verb))
+        guard BotRunner.fingerprint(argv) == sum else { return BotRunner.changedMessage }
+        run(Plan(id: UUID(), botID: id, verb: verb, argv: argv))
         return nil
     }
+
+    /// Описания из файла сейчас: вопрос быстрого действия показывает команду, а действие несёт её отпечаток.
+    func specsNow() -> [BotSpec] { BotRegistry.load(file) }
+
+    /// Команда в вопросе: без управляющих символов и смены направления текста, которыми подпись можно выдать за другую.
+    nonisolated static func shown(_ argv: [String]) -> String { BotsDiscovery.clean(Exec.display(argv), maxShown) }
+    private nonisolated static let maxShown = 2000
 
     private func run(_ plan: Plan) {
         pending = nil
@@ -203,7 +214,7 @@ final class BotsStore: ObservableObject, BotsModel {
         Task {
             let outcome: BotsNotice = await Task.detached(priority: .userInitiated) {
                 do {
-                    let message = try execute(plan.verb, plan.botID, file)
+                    let message = try execute(plan.verb, plan.botID, plan.argv, file)
                     ActionLog.write(kind: "bot", label: "\(plan.verb.title) \(plan.botID)", targets: [], ok: true, message: message, id: plan.id.uuidString)
                     return BotsNotice(text: message, isError: false)
                 } catch let e as BackgroundActionError {
@@ -286,7 +297,7 @@ final class BotsStore: ObservableObject, BotsModel {
         case .cancel: return handleCancel()
         case .confirm(let planID): return handleConfirm(planID)
         case .dismissNotice: dismissNotice()
-        case .quick(let id, let verb): return handleQuick(id: id, verb: verb)
+        case .quick(let id, let verb, let sum): return handleQuick(id: id, verb: verb, sum: sum)
         case .find: return handleFind()
         case .add(let id): return handleAdd(id)
         case .dismissFound: return handleDismissFound()

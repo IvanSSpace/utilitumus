@@ -42,14 +42,15 @@ final class BotsModule: SatelliteModule {
     /// Не больше трёх: меню не должно разрастаться вместе с файлом.
     var quickActions: [LinkQuickAction] {
         guard running, store.state.file.kind == .ok else { return [] }
+        let specs = store.specsNow()
         return store.state.bots.compactMap { bot -> LinkQuickAction? in
             let on = bot.state == .running || bot.state == .partial
             let verb: BotVerb = on ? .stop : .start
-            guard bot.verbs.contains(verb) else { return nil }
+            guard bot.verbs.contains(verb), case .argv(let argv)? = specs.first(where: { $0.id == bot.id })?.commands[verb] else { return nil }
             return LinkQuickAction(
                 title: "\(verb.title) \(bot.name)", icon: on ? "stop.circle" : "play.circle",
-                action: LinkWire.encoded(BotsAction.quick(id: bot.id, verb: verb)),
-                confirm: LinkConfirm(title: "\(verb.title) \(bot.name)?", message: "Выполнит команду из bots.toml.", button: verb.title))
+                action: LinkWire.encoded(BotsAction.quick(id: bot.id, verb: verb, sum: BotRunner.fingerprint(argv))),
+                confirm: LinkConfirm(title: "\(verb.title) \(bot.name)?", message: "Выполнит \(BotsStore.shown(argv)).", button: verb.title))
         }
         .prefix(3).map { $0 }
     }

@@ -264,11 +264,14 @@ enum BotsDiscovery {
         if dir.hasPrefix(home + "/Library/") { return false }
         if dir.hasPrefix(home + "/.") && !dir.hasPrefix(home + "/.local/") { return false }
         for root in systemRoots where dir == root || dir.hasPrefix(root + "/") { return false }
+        // Внешний или сетевой том может зависнуть на чтении папки, и поиск не закончится. Дом на томе — обычная папка.
+        if dir == "/Volumes" || (dir.hasPrefix("/Volumes/") && !dir.hasPrefix(home + "/")) { return false }
         return true
     }
 
     // MARK: Процессы
 
+    /// То же правило, что `BotRegistry.isRuntime`: поиск собирается один, без остального кода.
     static func isRuntime(exe: String, cwd: String) -> Bool {
         guard !cwd.isEmpty, cwd != "/" else { return false }
         let base = (exe as NSString).lastPathComponent.lowercased()
@@ -495,7 +498,7 @@ enum BotsDiscovery {
         var out = String.UnicodeScalarView()
         for u in s.unicodeScalars {
             let v = u.value
-            if v < 0x20 || (0x7f...0x9f).contains(v) || v == 0x2028 || v == 0x2029 || (0x202a...0x202e).contains(v) || (0x2066...0x2069).contains(v) || v == 0x200b || v == 0xfeff {
+            if v < 0x20 || (0x7f...0x9f).contains(v) || v == 0x2028 || v == 0x2029 || (0x202a...0x202e).contains(v) || (0x2066...0x2069).contains(v) || v == 0x200b || v == 0xfeff || v == 0x061c || v == 0x200e || v == 0x200f {
                 out.append(" ")
             } else {
                 out.append(u)
