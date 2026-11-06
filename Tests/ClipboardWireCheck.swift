@@ -98,8 +98,11 @@ final class FakeClipboardModel: ClipboardModel {
     }
     func moveSpace(_ id: UUID, by offset: Int) {
         calls.append("moveSpace")
+        // Без падения на переполнении: поломка проверки в handle должна дать FAIL, а не обрыв.
         guard let from = spaces.firstIndex(where: { $0.id == id }) else { return }
-        spaces.insert(spaces.remove(at: from), at: from + offset)
+        let (to, overflow) = from.addingReportingOverflow(offset)
+        guard !overflow, spaces.indices.contains(to) else { return }
+        spaces.insert(spaces.remove(at: from), at: to)
     }
     func deleteSpace(_ id: UUID) { calls.append("deleteSpace"); spaces.removeAll { $0.id == id } }
     func addExcluded(_ bundleID: String) {
@@ -445,6 +448,7 @@ func longFixture() -> Fixture {
 @main
 enum Main {
     static func main() {
+        setbuf(stdout, nil)
         let out = CommandLine.arguments[1]
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
