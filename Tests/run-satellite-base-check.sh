@@ -31,6 +31,10 @@ cp Sources/Apps/Awake/Info.plist "$APP/Contents/Info.plist"
 plutil -replace CFBundleIdentifier -string "$IDENTIFIER" "$APP/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string Probe "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string 1.2.3 "$APP/Contents/Info.plist"
+# Метка стенда, как у build-app.sh --test-seam: центр стенда ждёт от утилиты только её (KitSigning.testPeerEpoch).
+TEST_EPOCH="$(sed -n 's/.*static let testPeerEpoch = "\(.*\)".*/\1/p' Sources/Kit/KitSigning.swift)"
+[ -n "$TEST_EPOCH" ] || { echo "ПРОВАЛ: нет testPeerEpoch в KitSigning.swift"; exit 1; }
+plutil -replace UtilitumusSecurityEpoch -string "$TEST_EPOCH" "$APP/Contents/Info.plist"
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$IDENTIFIER" "$APP"
 
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ProbeCheck -o "$OUT/hub-build" \
