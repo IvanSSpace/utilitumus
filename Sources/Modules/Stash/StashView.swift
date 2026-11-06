@@ -57,7 +57,7 @@ private func appIcon(_ icon: NSImage?, size: CGFloat) -> some View {
 /// Плитка программы: значок, имя и «Тяжёлая», под ними полоска памяти и цифры, справа тумблер.
 /// Плитки встают в две колонки, поэтому цифры идут второй строкой.
 private struct StashAppRow: View {
-    let entry: RunningEntry
+    let entry: StashProgram
     let usage: AppUsage?
     /// Доля памяти от самой тяжёлой программы (0…1).
     let share: Double
@@ -124,8 +124,8 @@ private struct StashBlock<Trailing: View, Content: View>: View {
 
 /// Карточка «Вернуть»: что именно вернётся — плашки программ и сколько окон встанет на место.
 private struct RestoreCard: View {
-    let apps: [StashedApp]
-    let icons: [String: NSImage]
+    let apps: [StashProgram]
+    let icons: [String: NSImage?]
     let enabled: Bool
     let action: () -> Void
 
@@ -157,8 +157,8 @@ private struct RestoreCard: View {
             }
             FlowLayout(spacing: 5) {
                 ForEach(apps) {
-                    ChipView(chip: StashChip(id: $0.bundleID, icon: icons[$0.bundleID],
-                                             name: $0.name, windows: $0.windows.count))
+                    ChipView(chip: StashChip(id: $0.bundleID, icon: icons[$0.bundleID] ?? nil,
+                                             name: $0.name, windows: $0.windowCount))
                 }
             }
             .padding(.leading, 40)
@@ -171,7 +171,7 @@ private struct RestoreCard: View {
     }
 
     private var windowsSummary: String {
-        let windows = apps.reduce(0) { $0 + $1.windows.count }
+        let windows = apps.reduce(0) { $0 + $1.windowCount }
         let verb = apps.count == 1 ? "Откроется" : "Откроются"
         guard windows > 0 else { return "\(verb) снова" }
         let mod100 = windows % 100, mod10 = windows % 10
@@ -283,13 +283,15 @@ func programs(_ n: Int) -> String {
 }
 
 /// Экран модуля «Стеш программ».
-struct StashView: View {
+struct StashView<Model: StashModel>: View {
     @Environment(\.pageActive) private var pageActive
-    @ObservedObject var store = StashStore.shared
+    @ObservedObject var store: Model
     @State private var confirmStash = false
     @State private var pendingScenario: StashScenario?
     @State private var namePrompt: NamePrompt?
     @State private var nameText = ""
+
+    init(store: Model) { self.store = store }
 
     private enum NamePrompt: Identifiable {
         case new
@@ -302,7 +304,7 @@ struct StashView: View {
         }
     }
 
-    private var selectedCount: Int { store.selected.count }
+    private var selectedCount: Int { store.selectedBundleIDs.count }
 
     private var namePromptTitle: String {
         if case .rename = namePrompt { return "Новое имя сценария" }
@@ -325,19 +327,19 @@ struct StashView: View {
 
     private var subtitle: String {
         if let busy = store.busy { return busy }
-        if store.running.isEmpty { return "Нет запущенных программ" }
-        let freed = store.selected.reduce(0.0) { $0 + (store.usage[$1.bundleIdentifier ?? ""]?.memoryMB ?? 0) }
+        if store.runningPrograms.isEmpty { return "Нет запущенных программ" }
+        let freed = store.selectedBundleIDs.reduce(0.0) { $0 + (store.usage[$1]?.memoryMB ?? 0) }
         let tail = freed > 0 ? " · освободится ≈ \(memoryText(freed))" : ""
-        return "Выбрано \(selectedCount) из \(store.running.count)\(tail)"
+        return "Выбрано \(selectedCount) из \(store.runningPrograms.count)\(tail)"
     }
 
     /// Плитки программ в две колонки (одна, если окно узкое). Длинный список прокручивается сам,
     /// чтобы остальная страница стояла на месте; строк до прокрутки меньше, когда сверху карточка «Вернуть».
     private var programsSection: some View {
-        let entries = store.runningByWeight
+        let entries = store.programsByWeight
         let maxMB = max(entries.compactMap { store.usage[$0.bundleID]?.memoryMB }.max() ?? 1, 1)
         let hasHeavy = entries.contains { store.usage[$0.bundleID]?.isHeavy == true }
-        let maxRows: CGFloat = store.stashed.isEmpty ? 7 : 4
+        let maxRows: CGFloat = store.stashedPrograms.isEmpty ? 7 : 4
         let rowStep: CGFloat = 48 + 6
         return StashBlock(title: "Программы") {
             Text("Finder и Utilitumus не закрываются")
@@ -392,7 +394,7 @@ struct StashView: View {
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(store.scenarios) { scenario in
-                        let alive = store.runningApps(of: scenario).count
+                        let alive = store.runningPrograms(of: scenario).count
                         ScenarioCard(
                             scenario: scenario,
                             runningCount: alive,
@@ -425,22 +427,22 @@ struct StashView: View {
                 if store.busy == nil, selectedCount > 0 { confirmStash = true }
             }
         ) {
-            if !store.stashed.isEmpty {
-                RestoreCard(apps: store.stashed,
-                            icons: Dictionary(uniqueKeysWithValues: store.stashed.map { ($0.bundleID, store.icon(forPath: $0.path)) }),
+            if !store.stashedPrograms.isEmpty {
+                RestoreCard(apps: store.stashedPrograms,
+                            icons: Dictionary(uniqueKeysWithValues: store.stashedPrograms.map { ($0.bundleID, $0.icon) }),
                             enabled: store.busy == nil) {
                     Task { await store.restore() }
                 }
             }
 
-            if !store.stubborn.isEmpty {
+            if !store.stubbornPrograms.isEmpty {
                 DSSection("Не закрылись за 10 секунд") {
-                    ForEach(store.stubborn) { entry in
+                    ForEach(store.stubbornPrograms) { entry in
                         HStack(spacing: 12) {
                             appIcon(entry.icon, size: 30)
                             Text(entry.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
                             Spacer(minLength: 10)
-                            DSButton("Закрыть принудительно", small: true) { store.forceTerminate(entry) }
+                            DSButton("Закрыть принудительно", small: true) { store.forceTerminate(entry.bundleID) }
                         }
                         .padding(.horizontal, 14).padding(.vertical, 8)
                         .frame(minHeight: 50)
@@ -486,11 +488,11 @@ struct StashView: View {
             }
             Button("Отмена", role: .cancel) {}
         } message: {
-            Text(store.selected.compactMap(\.localizedName).joined(separator: ", ")
+            Text(store.selectedNames.joined(separator: ", ")
                  + "\n\nНесохранённое программы спросят сами.")
         }
         .confirmationDialog(
-            "Закрыть \(programs(pendingScenario.map { store.runningApps(of: $0).count } ?? 0))?",
+            "Закрыть \(programs(pendingScenario.map { store.runningPrograms(of: $0).count } ?? 0))?",
             isPresented: Binding(get: { pendingScenario != nil }, set: { if !$0 { pendingScenario = nil } }),
             presenting: pendingScenario
         ) { scenario in
@@ -499,7 +501,7 @@ struct StashView: View {
             }
             Button("Отмена", role: .cancel) {}
         } message: { scenario in
-            Text(store.runningApps(of: scenario).map(\.name).joined(separator: ", ")
+            Text(store.runningPrograms(of: scenario).map(\.name).joined(separator: ", ")
                  + "\n\nНесохранённое программы спросят сами.")
         }
         .alert(namePromptTitle, isPresented: Binding(get: { namePrompt != nil }, set: { if !$0 { namePrompt = nil } })) {
@@ -518,4 +520,9 @@ struct StashView: View {
             }
         }
     }
+}
+
+extension StashView where Model == StashStore {
+    /// Встроенный экран: модуль работает здесь же.
+    init() { self.init(store: StashStore.shared) }
 }

@@ -47,7 +47,7 @@ struct RunningEntry: Identifiable {
 }
 
 /// Сколько программа ест вместе со всеми своими процессами (у Chrome их десятки).
-struct AppUsage: Equatable {
+struct AppUsage: Codable, Equatable {
     let memoryMB: Double
     let cpu: Double
     /// Порог «тяжёлой»: от 1 ГБ памяти или от четверти ядра процессора.
@@ -63,12 +63,21 @@ struct StashScenario: Codable, Equatable, Identifiable {
 }
 
 /// Итог возврата — показывается на экране, чтобы пропавшее с диска не терялось молча.
-struct RestoreReport {
+struct RestoreReport: Codable, Equatable {
     var restored = 0
     var windowsPlaced = 0
     var missing: [String] = []
     var failed: [String] = []
     var hadAccess = true
+}
+
+/// Чем стеш находит и запускает чужие программы. Закрывает он их через сами `NSRunningApplication`.
+/// Проверка подставляет своё, поэтому настоящих программ не видит и запустить не может.
+struct StashSystem {
+    var runningApps: @MainActor () -> [NSRunningApplication] = { NSWorkspace.shared.runningApplications }
+    var open: @MainActor (URL, NSWorkspace.OpenConfiguration) async throws -> NSRunningApplication = {
+        try await NSWorkspace.shared.openApplication(at: $0, configuration: $1)
+    }
 }
 
 /// Работа с окнами через Accessibility API. Нужен доступ «Универсальный доступ»,
@@ -146,6 +155,8 @@ final class StashStore: ObservableObject {
 
     /// Сколько ждём штатного закрытия и появления окон после запуска.
     static let waitSeconds = 10.0
+    static let closingText = "Закрываю программы…"
+    static let restoringText = "Возвращаю программы…"
 
     private static let stashKey = "StashedApps"
     private static let excludedKey = "StashExcludedBundleIDs"
@@ -165,6 +176,11 @@ final class StashStore: ObservableObject {
     @Published private(set) var busy: String?
     @Published private(set) var report: RestoreReport?
     @Published private(set) var axTrusted = AXIsProcessTrusted()
+
+    var system = StashSystem()
+    /// Действие из связи принято, а его задача ещё не началась: второе такое же получит отказ.
+    var pendingBusy: String?
+    var usagePending = false
 
     private let defaults: UserDefaults
     /// Значки по bundle id и по пути. Не @Published: чтение из body не должно
@@ -241,7 +257,7 @@ final class StashStore: ObservableObject {
     /// `excluding` — программа, о завершении которой только что сообщили: в списке
     /// `runningApplications` она может задержаться ещё на тик.
     func refresh(excluding gonePID: pid_t? = nil) {
-        running = NSWorkspace.shared.runningApplications
+        running = system.runningApps()
             .filter { $0.processIdentifier != gonePID }
             .compactMap(Self.entry)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -256,11 +272,6 @@ final class StashStore: ObservableObject {
 
     func isClosing(_ bundleID: String) -> Bool { !excluded.contains(bundleID) }
 
-    /// Самые тяжёлые сверху; пока замеров нет — по имени.
-    var runningByWeight: [RunningEntry] {
-        running.sorted { (usage[$0.bundleID]?.memoryMB ?? 0) > (usage[$1.bundleID]?.memoryMB ?? 0) }
-    }
-
     /// Отметить к закрытию только тяжёлые, остальные — не закрывать.
     func selectOnlyHeavy() {
         for entry in running { setClosing(entry.bundleID, usage[entry.bundleID]?.isHeavy ?? false) }
@@ -272,6 +283,10 @@ final class StashStore: ObservableObject {
     func refreshUsage() async {
         // Окно скрыто или свёрнуто — запускать ps незачем.
         guard Self.windowIsVisible() else { return }
+        await measureUsage()
+    }
+
+    func measureUsage() async {
         let bundles: [String: String] = running.reduce(into: [:]) { acc, entry in
             if let url = entry.app.bundleURL { acc[url.path + "/"] = entry.bundleID }
         }
@@ -339,7 +354,7 @@ final class StashStore: ObservableObject {
         }
     }
 
-    private var selectedBundleIDs: [String] {
+    var selectedBundleIDs: [String] {
         running.filter { isClosing($0.bundleID) }.map(\.bundleID)
     }
 
@@ -435,7 +450,7 @@ final class StashStore: ObservableObject {
         guard busy == nil else { return }
         let targets = apps.filter(Self.isEligible)
         guard !targets.isEmpty else { return }
-        busy = "Закрываю программы…"
+        busy = Self.closingText
         report = nil
         defer { busy = nil }
 
@@ -471,6 +486,10 @@ final class StashStore: ObservableObject {
         refresh()
     }
 
+    func forceTerminate(_ bundleID: String) {
+        if let entry = stubborn.first(where: { $0.bundleID == bundleID }) { forceTerminate(entry) }
+    }
+
     func forceTerminateAll() {
         for entry in stubborn { forceTerminate(entry) }
     }
@@ -480,7 +499,7 @@ final class StashStore: ObservableObject {
     /// Открыть программы из стеша без вывода вперёд и вернуть окна на места.
     func restore() async {
         guard busy == nil, !stashed.isEmpty else { return }
-        busy = "Возвращаю программы…"
+        busy = Self.restoringText
         defer { busy = nil }
 
         let trusted = AXIsProcessTrusted()
@@ -497,7 +516,7 @@ final class StashStore: ObservableObject {
             // Не красть фокус: вернуть надо всё, а не выбрать одну программу.
             config.activates = false
             do {
-                let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+                let app = try await system.open(url, config)
                 result.restored += 1
                 launched.append((record, app))
             } catch {
