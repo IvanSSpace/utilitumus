@@ -289,7 +289,7 @@ let all = Module.allCases
 
 /// Строки списка стоят столбцом с одним пустым местом `gap` (счёт среди остальных); верх столбца — верх прокрутки (по AppKit).
 @MainActor func listGap(_ rig: Rig, others: [Module], gap: Int) -> Bool {
-    let top = rig.viewport.minY + SidebarMetrics.listTop - rig.scrollY
+    let top = rig.viewport.minY + 2 - rig.scrollY
     for (i, m) in others.enumerated() {
         guard let f = SidebarProbe.frames[m] else { return false }
         let slot = i < gap ? i : i + 1
