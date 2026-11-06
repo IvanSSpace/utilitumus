@@ -290,3 +290,5 @@ private struct SpaceRow: View {
         .buttonStyle(.plain).disabled(disabled).help(help).accessibilityLabel(help)
     }
 }
+
+extension ClipboardController: HotKeyTarget {}

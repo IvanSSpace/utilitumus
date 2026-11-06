@@ -190,7 +190,7 @@ final class StashStore: ObservableObject {
     private var missingBundleIDs: Set<String> = []
     private var observers: [NSObjectProtocol] = []
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = Kit.defaults) {
         self.defaults = defaults
         excluded = Set(defaults.stringArray(forKey: Self.excludedKey) ?? [])
         scenarios = defaults.data(forKey: Self.scenariosKey)
@@ -246,7 +246,12 @@ final class StashStore: ObservableObject {
     static func isEligible(_ app: NSRunningApplication) -> Bool {
         guard app.activationPolicy == .regular, !app.isTerminated,
               let id = app.bundleIdentifier else { return false }
-        return !protectedIDs.contains(id) && id != Bundle.main.bundleIdentifier
+        return isEligible(bundleID: id)
+    }
+
+    /// Лаунчер, утилиты и помощники не закрываем: из утилиты свой id уже не защитил бы лаунчер.
+    static func isEligible(bundleID id: String) -> Bool {
+        !protectedIDs.contains(id) && !Kit.isOurs(id)
     }
 
     private static func entry(_ app: NSRunningApplication) -> RunningEntry? {

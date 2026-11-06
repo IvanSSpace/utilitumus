@@ -9,7 +9,9 @@ enum SatelliteSelfUpdate {
     }
 
     /// Пока подпись и версия не проверены, `target` не тронут. Перезапуск — дело вызывающего.
-    static func install(_ app: CatalogApp, target: URL) async throws {
+    /// `beforeReplace` идёт после всех проверок и прямо перед заменой: после неё сервис вентиляторов может уже
+    /// не принять этот процесс. Если он бросил, бандл остаётся прежним.
+    static func install(_ app: CatalogApp, target: URL, beforeReplace: () async throws -> Void = {}) async throws {
         let fm = FileManager.default
         let (archive, response) = try await URLSession.shared.download(from: app.url)
         defer { try? fm.removeItem(at: archive) }
@@ -34,11 +36,12 @@ enum SatelliteSelfUpdate {
         try KitSigning.rejectWritableModes(in: staged)
 
         let identifier = KitLink.bundleID(app.id)
-        try KitSigning.verifySignature(of: staged, identifier: identifier, strict: true)
+        try KitSigning.verifyApp(staged, identifier: identifier)
         let info = NSDictionary(contentsOf: staged.appendingPathComponent("Contents/Info.plist"))
         guard info?["CFBundleIdentifier"] as? String == identifier, info?["CFBundleShortVersionString"] as? String == app.version else {
             throw KitSigning.Failure("В архиве обновления не та версия")
         }
+        try await beforeReplace()
         _ = try fm.replaceItemAt(target, withItemAt: staged)
     }
 }

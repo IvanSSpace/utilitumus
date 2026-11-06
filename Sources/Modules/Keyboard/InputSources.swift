@@ -76,12 +76,12 @@ enum FnSystemAction {
     }
 
     /// Нужно держать 0, пока модуль включён.
-    static var keepsOff: Bool { UserDefaults.standard.bool(forKey: keepOffKey) }
+    static var keepsOff: Bool { Kit.defaults.bool(forKey: keepOffKey) }
 
     /// Обновление с версии, где флага не было: модуль включён, система держит 0 (или осталось
     /// запомненное прежнее значение) — значит, пользователь просил отключить. Зовётся при запуске модуля.
     static func migrateKeepOff() {
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         if usage == 0 || defaults.object(forKey: savedKey) != nil { defaults.set(true, forKey: keepOffKey) }
     }
 
@@ -93,7 +93,7 @@ enum FnSystemAction {
     /// ничего не пишем и систему не дёргаем. true — значение пришлось менять.
     @discardableResult
     static func disable() -> Bool {
-        UserDefaults.standard.set(true, forKey: keepOffKey)
+        Kit.defaults.set(true, forKey: keepOffKey)
         guard writeZero() else { return false }
         applyToSystem()
         return true
@@ -104,7 +104,7 @@ enum FnSystemAction {
     private static func writeZero() -> Bool {
         let current = usage
         guard current != 0 else { return false }
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         if defaults.object(forKey: savedKey) == nil { defaults.set(current ?? -1, forKey: savedKey) }
         writeUsage(0)
         return true
@@ -141,7 +141,7 @@ enum FnSystemAction {
     /// Для шага «сделать всё автоматически».
     @discardableResult
     static func disableAll() -> Bool {
-        UserDefaults.standard.set(true, forKey: keepOffKey)
+        Kit.defaults.set(true, forKey: keepOffKey)
         let usageChanged = writeZero()
         let dictationChanged = writeDictationOff()
         if usageChanged || dictationChanged { applyToSystem(restartSwitcher: usageChanged) }
@@ -152,7 +152,7 @@ enum FnSystemAction {
     /// или удалил его в Сторе: при выходе из приложения и обновлении модуль зовёт `quit`.
     static func restore() {
         let dictationRestored = restoreDictation()
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         defaults.set(false, forKey: keepOffKey)
         var usageRestored = false
         if let saved = defaults.object(forKey: savedKey) as? Int {
@@ -239,7 +239,7 @@ enum FnSystemAction {
     }
 
     /// Мы сняли диктовку с двойного Fn и помним, что она была включена.
-    static var dictationOverridden: Bool { UserDefaults.standard.object(forKey: savedDictationKey) != nil }
+    static var dictationOverridden: Bool { Kit.defaults.object(forKey: savedDictationKey) != nil }
 
     /// Выключить горячую клавишу диктовки; при выключении модуля вернём. true — что-то менялось.
     @discardableResult
@@ -252,7 +252,7 @@ enum FnSystemAction {
     /// Запись без применения; false — диктовки на двойном Fn и так нет.
     private static func writeDictationOff() -> Bool {
         guard isDictationOnDoubleFn(hotKeys), let changed = settingEnabled(hotKeys, id: dictationKey, to: false) else { return false }
-        UserDefaults.standard.set(true, forKey: savedDictationKey)
+        Kit.defaults.set(true, forKey: savedDictationKey)
         writeHotKeys(changed)
         return true
     }
@@ -260,7 +260,7 @@ enum FnSystemAction {
     /// Вернуть диктовку, если выключали мы (без применения). true — записали.
     private static func restoreDictation() -> Bool {
         guard dictationOverridden else { return false }
-        UserDefaults.standard.removeObject(forKey: savedDictationKey)
+        Kit.defaults.removeObject(forKey: savedDictationKey)
         guard let changed = settingEnabled(hotKeys, id: dictationKey, to: true) else { return false }
         writeHotKeys(changed)
         return true

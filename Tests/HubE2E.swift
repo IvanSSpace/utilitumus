@@ -23,7 +23,7 @@ struct Refused: LocalizedError {
 @MainActor func requestStatus(_ id: String) async throws -> LinkStatus { try await LinkClient(id: id).status() }
 @MainActor func requestEnabled(_ id: String, _ on: Bool) async throws { try await LinkClient(id: id).setEnabled(on) }
 @MainActor func requestWindow(_ id: String) async throws { try await LinkClient(id: id).openWindow() }
-@MainActor func requestQuit(_ id: String) async { try? await LinkClient(id: id).quit() }
+@MainActor func requestQuit(_ id: String, _ reason: LinkQuitReason) async { try? await LinkClient(id: id).quit(reason) }
 @MainActor func requestHello(_ id: String) async throws -> LinkHello { try await LinkClient(id: id).hello() }
 
 let installer = SatelliteInstaller(
@@ -41,7 +41,7 @@ let installer = SatelliteInstaller(
     },
     verify: { try KitSigning.verifySignature(of: $0, identifier: $1, strict: true) },
     link: SatelliteLink(
-        quit: { await requestQuit($0) },
+        quit: { await requestQuit($0, $1) },
         hello: { _ = try await requestHello($0) }))
 
 func stateLine(_ entry: SatelliteRegistry.Entry?) -> String {
