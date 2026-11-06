@@ -252,32 +252,75 @@ enum BotRegistry {
     static var url: URL {
         #if KIT_TEST_DEFAULTS
         // Стенд не читает настоящий bots.toml: в нём команды, которые панель запускает.
-        return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("utilitumus-test-bots.toml")
+        // Файл свой у каждого домена настроек стенда, чтобы проверки шли одновременно.
+        let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
+        // Каталог пользователя из системы, а не из TMPDIR: утилита под launchd и центр стенда видят один и тот же файл.
+        var buf = [CChar](repeating: 0, count: 1024)
+        let dir = confstr(_CS_DARWIN_USER_TEMP_DIR, &buf, buf.count) > 0 ? String(cString: buf) : NSTemporaryDirectory()
+        return URL(fileURLWithPath: dir).appendingPathComponent("utilitumus-test-bots-\(suite).toml")
         #else
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Utilitumus/bots.toml")
         #endif
     }
 
-    private static let lock = NSLock()
-    private nonisolated(unsafe) static var cached: (path: String, stamp: TimeInterval, size: Int, bots: [BotSpec])?
+    /// Что не так с файлом. Команды из него запускает панель, поэтому при любой проблеме ботов нет.
+    enum Problem: Sendable, Codable, Equatable {
+        /// Права или владелец: файл мог изменить кто-то, кроме хозяина.
+        case unsafe(String)
+        /// Файл есть, но не читается как TOML.
+        case invalid
+    }
 
-    /// Боты из файла. Читается заново, только если файл изменился: замер идёт каждые 3 с.
-    static func load(_ url: URL = BotRegistry.url) -> [BotSpec] {
+    struct File: Sendable, Equatable {
+        var exists = false
+        var bots: [BotSpec] = []
+        var problem: Problem?
+    }
+
+    /// Файл и его папка не должны быть доступны на запись группе и всем и должны принадлежать хозяину:
+    /// иначе любая программа под другим пользователем подменила бы команды, которые панель запустит.
+    static func unsafeReason(_ url: URL) -> String? {
+        var st = stat()
+        guard stat(url.path, &st) == 0 else { return nil }
+        let name = url.lastPathComponent
+        if st.st_uid != getuid() { return "\(name) принадлежит другому пользователю" }
+        if st.st_mode & 0o022 != 0 { return "\(name) доступен на запись группе или всем: chmod go-w на этот файл" }
+        var dir = stat()
+        if stat(url.deletingLastPathComponent().path, &dir) == 0 {
+            if dir.st_uid != getuid() && dir.st_uid != 0 { return "папка с \(name) принадлежит другому пользователю" }
+            if dir.st_mode & 0o022 != 0, dir.st_mode & 0o1000 == 0 { return "папка с \(name) доступна на запись группе или всем" }
+        }
+        return nil
+    }
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var cached: (path: String, stamp: TimeInterval, size: Int, bots: [BotSpec]?)?
+
+    /// Файл целиком: боты и причина, если ему нельзя доверять. Права смотрятся при каждом вызове (chmod время правки
+    /// не меняет); разбор читается заново, только если файл изменился: замер идёт каждые 3 с.
+    static func read(_ url: URL = BotRegistry.url) -> File {
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        guard attrs != nil else { return File() }
+        if let why = unsafeReason(url) { return File(exists: true, problem: .unsafe(why)) }
         let stamp = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
         let size = (attrs?[.size] as? Int) ?? 0
         lock.lock()
         defer { lock.unlock() }
-        if let c = cached, c.path == url.path, c.stamp == stamp, c.size == size { return c.bots }
-        var bots: [BotSpec] = []
-        if attrs != nil, let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8),
+        if let c = cached, c.path == url.path, c.stamp == stamp, c.size == size {
+            return c.bots.map { File(exists: true, bots: $0) } ?? File(exists: true, problem: .invalid)
+        }
+        var bots: [BotSpec]?
+        if let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8),
            let toml = MiniTOML(parsing: text) {
             bots = (toml.arrays["bot"] ?? []).compactMap(spec)
         }
         cached = (url.path, stamp, size, bots)
-        return bots
+        return bots.map { File(exists: true, bots: $0) } ?? File(exists: true, problem: .invalid)
     }
+
+    /// Боты из файла; небезопасный или битый файл — пустой список.
+    static func load(_ url: URL = BotRegistry.url) -> [BotSpec] { read(url).bots }
 
     /// Запись без id, name или project пропускаем — как в lambscape.
     private static func spec(_ t: MiniTOML.Table) -> BotSpec? {
@@ -323,32 +366,6 @@ enum BotRegistry {
         bundles[bundle] = .some(id)
         lock.unlock()
         return id
-    }
-
-    /// Главные процессы бота: pid его меток launchd и запущенные .app с его bundle id.
-    static func pids(of spec: BotSpec, procs: [Int32: LoadProcess], launchd: [String: Int32?]) -> [Int32] {
-        var out = Set<Int32>()
-        for label in spec.launchd {
-            if let outer = launchd[label], let pid = outer, procs[pid] != nil { out.insert(pid) }
-        }
-        if !spec.bundleIDs.isEmpty {
-            for p in procs.values where p.exe.contains(".app/Contents/MacOS/") {
-                if let id = bundleID(ofExe: p.exe), spec.bundleIDs.contains(id) { out.insert(p.pid) }
-            }
-        }
-        return out.sorted()
-    }
-
-    /// pid → причина: процессы ботов со всеми потомками трогает только команда из bots.toml
-    /// (kill агента с KeepAlive — это перезапуск, а не остановка).
-    static func fence(_ bots: [BotSpec], procs: [Int32: LoadProcess], tree: ProcessTree, launchd: [String: Int32?]) -> [Int32: String] {
-        var out: [Int32: String] = [:]
-        for b in bots {
-            for main in pids(of: b, procs: procs, launchd: launchd) {
-                for q in tree.subtree(of: main) where out[q] == nil { out[q] = "процесс бота \(b.id) — только его кнопками" }
-            }
-        }
-        return out
     }
 
     private struct EnvCacheEntry {
@@ -458,46 +475,19 @@ enum BotState: String, Sendable, Codable {
     }
 }
 
-struct BotItem: Sendable, Codable, Equatable, Identifiable {
-    var id: String
-    var name: String
-    var state: BotState
-    var pids: [Int32]
-    var memMB: Int
-    var uptime: TimeInterval
-    var ports: [String]
-    var url: String?
-    var note: String
-    var actions: [BotVerb]
-    /// Команды из bots.toml: остаются в модуле, в связь не идут.
-    var spec = BotSpec.none
-
-    var isOn: Bool { state == .running || state == .partial }
-
-    private enum CodingKeys: String, CodingKey { case id, name, state, pids, memMB, uptime, ports, url, note, actions }
-}
-
 extension BotRegistry {
-    static func status(_ spec: BotSpec, procs: [Int32: LoadProcess], tree: ProcessTree, launchd: [String: Int32?]) -> BotItem {
-        let mains = pids(of: spec, procs: procs, launchd: launchd)
-        let all = Set(mains.flatMap { tree.subtree(of: $0) })
-        // Статус — по меткам launchd (их и гасит команда из конфига); .app вроде менюбара — только в pid и памяти.
-        let up: Int, total: Int
-        if !spec.launchd.isEmpty {
-            up = spec.launchd.filter { label in (launchd[label] ?? nil).map { procs[$0] != nil } ?? false }.count
-            total = spec.launchd.count
-        } else {
-            let found = Set(mains.compactMap { procs[$0].flatMap { bundleID(ofExe: $0.exe) } })
-            up = spec.bundleIDs.filter { found.contains($0) }.count
-            total = spec.bundleIDs.count
-        }
-        let missing = envMissing(spec)
-        let state: BotState = total > 0 && up == total ? .running : up > 0 ? .partial : !missing.isEmpty ? .noConfig : .stopped
-        var note = spec.note
-        if state == .noConfig {
-            let where_ = spec.envFile.flatMap { $0.isEmpty ? nil : ($0 as NSString).lastPathComponent } ?? "окружение"
-            note = "Не настроен: впиши \(missing.joined(separator: ", ")) в \(where_)"
-        }
+    /// Состояние по числу поднятых меток (или приложений) и недостающим переменным.
+    static func classify(up: Int, total: Int, missing: [String]) -> BotState {
+        total > 0 && up == total ? .running : up > 0 ? .partial : !missing.isEmpty ? .noConfig : .stopped
+    }
+
+    static func noConfigNote(_ spec: BotSpec, missing: [String]) -> String {
+        let place = spec.envFile.flatMap { $0.isEmpty ? nil : ($0 as NSString).lastPathComponent } ?? "окружение"
+        return "Не настроен: впиши \(missing.joined(separator: ", ")) в \(place)"
+    }
+
+    /// Кнопки, подходящие состоянию и описанные в файле: чего в bots.toml нет, того и на экране нет.
+    static func offered(_ spec: BotSpec, _ state: BotState) -> [BotVerb] {
         let wanted: [BotVerb]
         switch state {
         case .running: wanted = [.stop, .restart]
@@ -505,14 +495,6 @@ extension BotRegistry {
         case .stopped: wanted = [.start]
         case .noConfig: wanted = []
         }
-        // Аптайм — по процессам launchd: менюбар-приложение бота живёт неделями и врало бы.
-        let labelled = Set(spec.launchd.compactMap { launchd[$0] ?? nil }).intersection(mains)
-        let starts = (labelled.isEmpty ? Set(mains) : labelled).compactMap { procs[$0]?.startTime }.filter { $0 > 0 }
-        let ports = cachedListenPorts(of: all)
-        return BotItem(
-            id: spec.id, name: spec.name, state: state, pids: mains,
-            memMB: Int(all.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()),
-            uptime: starts.min().map { Date().timeIntervalSince1970 - $0 } ?? 0, ports: ports, url: spec.url,
-            note: note, actions: wanted.filter { spec.commands[$0] != nil }, spec: spec)
+        return wanted.filter { spec.commands[$0] != nil }
     }
 }

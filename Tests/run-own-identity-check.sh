@@ -48,7 +48,7 @@ stub evil local.utilitumus.evil
 cp Tests/OwnIdentityCheck.swift "$OUT/main.swift"
 L=Sources/Modules/Load/Native
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/main.swift" $(find Sources/Kit -name '*.swift') \
-  $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotRegistry.swift" \
+  $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
   "$L/Background/LaunchAgents.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
   "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift
 

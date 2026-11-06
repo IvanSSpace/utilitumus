@@ -169,12 +169,7 @@ enum LaunchAgents {
         }
     }
 
-    /// Как shlex.quote: без кавычек только безопасные символы.
-    static func shellQuote(_ s: String) -> String {
-        let safe = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./-_")
-        if !s.isEmpty, s.allSatisfy({ safe.contains($0) }) { return s }
-        return "'" + s.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
-    }
+    static func shellQuote(_ s: String) -> String { Exec.shellQuote(s) }
 
     static func sudoHint(_ label: String) -> String {
         let target = shellQuote("system/\(label)")
