@@ -20,6 +20,8 @@ final class FakeSMC {
     init?() {
         // Завис в ручном режиме: и цель, и возврат в «Авто» не применяются.
         if environment["FAN_TEST_SMC_STUCK"] != nil { bytes["F0Md"] = 1; bytes["F1Md"] = 1 }
+        // Вентиляторы остались в ручном режиме от прошлого запуска службы, запись работает.
+        if environment["FAN_TEST_SMC_MANUAL"] != nil { bytes["F0Md"] = 1; bytes["F1Md"] = 1 }
     }
 
     func uint8(_ key: String) -> UInt8? { bytes[key] }
@@ -74,6 +76,16 @@ final class FanService: NSObject, FanHelperXPC {
     /// последнего удержания. Только на главной очереди.
     private var holdWatchdog: DispatchWorkItem?
     private var releaseRetries = 0
+
+    /// При каждом запуске живого удержания нет, а вентилятор мог остаться ручным: служба упала, и сторож упал вместе с ней.
+    /// Клиент подтвердит удержание сам при следующем повторе. Главная очередь.
+    func recoverAtStart() {
+        #if FAN_TEST_FAKE_SMC
+        if ProcessInfo.processInfo.environment["FAN_TEST_NO_START_RELEASE"] != nil { return }
+        #endif
+        guard holdWatchdog == nil else { return }
+        releaseManualFans()
+    }
 
     func version(reply: @escaping (String) -> Void) {
         #if FAN_TEST_FAKE_SMC
@@ -241,5 +253,6 @@ let listener = NSXPCListener(machServiceName: FanLink.service)
 listener.setConnectionCodeSigningRequirement(FanLink.listenerRequirement)
 listener.delegate = delegate
 listener.resume()
+DispatchQueue.main.async { delegate.service.recoverAtStart() }
 delegate.armIdleExit()
 dispatchMain()

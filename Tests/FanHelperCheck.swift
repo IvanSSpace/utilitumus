@@ -22,7 +22,7 @@ let leaf = KitSigning.trustedLeafHashes[0]
 func pureChecks() {
     check(FanLink.service == "local.utilitumus.fan.xpc", "имя службы")
     check(FanLink.label == "local.utilitumus.fan", "метка")
-    check(FanLink.helperVersion == "5", "версия помощника")
+    check(FanLink.helperVersion == "6", "версия помощника")
     check(FanLink.holdTimeout == 15, "служба терпит без удержания 15 с")
     check(FanGate.holdRefresh * 2 < FanLink.holdTimeout, "клиент повторяет удержание минимум дважды за срок службы")
     check(FanLink.connectionOptions == .privileged, "клиент ищет службу в системном домене")
@@ -258,7 +258,8 @@ func plistChecks() {
     let data = Data(FanHelperInstaller.plistXML.utf8)
     let parsed = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     check(parsed != nil, "плист разбирается")
-    check(Set(parsed?.keys.map { $0 } ?? []) == ["Label", "ProgramArguments", "MachServices"], "в плисте только нужные ключи")
+    check(Set(parsed?.keys.map { $0 } ?? []) == ["Label", "ProgramArguments", "MachServices", "KeepAlive"], "в плисте только нужные ключи")
+    check(parsed?["KeepAlive"] as? [String: Bool] == ["SuccessfulExit": false], "KeepAlive только на сбой: чистый выход по простою службу не поднимает")
     check(parsed?["Label"] as? String == "local.utilitumus.fan", "Label")
     check(parsed?["ProgramArguments"] as? [String] == ["/Library/PrivilegedHelperTools/local.utilitumus.fan"], "ProgramArguments без аргументов")
     check(parsed?["MachServices"] as? [String: Bool] == ["local.utilitumus.fan.xpc": true], "MachServices")

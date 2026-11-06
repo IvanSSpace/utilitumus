@@ -9,7 +9,7 @@ enum FanLink {
     static let connectionOptions: NSXPCConnection.Options = []
     static let idleExit: TimeInterval = 2
     static let holdTimeout: TimeInterval = 3
-    static let exitRetries = 3
+    static let exitRetries = 2
     #else
     static let label = "local.utilitumus.fan"
     static let service = "local.utilitumus.fan.xpc"
@@ -26,11 +26,12 @@ enum FanLink {
     /// Пауза между попытками вернуть «Авто», если SMC не принял.
     static let holdRetry: TimeInterval = 2
 
+    /// 6: плист с `KeepAlive` на сбой, при запуске служба возвращает ручные вентиляторы в «Авто», не выходит по простою с ручным вентилятором.
     /// 5: сторож удержания (`holdTimeout`), служба сама отдаёт вентиляторы в «Авто». Клиент 4 удержание не повторяет.
     /// Менять при КАЖДОМ изменении поведения службы: по ней приложение решает,
     /// просить ли «Обновить доступ» (пароль). Сборка сама её не трогает.
     /// Только целое число и только вверх: пароль просит клиент новее службы, клиент старше работает с ней как есть.
-    static let helperVersion = "5"
+    static let helperVersion = "6"
 
     /// Identifier подписи самой службы: один и тот же в боевой и в тестовой сборке.
     private static let serviceIdentifier = "local.utilitumus.fan"
