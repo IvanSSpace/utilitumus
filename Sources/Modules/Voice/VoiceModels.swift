@@ -92,10 +92,18 @@ final class VoiceModelStore: ObservableObject {
 
     private var tasks: [VoiceModel: Task<Void, Never>] = [:]
 
-    /// Application Support/Utilitumus/Voice/Models.
+    /// Application Support/Utilitumus/Voice/Models. В сборке со швом `KIT_TEST_DEFAULTS` это временная папка своего suite:
+    /// домашний каталог в ней не участвует, потому что утилита стенда под launchd живёт с настоящим домом
+    /// и иначе чистила бы и стирала настоящие модели.
     nonisolated static var modelsRoot: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if KIT_TEST_DEFAULTS
+        let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
+        return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("utilitumus-test-models/\(suite)/Voice/Models", isDirectory: true)
+        #else
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Utilitumus/Voice/Models", isDirectory: true)
+        #endif
     }
 
     private init() {

@@ -5,6 +5,15 @@ set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup voice Voice
 
+# Настоящую папку моделей проверка не трогает: до и после снимок её содержимого и времён должен совпасть.
+REAL_MODELS="$HOME/Library/Application Support/Utilitumus/Voice/Models"
+real_snapshot() { ls -laT "$REAL_MODELS" 2>/dev/null | shasum; }
+BEFORE="$(real_snapshot)"
+# Модели стенда лежат во временной папке своего suite (шов KIT_TEST_DEFAULTS); начинаем с пустой.
+TEST_MODELS="${TMPDIR:-/tmp}/utilitumus-test-models/$SUITE"
+rm -rf "$TEST_MODELS"
+satellite_check_extra_cleanup() { rm -rf "$TEST_MODELS"; }
+
 forbid_timers Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteVoiceModel.swift Sources/App/Satellites/RemoteVoicePage.swift
 
 build_utility
@@ -31,5 +40,7 @@ check_foreign_rejected
 
 echo "== вкладка, мусор, смерть утилиты"
 "$HUB" run "$OUT" "$PID"
+
+[ "$BEFORE" = "$(real_snapshot)" ] && ok "папка настоящих моделей не менялась" || bad "папка настоящих моделей изменилась"
 
 satellite_check_finish "ВКЛАДКА «ГОЛОС»"

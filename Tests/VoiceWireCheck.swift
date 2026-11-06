@@ -36,10 +36,22 @@ func cleanSettings() {
 func prepareModels() {
     // Система может отдать путь без /private.
     func plain(_ path: String) -> String { path.hasPrefix("/private/") ? String(path.dropFirst(8)) : path }
-    guard let home = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"], !home.isEmpty,
-          plain(VoiceModelStore.modelsRoot.path).hasPrefix(plain(home) + "/") else {
-        refuse("папка моделей не подменена: \(VoiceModelStore.modelsRoot.path)")
+    // Сборка «после» держит модели во временной папке стенда, сборка «до» (старый коммит) — под подменённым домом.
+    // Под настоящим домом не должно быть ни той, ни другой.
+    let root = plain(VoiceModelStore.modelsRoot.path)
+    let temp = plain(URL(fileURLWithPath: NSTemporaryDirectory()).standardizedFileURL.path)
+    let fakeHome = ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"].map { plain($0) + "/" }
+    guard let realHome = getpwuid(getuid()).map({ plain(String(cString: $0.pointee.pw_dir)) + "/" }),
+          !root.hasPrefix(realHome) else {
+        refuse("папка моделей под настоящим домом: \(root)")
     }
+    #if VOICE_WIRE_BASE
+    guard let fakeHome, root.hasPrefix(fakeHome) else { refuse("папка моделей не подменена: \(root)") }
+    #else
+    guard root.hasPrefix(temp + "/utilitumus-test-models/") else { refuse("папка моделей не во временной папке стенда: \(root)") }
+    // Прошлый прогон мог оставить хвосты.
+    try? FileManager.default.removeItem(at: VoiceModelStore.modelsRoot)
+    #endif
     // Без bundle id `.standard` — домен по имени процесса, скрипт его удаляет.
     guard Bundle.main.bundleIdentifier == nil else { refuse("у процесса есть bundle id: настройки не тестовые") }
     for model in VoiceModel.allCases {
