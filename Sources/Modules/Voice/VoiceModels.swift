@@ -73,7 +73,7 @@ enum VoiceModel: String, CaseIterable, Identifiable {
 final class VoiceModelStore: ObservableObject {
     static let shared = VoiceModelStore()
 
-    enum Status: Equatable {
+    enum Status: Equatable, Codable {
         case notInstalled
         case downloading(progress: Double)
         case verifying
