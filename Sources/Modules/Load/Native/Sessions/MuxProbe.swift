@@ -67,9 +67,25 @@ final class MuxProbe: @unchecked Sendable {
         ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"].first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    /// `/private/tmp` общий: другая учётная запись может заранее создать там такой каталог и сокет со своим сервером.
+    /// Поэтому оба должны быть настоящими (не ссылками) и своими.
+    static func isOwnSocket(_ path: String, uid: uid_t = getuid()) -> Bool {
+        func owned(_ item: String, _ type: mode_t) -> Bool {
+            var info = stat()
+            return lstat(item, &info) == 0 && info.st_uid == uid && info.st_mode & S_IFMT == type
+        }
+        return owned((path as NSString).deletingLastPathComponent, S_IFDIR) && owned(path, S_IFSOCK)
+    }
+
+    /// `-u`: без переменных окружения tmux считает вывод не UTF-8 и заменяет русские имена сессий на «_».
+    static func tmuxArguments(socket: String) -> [String] {
+        ["-u", "-S", socket, "list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}"]
+    }
+
     static func readTmux() -> TmuxInfo {
-        guard FileManager.default.fileExists(atPath: tmuxSocket), let bin = tmuxBinary,
-              let text = Tool.run(bin, ["-S", tmuxSocket, "list-sessions", "-F", "#{session_name}\t#{session_windows}\t#{session_attached}"], timeout: 3),
+        // Окружение пустое: клиент tmux передаёт своё серверу.
+        guard isOwnSocket(tmuxSocket), let bin = tmuxBinary,
+              let text = Tool.run(bin, tmuxArguments(socket: tmuxSocket), timeout: 3, environment: []),
               !text.isEmpty else { return TmuxInfo() }
         // Сокет есть, а сервера нет: list-sessions молчит — это «не запущен», а не «пусто».
         return TmuxInfo(running: true, sessions: parseTmux(text))
