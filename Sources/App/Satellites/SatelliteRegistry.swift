@@ -7,6 +7,8 @@ struct SatelliteCommands {
     var status: @Sendable (String) async throws -> LinkStatus
     var setEnabled: @Sendable (String, Bool) async throws -> Void
     var openWindow: @Sendable (String) async throws -> Void
+    /// Значок утилиты в строке меню: центр сообщает по проверенной связи, утилита применяет сразу.
+    var setMenuIcon: @Sendable (String, Bool) async throws -> Void = { _, _ in }
     /// Быстрое действие из статуса: байты уходят в `moduleAction` как есть. Ответ — тело `LinkReply`.
     var action: @Sendable (String, Data) async throws -> Data = { _, _ in throw LinkError.timeout }
     /// Шаг настройки по id из статуса: просит разрешение сама утилита, потому что macOS показывает имя того, кто спросил.
@@ -16,6 +18,7 @@ struct SatelliteCommands {
         status: { try await liveStatus($0) },
         setEnabled: { try await liveSetEnabled($0, $1) },
         openWindow: { try await liveOpenWindow($0) },
+        setMenuIcon: { try await LinkClient(id: $0).setMenuIcon($1) },
         action: { try await liveAction($0, $1) },
         performStep: { try await livePerformStep($0, $1) })
 

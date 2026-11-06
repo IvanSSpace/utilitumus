@@ -168,6 +168,13 @@ private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
         }
     }
 
+    func setMenuIcon(_ on: Bool, reply: @escaping @Sendable () -> Void) {
+        onMain {
+            $0.linkSetMenuIcon(on)
+            reply()
+        }
+    }
+
     func openWindow(reply: @escaping @Sendable () -> Void) {
         onMain {
             $0.linkOpenWindow()

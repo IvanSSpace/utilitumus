@@ -208,6 +208,7 @@ final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
     let mode: String
     var unanswered: [Any] = []
     init(dir: String, mode: String) { self.dir = dir; self.mode = mode }
+    func setMenuIcon(_ on: Bool, reply: @escaping @Sendable () -> Void) { record("setMenuIcon(\(on))", in: dir); reply() }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         record("connection", in: dir, file: "connections.log")

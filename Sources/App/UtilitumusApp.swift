@@ -144,6 +144,12 @@ struct MainView: View {
         .onAppear {
             whatsNew.showIfUpdated()
             openStartPage()
+            // Просьба открыть модуль пришла, пока окна не было.
+            DispatchQueue.main.async { HubNavigation.consume() }
+        }
+        // Утилита просит открыть свою страницу: кладёт ключ в общий домен и выводит центр вперёд.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            HubNavigation.consume()
         }
         // После закрытия любого листа (в том числе alert и confirmationDialog) AppKit отдаёт фокус первой
         // фокусируемой кнопке окна, при включённой клавиатурной навигации это «Версия» в подвале панели, и вокруг
@@ -281,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeyboardController.onFeaturesChanged = { AccessState.shared.refresh() }
         MicGuardMigration.run()
         DockMode.start()
+        ModuleMenuIcons.shared.start()
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
         SatelliteRegistry.shared.startMigration()

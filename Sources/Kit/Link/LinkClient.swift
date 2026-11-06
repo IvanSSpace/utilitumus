@@ -61,6 +61,10 @@ final class LinkClient {
         try await command { proxy, done in proxy.setEnabled(enabled) { done(()) } }
     }
 
+    @MainActor func setMenuIcon(_ on: Bool) async throws {
+        try await command { proxy, done in proxy.setMenuIcon(on) { done(()) } }
+    }
+
     @MainActor func openWindow() async throws {
         try await command { proxy, done in proxy.openWindow { done(()) } }
     }

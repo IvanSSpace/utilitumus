@@ -42,6 +42,7 @@ enum DockMode {
 struct AppMenuBarScene: Scene {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
+    @ObservedObject private var menuIcons = ModuleMenuIcons.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -55,6 +56,12 @@ struct AppMenuBarScene: Scene {
                         set: {
                             if modules.isExternal(module) { satellites.setEnabled(module, $0) } else { modules.setOn(module, $0) }
                         }))
+                }
+            }
+
+            Menu("Значки") {
+                ForEach(modules.order) { module in
+                    Toggle(module.title, isOn: Binding(get: { menuIcons.isOn(module) }, set: { menuIcons.set(module, $0) }))
                 }
             }
 

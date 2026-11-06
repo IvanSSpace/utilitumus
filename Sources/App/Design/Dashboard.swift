@@ -223,6 +223,9 @@ enum DashboardLive {
     static var testBuiltIn: [Module: DashState] = [:]
     #endif
 
+    /// Состояние карточки сейчас, без подписки: значок в строке меню читает его при открытии меню.
+    static func snapshot(_ module: Module) -> DashState { compute(module) }
+
     fileprivate static func compute(_ module: Module) -> DashState {
         #if KIT_TEST_DEFAULTS
         if !ModuleManager.shared.isExternal(module), let fixture = testBuiltIn[module] { return fixture }
