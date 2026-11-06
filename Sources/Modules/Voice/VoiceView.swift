@@ -17,14 +17,17 @@ struct VoiceView<Model: VoiceScreenModel>: View {
         !VoiceModel.allCases.contains { voice.status($0) == .installed }
     }
 
-    /// Главная кнопка: без моделей — скачать GigaAM, иначе — перейти в поле проверки.
+    /// Главная кнопка: без моделей — скачать GigaAM, иначе — запись в поле проверки.
     private var primary: DSAction {
         if noneInstalled {
             return DSAction("Скачать GigaAM", icon: "arrow.down.circle.fill") {
                 if !isBusy(.gigaam) { voice.download(.gigaam) }
             }
         }
-        return DSAction("Проверить", icon: "mic.fill") { testFocused = true }
+        return DSAction(voice.recording ? "Закончить" : "Проверить", icon: voice.recording ? "stop.fill" : "mic.fill") {
+            testFocused = true
+            voice.toggleTestRecording()
+        }
     }
 
     var body: some View {
@@ -48,7 +51,10 @@ struct VoiceView<Model: VoiceScreenModel>: View {
             }
         }
         // Режим проверки у внешнего модуля: пока поле в фокусе, распознанное приходит сюда, а не в чужую программу.
-        .onChange(of: testFocused) { if testFocused { voice.beginTest() } else { voice.endTest() } }
+        // Идущую запись уход фокуса не трогает: её заканчивает вторая кнопка или уход с экрана.
+        .onChange(of: testFocused) {
+            if testFocused { if voice.test == nil { voice.beginTest() } } else if !voice.recording { voice.endTest() }
+        }
         .onChange(of: voice.test?.serial) {
             guard let phrase = voice.test?.phrase else { return }
             testText += (testText.isEmpty || testText.hasSuffix(" ") || testText.hasSuffix("\n") ? "" : " ") + phrase

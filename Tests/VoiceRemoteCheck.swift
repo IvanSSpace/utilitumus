@@ -32,6 +32,9 @@ let notOneAction: [(String, String)] = [
     await model.perform(.setMode(.toggle))
     await model.perform(.setHotKey(keyCode: 49, modifiers: 0))
     check(model.actionError != nil && model.hotKeyLabel == VoiceController.storedState().hotKeyLabel, "клавиша без модификаторов отвергнута")
+    // В стенде моделей нет: кнопка «Проверить» отказывает текстом до всякого микрофона.
+    await model.perform(.toggleTestRecording)
+    check(model.actionError != nil && !model.recording && model.test == nil, "«Проверить» без модели: отказ с текстом, записи нет")
     await model.perform(.beginTest)
     check(model.test != nil, "режим проверки включился действием")
     await model.perform(.endTest)

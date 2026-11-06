@@ -55,6 +55,8 @@ enum VoiceAction: Codable, Equatable {
     case selectModel(VoiceModel)
     case beginTest
     case endTest
+    /// Кнопка «Проверить»: начать запись в поле проверки или закончить её.
+    case toggleTestRecording
 
     /// Строго: ровно одно известное действие и ровно его поля. Кодирование остаётся синтезированным.
     init(from decoder: Decoder) throws {
@@ -80,6 +82,7 @@ enum VoiceAction: Codable, Equatable {
         case "selectModel": self = .selectModel(try wire.value())
         case "beginTest": try wire.none(); self = .beginTest
         case "endTest": try wire.none(); self = .endTest
+        case "toggleTestRecording": try wire.none(); self = .toggleTestRecording
         default: throw wire.refuse()
         }
     }
@@ -195,6 +198,8 @@ extension VoiceController {
             beginTest()
         case .endTest:
             endTest()
+        case .toggleTestRecording:
+            return toggleTestRecording(intoState: true)
         }
         return nil
     }

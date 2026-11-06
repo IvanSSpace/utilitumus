@@ -29,6 +29,10 @@ protocol VoiceScreenModel: ObservableObject, HotKeyTarget {
     var test: VoiceTestState? { get }
     func beginTest()
     func endTest()
+    /// Идёт ли запись: кнопка «Проверить» тогда останавливает её.
+    var recording: Bool { get }
+    /// Кнопка «Проверить»: начать запись или закончить. Отказ показывает сам модуль.
+    func toggleTestRecording()
 }
 
 /// Встроенный модуль: контроллер и хранилище моделей как одна модель экрана.
@@ -79,7 +83,12 @@ final class VoiceLocalModel: VoiceScreenModel {
 
     var test: VoiceTestState? { nil }
     func beginTest() {}
-    func endTest() {}
+    /// Ушёл с экрана или убрал фокус: запись, начатая кнопкой, обрывается.
+    func endTest() { controller.cancelTestRecording() }
+    var recording: Bool { controller.phase == .recording }
+    func toggleTestRecording() {
+        if let error = controller.toggleTestRecording(intoState: false) { VoiceHUD.shared.showMessage(error, isError: true) }
+    }
 }
 
 extension VoiceView where Model == VoiceLocalModel {

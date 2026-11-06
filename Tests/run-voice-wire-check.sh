@@ -24,7 +24,7 @@ trap cleanup EXIT
 BEFORE="$(real_snapshot)"
 
 # Вставку в тесте не вызвать: при поломке ушёл бы настоящий ⌘V. Поэтому порядок проверяем по исходнику.
-BODY="$(awk '/private func insert\(_ text: String\)/,/^    }$/' "$CONTROLLER")"
+BODY="$(awk '/private func insert\(_ text: String, session: TestSession\?\)/,/^    }$/' "$CONTROLLER")"
 [ "$(sed -n 2p <<<"$BODY" | tr -d ' ')" = "ifcaptureTestText(text){" ] || fail "вставка не начинается с режима проверки"
 [ "$(sed -n 2,5p <<<"$BODY" | grep -c 'return')" = 1 ] || fail "в режиме проверки вставка не заканчивается сразу"
 echo "ok   вставка сначала отдаёт текст режиму проверки и в нём ничего не вставляет"
@@ -35,6 +35,9 @@ EXPECTED="Sources/App/Satellites/RemoteVoiceModel.swift Sources/Modules/Voice/Vo
 grep -qE 'func beginTest\(\) \{\}' Sources/Modules/Voice/VoiceScreenModel.swift || fail "встроенная модель экрана включает режим проверки"
 grep -q 'controller.beginTest' Sources/Modules/Voice/VoiceScreenModel.swift && fail "встроенная модель зовёт контроллер"
 echo "ok   встроенный модуль режим проверки не включает"
+# Экран закрыт или центр пропал (аренда экрана): запись проверки утилиты обрывается.
+awk '/func screenOpen\(_ open: Bool\)/,/^    }$/' Sources/Apps/Voice/VoiceModule.swift | grep -q 'controller.endTest()' || fail "закрытие экрана не обрывает запись проверки"
+echo "ok   закрытие экрана обрывает запись проверки"
 
 rm -rf "$OUT/src" "$OUT/shots-after" "$OUT/home-run" "$OUT/home-after"
 mkdir -p "$OUT/src" "$OUT/shots-after"
