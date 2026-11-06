@@ -526,7 +526,7 @@ struct FansView: View {
     @ObservedObject var installer = FanHelperInstaller.shared
     @ObservedObject var game = GameModeController.shared
 
-    private var canControl: Bool { installer.status != .notInstalled && controller.conflictingApp == nil }
+    private var canControl: Bool { installer.status == .ready && controller.conflictingApp == nil }
     private var gameName: String? { game.isActive ? game.phase.gameName : nil }
     private var overridden: Bool { controller.fullPower || gameName != nil }
 

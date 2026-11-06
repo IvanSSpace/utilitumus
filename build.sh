@@ -41,10 +41,11 @@ swiftc -O -parse-as-library -target "$TARGET" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*') \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
-# Root-помощник вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ».
-swiftc -O -target "$TARGET" \
+# Root-служба вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ». Только Foundation и IOKit;
+# -wmo убирает из root-процесса всё, что не вызывается (остальное в KitSigning, вроде запуска процессов).
+swiftc -O -wmo -target "$TARGET" \
   -o "$APP_BUNDLE/Contents/MacOS/utilitumus-fan" \
-  Sources/Shared/SMC.swift Sources/FanHelper/main.swift \
+  Sources/Shared/SMC.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift \
   -framework IOKit
 # --options runtime (hardened runtime): в процесс нельзя внедрить чужой код через DYLD_* и подменённые библиотеки.
 codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"

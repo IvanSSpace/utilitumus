@@ -1,8 +1,8 @@
 import Foundation
 import AppKit
 
-/// Установка/удаление root-помощника `utilitumus-fan`. Права спрашивает сама
-/// macOS — стандартное окно «Utilitumus хочет внести изменения» (пароль или
+/// Установка/удаление root-службы `utilitumus-fan` (launchd, XPC; setuid больше нет). Права
+/// спрашивает сама macOS — стандартное окно «Utilitumus хочет внести изменения» (пароль или
 /// Touch ID) через `do shell script … with administrator privileges`.
 @MainActor
 final class FanHelperInstaller: ObservableObject {
@@ -10,12 +10,16 @@ final class FanHelperInstaller: ObservableObject {
 
     enum Status: Equatable {
         case notInstalled
-        /// Стоит, но версия старше помощника внутри приложения.
+        /// Файлы на месте, ответа службы ещё нет: ни плашки, ни команд.
+        case checking
+        /// Прежний setuid-помощник, неполная установка или служба с другой версией либо без ответа.
+        /// Команды не идут, плашка «Обновить доступ».
         case outdated
         case ready
     }
 
     nonisolated static let installedPath = "/Library/PrivilegedHelperTools/local.utilitumus.fan"
+    nonisolated static let plistPath = "/Library/LaunchDaemons/local.utilitumus.fan.plist"
     private nonisolated static var bundledPath: String {
         Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/utilitumus-fan").path
     }
@@ -28,86 +32,101 @@ final class FanHelperInstaller: ObservableObject {
     }
 
     func refresh() {
-        let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: Self.installedPath),
-              (attrs[.ownerAccountID] as? NSNumber)?.intValue == 0,
-              let perms = (attrs[.posixPermissions] as? NSNumber)?.intValue,
-              perms & 0o4000 != 0 else {
-            status = .notInstalled
+        if let settled = Self.statusFromFiles(binary: Self.fileInfo(Self.installedPath), plist: Self.fileInfo(Self.plistPath)) {
+            status = settled
             return
         }
         // По номеру версии, а не побайтово: байты меняются при каждой сборке
         // (и всегда отличаются у сборки с GitHub), а просить пароль надо, только
         // когда помощник действительно изменился.
         //
-        // В фоне, не на главном потоке: waitUntilExit крутит run loop, и пока
-        // shared ещё создаётся, SwiftUI успевал отрисовать FansView, тот лез в
-        // недосозданный shared — падение «dispatch_once: lock recursively».
-        // До ответа считаем установленный помощник рабочим — без мигания плашки.
-        if status == .notInstalled { status = .ready }
-        // Права 4755 от старых установок — тоже «устарел»: переустановка даст 4750 root:admin.
-        let modeOK = perms & 0o7777 == 0o4750
-        let installedPath = Self.installedPath, bundledPath = Self.bundledPath
+        // В фоне, не на главном потоке: пока shared ещё создаётся, SwiftUI успевал
+        // отрисовать FansView, тот лез в недосозданный shared — падение
+        // «dispatch_once: lock recursively». До ответа плашки нет, но и команд нет.
+        if status == .notInstalled { status = .checking }
         Task { [weak self] in
-            let ready = await Task.detached {
-                let installed = Self.version(of: installedPath)
-                return installed != nil && installed == Self.version(of: bundledPath)
-            }.value
-            self?.status = ready && modeOK ? .ready : .outdated
+            let ready = await Task.detached { FanHelperClient.version() == FanLink.helperVersion }.value
+            self?.status = ready ? .ready : .outdated
         }
     }
 
-    /// `utilitumus-fan version`; nil — старый помощник без этой команды.
-    private nonisolated static func version(of path: String) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["version"]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text?.isEmpty == false ? text : nil
+    /// Что видно по файлам; nil — файлы в порядке, решает версия службы по XPC.
+    /// Прежний setuid-помощник сюда попадает как `outdated`: запускать его незачем.
+    nonisolated static func statusFromFiles(binary: (owner: Int, mode: Int)?, plist: (owner: Int, mode: Int)?) -> Status? {
+        guard binary != nil || plist != nil else { return .notInstalled }
+        if let binary, binary.owner != 0 { return .notInstalled }
+        // Ни setuid/setgid, ни записи для группы и остальных.
+        guard let binary, binary.mode & 0o6022 == 0,
+              let plist, plist.owner == 0, plist.mode & 0o022 == 0 else { return .outdated }
+        return nil
+    }
+
+    private nonisolated static func fileInfo(_ path: String) -> (owner: Int, mode: Int)? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let owner = (attrs[.ownerAccountID] as? NSNumber)?.intValue,
+              let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue else { return nil }
+        return (owner, mode)
     }
 
     func install() {
-        let src = Self.bundledPath
-        let dir = "/Library/PrivilegedHelperTools"
-        let dst = Self.installedPath
-        let id = "local.utilitumus.fan"
-        // Проверка подписи — ВНУТРИ root-скрипта и на копии, которую пользователь уже
-        // не может подменить: иначе между проверкой и установкой (TOCTOU) обычный
-        // процесс успел бы подсунуть другой бинарь, и он получил бы root (setuid).
-        // Временный каталог создаётся в /Library/PrivilegedHelperTools (пишет только root,
-        // тот же том — mv атомарный) с правами 0700.
-        let verify = KitSigning.trustedLeafHashes.map {
-            "/usr/bin/codesign --verify " + Self.shQuote("-R=" + KitSigning.requirement(identifier: id, leafHash: $0)) + " \"$T\""
-        }.joined(separator: " || ")
-        let script = [
-            "set -e",
-            "/bin/mkdir -p \(Self.shQuote(dir))",
-            "D=$(/usr/bin/mktemp -d \(Self.shQuote(dir + "/.install.XXXXXX")))",
-            "trap '/bin/rm -rf \"$D\"' EXIT",
-            "T=\"$D/helper\"",
-            "/bin/cp \(Self.shQuote(src)) \"$T\"",
-            "/usr/sbin/chown root:wheel \"$T\"",
-            "/bin/chmod 0755 \"$T\"",
-            "(\(verify)) || { echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
-            // 4750 root:admin — запускать помощника могут только администраторы мака,
-            // а не любой локальный пользователь.
-            "/usr/sbin/chown root:admin \"$T\"",
-            "/bin/chmod 4750 \"$T\"",
-            "/bin/mv -f \"$T\" \(Self.shQuote(dst))",
-        ].joined(separator: "; ")
-        run(admin: script)
+        run(admin: Self.installScript(source: Self.bundledPath))
     }
 
     func uninstall() {
-        run(admin: "/bin/rm -f \(Self.shQuote(Self.installedPath))")
+        run(admin: Self.uninstallScript)
     }
+
+    /// В одну строку: идёт внутрь строки AppleScript. Без `RunAtLoad` и `KeepAlive`: launchd поднимает службу по подключению.
+    nonisolated static var plistXML: String {
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>"
+            + "<key>Label</key><string>\(FanLink.label)</string>"
+            + "<key>ProgramArguments</key><array><string>\(installedPath)</string></array>"
+            + "<key>MachServices</key><dict><key>\(FanLink.service)</key><true/></dict>"
+            + "</dict></plist>"
+    }
+
+    /// Проверка подписи — ВНУТРИ root-скрипта и на копии, которую пользователь уже
+    /// не может подменить: иначе между проверкой и установкой (TOCTOU) обычный
+    /// процесс успел бы подсунуть другой бинарь, и launchd запустил бы его от root.
+    /// Временный каталог создаётся в /Library/PrivilegedHelperTools (пишет только root,
+    /// тот же том — mv атомарный) с правами 0700. Плист пишется туда же, из текста скрипта, а не из файла.
+    /// `mv` поверх прежнего пути заодно убирает старый setuid-помощник.
+    nonisolated static func installScript(source: String) -> String {
+        let dir = "/Library/PrivilegedHelperTools"
+        let verify = KitSigning.trustedLeafHashes.map {
+            "/usr/bin/codesign --verify " + shQuote("-R=" + KitSigning.requirement(identifier: "local.utilitumus.fan", leafHash: $0)) + " \"$T\""
+        }.joined(separator: " || ")
+        return [
+            "set -e",
+            "/bin/mkdir -p \(shQuote(dir))",
+            "D=$(/usr/bin/mktemp -d \(shQuote(dir + "/.install.XXXXXX")))",
+            "trap '/bin/rm -rf \"$D\"' EXIT",
+            "T=\"$D/helper\"",
+            "/bin/cp \(shQuote(source)) \"$T\"",
+            "/usr/sbin/chown root:wheel \"$T\"",
+            "/bin/chmod 0755 \"$T\"",
+            "(\(verify)) || { echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
+            "/bin/mv -f \"$T\" \(shQuote(installedPath))",
+            "P=\"$D/plist\"",
+            "/usr/bin/printf '%s' \(shQuote(plistXML)) > \"$P\"",
+            "/usr/sbin/chown root:wheel \"$P\"",
+            "/bin/chmod 0644 \"$P\"",
+            "/bin/mv -f \"$P\" \(shQuote(plistPath))",
+            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || true",
+            // launchd отпускает метку не сразу после bootout.
+            "for i in 1 2 3 4 5 6 7 8 9 10; do /bin/launchctl bootstrap system \(shQuote(plistPath)) && break; [ \"$i\" = 10 ] && exit 1; /bin/sleep 0.3; done",
+        ].joined(separator: "; ")
+    }
+
+    nonisolated static var uninstallScript: String {
+        [
+            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || true",
+            "/bin/rm -f \(shQuote(plistPath))",
+            "/bin/rm -f \(shQuote(installedPath))",
+        ].joined(separator: "; ")
+    }
+
+    private nonisolated static var serviceTarget: String { "system/\(FanLink.label)" }
 
     /// Строка в одинарных кавычках для sh: внутренняя `'` → `'\''`.
     private nonisolated static func shQuote(_ s: String) -> String {
@@ -115,7 +134,7 @@ final class FanHelperInstaller: ObservableObject {
     }
 
     /// Строка для AppleScript в двойных кавычках: экранируем `\` и `"`.
-    private nonisolated static func appleScriptQuote(_ s: String) -> String {
+    nonisolated static func appleScriptQuote(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 

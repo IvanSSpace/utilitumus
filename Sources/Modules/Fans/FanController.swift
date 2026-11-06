@@ -200,11 +200,11 @@ final class FanController: ObservableObject {
     /// Синхронно — иначе процесс завершится раньше помощника.
     func restoreAutoBlocking() {
         if pendingPersist != nil { persist() }
-        guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
+        guard FanHelperInstaller.shared.status == .ready, conflictingApp == nil, let smc else { return }
         let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
         Self.helperQueue.sync {
-            for index in manual { _ = Self.runHelper(["auto", String(index)]) }
+            for index in manual { _ = Self.runHelper(.auto(index)) }
         }
     }
 
@@ -345,17 +345,17 @@ final class FanController: ObservableObject {
     /// приложения — такое расхождение само больше не исправилось бы.
     private func apply() {
         // Пока вентиляторами рулит другая программа — не воюем с ней.
-        guard isRunning, FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
+        guard isRunning, FanHelperInstaller.shared.status == .ready, conflictingApp == nil, let smc else { return }
         for fan in fans where fan.index < configs.count && !inFlight.contains(fan.index) {
             let i = fan.index
             let desired = desiredRPM(for: fan, config: configs[i])
             let isManual = smc.uint8("F\(i)Md") == 1
             let target = Double(smc.float("F\(i)Tg") ?? 0)
-            let args: [String]
+            let command: FanHelperClient.Command
             if let rpm = desired {
-                // Дрожание датчика на пару градусов не стоит запуска процесса.
+                // Дрожание датчика на пару градусов не стоит записи в SMC.
                 guard !isManual || abs(target - rpm) >= 50 else { continue }
-                // Шум датчика качает цель на десятки об/мин, а запуск помощника дорог:
+                // Шум датчика качает цель на десятки об/мин, а команда помощнику дорога:
                 // в «По датчику» шлём не чаще порога/таймера. Остальное — сразу.
                 let urgent = configs[i].mode != .sensor || fullPower || GameModeController.shared.isActive
                     || safetyTripped || !isManual
@@ -363,16 +363,16 @@ final class FanController: ObservableObject {
                 guard FanGate.shouldSend(desired: rpm, lastSent: last?.rpm, lastSentAt: last?.at,
                                          now: Date(), urgent: urgent) else { continue }
                 lastSent[i] = (rpm.rounded(), Date())
-                args = ["set", String(i), String(Int(rpm))]
+                command = .set(i, Double(Int(rpm)))
             } else {
                 lastSent[i] = nil
                 guard isManual else { continue }
-                args = ["auto", String(i)]
+                command = .auto(i)
             }
             Self.log("fan\(i) Md=\(smc.uint8("F\(i)Md").map(String.init) ?? "?") Tg=\(Int(target)) Ac=\(Int(fan.actual)) хотим=\(desired.map { String(Int($0)) } ?? "авто") fullPower=\(fullPower)")
             inFlight.insert(i)
             Self.helperQueue.async {
-                let error = Self.runHelper(args)
+                let error = Self.runHelper(command)
                 Task { @MainActor in
                     let me = FanController.shared
                     me.inFlight.remove(i)
@@ -434,9 +434,9 @@ final class FanController: ObservableObject {
     }
 
     /// Возвращает текст ошибки или nil при успехе.
-    private nonisolated static func runHelper(_ args: [String]) -> String? {
-        let error = runHelperUnlogged(args)
-        log("helper \(args.joined(separator: " ")) → \(error ?? "ok")")
+    private nonisolated static func runHelper(_ command: FanHelperClient.Command) -> String? {
+        let error = FanHelperClient.send(command)
+        log("helper \(command) → \(error ?? "ok")")
         return error
     }
 
@@ -455,25 +455,5 @@ final class FanController: ObservableObject {
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(data); try? handle.close()
         }
-    }
-
-    private nonisolated static func runHelperUnlogged(_ args: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: FanHelperInstaller.installedPath)
-        process.arguments = args
-        let stderr = Pipe()
-        process.standardError = stderr
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return error.localizedDescription
-        }
-        guard process.terminationStatus == 0 else {
-            let text = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return text?.isEmpty == false ? text : "Помощник завершился с кодом \(process.terminationStatus)"
-        }
-        return nil
     }
 }

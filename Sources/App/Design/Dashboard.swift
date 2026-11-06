@@ -230,7 +230,7 @@ enum DashboardLive {
         if let rpm = c.fans.map(\.actual).max() { parts.append("\(Int(rpm.rounded())) об/мин") }
         var state = DashState(text: parts.joined(separator: " · "))
         // Без доступа помощника кнопка ничего бы не сделала.
-        if FanHelperInstaller.shared.status != .notInstalled && c.conflictingApp == nil {
+        if FanHelperInstaller.shared.status == .ready && c.conflictingApp == nil {
             state.actionTitle = c.fullPower ? "Авто" : "Максимум"
             state.actionIcon = c.fullPower ? "arrow.uturn.backward" : "wind"
         }

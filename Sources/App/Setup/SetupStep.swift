@@ -140,7 +140,7 @@ extension Module {
             return [SetupStep(
                 id: "fans.helper", title: "Помощник для вентиляторов", why: "Пароль администратора, один раз",
                 kind: .permission, icon: "key.fill", buttonTitle: "Дать доступ…",
-                // Устаревший помощник ещё работает: обновить его можно с экрана модуля.
+                // Устаревший помощник команд не получает, но обновляется плашкой на экране модуля: без этого шага экран открыт.
                 isDone: { FanHelperInstaller.shared.status != .notInstalled },
                 perform: { FanHelperInstaller.shared.install() },
                 lastError: { FanHelperInstaller.shared.lastError })]
