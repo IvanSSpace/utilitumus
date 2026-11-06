@@ -44,7 +44,7 @@ done
 
 REPO="IvanSSpace/utilitumus"
 # Новая запись в каталоге; у имеющейся minHub не меняется (как в release-app.sh).
-MIN_HUB="0.6.0"
+MIN_HUB="0.7.0"
 LEAF="$(grep -oE '"[0-9a-f]{40}"' Sources/Kit/KitSigning.swift | head -1 | tr -d '"')"
 EPOCH="$(sed -n 's/.*static let securityEpoch = "\(.*\)".*/\1/p' Sources/Kit/KitSigning.swift)"
 [ -n "$LEAF" ] && [ -n "$EPOCH" ] || fail "В Sources/Kit/KitSigning.swift нет хэша сертификата или securityEpoch."

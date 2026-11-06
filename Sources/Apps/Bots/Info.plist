@@ -13,22 +13,22 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>UtilitumusSecurityEpoch</key>
-	<string>1</string>
-	<key>NSDocumentsFolderUsageDescription</key>
-	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
 	<key>NSDesktopFolderUsageDescription</key>
+	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>UtilitumusSecurityEpoch</key>
+	<string>1</string>
 </dict>
 </plist>

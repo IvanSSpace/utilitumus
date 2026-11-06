@@ -13,18 +13,18 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1.0.0</string>
+	<string>1.1.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>UtilitumusSecurityEpoch</key>
-	<string>1</string>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Микшеру нужно перехватывать звук выбранного приложения, чтобы менять его громкость отдельно от остальных. Звук остаётся на этом Mac и нигде не сохраняется.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>UtilitumusSecurityEpoch</key>
+	<string>1</string>
 </dict>
 </plist>
