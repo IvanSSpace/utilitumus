@@ -10,12 +10,19 @@ final class SidebarModel {
     private let modules: ModuleManager
     private let icons: ModuleMenuIcons
     private var installed: Set<Module>
+    /// Утилита уже стояла при запуске, а внешней станет только с первым опросом. Это не установка, и порядок, который
+    /// расставил человек, от этого не меняется. Модуль уходит отсюда, как только появился в панели.
+    private var bundledAtLaunch: Set<Module>
     private var subscription: AnyCancellable?
 
-    init(modules: ModuleManager = .shared, icons: ModuleMenuIcons = .shared) {
+    init(modules: ModuleManager = .shared, icons: ModuleMenuIcons = .shared, satellites: SatelliteRegistry = .shared) {
         self.modules = modules
         self.icons = icons
         installed = Set(modules.installedModules)
+        let apps = satellites.environment.paths.appsDir
+        bundledAtLaunch = Set(Module.allCases.filter {
+            FileManager.default.fileExists(atPath: apps.appendingPathComponent(SatelliteRegistry.bundleName($0) + ".app").path)
+        })
     }
 
     /// Следит за составом модулей: убранный теряет закрепление, новый встаёт в конец списка.
@@ -43,10 +50,11 @@ final class SidebarModel {
         let now = Set(modules.installedModules)
         defer { installed = now }
         for module in installed.subtracting(now) {
-            // Убрали или выключили: закрепление уходит вместе с модулем, вернётся он в список.
-            if icons.isOn(module) { icons.set(module, false) }
+            // Убрали или выключили: настройка значка уходит вместе с модулем, вернётся он в список без неё.
+            if icons.settings[module] != nil { icons.clear(module) }
         }
-        let added = now.subtracting(installed)
+        let added = now.subtracting(installed).subtracting(bundledAtLaunch)
+        bundledAtLaunch.subtract(now)
         guard !added.isEmpty else { return }
         let moved = modules.order.filter { !added.contains($0) } + modules.order.filter { added.contains($0) }
         modules.applyOrder(moved)
@@ -58,16 +66,18 @@ final class SidebarModel {
     /// Закрепление и скрытие идут через те же места, что и раньше: значок — `ModuleMenuIcons.set`, скрытие — `ModuleManager`.
     func apply(_ layout: SidebarLayout, moved module: Module) {
         guard let zone = layout.zone(of: module) else { return }
+        // Десятый со значком лежит в списке: перенос по списку его значка не трогает.
+        let wasPinned = self.layout().pinned.contains(module)
         switch zone {
         case .pinned:
             modules.setHidden(module, false)
             if !icons.isOn(module) { icons.set(module, true) }
         case .list:
             modules.setHidden(module, false)
-            if icons.isOn(module) { icons.set(module, false) }
+            if wasPinned { icons.clear(module) }
         case .hidden:
             modules.setHidden(module, true)
-            if icons.isOn(module) { icons.set(module, false) }
+            if icons.isOn(module) { icons.clear(module) }
         }
         modules.applyOrder(layout.mergedOrder(modules.order))
     }

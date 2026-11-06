@@ -178,6 +178,7 @@ private struct PinnedZone: View {
                     .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.38))
                     .fixedSize(horizontal: false, vertical: true)
             }
+            MenuIconNotice()
         }
     }
 

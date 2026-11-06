@@ -71,6 +71,8 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     @Published private(set) var entries: [Module: Entry] = [:]
     /// Модули, которые сейчас ставятся или удаляются.
     @Published private(set) var busy: Set<Module> = []
+    /// Утилита сообщила о смене. Опрос публикует только разницу в статусе, а о настройке значка статус не говорит.
+    let statusPinged = PassthroughSubject<Module, Never>()
 
     let environment: SatelliteEnvironment
     private var modules: ModuleManager { environment.modules }
@@ -312,6 +314,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     @objc private func statusDidChange(_ note: Notification) {
         guard let module = Module.allCases.first(where: { KitLink.statusChanged($0.rawValue) == note.name }) else { return }
+        statusPinged.send(module)
         Task { await poll(module) }
     }
 

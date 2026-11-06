@@ -220,7 +220,7 @@ enum LinkQuitReason: Int, Sendable {
     /// `LinkWatch`. Действует, пока живо это соединение.
     func watch(_ level: Int, reply: @escaping @Sendable () -> Void)
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void)
-    /// Свой значок модуля в строке меню (`MenuBarIcon`): сразу, без перезапуска. Только служба центра.
+    /// Центр сменил настройку значка (`MenuBarIcon`): утилита перечитывает её и применяет сразу. Только служба центра.
     func setMenuIcon(_ on: Bool, reply: @escaping @Sendable () -> Void)
     func openWindow(reply: @escaping @Sendable () -> Void)
     /// `LinkQuitReason`.

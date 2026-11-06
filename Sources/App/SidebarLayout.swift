@@ -8,7 +8,7 @@ struct SidebarLayout: Equatable {
     enum Zone: String, CaseIterable { case pinned, list, hidden }
 
     /// Больше закрепить нельзя: десятое перетаскивание отклоняется.
-    static let maxPinned = 9
+    static let maxPinned = MenuBarIcon.maxPins
     /// Столько значков и больше может не поместиться рядом с вырезом MacBook: только тихая подсказка.
     static let notchHintFrom = 7
 

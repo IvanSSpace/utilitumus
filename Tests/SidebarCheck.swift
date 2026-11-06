@@ -166,6 +166,48 @@ func pure() {
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)); modules.setOn(m, true); modules.setHidden(m, false) }
     modules.applyOrder(Module.allCases)
     icons.start()
+
+    print("== запуск: порядок не трогается первым опросом")
+    let registry = SatelliteRegistry.shared
+    let apps = registry.environment.paths.appsDir
+    func putBundle(_ name: String, version: String) {
+        let contents = apps.appendingPathComponent(name + ".app/Contents")
+        try? FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        (["CFBundleShortVersionString": version] as NSDictionary).write(to: contents.appendingPathComponent("Info.plist"), atomically: true)
+    }
+    func removeBundle(_ name: String) { try? FileManager.default.removeItem(at: apps.appendingPathComponent(name + ".app")) }
+    /// Настоящий опрос, как при запуске и после установки.
+    func poll(_ module: Module, until done: @escaping () -> Bool) async {
+        for _ in 0..<100 {
+            registry.refresh(module)
+            await pause(0.02)
+            if done() { break }
+        }
+    }
+    let arranged: [Module] = Module.allCases.reversed()
+    modules.applyOrder(arranged)
+    putBundle("Clipboard", version: "1.1.0")
+    modules.setOn(.clipboard, false)
+    let launched = SidebarModel(modules: modules, icons: icons, satellites: registry)
+    await poll(.clipboard) { modules.isExternal(.clipboard) }
+    launched.reconcile()
+    check(modules.isExternal(.clipboard), "опрос: утилита стоит, встроенный выключен — модуль ведёт она")
+    check(modules.order == arranged, "первый опрос при запуске не меняет порядок, который расставил человек")
+    launched.reconcile()
+    check(modules.order == arranged, "и следующие пересчёты его не меняют")
+    modules.setOn(.voice, false)
+    await poll(.voice) { !modules.isExternal(.voice) }
+    let running = SidebarModel(modules: modules, icons: icons, satellites: registry)
+    putBundle("Voice", version: "1.1.0")
+    await poll(.voice) { modules.isExternal(.voice) }
+    running.reconcile()
+    check(modules.order.last == .voice, "настоящая установка, пока центр работает, ставит модуль в конец")
+    removeBundle("Clipboard"); removeBundle("Voice")
+    modules.setExternal(.clipboard, false); modules.setExternal(.voice, false)
+    modules.setOn(.clipboard, true); modules.setOn(.voice, true)
+    modules.applyOrder(Module.allCases)
+    await pause(0.05)
+
     SidebarModel.shared.start()
     await pause(0.1)
     let model = SidebarModel.shared
@@ -180,8 +222,14 @@ func pure() {
 
     check(model.send(.awake, to: .pinned) && defaults.bool(forKey: MenuBarIcon.key(.awake)) && icons.isOn(.awake), "закрепление включает MenuBarIcon.<id> сразу")
     check(icons.wanted.contains(.awake), "значок в строке меню появился без перезапуска")
-    check(model.send(.awake, to: .list) && defaults.object(forKey: MenuBarIcon.key(.awake)) as? Bool == false && !icons.wanted.contains(.awake), "открепление пишет false и убирает значок сразу")
-    check(model.send(.sound, to: .hidden) && modules.isHidden(.sound) && defaults.object(forKey: MenuBarIcon.key(.sound)) as? Bool == false, "перенос закреплённого в скрытые снимает закрепление")
+    check(model.send(.awake, to: .list) && defaults.object(forKey: MenuBarIcon.key(.awake)) == nil && !icons.wanted.contains(.awake), "открепление снимает ключ и убирает значок сразу")
+    check(MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления запасной значок утилиты без центра остаётся")
+    check(model.send(.sound, to: .hidden) && modules.isHidden(.sound) && defaults.object(forKey: MenuBarIcon.key(.sound)) == nil, "перенос закреплённого в скрытые снимает ключ")
+    icons.set(.awake, false)
+    check(defaults.object(forKey: MenuBarIcon.key(.awake)) as? Bool == false, "явное «Скрыть значок» пишет false")
+    check(!MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "и значка нет и без центра")
+    defaults.removeObject(forKey: MenuBarIcon.key(.awake))
+    await pause(0.05)
     check(model.layout().hidden.contains(.sound) && modules.isOn(.sound), "скрытый продолжает работать")
     check(model.send(.sound, to: .list) && !modules.isHidden(.sound), "«показать» возвращает в список")
 
@@ -204,7 +252,7 @@ func pure() {
     await pause(0.05)
     modules.setOn(.awake, false)
     await pause(0.1)
-    check(defaults.object(forKey: MenuBarIcon.key(.awake)) as? Bool == false, "выключили модуль — закрепление снято")
+    check(defaults.object(forKey: MenuBarIcon.key(.awake)) == nil, "выключили модуль — ключ снят")
     check(!model.layout().flattened.contains(.awake), "и из раскладки он ушёл")
     modules.setOn(.awake, true)
     await pause(0.1)
@@ -215,6 +263,51 @@ func pure() {
     await pause(0.1)
     check(model.layout().list.last == .voice, "новый модуль из Стора — в конце списка")
     check(model.layout(open: .mixer).flattened.contains(.mixer), "открытая страница остаётся в раскладке")
+    icons.set(.voice, false)
+    modules.setOn(.voice, false)
+    await pause(0.1)
+    check(defaults.object(forKey: MenuBarIcon.key(.voice)) == nil, "убрали модуль со скрытым значком: новая установка начнёт с чистого")
+    modules.setOn(.voice, true)
+    await pause(0.1)
+
+    print("== значок сменили в утилите")
+    let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? ""
+    /// Другой процесс, как утилита: запись в общий домен, и сигнал статуса.
+    func writeFromOutside(_ module: Module, _ on: Bool) async {
+        let write = Process()
+        write.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        write.arguments = ["write", suite, MenuBarIcon.key(module), "-bool", on ? "true" : "false"]
+        try? write.run()
+        write.waitUntilExit()
+        registry.statusPinged.send(module)
+        await pause(0.1)
+    }
+    await writeFromOutside(.mouse, true)
+    check(icons.isOn(.mouse) && model.layout().pinned.contains(.mouse), "закрепили из окна утилиты: плитка появилась в центре")
+    await writeFromOutside(.mouse, false)
+    check(!icons.isOn(.mouse) && !model.layout().pinned.contains(.mouse), "«Скрыть значок» в утилите: плитка ушла из закреплённых")
+    defaults.removeObject(forKey: MenuBarIcon.key(.mouse))
+    await pause(0.05)
+
+    print("== старая утилита: значок появится после обновления")
+    modules.setOn(.fans, false)
+    putBundle("Fans", version: "1.0.0")
+    await poll(.fans) { modules.isExternal(.fans) && registry.entries[.fans]?.installedVersion != nil }
+    await pause(0.1)
+    told = []
+    check(model.send(.fans, to: .pinned) && model.layout().pinned.contains(.fans), "старой утилите закрепить можно: плитка встаёт")
+    check(icons.notice?.contains(Module.fans.title) == true && icons.notice?.contains("после обновления") == true, "и тихая строка говорит про обновление: \(icons.notice ?? "нет")")
+    check(told.isEmpty, "старой утилите вызова нет: она его не знает")
+    putBundle("Fans", version: "1.1.0")
+    await poll(.fans) { registry.entries[.fans]?.installedVersion == "1.1.0" }
+    check(icons.notice == nil, "обновили — строка ушла")
+    check(model.send(.fans, to: .list) && told == ["fans false"] && defaults.object(forKey: MenuBarIcon.key(.fans)) == nil, "открепление: новой утилите сказано, ключ снят (\(told))")
+    removeBundle("Fans")
+    await poll(.fans) { !modules.isExternal(.fans) }
+    modules.setOn(.fans, true)
+    await pause(0.1)
+    check(SatelliteRegistry.isOutdated(.sound, installed: "1.0.0") && SatelliteRegistry.isOutdated(.sound, installed: "0") && !SatelliteRegistry.isOutdated(.sound, installed: "1.1.0")
+          && !SatelliteRegistry.isOutdated(.sound, installed: "1.10.0") && !SatelliteRegistry.isOutdated(.sound, installed: nil) && !SatelliteRegistry.isOutdated(.bots, installed: "1.0.0"), "кто считается старым")
 
     print("== десятый не закрепляется")
     for m in Module.allCases { _ = model.send(m, to: .list) }
@@ -223,6 +316,18 @@ func pure() {
     let tenth = Module.allCases[9]
     check(!model.send(tenth, to: .pinned) && !icons.isOn(tenth) && model.layout().pinned.count == 9, "десятый отклонён, значок не включён")
     check(model.layout().showsNotchHint, "подсказка про вырез показана")
+    icons.set(tenth, true)
+    check(defaults.object(forKey: MenuBarIcon.key(tenth)) == nil && !icons.isOn(tenth), "десятый из переключателя на странице, настроек и меню не встаёт")
+    check(icons.isFull && icons.notice == MenuBarIcon.limitNotice, "и тихая строка говорит почему")
+    defaults.set(true, forKey: MenuBarIcon.key(tenth))
+    await pause(0.05)
+    check(icons.isOn(tenth) && model.layout().list.contains(tenth), "десятый со значком из старых настроек лежит в списке")
+    var within = model.layout()
+    check(within.move(tenth, to: .list, at: 1), "перенос по списку")
+    model.apply(within, moved: tenth)
+    check(icons.isOn(tenth) && defaults.bool(forKey: MenuBarIcon.key(tenth)), "перенос по списку значка не снимает")
+    defaults.removeObject(forKey: MenuBarIcon.key(tenth))
+    await pause(0.05)
     told = []
     for m in Module.allCases { _ = model.send(m, to: .list) }
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
