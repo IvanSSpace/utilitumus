@@ -170,6 +170,10 @@ PLIST
 
   # Рядом и переносом: пока копия не готова, старая версия цела и работает.
   mkdir -p "$INSTALL_DIR/Utilitumus" "$HOME/Library/LaunchAgents"
+  # Прошлый запуск мог сорваться на возврате: бандла нет, а .old — единственная копия. Удалять её нельзя.
+  if [ -e "$DEST.old" ] && [ ! -e "$DEST" ]; then
+    mv "$DEST.old" "$DEST" || fail "Не удалось вернуть прежнюю версию ${NAME}: она лежит в ${DEST}.old"
+  fi
   rm -rf -- "$DEST.new" "$DEST.old"
   ditto "$APP" "$DEST.new"
   local OLD_AGENT="$WORK/old-agent.plist"
@@ -179,7 +183,8 @@ PLIST
   # Отказ — обычно значит «не был загружен»; настоящий сбой покажет bootstrap.
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   if { [ -z "$HAD_OLD" ] || mv "$DEST" "$DEST.old"; } && mv "$DEST.new" "$DEST" && cp "$WORK/agent.plist" "$AGENT" && load_agent "$AGENT"; then
-    rm -rf -- "$DEST.old"
+    # Новая версия уже работает: остаток .old уберёт следующий запуск.
+    rm -rf -- "$DEST.old" || true
     echo "$NAME $VERSION установлен в $DEST."
     return
   fi
@@ -187,13 +192,18 @@ PLIST
   # Сорвалось после снятия старой версии: вернуть её, иначе у человека не осталось бы ничего.
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
   # Старая версия могла и не уехать в .old: тогда она всё ещё на месте и удалять её нельзя.
-  if [ -z "$HAD_OLD" ] || [ -e "$DEST.old" ]; then rm -rf -- "$DEST"; fi
-  rm -rf -- "$DEST.new"
-  rm -f -- "$AGENT"
-  if [ -e "$DEST.old" ]; then mv "$DEST.old" "$DEST"; fi
+  if [ -z "$HAD_OLD" ] || [ -e "$DEST.old" ]; then rm -rf -- "$DEST" || true; fi
+  rm -rf -- "$DEST.new" || true
+  # Сначала бандл: сбой уборки при set -e не должен оставить его в .old. Под остатком mv положил бы копию внутрь.
+  if [ -e "$DEST.old" ]; then
+    if [ -e "$DEST" ] || ! mv "$DEST.old" "$DEST"; then
+      fail "$NAME $VERSION не установлен, и прежнюю версию вернуть не удалось: она лежит в ${DEST}.old"
+    fi
+  fi
+  rm -f -- "$AGENT" || true
   if [ -f "$OLD_AGENT" ]; then
-    cp "$OLD_AGENT" "$AGENT"
-    load_agent "$AGENT" || fail "$NAME $VERSION не установлен, и прежнюю версию launchd не загрузил: ${AGENT}"
+    { cp "$OLD_AGENT" "$AGENT" && load_agent "$AGENT"; } \
+      || fail "$NAME $VERSION не установлен, и прежнюю версию launchd не загрузил: ${AGENT}"
   fi
   if [ -n "$HAD_OLD" ]; then fail "$NAME $VERSION не установлен. Прежняя версия возвращена."; fi
   fail "$NAME $VERSION не установлен: не удалось положить приложение или загрузить ${LABEL}."

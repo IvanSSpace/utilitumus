@@ -43,17 +43,23 @@ func roleChecks() {
 }
 
 func releaseChecks() {
-    let cases: [(SatelliteRole.Mode, Bool, Bool, String)] = [
-        (.active, true, false, "активна и включена — держать"),
-        (waiting, true, false, "центр запустился, ждём передачу — держать: кнопку встроенного ещё никто не нажал"),
-        (waiting, false, true, "ждём передачу, но выключена — снять"),
-        (outdated, true, true, "старый центр — снять"),
-        (outdated, false, true, "старый центр и выключена — снять"),
-        (.active, false, true, "активна, но выключена — снять"),
+    let cases: [(SatelliteRole.Mode, Bool, String?, Bool, String)] = [
+        (.active, true, nil, false, "центра нет, активна и включена — держать"),
+        (.active, true, "0.6.0", false, "активна и включена — держать"),
+        (waiting, true, "0.6.0", false, "центр запустился, ждём передачу — держать: кнопку встроенного ещё никто не нажал"),
+        (waiting, false, "0.6.0", true, "ждём передачу, но выключена — снять"),
+        (outdated, true, "0.5.3", true, "старый центр — снять"),
+        (outdated, true, "abc", true, "центр с мусором вместо версии — снять, как старый"),
+        (outdated, false, "0.5.3", true, "старый центр и выключена — снять"),
+        (outdated, true, nil, false, "версию центра не прочитали — уже включённую держать"),
+        (outdated, false, nil, true, "версию не прочитали, но выключена — снять"),
+        (.active, false, "0.6.0", true, "активна, но выключена — снять"),
     ]
-    for (mode, enabled, release, name) in cases {
-        check(SatelliteRole.mustRelease(mode: mode, enabled: enabled) == release, "блокировка: " + name)
+    for (mode, enabled, version, release, name) in cases {
+        check(SatelliteRole.mustRelease(mode: mode, enabled: enabled, hubVersion: version) == release, "блокировка: " + name)
     }
+    check(SatelliteRole.decide(launchedByLaunchd: true, hubRunning: true, hubVersion: nil, hubModuleOn: true, handedOver: false) == outdated,
+          "версию не прочитали: при старте остаётся пассивной")
 }
 
 func keyChecks() {

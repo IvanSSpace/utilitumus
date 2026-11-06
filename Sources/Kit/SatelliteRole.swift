@@ -21,9 +21,10 @@ enum SatelliteRole {
 
     /// Блокировку включил сам человек, поэтому запуск центра её не снимает: встроенный модуль без нажатия кнопки
     /// блокировку не держит, двойной работы нет. Снимают только выключение утилиты и старый центр: тот не передаст
-    /// модуль никогда, и там он уже может работать.
-    static func mustRelease(mode: Mode, enabled: Bool) -> Bool {
-        !enabled || mode == .passive(reason: outdatedHubReason)
+    /// модуль никогда, и там он уже может работать. Версию не прочитали (`hubVersion == nil`) — старым центр не назван:
+    /// новую блокировку пассивный режим не даст, но уже включённую из-за нечитаемого файла не снимаем.
+    static func mustRelease(mode: Mode, enabled: Bool, hubVersion: String?) -> Bool {
+        !enabled || (mode == .passive(reason: outdatedHubReason) && hubVersion != nil)
     }
 
     /// Строгая проверка формы: `Kit.isNewer` считает мусор нулём, и «0.6.0abc» оказалась бы равна 0.6.0.

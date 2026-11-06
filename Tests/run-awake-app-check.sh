@@ -155,6 +155,7 @@ fake_hub_start() {
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST_EOF
+  if [ "$1" = нечитаемая ]; then plutil -remove CFBundleShortVersionString "$FAKE_HUB/Contents/Info.plist" > /dev/null; fi
   "$FAKE_HUB/Contents/MacOS/FakeHub" & FAKE_HUB_PID=$!
 }
 # fake_hub_stop <сигнал>
@@ -323,6 +324,20 @@ expect_no_assertion "старый центр снимает блокировку
 expect_line "старый центр: версия из его Info.plist" "Модуль уже работает в Utilitumus — обновите центр"
 fake_hub_stop TERM
 expect_line "старый центр вышел: активна" "Mac засыпает как обычно"
+
+echo "== версию центра не прочитать"
+command_keep_awake "$PID"
+expect_assertion "блокировка перед запуском центра" "$PID"
+fake_hub_start нечитаемая
+expect_icon "центр без версии: значок скрыт" "скрыт"
+if holds_assertion "$PID"; then ok "нет версии: включённая блокировка держится"; else bad "нет версии: блокировка снята"; fi
+expect_line "нет версии: статус честный" "Mac не уснёт"
+command_keep_awake "$PID"
+expect_no_assertion "нет версии: кнопка снимает" "$PID"
+command_keep_awake "$PID"
+expect_still_no_assertion "нет версии: новую блокировку не даёт" "$PID"
+fake_hub_stop TERM
+expect_line "центр без версии вышел: активна" "Mac засыпает как обычно"
 
 echo "== выключенная утилита при центре"
 command_keep_awake "$PID"

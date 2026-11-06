@@ -503,6 +503,37 @@ check "отказ mv: старый бандл вернулся" test -f "$REAL/C
 check "отказ mv: старый плист вернулся" has "$REAL_AGENT" "<!-- старый -->"
 same "отказ mv: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
 
+# mv отказывает и при возврате: единственная копия остаётся в .old, человек видит, где она.
+mkdir -p "$OUT/mv-stuck"
+cat > "$OUT/mv-stuck/mv" <<'EOF'
+#!/bin/bash
+case "$1" in *.new|*.old) echo "mv: отказ" >&2; exit 1 ;; esac
+exec /bin/mv "$@"
+EOF
+chmod +x "$OUT/mv-stuck/mv"
+refused "возврат не удался: причина по-русски" "прежнюю версию вернуть не удалось" \
+  env PATH="$OUT/mv-stuck:$FAKE:$PATH" HOME="$OUT/home" INSTALL_DIR="$OUT/inst" CATALOG_URL="file://$GOOD_CATALOG" "$ROOT/install.sh" awake
+check "возврат не удался: бандла на месте нет" test ! -e "$REAL"
+check "возврат не удался: копия цела в .old" test -f "$REAL.old/Contents/old-marker"
+check "возврат не удался: плист не снят" has "$REAL_AGENT" "<!-- старый -->"
+# Следующий запуск новую версию не загрузит: откат вернёт старую, только если .old пережил начало запуска.
+rm -f "$REFUSE_COUNT"
+REFUSE_BOOTSTRAP=10 refused "следующий запуск: копия из .old не удалена" "Прежняя версия возвращена" inst "$GOOD_CATALOG" awake
+check "следующий запуск: старый бандл на месте" test -f "$REAL/Contents/old-marker"
+same "следующий запуск: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
+
+# cp отказывает при возврате плиста: бандл уже вернулся, причина по-русски.
+mkdir -p "$OUT/cp-stuck"
+cat > "$OUT/cp-stuck/cp" <<'EOF'
+#!/bin/bash
+case "$1" in *old-agent.plist) echo "cp: отказ" >&2; exit 1 ;; esac
+exec /bin/cp "$@"
+EOF
+chmod +x "$OUT/cp-stuck/cp"
+refused "возврат плиста не удался: причина по-русски" "прежнюю версию launchd не загрузил" \
+  env PATH="$OUT/cp-stuck:$OUT/mv-refuses:$FAKE:$PATH" HOME="$OUT/home" INSTALL_DIR="$OUT/inst" CATALOG_URL="file://$GOOD_CATALOG" "$ROOT/install.sh" awake
+check "возврат плиста не удался: старый бандл вернулся" test -f "$REAL/Contents/old-marker"
+
 : > "$LAUNCHCTL_LOG"
 inst "$GOOD_CATALOG" awake > "$OUT/inst-write.txt" 2>&1 || { cat "$OUT/inst-write.txt"; bad "обновление install.sh упало"; }
 check "обновление: метки старой версии нет" test ! -e "$REAL/Contents/old-marker"
