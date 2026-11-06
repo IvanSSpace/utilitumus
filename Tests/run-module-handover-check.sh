@@ -11,8 +11,8 @@ OUT="${MODULE_HANDOVER_CHECK_DIR:-${TMPDIR:-/tmp}/module-handover-check}"
 # Ни один тест не имеет права дотянуться до настоящих путей и настоящей связи.
 status=0
 # Ищем `Тип.live` и `liveИмя`, а не поле `state.live` и слова вроде keepalive. `liveVerify` проверяет подпись переданного
-# бандла из папки теста и настоящих путей не трогает.
-found="$(grep -rnE '[A-Z][A-Za-z]*\.live\b|\blive[A-Z]' Tests --include='*.swift' | grep -v 'SatelliteInstaller\.liveVerify')" || status=$?
+# бандла из папки теста и настоящих путей не трогает. `BotsMonitor.liveProbe(getpid())` читает libproc про сам тест, и только с getpid().
+found="$(grep -rnE '[A-Z][A-Za-z]*\.live\b|\blive[A-Z]' Tests --include='*.swift' | grep -vE 'SatelliteInstaller\.liveVerify|BotsMonitor\.liveProbe\(getpid\(\)\)')" || status=$?
 case "$status" in
   0) echo "ПРОВАЛ: настоящие замыкания и пути в тестах:"; echo "$found"; exit 1 ;;
   1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;
@@ -33,6 +33,7 @@ cp Tests/ModuleHandoverCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" "$OUT/src/main.swift" "$OUT/src/KitDefaults.swift" \
   $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift) \
   Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
+  Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift \
   -framework SwiftUI -framework AppKit -framework Carbon

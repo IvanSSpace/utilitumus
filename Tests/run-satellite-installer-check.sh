@@ -25,7 +25,8 @@ forbid() {
 status=0
 # Ищем настоящие `.live`, `Тип.live` и `liveИмя`; поле `state.live` и слова вроде keepalive сюда не попадают.
 # liveVerify только читает бандл и не меняет ничего, а проверка помощников должна идти через настоящую.
-found="$(grep -rnE '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive[A-Z(]' Tests --include='*.swift' | grep -v 'SatelliteInstaller\.liveVerify')" || status=$?
+# `BotsMonitor.liveProbe(getpid())` читает libproc про сам тест, и только с getpid().
+found="$(grep -rnE '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive[A-Z(]' Tests --include='*.swift' | grep -vE 'SatelliteInstaller\.liveVerify|BotsMonitor\.liveProbe\(getpid\(\)\)')" || status=$?
 case "$status" in
   0) echo "ПРОВАЛ: настоящие замыкания и пути в тестах:"; echo "$found"; exit 1 ;;
   1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;

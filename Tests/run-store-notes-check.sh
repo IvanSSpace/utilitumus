@@ -26,7 +26,8 @@ case "$status" in
   1) echo "ok   разметки и ссылок в Сторе нет" ;;
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
-same "настоящий каталог пуст и не изменён" "$(cat Catalog/catalog.json)" '{"schema":1,"apps":[]}'
+# Каталог опубликован и меняется только выпуском: проверка его не трогает, сверка в самом конце.
+CATALOG_BEFORE="$(shasum -a 256 < Catalog/catalog.json)"
 same "формат каталога прежний" "$(sed -n 's/.*catalog.schema == \([0-9]*\).*/\1/p' Sources/Kit/SatelliteCatalog.swift)" 1
 
 # build <папка с исходниками> <папка стенда> [флаги swiftc]
@@ -70,6 +71,8 @@ if [ -z "${STORE_NOTES_REUSE_BASE:-}" ] || [ ! -d "$OUT/base/png" ]; then
   [ -s "$OUT/base/notes.diff" ] || { echo "ПРОВАЛ: коммит $NOTES_COMMIT не меняет Sources"; exit 1; }
   (cd "$OUT/base/tree" && patch -R -p1 -F3 --no-backup-if-mismatch < "$OUT/base/notes.diff" > "$OUT/base/patch.log") \
     || { echo "ПРОВАЛ: заметки не отделились от нынешних исходников"; cat "$OUT/base/patch.log"; exit 1; }
+  # «Обновить всё» появилось позже коммита заметок и читает те же поля каталога: в BASE строка обновления без заметок.
+  sed -i '' 's/notes: held\.notes,/notes: [],/; s/notes: app\.notes,/notes: [],/' "$OUT/base/tree/Sources/App/Store/UpdateAll.swift"
   ! grep -rq 'updateNotes\|StoreUpdateNotes' "$OUT/base/tree/Sources" || { echo "ПРОВАЛ: в BASE остался код заметок"; exit 1; }
   echo "== сборка из HEAD без кода заметок"
   build "$OUT/base/tree" "$OUT/base" -D BASE_BUILD
@@ -80,3 +83,4 @@ echo "== нынешняя сборка"
 rm -rf "$OUT/new"
 build "$ROOT" "$OUT/new"
 run "$OUT/new"
+same "настоящий каталог не изменён" "$(shasum -a 256 < "$ROOT/Catalog/catalog.json")" "$CATALOG_BEFORE"

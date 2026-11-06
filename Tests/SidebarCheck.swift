@@ -155,7 +155,7 @@ func pure() {
 
 // MARK: - Настройки и переход
 
-@MainActor func live() async {
+@MainActor func settingsFlow() async {
     print("== настройки: закрепление, скрытие, порядок")
     let defaults = Kit.defaults
     let modules = ModuleManager.shared
@@ -417,7 +417,7 @@ func pure() {
         loadCatalog: { Data(#"{"schema":1,"apps":[]}"#.utf8) },
         hubVersion: "0.6.0", modules: .shared)
     pure()
-    await live()
+    await settingsFlow()
     await scenes()
     Kit.defaults.removeObject(forKey: DSTheme.storageKey)
 }

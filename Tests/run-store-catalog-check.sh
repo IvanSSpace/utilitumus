@@ -21,19 +21,36 @@ forbid() {
 }
 # Ни один тест не имеет права дотянуться до настоящих путей и настоящей связи.
 # Ищем настоящие `.live`, `Тип.live` и `liveИмя`; поле `state.live` и слова вроде keepalive сюда не попадают.
-# Кроме `liveVerify`: он только читает бандл (HelperIdentityCheck).
-forbid '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive([A-UW-Z(]|V[^e])' 'настоящие замыкания и пути в тестах' -r Tests --include='*.swift'
+# Кроме `liveVerify`: он только читает бандл (HelperIdentityCheck). И кроме `BotsMonitor.liveProbe(getpid())`: читает libproc про сам тест.
+status=0
+found="$(grep -rnE '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive([A-UW-Z(]|V[^e])' Tests --include='*.swift')" || status=$?
+if [ "$status" = 0 ]; then found="$(printf '%s\n' "$found" | grep -vF 'BotsMonitor.liveProbe(getpid())')" || status=$?; fi
+case "$status" in
+  0) echo "ПРОВАЛ: настоящие замыкания и пути в тестах:"; echo "$found"; exit 1 ;;
+  1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;
+  *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
+esac
 
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/fixture/Awake.app/Contents/MacOS"
 
-# Вкладки категорий без замков и без запрета нажатия (версия 0.5.3).
-sed -n '/^private struct DSCategoryTab: View/,/^}/p' Sources/App/Design/Shell.swift > "$OUT/tab.txt"
-if [ ! -s "$OUT/tab.txt" ]; then
-  echo "ПРОВАЛ: не найдена вкладка категории"
+# Категории без замков и без запрета нажатия (версия 0.5.3): запертое выглядело как поломка, а ставить модуль надо с плитки.
+# Вкладок категорий больше нет: категории — ряды витрины Стора, вместо вкладок боковая панель.
+: > "$OUT/tab.txt"
+for view in StoreShelf StoreTile StoreTileInstall; do
+  sed -n "/^private struct $view: View/,/^}/p" Sources/App/Store/StoreView.swift > "$OUT/$view.txt"
+  if [ ! -s "$OUT/$view.txt" ]; then
+    echo "ПРОВАЛ: не найден вид $view"
+    exit 1
+  fi
+  cat "$OUT/$view.txt" >> "$OUT/tab.txt"
+done
+forbid 'systemName: "lock|\.disabled\(' 'замок или запрет в рядах Стора и на плитке' "$OUT/tab.txt"
+forbid 'systemName: "lock|\.disabled\(' 'замок или запрет в боковой панели' Sources/App/Design/SidebarView.swift
+if ! grep -q 'store\.install(module)' "$OUT/StoreTileInstall.txt" || ! grep -q 'StoreTileInstall(' "$OUT/StoreTile.txt"; then
+  echo "ПРОВАЛ: на плитке Стора нет кнопки установки"
   exit 1
 fi
-forbid 'systemName: "lock|\.disabled\(' 'замок или запрет на вкладке категории' "$OUT/tab.txt"
 
 # Код Kit вне центра читал бы настоящий домен local.utilitumus: здесь Kit.defaults — домен самого бинарника.
 sed 's/Bundle\.main\.bundleIdentifier == hubBundleID/true/' Sources/Kit/KitDefaults.swift > "$OUT/src/KitDefaults.swift"

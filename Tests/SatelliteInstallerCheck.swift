@@ -37,7 +37,14 @@ func catalogChecks() {
     check(one?.apps == [CatalogApp(id: "awake", version: "1.0.0", minHub: "0.6.0", url: URL(string: "https://example.com/Awake.zip")!, sha256: "ab", sizeMB: 2)], "хороший каталог: поля приложения")
 
     let repo = (try? Data(contentsOf: repoCatalog)).flatMap { try? SatelliteCatalog.decode($0) }
-    check(repo?.schema == 1 && repo?.apps.isEmpty == true, "Catalog/catalog.json: schema 1, пустой")
+    // Каталог опубликован с 0.6.0: настоящий файл читается этим же кодом, и каждая запись пригодна для установки.
+    let published = repo?.apps ?? []
+    check(repo?.schema == 1 && !published.isEmpty, "Catalog/catalog.json: schema 1, не пустой")
+    check(Set(published.map(\.id)).count == published.count, "Catalog/catalog.json: id не повторяются")
+    for app in published {
+        check(app.url.scheme == "https" && app.sha256.range(of: "^[0-9a-f]{64}\\z", options: .regularExpression) != nil,
+              "Catalog/catalog.json: \(app.id): https и sha256")
+    }
 
     check((try? SatelliteCatalog.decode(Data("{не json".utf8))) == nil, "мусор — ошибка")
     func decodeError(_ data: Data) -> SatelliteCatalogError? {
