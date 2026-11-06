@@ -375,7 +375,10 @@ func reply(_ data: Data) -> LinkReply<SoundState>? { try? JSONDecoder().decode(L
     answer = reply(module.handle(lock))
     check(answer?.error != nil && LockState.shared.isLocked, "пассивная: действие отвергнуто")
 
-    // Пока модуль стоял, центр поменял настройки: после start их видно.
+    // Пока модуль стоял, центр поменял настройки: после start их видно. Исходные значения другие, иначе проверка пуста.
+    PrimaryOutputStore.shared.select(.builtIn)
+    PrimaryInputStore.shared.select(nil)
+    LockState.shared.isLocked = true
     Kit.defaults.set("system", forKey: "UtilitumusPrimaryOutput")
     Kit.defaults.set(false, forKey: "MicGuardBluetoothLocked")
     Kit.defaults.set("usb-mic", forKey: "UtilitumusPrimaryInput")
