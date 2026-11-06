@@ -101,7 +101,9 @@ final class BrowserRouter {
 
     func open(_ url: URL, in browser: InstalledBrowser, private isPrivate: Bool) {
         // Стенд не открывает ссылки в настоящих браузерах автора.
+        #if KIT_TEST_DEFAULTS
         if Kit.standRefuses("открыть ссылку в \(browser.name)") { return }
+        #endif
         if isPrivate, let flags = BrowserPrivateMode.arguments(for: browser.id) {
             openPrivately(url, in: browser, flags: flags)
             return
