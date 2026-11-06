@@ -31,15 +31,7 @@ enum SatelliteSelfUpdate {
         }
         let staged = work.appendingPathComponent(name)
 
-        // Режимы файлов подпись не запечатывает.
-        let walker = fm.enumerator(atPath: staged.path)
-        while let relative = walker?.nextObject() as? String {
-            let attributes = walker?.fileAttributes ?? [:]
-            guard attributes[.type] as? FileAttributeType == .typeSymbolicLink
-                    || (attributes[.posixPermissions] as? Int).map({ $0 & 0o022 == 0 }) == true else {
-                throw KitSigning.Failure("В обновлении запись разрешена группе или всем: \(relative)")
-            }
-        }
+        try KitSigning.rejectWritableModes(in: staged)
 
         let identifier = KitLink.bundleID(app.id)
         try KitSigning.verifySignature(of: staged, identifier: identifier, strict: true)

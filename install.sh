@@ -193,6 +193,9 @@ LINKS="$APP/Contents/Helpers/Utilitumus Links.app"
 if [ -d "$LINKS" ]; then
   verify_signature "$LINKS" "local.utilitumus.links" || refuse "Utilitumus Links.app"
 fi
+# Режимы файлов подпись не запечатывает.
+WRITABLE="$(find "$APP" ! -type l \( -perm -020 -o -perm -002 \))"
+[ -z "$WRITABLE" ] || fail "В архиве запись разрешена группе или всем: ${WRITABLE}"
 VERSION=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString)
 
 # Запущенную версию закрываем штатно: она вернёт вентиляторы в «Авто».

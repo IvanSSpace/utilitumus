@@ -32,6 +32,25 @@ enum KitSigning {
         throw Failure("Подпись \(path.lastPathComponent) не от автора Utilitumus: \(lastError?.localizedDescription ?? "")")
     }
 
+    /// Режимы файлов подпись не запечатывает: перепакованная настоящая сборка с правами 0777
+    /// пройдёт проверку подписи, а файлы приложения сможет менять другая учётная запись.
+    static func rejectWritableModes(in bundle: URL) throws {
+        let fm = FileManager.default
+        func safe(_ attributes: [FileAttributeKey: Any]) -> Bool {
+            attributes[.type] as? FileAttributeType == .typeSymbolicLink
+                || (attributes[.posixPermissions] as? Int).map { $0 & 0o022 == 0 } == true
+        }
+        guard safe(try fm.attributesOfItem(atPath: bundle.path)) else {
+            throw Failure("В обновлении запись разрешена группе или всем: \(bundle.lastPathComponent)")
+        }
+        let walker = fm.enumerator(atPath: bundle.path)
+        while let relative = walker?.nextObject() as? String {
+            guard safe(walker?.fileAttributes ?? [:]) else {
+                throw Failure("В обновлении запись разрешена группе или всем: \(relative)")
+            }
+        }
+    }
+
     /// Запускает системную программу и ждёт её. Код выхода не 0 — ошибка с текстом из stderr.
     static func run(_ tool: String, _ args: [String]) throws {
         let process = Process()
