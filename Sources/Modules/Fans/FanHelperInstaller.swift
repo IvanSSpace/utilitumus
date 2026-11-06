@@ -50,7 +50,13 @@ final class FanHelperInstaller: ObservableObject {
 
     init(
         files: @escaping () -> (binary: FileInfo?, plist: FileInfo?) = {
-            (FanHelperInstaller.fileInfo(FanHelperInstaller.installedPath), FanHelperInstaller.fileInfo(FanHelperInstaller.plistPath))
+            #if KIT_TEST_DEFAULTS
+            // Стенд не смотрит в настоящие файлы службы: на этом Mac может стоять прежний помощник, и тогда стенд
+            // получил бы «Доступ нужно обновить», окно пароля на удаление и запись в настоящий SMC через прежний помощник.
+            return (nil, nil)
+            #else
+            return (FanHelperInstaller.fileInfo(FanHelperInstaller.installedPath), FanHelperInstaller.fileInfo(FanHelperInstaller.plistPath))
+            #endif
         },
         probeVersion: @escaping @Sendable () -> String? = { FanHelperClient.version() },
         clientVersion: String = FanLink.helperVersion,

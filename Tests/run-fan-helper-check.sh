@@ -396,8 +396,11 @@ role hub "quit silent"
 agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
 role hub "quit stuck"
 sleep 6
-[ "$(cat "$LOG")" = "F0Md=0
+# Договор службы: поставленные в очередь команды клиента доделываются первыми, в порядке очереди. Потом, когда клиента
+# нет, служба сама отдаёт зависшие ручные вентиляторы (выход по простою) — это только дополнительные записи «Авто».
+[ "$(head -n 2 "$LOG")" = "F0Md=0
 F1Md=0" ] || fail "клиент вышел, служба не доделала команды: $(cat "$LOG")"
+[ -z "$(tail -n +3 "$LOG" | grep -vxE 'F[01]Md=0')" ] || fail "после команд клиента служба записала не «Авто»: $(cat "$LOG")"
 ok "клиент вышел, служба доделала команды обоим вентиляторам"
 agent daemon
 role hub "quit busy"
@@ -479,7 +482,8 @@ echo "== перегрев: служба сама возвращает «Авто
 /usr/bin/grep -q 'safetyRelease = FanLink.thermalRelease' Sources/Modules/Fans/FanController.swift || fail "клиент не берёт порог возврата из FanLink"
 rm -f "$OUT/temp-cpu" "$OUT/temp-gpu"
 agent daemon
-echo 50 > "$OUT/temp-cpu"
+# Список датчиков служба составляет при первом удержании (на настоящем SMC они не появляются и не пропадают), поэтому оба файла есть сразу.
+echo 50 > "$OUT/temp-cpu"; echo 50 > "$OUT/temp-gpu"
 "$OUT/hub" hold-manual 8 >/dev/null &
 HOLD=$!
 sleep 0.5

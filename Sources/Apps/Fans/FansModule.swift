@@ -88,16 +88,19 @@ final class FansModule: SatelliteModule {
         ]
     }
 
+    /// Те же слова, что у шага встроенного модуля (`Module.setupSteps`): на экране центра они не должны отличаться.
+    /// Устаревший помощник команд не получает, но обновляется плашкой на экране модуля: без этого шага экран открыт.
     var setupSteps: [LinkSetupStep] {
-        [LinkSetupStep(id: "helper", title: "Доступ к вентиляторам",
-                       why: "Одна служба с правами администратора: только она может менять обороты. macOS спросит пароль один раз.",
-                       icon: "lock.shield", kind: .permission, buttonTitle: "Дать доступ…",
-                       verifiable: true, done: installer.status == .ready || installer.status == .installed)]
+        [LinkSetupStep(id: Self.helperStep, title: "Помощник для вентиляторов", why: "Пароль администратора, один раз",
+                       icon: "key.fill", kind: .permission, buttonTitle: "Дать доступ…",
+                       verifiable: true, done: installer.status != .notInstalled, error: installer.lastError)]
     }
+
+    private static let helperStep = "fans.helper"
 
     /// Окно пароля идёт не на главном потоке (`FanHelperInstaller.install`), поэтому ответ уходит сразу.
     func performSetupStep(_ id: String) -> String? {
-        guard id == "helper" else { return "Такого шага нет" }
+        guard id == Self.helperStep else { return "Такого шага нет" }
         guard installer.status == .notInstalled || installer.status == .outdated else { return nil }
         installer.install()
         return nil

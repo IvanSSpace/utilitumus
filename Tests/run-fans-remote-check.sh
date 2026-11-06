@@ -13,7 +13,10 @@ build_utility
 build_module_hub Tests/FansRemoteCheck.swift
 
 echo "== утилита: пассивная остановлена"
+# Пассивность решает центр: запущен, не старый и модуль у него включён, а передачи ещё не было.
 defaults write "$SUITE" Test.HubRunning -bool true
+defaults write "$SUITE" Test.HubVersion -string 0.6.0
+defaults write "$SUITE" "ModuleOn.$ID" -bool true
 defaults write "$SUITE" "App.$ID.Enabled" -bool true
 start_agent
 sleep 1
