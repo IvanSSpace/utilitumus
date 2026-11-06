@@ -13,15 +13,23 @@ OUT="${SIDEBAR_DRAG_CHECK_DIR:-${TMPDIR:-/tmp}/sidebar-drag-check}"
 BIN="sidebar-drag-stand"
 SUITE="local.utilitumus.test.kit.sidebar-drag"
 
+# Инкрементальная сборка: кэш рядом с папкой проверки, а не в ней (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="${SIDEBAR_DRAG_CACHE:-$OUT-cache}"
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/work"
-sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
-cp Tests/SidebarDragCheck.swift "$OUT/src/main.swift"
-# shellcheck disable=SC2046
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SidebarDragStand -o "$OUT/$BIN" \
-  "$OUT/src/main.swift" "$OUT/src/UtilitumusApp.swift" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-    -not -name UtilitumusApp.swift) \
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$CACHE/src/UtilitumusApp.swift.new"
+cmp -s "$CACHE/src/UtilitumusApp.swift.new" "$CACHE/src/UtilitumusApp.swift" || mv "$CACHE/src/UtilitumusApp.swift.new" "$CACHE/src/UtilitumusApp.swift"
+rm -f "$CACHE/src/UtilitumusApp.swift.new"
+cmp -s Tests/SidebarDragCheck.swift "$CACHE/src/main.swift" || cp Tests/SidebarDragCheck.swift "$CACHE/src/main.swift"
+FILES=("$CACHE/src/main.swift" "$CACHE/src/UtilitumusApp.swift")
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
+  -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SidebarDragStand -o "$OUT/$BIN" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 defaults delete "$BIN" >/dev/null 2>&1 || true
