@@ -75,7 +75,8 @@ actor LoadEngine {
         let assigned = attribution.assign(procs, tree: tree, roots: rootList)
         // Процессы ботов из bots.toml трогают только их кнопки.
         let botFence = BotRegistry.fence(BotRegistry.load(), procs: procs, tree: tree, launchd: launchd.current())
-        let fence = Protection.fence(procs: procs, tree: tree, extra: botFence)
+        let own = Protection.ownPids()
+        let fence = Protection.fence(procs: procs, tree: tree, ownPids: own, extra: botFence)
         let planner = StopPlanner(procs: procs, fence: fence, tree: tree)
 
         var groups = Grouping.groups(procs: procs, assigned: assigned, stoppable: planner.canStop)
@@ -97,11 +98,16 @@ actor LoadEngine {
                 now: Date().timeIntervalSince1970, sessions: sessions.claude))
         }
         let me = getpid()
+        // Строка «Utilitumus · память · CPU»: всё наше вместе (центр, утилиты, помощники), а не только процесс,
+        // в котором работает модуль: в утилите getpid() — это одна утилита.
+        let family = own.union([me])
+        let familyMem = family.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }
+        let familyCPUs = family.compactMap { procs[$0]?.cpuPercent }
+        let familyCPU = familyCPUs.isEmpty ? nil : familyCPUs.reduce(0, +)
         let snapshot = LoadSnapshot(
             timestamp: Date(), host: SystemMemory.host, memory: memory, procs: procs, tree: tree, assigned: assigned,
             groups: groups, map: map, advice: advice, sessions: sessions, disk: disk.card(swap24: history.swapWrittenLastDay()), fence: fence,
-            launchd: launchd.current(), roots: rootList, selfPid: me, selfMemMB: procs[me]?.mem ?? 0,
-            selfCPU: procs[me]?.cpuPercent,
+            launchd: launchd.current(), roots: rootList, selfPid: me, selfMemMB: familyMem, selfCPU: familyCPU,
             measureMillis: Double(DispatchTime.now().uptimeNanoseconds - started) / 1e6)
         return snapshot
     }
@@ -115,6 +121,9 @@ actor LoadEngine {
     }
 
     func historyWindow() -> HistoryWindow { history.window() }
+
+    /// Модуль остановлен: больше не пишем историю, замок отдаём следующему.
+    func releaseHistory() { history.releaseWriter() }
 
     /// «Обновить»: заодно перечитать `top` (память root-процессов), не дожидаясь пяти минут.
     func refreshNow() -> LoadSnapshot {

@@ -75,7 +75,7 @@ struct StopPlan: Sendable, Identifiable {
         var id: Int32 { pid }
     }
 
-    struct Kept: Sendable, Identifiable {
+    struct Kept: Sendable, Codable, Equatable, Identifiable {
         var name: String
         var why: String
         var id: String { "\(name)|\(why)" }
@@ -94,6 +94,13 @@ struct StopPlan: Sendable, Identifiable {
     var targets: [Target]
     var kept: [Kept]
     var totalMB: Double
+
+    /// Что показать на подтверждении.
+    var prompt: LoadStopPrompt {
+        LoadStopPrompt(id: id, title: title, message: message,
+                       targets: targets.map { AgentTarget(pid: $0.pid, name: $0.name, memMB: $0.memMB) },
+                       kept: kept, totalMB: totalMB)
+    }
 }
 
 struct StopPlanner {

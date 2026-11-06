@@ -1,7 +1,7 @@
 import Foundation
 
 /// Доля сегмента полосы памяти: macOS, программа или «прочее».
-struct SplitRow: Sendable, Identifiable {
+struct SplitRow: Sendable, Codable, Equatable, Identifiable {
     /// «macos», «rest» или id группы.
     var key: String
     var name: String
@@ -12,7 +12,7 @@ struct SplitRow: Sendable, Identifiable {
 }
 
 /// Кандидат в «Что можно освободить»: группа с её памятью в RAM и сжатой.
-struct FreeCandidate: Sendable, Identifiable {
+struct FreeCandidate: Sendable, Codable, Equatable, Identifiable {
     var key: String
     var name: String
     var ramMB: Int
@@ -25,7 +25,7 @@ struct FreeCandidate: Sendable, Identifiable {
     var totalMB: Int { ramMB + compressedMB }
 }
 
-struct RamSplitRow: Sendable, Identifiable {
+struct RamSplitRow: Sendable, Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var kind: GroupKind
@@ -33,16 +33,18 @@ struct RamSplitRow: Sendable, Identifiable {
     var swappedMB: Int
 }
 
-struct CompressedRow: Sendable, Identifiable {
+struct CompressedRow: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var name: String
     var group: String
     var mb: Int
     var stoppable: Bool
+    var uniqueID: UInt64 = 0
     var id: Int32 { pid }
+    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
 }
 
-struct WiredRow: Sendable, Identifiable {
+struct WiredRow: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var name: String
     var mb: Double
@@ -51,7 +53,7 @@ struct WiredRow: Sendable, Identifiable {
 
 /// Карта памяти: из чего состоит «занято» и что можно освободить. Разбор по группам — оценки
 /// процессов, они с vm_stat один в один не сходятся, поэтому доли подогнаны под итоги.
-struct MemoryMap: Sendable {
+struct MemoryMap: Sendable, Codable, Equatable {
     var macosMB = 0
     var programsMB = 0
     var cacheMB = 0

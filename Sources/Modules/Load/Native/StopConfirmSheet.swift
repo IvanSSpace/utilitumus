@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Подтверждение остановки: что именно будет остановлено, что не тронем, и сколько это освободит.
-struct StopConfirmSheet: View {
-    @ObservedObject var store: LoadStore
-    let plan: StopPlan
+struct StopConfirmSheet<Model: LoadModel>: View {
+    @ObservedObject var store: Model
+    let plan: LoadStopPrompt
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -49,7 +49,7 @@ struct StopConfirmSheet: View {
                 Button("Отмена") { store.cancelStop() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(store.stopRunning)
-                Button("Остановить", role: .destructive) { store.confirmStop() }
+                Button("Остановить", role: .destructive) { store.confirmStop(plan.id) }
                     .disabled(store.stopRunning)
             }
         }

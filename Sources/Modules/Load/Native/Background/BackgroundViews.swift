@@ -230,9 +230,9 @@ struct JournalSection: View {
 
 /// Подтверждение действия над агентом или ботом: что именно будет сделано, какие процессы остановятся
 /// и какая команда запустится.
-struct BackgroundConfirmSheet: View {
-    @ObservedObject var background: BackgroundStore
-    let plan: BackgroundPlan
+struct BackgroundConfirmSheet<Background: LoadBackgroundModel>: View {
+    @ObservedObject var background: Background
+    let plan: LoadBackgroundPrompt
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -283,7 +283,7 @@ struct BackgroundConfirmSheet: View {
                 Button("Отмена") { background.cancel() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(background.running)
-                Button(plan.confirmTitle, role: plan.destructive ? .destructive : nil) { background.confirm() }
+                Button(plan.confirmTitle, role: plan.destructive ? .destructive : nil) { background.confirm(plan.id) }
                     .disabled(background.running)
             }
         }

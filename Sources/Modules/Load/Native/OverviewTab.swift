@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Вкладка «Обзор»: итоги, память, что выключить. В «Просто» — только главное.
-struct OverviewTab: View {
-    @ObservedObject var store: LoadStore
+struct OverviewTab<Model: LoadModel>: View {
+    @ObservedObject var store: Model
     let mode: LoadViewMode
     @Binding var drill: MemoryPart?
     var openMemory: () -> Void
@@ -11,7 +11,7 @@ struct OverviewTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
-            if let s = store.snapshot {
+            if let s = store.measure {
                 if mode == .full { full(s) } else { simple(s) }
                 FooterSection(host: s.host, live: store.live)
             } else {
@@ -21,7 +21,7 @@ struct OverviewTab: View {
     }
 
     @ViewBuilder
-    private func full(_ s: LoadSnapshot) -> some View {
+    private func full(_ s: LoadMeasure) -> some View {
         let m = s.memory
         DSSection("Итоги") {
             LoadLine(divider: false) {
@@ -32,7 +32,7 @@ struct OverviewTab: View {
                             subtitle: "\(Fmt.percent(Double(m.compressedMB), of: Double(m.usedMB))) занятого")
                     KPITile(title: "Своп", value: Fmt.gb(Double(m.swapUsedMB)), unit: "GB",
                             subtitle: "из \(Fmt.gb(Double(m.swapTotalMB))) GB · \(Fmt.percent(Double(m.swapUsedMB), of: Double(m.swapTotalMB)))",
-                            warn: LoadScreen.swapIsHot(m))
+                            warn: LoadText.swapIsHot(m))
                     AIMemoryKPI(ai: s.sessions.ai, open: $aiOpen)
                     let freeable = s.advice.filter { $0.stopPid != nil }
                     let freeMB = Double(freeable.reduce(0) { $0 + $1.savesMB })
@@ -44,16 +44,16 @@ struct OverviewTab: View {
         }
         DSSection("Память", trailing: "\(Fmt.gb(Double(m.totalMB))) GB") {
             LoadLine(divider: false) {
-                MemoryCard(snapshot: s, palette: store.palette, mode: .full, drill: $drill) { store.requestStop(process: $0) }
+                MemoryCard(snapshot: s, palette: store.palette, mode: .full, drill: $drill) { store.requestStop(.process($0)) }
             }
         }
-        AdviceSection(items: s.advice, limit: 5, onStop: { store.requestStop(process: $0) }, onMore: openMemory, moreTitle: "в «Памяти»")
+        AdviceSection(items: s.advice, limit: 5, onStop: { store.requestStop(.process($0)) }, onMore: openMemory, moreTitle: "в «Памяти»")
         SessionsCompactSection(sessions: s.sessions.claude, now: s.timestamp.timeIntervalSince1970)
         BackgroundCompactSection(background: store.background, open: openBackground)
     }
 
     @ViewBuilder
-    private func simple(_ s: LoadSnapshot) -> some View {
+    private func simple(_ s: LoadMeasure) -> some View {
         DSSection("Память") {
             LoadLine(divider: false) {
                 MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }
@@ -62,8 +62,8 @@ struct OverviewTab: View {
             LoadLine { Text(simpleDiskLine(s.disk)).font(.caption).foregroundStyle(.secondary).monospacedDigit() }
         }
         TopProgramsSection(map: s.map)
-        AdviceSection(items: s.advice, limit: 3, onStop: { store.requestStop(process: $0) }, onMore: openMemory, moreTitle: "в «Подробно»")
-        SessionsSimpleSection(sessions: s.sessions.claude) { store.requestStop(session: $0) }
+        AdviceSection(items: s.advice, limit: 3, onStop: { store.requestStop(.process($0)) }, onMore: openMemory, moreTitle: "в «Подробно»")
+        SessionsSimpleSection(sessions: s.sessions.claude) { store.requestStop(.session($0.rowID)) }
     }
 }
 

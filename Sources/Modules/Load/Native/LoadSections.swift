@@ -6,7 +6,7 @@ struct AdviceSection: View {
     let items: [AdviceItem]
     /// Сколько показать; nil — все.
     var limit: Int?
-    var onStop: (Int32) -> Void
+    var onStop: (LoadRowID) -> Void
     var onMore: (() -> Void)?
     var moreTitle = ""
 
@@ -27,12 +27,12 @@ struct AdviceSection: View {
                 DSRow(icon: icon(item.severity), title: item.title, subtitle: item.detail) {
                     HStack(spacing: 8) {
                         SeverityBadge(severity: item.severity)
-                        if let pid = item.stopPid {
+                        if let stopID = item.stopID {
                             if item.savesMB > 0 {
                                 Text("−\(Fmt.mb(item.savesMB))").font(.callout).foregroundStyle(.secondary).monospacedDigit()
                                     .help("Освободит \(Fmt.mb(item.savesMB))")
                             }
-                            DSButton("Остановить…", small: true) { onStop(pid) }
+                            DSButton("Остановить…", small: true) { onStop(stopID) }
                         }
                     }
                 }
@@ -152,12 +152,12 @@ func simpleDiskLine(_ d: DiskCard) -> String {
 struct GroupsSection: View {
     let kind: GroupKind
     let groups: [ProcessGroup]
-    let snapshot: LoadSnapshot
+    let snapshot: LoadMeasure
     @Binding var expanded: Set<String>
     @Binding var showAll: Set<String>
     /// Виды, у которых показан весь список, а не первые `Self.initialLimit` групп.
     @Binding var fullKinds: Set<GroupKind>
-    var onStopProcess: (Int32) -> Void
+    var onStopProcess: (LoadRowID) -> Void
     var onStopGroup: (String) -> Void
 
     /// Сколько групп каждого вида видно сразу: сотни строк разом перерисовываются заметно.
@@ -180,7 +180,7 @@ struct GroupsSection: View {
                 }
                 if open {
                     LoadLine(divider: false) {
-                        GroupBody(group: g, procs: snapshot.procs, showAll: Binding(
+                        GroupBody(group: g, showAll: Binding(
                             get: { showAll.contains(g.id) },
                             set: { if $0 { showAll.insert(g.id) } else { showAll.remove(g.id) } }),
                             onStopProcess: onStopProcess, onStopGroup: onStopGroup)
@@ -230,10 +230,8 @@ private struct GroupHeader: View {
 
 private struct GroupBody: View {
     let group: ProcessGroup
-    /// Только процессы: из всего снимка группе нужны лишь они.
-    let procs: [Int32: LoadProcess]
     @Binding var showAll: Bool
-    var onStopProcess: (Int32) -> Void
+    var onStopProcess: (LoadRowID) -> Void
     var onStopGroup: (String) -> Void
 
     var body: some View {
@@ -241,7 +239,7 @@ private struct GroupBody: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { i, m in
                 // В «top» память подогнана под итог группы, в полном списке — как есть.
-                ProcessRow(member: m, process: procs[m.pid], mb: showAll ? m.memMB : group.topMB[safe: i], onStop: onStopProcess)
+                ProcessRow(member: m, mb: showAll ? m.memMB : group.topMB[safe: i], onStop: onStopProcess)
             }
             if group.restCount > 0 || showAll {
                 HStack {
@@ -272,40 +270,30 @@ private struct GroupBody: View {
 
 private struct ProcessRow: View {
     let member: GroupMember
-    let process: LoadProcess?
     let mb: Int?
-    var onStop: (Int32) -> Void
-
-    private static let kindNames: [ProcessKind: String] = [.devServer: "dev-сервер", .build: "сборка", .mcp: "MCP", .shell: "шелл"]
+    var onStop: (LoadRowID) -> Void
 
     var body: some View {
-        let p = process
         HStack(spacing: 8) {
             Text(String(member.pid)).font(.caption.monospaced()).foregroundStyle(.secondary).frame(width: 56, alignment: .trailing)
             VStack(alignment: .leading, spacing: 0) {
-                Text(p.map { Kinds.label($0) } ?? "—").lineLimit(1).truncationMode(.middle)
-                if let why = whyText(p) {
+                Text(member.label).lineLimit(1).truncationMode(.middle)
+                if let why = member.note {
                     Text(why).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer()
-            if let cpu = p?.cpuPercent, cpu >= 1 {
+            if let cpu = member.cpuPercent, cpu >= 1 {
                 Text("\(Int(cpu.rounded()))%").font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     .help("Загрузка процессора (100% = одно ядро)")
             }
             Text(mb.map { Fmt.mb($0) } ?? "—").monospacedDigit().frame(width: 76, alignment: .trailing)
             if member.stoppable {
-                StopButton(help: "Остановить") { onStop(member.pid) }
+                StopButton(help: "Остановить") { onStop(member.rowID) }
             } else {
                 StopButton.gap
             }
         }
         .padding(.vertical, 2)
-    }
-
-    private func whyText(_ p: LoadProcess?) -> String? {
-        guard let p else { return nil }
-        if Kinds.isClaude(p) { return "сессия Claude" }
-        return Self.kindNames[Kinds.childKind(p)]
     }
 }

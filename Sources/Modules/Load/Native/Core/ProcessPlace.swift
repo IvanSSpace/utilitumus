@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 /// Где запущен процесс: проект (папка с `.git` или `package.json`) и полный путь к рабочей папке.
-struct ProcessPlace: Sendable, Equatable {
+struct ProcessPlace: Sendable, Codable, Equatable {
     /// Имя папки проекта, у домашней папки — пусто.
     var project: String
     /// Рабочая папка с `~` вместо домашней.

@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 /// Готовый список для экрана: сторонние агенты launchd и боты из bots.toml.
-struct BackgroundData: Sendable {
+struct BackgroundData: Sendable, Codable, Equatable {
     var agents: [AgentItem] = []
     var bots: [BotItem] = []
 
@@ -25,7 +25,7 @@ enum BackgroundCollector {
 /// Состояние вкладки «Фоновое»: список, ожидающее подтверждения действие, журнал.
 /// Список обновляется вместе с замером (раз в 3 с, пока экран открыт); пустой список прячет вкладку.
 @MainActor
-final class BackgroundStore: ObservableObject {
+final class BackgroundStore: LoadBackgroundModel {
     @Published private(set) var data = BackgroundData()
     /// Действие, ждущее подтверждения.
     @Published var pending: BackgroundPlan?
@@ -35,7 +35,9 @@ final class BackgroundStore: ObservableObject {
     /// Результат действия — наверх, в баннер экрана «Нагрузка».
     var onFinish: ((StopResult) -> Void)?
 
-    private let executor = BackgroundExecutor()
+    private let collect: @Sendable (LoadSnapshot) -> BackgroundData
+    private let execute: @Sendable (BackgroundPlan) -> StopResult
+    private let readJournal: @Sendable () -> [ActionLog.Entry]
     private var collecting = false
     private var queued: LoadSnapshot?
     private var lastSnapshot: LoadSnapshot?
@@ -46,7 +48,17 @@ final class BackgroundStore: ObservableObject {
 
     static let idleInterval: TimeInterval = 15
 
-    var hasContent: Bool { !data.isEmpty }
+    /// Параметры — для проверок: они не должны читать настоящий launchd и что-либо запускать.
+    init(collect: (@Sendable (LoadSnapshot) -> BackgroundData)? = nil,
+         execute: (@Sendable (BackgroundPlan) -> StopResult)? = nil,
+         readJournal: (@Sendable () -> [ActionLog.Entry])? = nil) {
+        let executor = BackgroundExecutor()
+        self.collect = collect ?? { BackgroundCollector.collect($0) }
+        self.execute = execute ?? { executor.execute($0) }
+        self.readJournal = readJournal ?? { ActionLog.recent() }
+    }
+
+    var prompt: LoadBackgroundPrompt? { pending?.prompt }
 
     /// Экран сообщает, открыта ли вкладка «Фоновое». При открытии список собирается сразу.
     func setTabOpen(_ open: Bool) {
@@ -64,7 +76,8 @@ final class BackgroundStore: ObservableObject {
         collecting = true
         lastCollect = Date()
         Task {
-            let d = await Task.detached(priority: .utility) { BackgroundCollector.collect(s) }.value
+            let collect = collect
+            let d = await Task.detached(priority: .utility) { collect(s) }.value
             data = d
             collecting = false
             if let q = queued {
@@ -78,7 +91,8 @@ final class BackgroundStore: ObservableObject {
     func forget() { LaunchState.shared.forget() }
 
     func reloadJournal() {
-        Task { journal = await Task.detached(priority: .utility) { ActionLog.recent() }.value }
+        let readJournal = readJournal
+        Task { journal = await Task.detached(priority: .utility) { readJournal() }.value }
     }
 
     // MARK: Действия
@@ -98,17 +112,26 @@ final class BackgroundStore: ObservableObject {
         pending = nil
     }
 
-    func confirm() {
-        guard let plan = pending, !running else { return }
+    func confirm(_ planID: UUID) {
+        guard let plan = pending, plan.id == planID, !running else { return }
         running = true
-        let executor = executor
+        let execute = execute
         Task {
-            let result = await Task.detached(priority: .userInitiated) { executor.execute(plan) }.value
+            let result = await Task.detached(priority: .userInitiated) { execute(plan) }.value
             running = false
             pending = nil
             LaunchState.shared.forget()
-            journal = ActionLog.recent()
+            journal = readJournal()
             onFinish?(result)
         }
     }
 }
+
+#if KIT_TEST_DEFAULTS
+extension BackgroundStore {
+    func testPin(_ state: LoadBackgroundState) {
+        data = state.data
+        journal = state.journal
+    }
+}
+#endif

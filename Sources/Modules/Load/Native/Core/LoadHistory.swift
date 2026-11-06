@@ -16,14 +16,14 @@ struct HistorySample: Codable, Sendable {
 }
 
 /// Окно истории для графика: корзины по 5 минут, ряды — топ-5 групп и «прочее».
-struct HistoryWindow: Sendable, Equatable {
-    struct Series: Sendable, Identifiable, Equatable {
+struct HistoryWindow: Sendable, Codable, Equatable {
+    struct Series: Sendable, Codable, Identifiable, Equatable {
         var key: String
         var name: String
         var id: String { key }
     }
 
-    struct Point: Sendable, Identifiable, Equatable {
+    struct Point: Sendable, Codable, Identifiable, Equatable {
         var ts: Int
         var usedMB: Int
         var swapMB: Int
@@ -57,10 +57,51 @@ final class LoadHistory {
         load()
     }
 
-    static var defaultURL: URL? {
+    /// Настоящий файл. Проверки сверяют, что его не трогали.
+    static var realURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Utilitumus/load-history.json")
     }
+
+    /// Сборка со швом пишет в свою временную папку: стенд с настоящей утилитой не должен трогать настоящую историю.
+    static var defaultURL: URL? {
+        #if KIT_TEST_DEFAULTS
+        return FileManager.default.temporaryDirectory.appendingPathComponent("utilitumus-test-load/load-history.json")
+        #else
+        return realURL
+        #endif
+    }
+
+    /// Единственный писатель файла: замок flock на соседнем файле держит тот, кто пишет. Центр и утилита
+    /// не работают вместе, но при передаче модуля они могут пересечься, и тогда второй только читает.
+    private var writerFD: Int32 = -1
+
+    private func claimWriter() -> Bool {
+        if writerFD >= 0 { return true }
+        guard let url else { return true }
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fd = open(url.appendingPathExtension("lock").path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return false }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            close(fd)
+            return false
+        }
+        writerFD = fd
+        // Пока писал другой, файл ушёл вперёд.
+        load()
+        return true
+    }
+
+    /// Модуль остановлен: замок нужен тому, кто стартует следом.
+    func releaseWriter() {
+        guard writerFD >= 0 else { return }
+        flock(writerFD, LOCK_UN)
+        close(writerFD)
+        writerFD = -1
+    }
+
+    deinit { releaseWriter() }
 
     private func load() {
         guard let url, let data = try? Data(contentsOf: url),
@@ -79,6 +120,11 @@ final class LoadHistory {
     }
 
     func record(memory: MemoryTotals, groups: [ProcessGroup], swapoutsMB: Int?, now: Int = Int(Date().timeIntervalSince1970)) {
+        // Читатель пишущего только догоняет, своих замеров в файл не кладёт.
+        guard claimWriter() else {
+            load()
+            return
+        }
         let top = groups.filter { $0.id != "other" }.sorted { $0.memMB > $1.memMB }.prefix(Self.topGroups)
         var byGroup = Dictionary(uniqueKeysWithValues: top.map { ($0.id, $0.memMB) })
         // Всё остальное, включая группу «Прочее» (её id тоже other).

@@ -1,6 +1,6 @@
 import Foundation
 
-enum AdviceSeverity: Int, Sendable, Comparable {
+enum AdviceSeverity: Int, Sendable, Codable, Comparable {
     case high = 0, med = 1, low = 2
 
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
@@ -9,13 +9,19 @@ enum AdviceSeverity: Int, Sendable, Comparable {
 }
 
 /// Подсказка «что выключить». Кнопка — остановка процесса `stopPid` (если можно).
-struct AdviceItem: Sendable, Identifiable {
+struct AdviceItem: Sendable, Codable, Equatable, Identifiable {
     var id: String
     var severity: AdviceSeverity
     var title: String
     var detail: String
     var savesMB: Int
     var stopPid: Int32?
+    var stopUniqueID: UInt64?
+
+    var stopID: LoadRowID? {
+        guard let stopPid, let stopUniqueID else { return nil }
+        return LoadRowID(pid: stopPid, uniqueID: stopUniqueID)
+    }
 }
 
 /// Правила подсказок lambscape (advice.py): долгоживущие dev-серверы и тяжёлые потомки сессий и вкладок
@@ -44,6 +50,7 @@ enum Advice {
     static func build(_ c: Context) -> [AdviceItem] {
         var items = longRunningItems(c) + idleItems(c) + orphanItems(c) + mcpItems(c) + ollamaItems(c) + swapItems(c)
         items.sort { $0.severity != $1.severity ? $0.severity < $1.severity : $0.savesMB > $1.savesMB }
+        for i in items.indices { items[i].stopUniqueID = items[i].stopPid.flatMap { c.procs[$0]?.uniqueID } }
         return items
     }
 
@@ -151,14 +158,16 @@ enum Advice {
 
     // MARK: Сироты
 
-    struct Orphan: Sendable, Identifiable {
+    struct Orphan: Sendable, Codable, Equatable, Identifiable {
         var pid: Int32
         var name: String
         var memMB: Double
         var age: Double
         /// Где запущен: проект и папка. nil — рабочую папку узнать не вышло.
         var place: ProcessPlace?
+        var uniqueID: UInt64 = 0
         var id: Int32 { pid }
+        var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
     }
 
     /// Свои процессы с ppid=1: не .app, не под launchd и похожи на node/python/bun/uv/deno/MCP.
@@ -173,7 +182,7 @@ enum Advice {
                     || p.args.joined(separator: " ").lowercased().contains("mcp") else { continue }
             let mem = tree.subtree(of: p.pid).reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }
             out.append(Orphan(pid: p.pid, name: Kinds.label(p), memMB: mem.rounded(), age: p.age(now: now) ?? 0,
-                             place: ProcessPlaces.place(cwd: p.cwd)))
+                             place: ProcessPlaces.place(cwd: p.cwd), uniqueID: p.uniqueID))
         }
         return out.sorted { $0.memMB > $1.memMB }
     }

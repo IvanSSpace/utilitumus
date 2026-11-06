@@ -2,11 +2,14 @@ import Darwin
 import Foundation
 
 /// Что делает сессия: последний запрос человека и последний шаг ассистента (из хвоста транскрипта).
-struct SessionActivity: Sendable, Equatable {
+struct SessionActivity: Sendable, Codable, Equatable {
     var lastPrompt = ""
     var lastPromptTS: TimeInterval?
     var lastAction = ""
     var lastActionTS: TimeInterval?
+
+    /// `lastPromptTS` экран не показывает.
+    private enum CodingKeys: String, CodingKey { case lastPrompt, lastAction, lastActionTS }
 }
 
 /// Чтение хвостов транскриптов `~/.claude/projects/<проект>/<sessionId>.jsonl`. Файл может весить сотни MB,

@@ -17,6 +17,7 @@ struct ModuleDetail: View {
             case .voice: RemoteVoicePage()
             case .keyboard: RemoteKeyboardPage()
             case .stash: RemoteStashPage()
+            case .load: RemoteLoadPage()
             default: SatellitePage(module: module)
             }
         } else {

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Вкладка «Память»: карта памяти, что освободить, история за сутки, диск и все процессы по группам.
-struct MemoryTab: View {
-    @ObservedObject var store: LoadStore
+struct MemoryTab<Model: LoadModel>: View {
+    @ObservedObject var store: Model
     let mode: LoadViewMode
     @Binding var drill: MemoryPart?
     var openFull: () -> Void
@@ -13,7 +13,7 @@ struct MemoryTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.blockSpacing) {
-            if let s = store.snapshot {
+            if let s = store.measure {
                 if mode == .full { full(s) } else { simple(s) }
                 FooterSection(host: s.host, live: store.live)
             } else {
@@ -23,13 +23,13 @@ struct MemoryTab: View {
     }
 
     @ViewBuilder
-    private func full(_ s: LoadSnapshot) -> some View {
+    private func full(_ s: LoadMeasure) -> some View {
         DSSection("Память", trailing: "\(Fmt.gb(Double(s.memory.totalMB))) GB") {
             LoadLine(divider: false) {
-                MemoryCard(snapshot: s, palette: store.palette, mode: .full, big: true, drill: $drill) { store.requestStop(process: $0) }
+                MemoryCard(snapshot: s, palette: store.palette, mode: .full, big: true, drill: $drill) { store.requestStop(.process($0)) }
             }
         }
-        AdviceSection(items: s.advice, limit: nil, onStop: { store.requestStop(process: $0) })
+        AdviceSection(items: s.advice, limit: nil, onStop: { store.requestStop(.process($0)) })
         DSSection("Память за 24 ч", trailing: historyNote) {
             LoadLine(divider: false) {
                 if let h = store.history, !h.points.isEmpty {
@@ -42,12 +42,12 @@ struct MemoryTab: View {
             }
         }
         DiskSection(disk: s.disk)
-        FreeCandidatesSection(map: s.map, palette: store.palette) { store.requestStop(group: $0) }
+        FreeCandidatesSection(map: s.map, palette: store.palette) { store.requestStop(.group($0)) }
         ForEach([GroupKind.project, .app, .system, .other], id: \.self) { kind in
             let list = s.groups.filter { $0.kind == kind }
             if !list.isEmpty || kind != .other {
                 GroupsSection(kind: kind, groups: list, snapshot: s, expanded: $expanded, showAll: $showAll, fullKinds: $fullKinds,
-                              onStopProcess: { store.requestStop(process: $0) }, onStopGroup: { store.requestStop(group: $0) })
+                              onStopProcess: { store.requestStop(.process($0)) }, onStopGroup: { store.requestStop(.group($0)) })
             }
         }
     }
@@ -59,7 +59,7 @@ struct MemoryTab: View {
     }
 
     @ViewBuilder
-    private func simple(_ s: LoadSnapshot) -> some View {
+    private func simple(_ s: LoadMeasure) -> some View {
         DSSection("Память") {
             LoadLine(divider: false) {
                 MemoryCard(snapshot: s, palette: store.palette, mode: .simple, drill: $drill) { _ in }

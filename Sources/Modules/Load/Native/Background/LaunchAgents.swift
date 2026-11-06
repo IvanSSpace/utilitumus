@@ -4,18 +4,18 @@ import Foundation
 /// плюс каталог известных производителей — что перестанет работать, если агента выключить.
 /// Здесь только чтение; менять состояние может только `BackgroundExecutor`. Правила один в один с lambscape (agents.py).
 
-enum AgentVerb: String, Sendable {
+enum AgentVerb: String, Sendable, Codable {
     case stop, disable, enable
 }
 
-struct AgentTarget: Sendable, Identifiable {
+struct AgentTarget: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var name: String
     var memMB: Double
     var id: Int32 { pid }
 }
 
-struct AgentItem: Sendable, Identifiable {
+struct AgentItem: Sendable, Codable, Equatable, Identifiable {
     var label: String
     var name: String
     var vendor: String
@@ -31,8 +31,8 @@ struct AgentItem: Sendable, Identifiable {
     var sudoHint: String?
     var verbs: [AgentVerb]
     /// Процессы задания: корень первым, дальше по убыванию памяти. Для подтверждения.
-    var targets: [AgentTarget]
-    var loaded: Bool
+    var targets: [AgentTarget] = []
+    var loaded = false
     /// Почему панель не трогает задание (терминал, сама панель, macOS…).
     var refusal: String?
     /// Где запущен главный процесс; у служб с cwd «/» и из домашней папки — nil.
@@ -44,6 +44,11 @@ struct AgentItem: Sendable, Identifiable {
     var title: String {
         let s = [vendor, name].filter { !$0.isEmpty }.joined(separator: " · ")
         return s.isEmpty ? label : s
+    }
+
+    /// `targets` и `loaded` нужны только плану действия, его строит модуль.
+    private enum CodingKeys: String, CodingKey {
+        case label, name, vendor, plist, pids, memMB, keepalive, runAtLoad, disabled, domain, note, sudoHint, verbs, refusal, place
     }
 }
 

@@ -93,7 +93,7 @@ final class SessionsBuilder: @unchecked Sendable {
                 memMB: order.reduce(0.0) { $0 + (i.procs[$1]?.mem ?? 0) }, version: version,
                 children: order.dropLast().compactMap { child($0, i, ownerCwd: cwd) }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) },
                 resumeCommand: sid.map(TranscriptReader.isSafeID) == true && app == nil ? "claude --resume \(sid!)" : "",
-                hostApp: app, isSelf: above.contains(p.pid), stoppable: i.planner.canStop(p)))
+                hostApp: app, isSelf: above.contains(p.pid), stoppable: i.planner.canStop(p), uniqueID: p.uniqueID))
         }
         transcripts.prune(keeping: seen) // кэш разбора — только для живых сессий
         return out.sorted { $0.memMB != $1.memMB ? $0.memMB > $1.memMB : $0.pid < $1.pid }
@@ -107,7 +107,7 @@ final class SessionsBuilder: @unchecked Sendable {
         let kind = Kinds.childKind(p)
         let heavy = kind == .devServer || p.mem >= Self.heavyMB
         return SessionChild(pid: pid, name: Kinds.label(p), kind: kind, memMB: p.memMB, age: p.age(now: i.now) ?? 0,
-                            stoppable: heavy && i.planner.canStop(p), place: place)
+                            stoppable: heavy && i.planner.canStop(p), place: place, uniqueID: p.uniqueID)
     }
 
     // MARK: Вкладки терминалов
@@ -131,7 +131,7 @@ final class SessionsBuilder: @unchecked Sendable {
             }.sorted { ($0.memMB ?? 0) > ($1.memMB ?? 0) }
             let shell = TerminalShell(
                 pid: p.pid, tty: p.tty, cwd: p.cwd, project: Attribution.project(of: p.cwd, roots: i.roots)?.name,
-                foreground: fg, children: kids, sessions: order.compactMap { byPid[$0] }, stoppable: i.planner.canStop(p))
+                foreground: fg, children: kids, sessions: order.compactMap { byPid[$0] }, stoppable: i.planner.canStop(p), uniqueID: p.uniqueID)
             hosts[host.pid, default: TerminalHost(app: app, hostPid: host.pid, shells: [])].shells.append(shell)
         }
         return hosts.values.sorted { $0.hostPid < $1.hostPid }.map { h in

@@ -209,7 +209,7 @@ enum BotCommand: Sendable, Equatable {
     case invalid
 }
 
-enum BotVerb: String, Sendable, CaseIterable {
+enum BotVerb: String, Sendable, Codable, CaseIterable {
     case start, stop, restart
 
     var title: String {
@@ -231,6 +231,8 @@ enum BotVerb: String, Sendable, CaseIterable {
 }
 
 struct BotSpec: Sendable, Equatable {
+    static let none = BotSpec(id: "", name: "", project: "", launchd: [], bundleIDs: [], commands: [:], requiresEnv: [], note: "")
+
     var id: String
     var name: String
     var project: String
@@ -438,7 +440,7 @@ enum BotRegistry {
 
 // MARK: Статус бота
 
-enum BotState: String, Sendable {
+enum BotState: String, Sendable, Codable {
     case running, partial, stopped, noConfig
 
     var title: String {
@@ -451,7 +453,7 @@ enum BotState: String, Sendable {
     }
 }
 
-struct BotItem: Sendable, Identifiable {
+struct BotItem: Sendable, Codable, Equatable, Identifiable {
     var id: String
     var name: String
     var state: BotState
@@ -462,9 +464,12 @@ struct BotItem: Sendable, Identifiable {
     var url: String?
     var note: String
     var actions: [BotVerb]
-    var spec: BotSpec
+    /// Команды из bots.toml: остаются в модуле, в связь не идут.
+    var spec = BotSpec.none
 
     var isOn: Bool { state == .running || state == .partial }
+
+    private enum CodingKeys: String, CodingKey { case id, name, state, pids, memMB, uptime, ports, url, note, actions }
 }
 
 extension BotRegistry {

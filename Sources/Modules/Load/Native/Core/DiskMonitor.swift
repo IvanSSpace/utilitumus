@@ -3,14 +3,14 @@ import Foundation
 /// Карточка «Диск»: износ SSD из smartctl (только если он установлен), запись на диск с загрузки из ioreg,
 /// запись в своп с загрузки и за сутки, доля свопа во всей записи. Объёмы — в десятичных GB/TB,
 /// как у производителя диска и в smartctl.
-struct DiskCard: Sendable {
+struct DiskCard: Sendable, Codable, Equatable {
     var model: String?
     var sizeGB: Int?
     var wearPct: Int?
     var writtenTB: Double?
     var sparePct: Int?
     var mediaErrors: Int?
-    var swapWrittenGBSinceBoot: Double
+    var swapWrittenGBSinceBoot: Double = 0
     var swapGBPerDay: Double
     var swapSharePct: Int?
     var swapWritten24hGB: Double?
@@ -18,6 +18,11 @@ struct DiskCard: Sendable {
     var swap24SpanHours: Double?
     /// smartctl установлен и вернул данные об износе.
     var hasSmart: Bool { wearPct != nil || writtenTB != nil || sparePct != nil }
+
+    /// `swapWrittenGBSinceBoot` экран не показывает.
+    private enum CodingKeys: String, CodingKey {
+        case model, sizeGB, wearPct, writtenTB, sparePct, mediaErrors, swapGBPerDay, swapSharePct, swapWritten24hGB, swap24SpanHours
+    }
 }
 
 /// Инструменты запускаются только в фоне и с кэшем: smartctl раз в час (`-a disk0`, таймаут 10 с,
