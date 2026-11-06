@@ -27,13 +27,20 @@ final class AudioMonitor {
     private var active = false
     private var listeners: [(address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
 
-    private var isActive: Bool {
+    /// Монитор слушает устройства и держит выбор. Проверкам модуля.
+    var isActive: Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
         return active
     }
 
     func start() {
+        // Пока модуль вёл другой процесс (центр или утилита), настройки менялись там: читаем заново, до первого прохода.
+        LockState.shared.reload()
+        PrimaryInputStore.shared.reload()
+        PrimaryOutputStore.shared.reload()
+        KnownDeviceStore.inputs.reload()
+        KnownDeviceStore.outputs.reload()
         stateLock.lock()
         defer { stateLock.unlock() }
         guard !active else { return }
@@ -163,11 +170,17 @@ final class AudioMonitor {
         return deviceID
     }
 
+    /// Запись системного устройства по умолчанию. В сборке для проверок (`KIT_TEST_DEFAULTS`) она ничего не пишет:
+    /// проверки читают настоящие устройства, но не меняют их, а значит и выбор пользователя.
     private func setDefault(_ selector: AudioObjectPropertySelector, _ deviceID: AudioDeviceID) {
+        #if KIT_TEST_DEFAULTS
+        return
+        #else
         var addr = address(selector)
         var id = deviceID
         let size = UInt32(MemoryLayout<AudioDeviceID>.size)
         AudioObjectSetPropertyData(systemObjectID, &addr, 0, nil, size, &id)
+        #endif
     }
 
     private func setDefaultInput(_ deviceID: AudioDeviceID) {

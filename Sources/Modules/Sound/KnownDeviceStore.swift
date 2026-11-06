@@ -10,7 +10,7 @@ struct KnownDevice: Codable {
 }
 
 /// Устройство для отображения в UI: может быть сейчас не подключено.
-struct DisplayDevice: SoundDevice, Equatable {
+struct DisplayDevice: SoundDevice, Codable, Equatable, Sendable {
     let uid: String
     let name: String
     let transport: Transport
@@ -30,6 +30,12 @@ final class KnownDeviceStore {
 
     private init(key: String) {
         self.key = key
+        known = []
+        reload()
+    }
+
+    /// Пока модуль вёл другой процесс, список дополнялся там.
+    func reload() {
         if let data = Kit.defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode([KnownDevice].self, from: data) {
             known = Self.deduplicated(decoded)

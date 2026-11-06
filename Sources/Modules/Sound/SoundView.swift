@@ -116,19 +116,16 @@ private struct ChoiceRow: View {
 }
 
 /// Экран модуля «Звук»: основной микрофон и основной выход.
-struct SoundView: View {
-    @ObservedObject var lockState = LockState.shared
-    @ObservedObject var monitorState = MonitorState.shared
-    @ObservedObject var inputStore = PrimaryInputStore.shared
-    @ObservedObject var outputStore = PrimaryOutputStore.shared
-    
+struct SoundView<Model: SoundModel>: View {
+    @ObservedObject var model: Model
+
     /// Реальные микрофоны — то, что физически выбирают как вход.
     private var physicalInputs: [DisplayDevice] {
-        monitorState.displayInputs.filter { $0.transport.isPhysical }
+        model.displayInputs.filter { $0.transport.isPhysical }
     }
 
     private var physicalOutputs: [DisplayDevice] {
-        monitorState.displayOutputs.filter { $0.transport.isPhysical }
+        model.displayOutputs.filter { $0.transport.isPhysical }
     }
 
     private var builtInInput: DisplayDevice? {
@@ -141,8 +138,8 @@ struct SoundView: View {
 
     private func inputRow(_ device: DisplayDevice) -> some View {
         let isBuiltIn = device.uid == builtInInput?.uid
-        let selectedUID = inputStore.primaryUID ?? builtInInput?.uid
-        let isBluetoothBlocked = device.transport == .bluetooth && lockState.isLocked
+        let selectedUID = model.primaryInputUID ?? builtInInput?.uid
+        let isBluetoothBlocked = device.transport == .bluetooth && model.isBluetoothLocked
         return ChoiceRow(
             style: DeviceStyle(name: device.name, transport: device.transport),
             title: isBuiltIn ? "Микрофон MacBook" : device.name,
@@ -151,15 +148,14 @@ struct SoundView: View {
             isConnected: device.isConnected,
             isLocked: isBluetoothBlocked
         ) {
-            inputStore.select(isBuiltIn ? nil : device.uid)
-            AudioMonitor.shared.enforcePolicy()
+            model.selectInput(uid: device.uid)
         }
     }
 
     private func outputRow(_ device: DisplayDevice) -> some View {
         let isBuiltIn = device.uid == builtInOutput?.uid
         let isSelected: Bool
-        switch outputStore.choice {
+        switch model.outputChoice {
         case .builtIn: isSelected = isBuiltIn
         case .device(let uid): isSelected = device.uid == uid
         case .system: isSelected = false
@@ -172,8 +168,7 @@ struct SoundView: View {
             isConnected: device.isConnected,
             isLocked: false
         ) {
-            outputStore.select(isBuiltIn ? .builtIn : .device(device.uid))
-            AudioMonitor.shared.enforcePolicy()
+            model.selectOutput(uid: device.uid)
         }
     }
 
@@ -192,13 +187,10 @@ struct SoundView: View {
             DSSection("Bluetooth") {
                 DeviceRow(style: DeviceStyle(symbol: "lock.shield.fill", tint: .indigo),
                           title: "Блокировать Bluetooth-вход") {
-                    DSToggle("Блокировать Bluetooth-микрофон", isOn: $lockState.isLocked)
+                    DSToggle("Блокировать Bluetooth-микрофон", isOn: $model.isBluetoothLocked)
                 }
-                .help(lockState.isLocked ? "Bluetooth-микрофон не станет входом."
+                .help(model.isBluetoothLocked ? "Bluetooth-микрофон не станет входом."
                                          : "Bluetooth-микрофон можно выбрать основным.")
-            }
-            .onChange(of: lockState.isLocked) { _, _ in
-                AudioMonitor.shared.enforcePolicy()
             }
         }
     }
@@ -211,12 +203,11 @@ struct SoundView: View {
                     style: DeviceStyle(symbol: "gearshape.fill", tint: .gray),
                     title: "Как решит macOS",
                     note: nil,
-                    isSelected: outputStore.choice == .system,
+                    isSelected: model.outputChoice == .system,
                     isConnected: true,
                     isLocked: false
                 ) {
-                    outputStore.select(.system)
-                    AudioMonitor.shared.enforcePolicy()
+                    model.selectSystemOutput()
                 }
             }
             caption("Выход отключён — звук на динамиках MacBook. «Как решит macOS» — не вмешиваться.")
@@ -235,10 +226,10 @@ struct SoundView: View {
             DSSection("Сейчас") {
                 HStack(spacing: 0) {
                     DeviceRow(style: DeviceStyle(symbol: "mic.fill",
-                                                 tint: monitorState.currentInputIsBluetooth ? .indigo : .blue),
-                              title: monitorState.currentInputName, note: "микрофон", inline: true) { EmptyView() }
+                                                 tint: model.currentInputIsBluetooth ? .indigo : .blue),
+                              title: model.currentInputName, note: "микрофон", inline: true) { EmptyView() }
                     DeviceRow(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue),
-                              title: monitorState.currentOutputName, note: "выход", inline: true) { EmptyView() }
+                              title: model.currentOutputName, note: "выход", inline: true) { EmptyView() }
                 }
             }
 
@@ -254,4 +245,9 @@ struct SoundView: View {
             }
         }
     }
+}
+
+/// Встроенный модуль: экран берёт модель этого процесса.
+extension SoundView where Model == SoundController {
+    init() { self.init(model: .shared) }
 }
