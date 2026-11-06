@@ -67,7 +67,7 @@ func pureChecks() {
     for (version, oldestOfPeer, accepted, name) in ranges {
         let hello = LinkHello(id: "awake", version: "1", protocolVersion: version, oldestProtocolVersion: oldestOfPeer)
         check(KitLink.isCompatible(hello) == accepted, "диапазон версий: \(name) (\(version), \(oldestOfPeer.map(String.init) ?? "нет")) — \(accepted ? "принят" : "отвергнут")")
-        check((try? LinkClient.decodeHello(JSONEncoder().encode(hello))) != nil == accepted, "диапазон версий: decodeHello то же для «\(name)»")
+        check(((try? LinkClient.decodeHello(JSONEncoder().encode(hello))) != nil) == accepted, "диапазон версий: decodeHello то же для «\(name)»")
     }
     let oldStatus = #"{"enabled":true,"line":"x","needsSetup":0}"#
     let tolerant = try? JSONDecoder().decode(LinkStatus.self, from: Data(oldStatus.utf8))
