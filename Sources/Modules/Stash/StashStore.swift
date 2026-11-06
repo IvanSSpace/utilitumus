@@ -47,7 +47,7 @@ struct RunningEntry: Identifiable {
 }
 
 /// Сколько программа ест вместе со всеми своими процессами (у Chrome их десятки).
-struct AppUsage: Codable, Equatable {
+struct AppUsage: Codable, Equatable, Sendable {
     let memoryMB: Double
     let cpu: Double
     /// Порог «тяжёлой»: от 1 ГБ памяти или от четверти ядра процессора.
@@ -56,14 +56,14 @@ struct AppUsage: Codable, Equatable {
 
 /// Сценарий: именованный набор программ, который прячется одним нажатием.
 /// Хранится в UserDefaults; формат менять только совместимо (новые поля — опциональные).
-struct StashScenario: Codable, Equatable, Identifiable {
+struct StashScenario: Codable, Equatable, Sendable, Identifiable {
     var id: UUID
     var name: String
     var bundleIDs: [String]
 }
 
 /// Итог возврата — показывается на экране, чтобы пропавшее с диска не терялось молча.
-struct RestoreReport: Codable, Equatable {
+struct RestoreReport: Codable, Equatable, Sendable {
     var restored = 0
     var windowsPlaced = 0
     var missing: [String] = []
@@ -181,6 +181,8 @@ final class StashStore: ObservableObject {
     /// Действие из связи принято, а его задача ещё не началась: второе такое же получит отказ.
     var pendingBusy: String?
     var usagePending = false
+    /// Экран открыт в центре: только тогда утилита замеряет память. Встроенному модулю окно проверяет `refreshUsage`.
+    var screenLease = true
 
     private let defaults: UserDefaults
     /// Значки по bundle id и по пути. Не @Published: чтение из body не должно

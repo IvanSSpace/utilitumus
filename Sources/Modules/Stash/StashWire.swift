@@ -1,15 +1,15 @@
 import Foundation
 
 /// То, что вкладка центра показывает на экране. Пути, кадры окон и хэши заголовков сюда не входят.
-struct StashState: Codable, Equatable {
-    struct Program: Codable, Equatable {
+struct StashState: Codable, Equatable, Sendable {
+    struct Program: Codable, Equatable, Sendable {
         var bundleID: String
         var name: String
         /// Закроет ли его «Спрятать выбранные».
         var closing: Bool
     }
 
-    struct Stashed: Codable, Equatable {
+    struct Stashed: Codable, Equatable, Sendable {
         var bundleID: String
         var name: String
         var windowCount: Int
@@ -26,7 +26,7 @@ struct StashState: Codable, Equatable {
 
 /// Что вкладка центра может попросить. Больше утилита ничего не примет.
 /// Программы называются только id из её же списков: ни путей, ни pid.
-enum StashAction: Codable, Equatable {
+enum StashAction: Codable, Equatable, Sendable {
     case setClosing(bundleID: String, closing: Bool)
     case selectOnlyHeavy
     /// Ровно те программы, что были в подтверждении. «Закрыть отмеченные» не годится: за время
@@ -41,6 +41,48 @@ enum StashAction: Codable, Equatable {
     case selectScenario(id: UUID)
     /// Экран открыт: замерить память и процессор.
     case refreshUsage
+
+    /// Разбор строгий: ровно одно известное действие и ровно его поля, всё лишнее — ошибка.
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "setClosing":
+            try wire.fields("bundleID", "closing")
+            self = .setClosing(bundleID: try wire.field("bundleID"), closing: try wire.field("closing"))
+        case "selectOnlyHeavy":
+            try wire.none()
+            self = .selectOnlyHeavy
+        case "stash":
+            try wire.fields("bundleIDs")
+            self = .stash(bundleIDs: try wire.field("bundleIDs"))
+        case "restore":
+            try wire.none()
+            self = .restore
+        case "forceTerminate":
+            try wire.fields("bundleIDs")
+            self = .forceTerminate(bundleIDs: try wire.field("bundleIDs"))
+        case "addScenario":
+            try wire.fields("name")
+            self = .addScenario(name: try wire.field("name"))
+        case "updateScenario":
+            try wire.fields("id")
+            self = .updateScenario(id: try wire.field("id"))
+        case "renameScenario":
+            try wire.fields("id", "name")
+            self = .renameScenario(id: try wire.field("id"), name: try wire.field("name"))
+        case "deleteScenario":
+            try wire.fields("id")
+            self = .deleteScenario(id: try wire.field("id"))
+        case "selectScenario":
+            try wire.fields("id")
+            self = .selectScenario(id: try wire.field("id"))
+        case "refreshUsage":
+            try wire.none()
+            self = .refreshUsage
+        default:
+            throw wire.refuse()
+        }
+    }
 }
 
 extension StashStore {
@@ -60,6 +102,11 @@ extension StashStore {
             busy: busy ?? pendingBusy,
             report: report
         )
+    }
+
+    /// Действие из связи в байтах. Самое длинное настоящее — `stash` со списком id программ, он короче 64 КБ.
+    func handle(_ data: Data) -> Data {
+        LinkWire.handle(data, as: StashAction.self, limit: 64 * 1024, state: { wireState }) { handle($0) }
     }
 
     /// Действие из связи: сначала проверка, изменения только после неё. Возвращает текст отказа или nil.
@@ -112,15 +159,20 @@ extension StashStore {
             guard let scenario = scenarios.first(where: { $0.id == id }) else { return "Такого сценария нет" }
             select(scenario)
         case .refreshUsage:
-            // Замер уже идёт — второй `ps` не нужен. Окна у утилиты нет: раз экран открыт, проверять её окно незачем.
-            guard !usagePending else { return nil }
-            usagePending = true
-            Task {
-                await measureUsage()
-                usagePending = false
-            }
+            // Без аренды экрана замерять нечего; это не отказ: экран мог открыться чуть позже запроса.
+            requestUsage()
         }
         return nil
+    }
+
+    /// Замер памяти по просьбе экрана. Окна у утилиты нет: вместо него аренда экрана. Идущий замер второй не запускает.
+    func requestUsage() {
+        guard screenLease, !usagePending else { return }
+        usagePending = true
+        Task {
+            await measureUsage()
+            usagePending = false
+        }
     }
 
     /// Непустой список без повторов, и каждый id — из списка самого модуля.
