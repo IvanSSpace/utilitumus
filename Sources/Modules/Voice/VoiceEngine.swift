@@ -15,7 +15,6 @@ actor VoiceEngine {
     nonisolated static let maxSamples = 16_000 * 600
 
     private var helper: HelperProcess?
-    private var signatureChecked = false
     private var lastUse = Date()
     private var inFlight = 0
     private var idleTask: Task<Void, Never>?
@@ -65,10 +64,9 @@ actor VoiceEngine {
         guard FileManager.default.isExecutableFile(atPath: url.path) else {
             throw VoiceEngineError("В приложении нет помощника распознавания (utilitumus-voice)")
         }
-        if !signatureChecked {
-            try Self.verifyHelper(url)
-            signatureChecked = true
-        }
+        // При каждом запуске: помощник выгружается после простоя, а файл за это время могли подменить.
+        // Актор работает не на главном потоке, поэтому codesign интерфейс не держит.
+        try Self.verifyHelper(url)
         let process = try HelperProcess(executable: url)
         helper = process
         return process
