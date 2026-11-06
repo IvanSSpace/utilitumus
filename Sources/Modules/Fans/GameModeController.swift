@@ -267,7 +267,7 @@ final class GameModeController: ObservableObject {
     }
 
     /// Копия: иконка из `NSRunningApplication` общая, менять её размер нельзя.
-    private static func smallIcon(_ image: NSImage) -> NSImage {
+    static func smallIcon(_ image: NSImage) -> NSImage {
         let copy = (image.copy() as? NSImage) ?? image
         copy.size = NSSize(width: 16, height: 16)
         return copy

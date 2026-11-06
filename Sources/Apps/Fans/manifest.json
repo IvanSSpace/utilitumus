@@ -1,0 +1,12 @@
+{
+  "sources": ["Sources/Shared"],
+  "frameworks": ["IOKit"],
+  "entitlements": "Sources/Apps/Fans/Fans.entitlements",
+  "helpers": [{
+    "kind": "swift-tool",
+    "path": "Contents/MacOS/utilitumus-fan",
+    "identifier": "local.utilitumus.fan",
+    "sources": ["Sources/Shared/SMC.swift", "Sources/Shared/FanLink.swift", "Sources/Kit/KitSigning.swift", "Sources/FanHelper/main.swift"],
+    "frameworks": ["IOKit"]
+  }]
+}

@@ -34,6 +34,8 @@ final class FanHelperInstaller: ObservableObject {
     var screenOpen = false
     /// Служба ответила хоть какой-то версией при последней проверке: ей можно отдать «Авто», даже если устарела.
     private(set) var serviceAnswered = false
+    /// Окно пароля сейчас открыто.
+    private var adminRunning = false
 
     typealias FileInfo = (owner: Int, mode: Int)
     private let files: () -> (binary: FileInfo?, plist: FileInfo?)
@@ -143,13 +145,11 @@ final class FanHelperInstaller: ObservableObject {
     }
 
     func install() {
-        run(admin: Self.installScript(source: Self.bundledPath))
-        refresh(afterInstall: true)
+        run(admin: Self.installScript(source: Self.bundledPath)) { $0.refresh(afterInstall: true) }
     }
 
     func uninstall() {
-        run(admin: Self.uninstallScript)
-        refresh()
+        run(admin: Self.uninstallScript) { $0.refresh() }
     }
 
     /// В одну строку: идёт внутрь строки AppleScript. Без `RunAtLoad` и `KeepAlive`: launchd поднимает службу по подключению.
@@ -246,15 +246,28 @@ final class FanHelperInstaller: ObservableObject {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    private func run(admin shell: String) {
+    /// Окно пароля ждёт человека сколько угодно, поэтому идёт не на главном потоке: утилита, зависшая на главном,
+    /// для центра не отвечает. Пока окно открыто, второе не поднимается. Один поток на все вызовы: AppleScript держим на нём.
+    private func run(admin shell: String, then finish: @escaping @MainActor (FanHelperInstaller) -> Void) {
+        guard !adminRunning else { return }
+        adminRunning = true
         lastError = nil
         Self.scrubRootShellEnvironment()
         let source = "do shell script \(Self.appleScriptQuote(Self.adminCommand(shell))) with administrator privileges"
-        var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        // -128 — пользователь нажал «Отменить», это не ошибка.
-        if let error, (error[NSAppleScript.errorNumber] as? Int) != -128 {
-            lastError = error[NSAppleScript.errorMessage] as? String ?? "Не удалось"
+        Self.adminQueue.async {
+            var error: NSDictionary?
+            NSAppleScript(source: source)?.executeAndReturnError(&error)
+            // -128 — пользователь нажал «Отменить», это не ошибка.
+            let message = error.flatMap { dict -> String? in
+                (dict[NSAppleScript.errorNumber] as? Int) == -128 ? nil : (dict[NSAppleScript.errorMessage] as? String ?? "Не удалось")
+            }
+            Task { @MainActor [self] in
+                self.adminRunning = false
+                if let message { self.lastError = message }
+                finish(self)
+            }
         }
     }
+
+    private nonisolated static let adminQueue = DispatchQueue(label: "utilitumus.fans.admin")
 }

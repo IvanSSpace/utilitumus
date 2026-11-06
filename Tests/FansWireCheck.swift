@@ -278,6 +278,8 @@ func check(_ ok: Bool, _ name: String) {
     func installHelper() { calls.append("install") }
     func uninstallHelper() { calls.append("uninstall") }
     func setScreenOpen(_ open: Bool) { calls.append("screenOpen \(open)") }
+    /// Пиксели сверяются с базой, где текст прежний; тексты внешнего модуля проверяются отдельно.
+    var isExternal = false
 }
 
 func wire(_ value: some Encodable) -> Data {
