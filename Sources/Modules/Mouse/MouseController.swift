@@ -5,7 +5,7 @@ import ApplicationServices
 /// Модуль «Мышь»: держит tap на прокрутку, пока он нужен. Если все настройки
 /// «как у системы» или нет доступа, tap не существует вовсе.
 @MainActor
-final class MouseController: ObservableObject {
+final class MouseController: MouseModel {
     static let shared = MouseController()
 
     @Published var settings: MouseSettings {
@@ -34,6 +34,9 @@ final class MouseController: ObservableObject {
 
     func start() {
         guard !started else { return }
+        // Пока модуль стоял, настройки мог менять центр.
+        let stored = MouseSettings.load()
+        if stored != settings { settings = stored }
         started = true
         // Доступ дают в Системных настройках, а tap могла выключить система:
         // раз в пару секунд проверяем и то и другое.
@@ -58,17 +61,38 @@ final class MouseController: ObservableObject {
     }
 
     func requestAccess() {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не показывает системный запрос и не открывает настройки.
+        testAccessRequests += 1
+        #else
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+        #endif
     }
+
+    #if KIT_TEST_DEFAULTS
+    private(set) var testAccessRequests = 0
+    var testIsRunning: Bool { started && poll != nil }
+
+    /// Стенд ставит состояние для снимка: без настоящего tap и прав.
+    func testPin(axTrusted: Bool, tapActive: Bool) {
+        self.axTrusted = axTrusted
+        self.tapActive = tapActive
+    }
+    #endif
 
     private func reconcile() {
         guard started else { return }
         refreshAccess()
+        #if KIT_TEST_DEFAULTS
+        // Проверки не создают настоящий tap на прокрутку, какие бы права ни были у стенда.
+        let wanted = false
+        #else
         let wanted = settings.needsTap && axTrusted
+        #endif
         if tap.isRunning && (!wanted || !tap.isEnabled) {
             // Не нужен, права отозвали или система выключила и не включила обратно.
             tap.stop()

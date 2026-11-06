@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Экран модуля «Мышь».
-struct MouseView: View {
-    @ObservedObject var controller = MouseController.shared
+struct MouseView<Model: MouseModel>: View {
+    @ObservedObject var model: Model
 
     var body: some View {
         DSPage(module: .mouse, subtitle: "Направление и плавность прокрутки колеса") {
@@ -16,23 +16,23 @@ struct MouseView: View {
             .padding(.horizontal, 6)
 
             DSSection("Направление прокрутки", trailing: "«Как трекпад» — из настроек macOS") {
-                directionRow("Мышь", icon: "computermouse.fill", $controller.settings.mouseDirection)
-                directionRow("Magic Mouse", icon: "magicmouse.fill", $controller.settings.magicMouseDirection)
+                directionRow("Мышь", icon: "computermouse.fill", $model.settings.mouseDirection)
+                directionRow("Magic Mouse", icon: "magicmouse.fill", $model.settings.magicMouseDirection)
             }
 
             DSSection("Плавность мыши", trailing: "С ⌘, ⌃, ⌥ или ⇧ — как обычно") {
                 DSRow(icon: "scroll.fill", title: "Плавная прокрутка",
                       subtitle: "Колесо крутит плавно, а не рывками") {
-                    DSToggle("Плавная прокрутка", isOn: $controller.settings.smoothEnabled)
+                    DSToggle("Плавная прокрутка", isOn: $model.settings.smoothEnabled)
                 }
                 sliderRow("Скорость", icon: "speedometer",
-                          value: Binding(get: { controller.settings.speed },
-                                         set: { controller.settings.speed = ($0 * 10).rounded() / 10 }),
+                          value: Binding(get: { model.settings.speed },
+                                         set: { model.settings.speed = ($0 * 10).rounded() / 10 }),
                           range: MouseSettings.speedRange,
-                          text: String(format: "%.1f×", controller.settings.speed))
+                          text: String(format: "%.1f×", model.settings.speed))
                 sliderRow("Плавность", icon: "waveform.path",
-                          value: $controller.settings.smoothness, range: 0...1,
-                          text: "\(Int((controller.settings.smoothness * 100).rounded())) %")
+                          value: $model.settings.smoothness, range: 0...1,
+                          text: "\(Int((model.settings.smoothness * 100).rounded())) %")
             }
 
             DSSection("Состояние") {
@@ -41,7 +41,7 @@ struct MouseView: View {
                 }
             }
         }
-        .onPageActive { if $0 { controller.refreshAccess() } }
+        .onPageActive { if $0 { model.refreshAccess() } }
     }
 
     private func directionRow(_ title: String, icon: String, _ selection: Binding<ScrollDirection>) -> some View {
@@ -52,7 +52,7 @@ struct MouseView: View {
 
     private func sliderRow(_ title: String, icon: String, value: Binding<Double>,
                            range: ClosedRange<Double>, text: String) -> some View {
-        let enabled = controller.settings.smoothEnabled
+        let enabled = model.settings.smoothEnabled
         return DSRow(icon: icon, title: title) {
             TintedSlider(value: value, range: range)
             Text(text)
@@ -65,16 +65,21 @@ struct MouseView: View {
     }
 
     private var status: (text: String, icon: String, color: Color) {
-        if !controller.settings.needsTap {
+        if !model.settings.needsTap {
             return ("Всё как в системе, перехват прокрутки не нужен", "checkmark.circle", .secondary)
         }
-        if !controller.axTrusted {
+        if !model.axTrusted {
             return ("Нет доступа «Универсальный доступ», настройки не действуют", "exclamationmark.triangle", .orange)
         }
-        return controller.tapActive
+        return model.tapActive
             ? ("Перехват прокрутки работает", "checkmark.circle.fill", .green)
             : ("Запускаю перехват…", "hourglass", .secondary)
     }
+}
+
+extension MouseView where Model == MouseController {
+    /// Встроенный модуль.
+    @MainActor init() { self.init(model: .shared) }
 }
 
 /// Слайдер с акцентом модуля. Акцент задаёт `DSPage`, поэтому читать его надо ниже страницы.

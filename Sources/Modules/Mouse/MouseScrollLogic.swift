@@ -5,7 +5,7 @@ import Foundation
 
 /// Направление прокрутки для устройства. `system` — как настроено в macOS (то,
 /// что сейчас у трекпада); `reversed` — наоборот.
-enum ScrollDirection: String, CaseIterable, Identifiable {
+enum ScrollDirection: String, CaseIterable, Identifiable, Codable {
     case system, reversed
 
     var id: String { rawValue }
@@ -14,7 +14,7 @@ enum ScrollDirection: String, CaseIterable, Identifiable {
 }
 
 /// Настройки модуля. Всё по умолчанию — «как есть»: тогда перехват не нужен вовсе.
-struct MouseSettings: Equatable {
+struct MouseSettings: Equatable, Codable, Sendable {
     var mouseDirection: ScrollDirection = .system
     var magicMouseDirection: ScrollDirection = .system
     var smoothEnabled = false
@@ -30,6 +30,15 @@ struct MouseSettings: Equatable {
         mouseDirection == .reversed || magicMouseDirection == .reversed || smoothEnabled
     }
 
+    /// Одна строка для статуса и карточки: что сейчас включено.
+    var summary: String {
+        guard needsTap else { return "всё как в системе" }
+        var parts: [String] = []
+        if mouseDirection == .reversed || magicMouseDirection == .reversed { parts.append("прокрутка обратная") }
+        if smoothEnabled { parts.append("плавность \(Int((smoothness * 100).rounded())) %") }
+        return parts.joined(separator: " · ")
+    }
+
     private enum Key {
         static let mouse = "Mouse.Direction"
         static let magic = "Mouse.MagicDirection"
@@ -43,8 +52,9 @@ struct MouseSettings: Equatable {
         s.mouseDirection = d.string(forKey: Key.mouse).flatMap(ScrollDirection.init) ?? .system
         s.magicMouseDirection = d.string(forKey: Key.magic).flatMap(ScrollDirection.init) ?? .system
         s.smoothEnabled = d.bool(forKey: Key.smooth)
-        if let v = d.object(forKey: Key.speed) as? Double { s.speed = min(max(v, speedRange.lowerBound), speedRange.upperBound) }
-        if let v = d.object(forKey: Key.smoothness) as? Double { s.smoothness = min(max(v, 0), 1) }
+        // NaN прошёл бы сквозь min и max, а JSONEncoder на нём падает с ошибкой: состояние ушло бы пустым.
+        if let v = d.object(forKey: Key.speed) as? Double, v.isFinite { s.speed = min(max(v, speedRange.lowerBound), speedRange.upperBound) }
+        if let v = d.object(forKey: Key.smoothness) as? Double, v.isFinite { s.smoothness = min(max(v, 0), 1) }
         return s
     }
 
