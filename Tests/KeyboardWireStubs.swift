@@ -35,7 +35,7 @@ import Foundation
     static var dictationOnDoubleFn: Bool { Stub.dictation }
     static func migrateKeepOff() { Stub.calls.append("migrateKeepOff") }
     static func reapplyAll() -> Reapplied { Stub.calls.append("reapplyAll"); return Reapplied() }
-    static func restore() { Stub.calls.append("restore") }
+    static func restore(waitForSystem: Bool = false) { Stub.calls.append("restore") }
     @discardableResult static func disable() -> Bool { Stub.calls.append("disable"); return true }
     @discardableResult static func disableDictation() -> Bool { Stub.calls.append("disableDictation"); return true }
     @discardableResult static func disableAll() -> Bool { Stub.calls.append("disableAll"); return true }

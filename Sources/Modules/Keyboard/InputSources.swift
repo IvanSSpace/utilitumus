@@ -89,7 +89,15 @@ enum FnSystemAction {
     /// запомненное прежнее значение) — значит, пользователь просил отключить. Зовётся при запуске модуля.
     static func migrateKeepOff() {
         let defaults = Kit.defaults
+        if defaults.object(forKey: keepOffKey) == nil { rememberUserZero() }
         if usage == 0 || defaults.object(forKey: savedKey) != nil { defaults.set(true, forKey: keepOffKey) }
+    }
+
+    /// Просят держать 0 впервые, а в системе уже 0: он был до нас, откат его оставит. Без этой отметки
+    /// «запомненного нет, 0 в системе» нельзя отличить от потерянного значения, которое надо вернуть к умолчанию.
+    private static func rememberUserZero() {
+        let defaults = Kit.defaults
+        if !keepsOff, usage == 0, defaults.object(forKey: savedKey) == nil { defaults.set(0, forKey: savedKey) }
     }
 
     /// Нужно ли заново отключить действие при запуске модуля: пользователь просил отключить
@@ -100,6 +108,7 @@ enum FnSystemAction {
     /// ничего не пишем и систему не дёргаем. true — значение пришлось менять.
     @discardableResult
     static func disable() -> Bool {
+        rememberUserZero()
         Kit.defaults.set(true, forKey: keepOffKey)
         guard writeZero() else { return false }
         applyToSystem()
@@ -112,7 +121,11 @@ enum FnSystemAction {
         let current = usage
         guard current != 0 else { return false }
         let defaults = Kit.defaults
-        if defaults.object(forKey: savedKey) == nil { defaults.set(current ?? -1, forKey: savedKey) }
+        if defaults.object(forKey: savedKey) == nil {
+            defaults.set(current ?? -1, forKey: savedKey)
+            // Процесс могут убить сразу после записи 0: прежнее значение должно дойти до диска раньше нуля.
+            defaults.synchronize()
+        }
         writeUsage(0)
         return true
     }
@@ -148,6 +161,7 @@ enum FnSystemAction {
     /// Для шага «сделать всё автоматически».
     @discardableResult
     static func disableAll() -> Bool {
+        rememberUserZero()
         Kit.defaults.set(true, forKey: keepOffKey)
         let usageChanged = writeZero()
         let dictationChanged = writeDictationOff()
@@ -155,21 +169,40 @@ enum FnSystemAction {
         return usageChanged || dictationChanged
     }
 
+    /// Что `restore` должен сделать с действием 🌐.
+    enum RestoreStep: Equatable {
+        case leave
+        /// nil — убрать ключ, система действует по умолчанию.
+        case write(Int?)
+    }
+
+    /// `saved` — запомненное значение (-1: ключа не было), `keptOff` — мы держали 0, `usage` — что в системе сейчас.
+    /// Запомненного нет или оно мусор (потеряно, записано чужой версией), а 0 в системе держали мы: возвращаем
+    /// умолчание macOS, как вентиляторы возвращаются в «Авто». Хуже оставить 🌐 мёртвой, чем вернуть умолчание.
+    /// Мы 0 не держали — значение пользователя не трогаем.
+    static func restoreStep(saved: Any?, keptOff: Bool, usage: Int?) -> RestoreStep {
+        if let saved = saved as? Int, (-1...3).contains(saved) {
+            let value = saved < 0 ? nil : saved
+            return usage == value ? .leave : .write(value)
+        }
+        return keptOff && usage == 0 ? .write(nil) : .leave
+    }
+
     /// Вернуть значение, если его меняли мы. Зовётся, только когда пользователь выключил модуль
     /// или удалил его в Сторе: при выходе из приложения и обновлении модуль зовёт `quit`.
-    static func restore() {
+    /// `waitForSystem` — процесс сейчас выйдет: применение настроек и перезапуск переключателя идут здесь, а не в фоне.
+    static func restore(waitForSystem: Bool = false) {
         let dictationRestored = restoreDictation()
         let defaults = Kit.defaults
-        defaults.set(false, forKey: keepOffKey)
         var usageRestored = false
-        if let saved = defaults.object(forKey: savedKey) as? Int {
-            defaults.removeObject(forKey: savedKey)
-            if saved < 0 ? usage != nil : usage != saved {
-                writeUsage(saved < 0 ? nil : saved)
-                usageRestored = true
-            }
+        if case .write(let value) = restoreStep(saved: defaults.object(forKey: savedKey), keptOff: keepsOff, usage: usage) {
+            writeUsage(value)
+            usageRestored = true
         }
-        if usageRestored || dictationRestored { applyToSystem(restartSwitcher: usageRestored) }
+        // Запомненное убираем после записи: процесс убили посередине — значение осталось, повтор безвреден.
+        defaults.removeObject(forKey: savedKey)
+        defaults.set(false, forKey: keepOffKey)
+        if usageRestored || dictationRestored { applyToSystem(restartSwitcher: usageRestored, wait: waitForSystem) }
     }
 
     /// Только запись, без `activateSettings`: применяет вызывающий, один раз на все записи.
@@ -185,11 +218,17 @@ enum FnSystemAction {
 
     /// macOS не перечитывает AppleFnUsageType сама: TextInputSwitcher держит старое значение и
     /// показывает своё окошко. Просим систему применить настройки и перезапускаем его.
-    /// Не на главном потоке; трогаем только процесс текущего пользователя.
-    private static func applyToSystem(restartSwitcher: Bool = true) {
+    /// Не на главном потоке, кроме `wait`; трогаем только процесс текущего пользователя.
+    private static func applyToSystem(restartSwitcher: Bool = true, wait: Bool = false) {
+        #if KIT_TEST_DEFAULTS
+        // Стенд записывает, что применение было и ждали ли его.
+        Kit.defaults.set(Kit.defaults.integer(forKey: "Test.ApplyCount") + 1, forKey: "Test.ApplyCount")
+        Kit.defaults.set(wait, forKey: "Test.ApplyWaited")
+        Kit.defaults.set(restartSwitcher, forKey: "Test.ApplyRestart")
+        #endif
         // Стенд не перезапускает настройки и TextInputSwitcher настоящей сессии.
         if Kit.standRefuses("activateSettings и перезапуск TextInputSwitcher") { return }
-        DispatchQueue.global(qos: .utility).async {
+        let work = {
             let tool = "/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings"
             if FileManager.default.isExecutableFile(atPath: tool) {
                 let process = Process()
@@ -202,6 +241,8 @@ enum FnSystemAction {
             // SIGTERM он игнорирует, нужен SIGKILL; launchd поднимет его при следующем нажатии.
             if restartSwitcher, let pid = textInputSwitcherPID() { kill(pid, SIGKILL) }
         }
+        // Процесс сейчас выйдет (удаление): фоновая задача не успела бы начаться.
+        if wait { work() } else { DispatchQueue.global(qos: .utility).async(execute: work) }
     }
 
     private static func textInputSwitcherPID() -> pid_t? {
@@ -278,7 +319,7 @@ enum FnSystemAction {
     /// Вернуть диктовку, если выключали мы (без применения). true — записали.
     private static func restoreDictation() -> Bool {
         guard dictationOverridden else { return false }
-        Kit.defaults.removeObject(forKey: savedDictationKey)
+        defer { Kit.defaults.removeObject(forKey: savedDictationKey) }  // после записи, как у 🌐
         guard let changed = settingEnabled(hotKeys, id: dictationKey, to: true) else { return false }
         writeHotKeys(changed)
         return true
