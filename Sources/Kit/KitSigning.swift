@@ -14,6 +14,17 @@ enum KitSigning {
         "identifier \"\(identifier)\" and certificate leaf = H\"\(leafHash)\""
     }
 
+    /// Метка выпуска в Info.plist, её скрепляет подпись. Выпуски v0.2.0–v0.4.4 подписаны нашим сертификатом
+    /// с тем же identifier, но без hardened runtime: в такой бинарник внедряют код через DYLD_INSERT_LIBRARIES,
+    /// и identifier с сертификатом он всё равно проходит. Выпуск с уязвимостью отсекается повышением эпохи.
+    static let securityEpochKey = "UtilitumusSecurityEpoch"
+    static let securityEpoch = "1"
+
+    /// Требование к процессу-собеседнику по XPC: центру и утилите. Значение метки должно совпадать с их Info.plist.
+    static func peerRequirement(identifier: String, leafHash: String) -> String {
+        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] = \"\(securityEpoch)\""
+    }
+
     /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —
     /// требование строкой (без `=` codesign принял бы это за путь к файлу).
     static func verifySignature(of path: URL, identifier: String, strict: Bool) throws {

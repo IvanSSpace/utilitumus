@@ -54,7 +54,8 @@ same "bundle id" "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP
 cp Tests/SatelliteRoleCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/client-build" "$OUT/src/main.swift" \
   Sources/Kit/KitDefaults.swift Sources/Kit/KitSigning.swift Sources/Kit/SatelliteCatalog.swift \
-  Sources/Kit/SatelliteRole.swift Sources/Kit/SatelliteSelfUpdate.swift $(find Sources/Kit/Link -name '*.swift')
+  Sources/Kit/SatelliteRole.swift Sources/Kit/SatelliteSelfUpdate.swift $(find Sources/Kit/Link -name '*.swift') \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
 signed() {
   cp "$OUT/client-build" "$OUT/$1"
   codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$2" "$OUT/$1" 2>/dev/null

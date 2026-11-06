@@ -526,7 +526,7 @@ struct FansView: View {
     @ObservedObject var installer = FanHelperInstaller.shared
     @ObservedObject var game = GameModeController.shared
 
-    private var canControl: Bool { installer.status != .notInstalled && controller.conflictingApp == nil }
+    private var canControl: Bool { installer.status == .ready && controller.conflictingApp == nil }
     private var gameName: String? { game.isActive ? game.phase.gameName : nil }
     private var overridden: Bool { controller.fullPower || gameName != nil }
 
@@ -557,14 +557,17 @@ struct FansView: View {
                 footer
             }
         }
-        .onPageActive { if $0 { installer.refresh() } }
+        .onPageActive {
+            installer.screenOpen = $0
+            if $0 { installer.refresh() }
+        }
     }
 
     @ViewBuilder private var banners: some View {
         // «Нужен доступ» теперь на экране «Осталось дать доступ»; здесь только устаревший помощник и ошибка.
         if installer.status == .outdated {
             Banner(icon: "lock.shield", color: .orange, text: "Доступ нужно обновить",
-                   detail: "Помощник устарел. macOS один раз спросит пароль администратора.") {
+                   detail: FanHelperInstaller.outdatedDetail(fanStuckManual: controller.fans.contains(where: \.isManual))) {
                 DSButton("Обновить доступ…", icon: "key.fill") { installer.install() }
             }
         }
@@ -690,7 +693,7 @@ struct FansView: View {
                     .font(.system(size: 11)).foregroundStyle(dim)
                 Spacer()
                 if installer.status != .notInstalled {
-                    DSButton("Забрать доступ…", style: .plain, small: true) { installer.uninstall() }
+                    DSButton("Забрать доступ…", style: .plain, small: true) { controller.restoreAutoBlocking(); installer.uninstall() }
                 }
             }
         }
