@@ -89,7 +89,8 @@ let scenes: [MouseCase] = [
 
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        var shots: [NSBitmapImageRep] = []
+        // Экран доступа вместо настроек: у него от настроек ничего не зависит, два таких снимка совпадают.
+        var shots: [(image: NSBitmapImageRep, checklist: Bool)] = []
         for scene in scenes {
             await drive(scene.settings)
             check(model.responding && model.settings == scene.settings, "\(themeName) \(scene.name): утилита в нужном состоянии")
@@ -97,7 +98,16 @@ let scenes: [MouseCase] = [
 
             modules.setExternal(.mouse, false)
             controller.settings = scene.settings
+            // Шаг доступа у встроенного модуля читает права самого центра, у утилиты — её права: на стенде они разные.
+            // Подменяем шаг тем, что описал бы модуль утилиты: обязателен при перехвате, готов по закреплённому доступу.
+            SetupFlow.overrides[.mouse] = [SetupStep(id: "mouse.ax", title: "Универсальный доступ",
+                                                     why: "Чтобы менять направление и плавность прокрутки",
+                                                     kind: .permission, icon: "lock.shield.fill",
+                                                     required: scene.settings.needsTap, isDone: { ax }, perform: {})]
+            AccessState.shared.refresh()
             let local = await shot(theme) { controller.testPin(axTrusted: ax, tapActive: false) }
+            SetupFlow.overrides[.mouse] = nil
+            AccessState.shared.refresh()
             Stand.save(local, "\(themeName)-\(scene.name)-local")
 
             modules.setExternal(.mouse, true)
@@ -108,9 +118,10 @@ let scenes: [MouseCase] = [
 
             let diff = differingPixels(local, remote)
             check(diff == 0, "\(themeName) \(scene.name): снимки совпали, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
-            shots.append(remote)
+            shots.append((remote, scene.settings.needsTap && !ax))
         }
-        check(zip(shots, shots.dropFirst()).allSatisfy { differingPixels($0, $1) > 0 }, "\(themeName): состояния выглядят по-разному, снимки не пустые")
+        check(zip(shots, shots.dropFirst()).allSatisfy { ($0.checklist && $1.checklist) || differingPixels($0.image, $1.image) > 0 },
+              "\(themeName): состояния выглядят по-разному, снимки не пустые")
         await drive(MouseSettings())
     }
     controller.settings = MouseSettings()
@@ -156,7 +167,7 @@ let scenes: [MouseCase] = [
 /// Утилита умерла: центр говорит «не отвечает», а не показывает старое как живое.
 @MainActor func died(utility: Int32) async {
     let model = RemoteMouseModel.shared
-    kill(utility, SIGKILL)
+    killUtilityForGood(utility)
     await pause(0.3)
     await model.read()
     await model.read()
