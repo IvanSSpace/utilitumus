@@ -32,7 +32,7 @@ swiftc -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handov
   $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift) \
   Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
-  Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift \
+  Sources/App/Satellites/SatelliteInstaller.swift Sources/Kit/KitArchive.swift Sources/App/Satellites/SatelliteAgent.swift \
   -framework SwiftUI -framework AppKit -framework Carbon
 
 "$OUT/module-handover-check" "$OUT/work"

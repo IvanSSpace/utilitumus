@@ -92,6 +92,24 @@ verify_helper() { # бандл, путь в нём, identifier
   require_runtime "$HELPER" "Помощник $2"
 }
 
+# Состав архива до распаковки: ditto пишет на диск раньше любой проверки подписи, и ссылка внутри архива с файлом
+# «через» неё увела бы запись за пределы папки. Имена: ни `..`, ни абсолютного пути, ни управляющих символов.
+# Режимы из `unzip -Z`: только обычные файлы и каталоги.
+vet_archive() { # архив
+  local LISTING ENTRY
+  LISTING="$(unzip -Z1 "$1" 2>/dev/null)" || fail "Скачанный файл — не zip."
+  while IFS= read -r ENTRY; do
+    case "/${ENTRY//\\//}/" in
+      //* | */../*) fail "В архиве путь за пределы папки: ${ENTRY}" ;;
+    esac
+    # Вне UTF-8 и без locale: диапазон управляющих символов не зависит от языка системы.
+    if LC_ALL=C grep -q '[[:cntrl:]]' <<<"$ENTRY"; then fail "В архиве управляющий символ в имени."; fi
+  done <<<"$LISTING"
+  if unzip -Z "$1" 2>/dev/null | LC_ALL=C grep -E '^[lcbpsD][-rwxsStTa]{6,9}[[:space:]]' >/dev/null; then
+    fail "В архиве ссылка или особый файл — ничего не установлено."
+  fi
+}
+
 # launchd отпускает метку не сразу после bootout.
 load_agent() {
   local ATTEMPT=1
@@ -141,14 +159,7 @@ install_app() {
     fail "Контрольная сумма архива не совпала с каталогом — ничего не установлено."
   fi
 
-  # ditto молча убирает `..` и начальный `/`, и такой архив выглядел бы обычным: смотреть надо до распаковки.
-  local LISTING ENTRY
-  LISTING="$(unzip -Z1 "$ZIP" 2>/dev/null)" || fail "Скачанный файл — не zip."
-  while IFS= read -r ENTRY; do
-    case "/${ENTRY//\\//}/" in
-      //* | */../*) fail "В архиве путь за пределы папки: ${ENTRY}" ;;
-    esac
-  done <<<"$LISTING"
+  vet_archive "$ZIP"
   ditto -x -k "$ZIP" "$WORK/unpacked"
 
   # Имя станет путём в /Applications и попадёт в плист, поэтому правила те же, что у build-app.sh.
@@ -270,6 +281,7 @@ fi
 
 echo "Скачиваю последнюю версию…"
 curl -fsSL -o "$WORK/Utilitumus.zip" "$URL"
+vet_archive "$WORK/Utilitumus.zip"
 ditto -x -k "$WORK/Utilitumus.zip" "$WORK"
 APP="$WORK/Utilitumus.app"
 

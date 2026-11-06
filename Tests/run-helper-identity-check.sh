@@ -101,7 +101,7 @@ nested browser-v1 good 1.0.0
 
 cp Tests/HelperIdentityCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name HelperIdentityCheck -o "$OUT/check" "$OUT/src/main.swift" \
-  Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/SatelliteCatalog.swift Sources/Kit/SatelliteSelfUpdate.swift \
+  Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/SatelliteCatalog.swift Sources/Kit/SatelliteSelfUpdate.swift Sources/Kit/KitArchive.swift \
   $(find Sources/Kit/Link -name '*.swift') Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift
 
 "$OUT/check" verify "$F" "$OUT/work"

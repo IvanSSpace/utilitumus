@@ -30,7 +30,7 @@ case "$status" in
   1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
-forbid 'UserDefaults|Kit\.defaults' Sources/App/Satellites/SatelliteInstaller.swift 'настройки в установщике'
+forbid 'UserDefaults|Kit\.defaults' Sources/App/Satellites/SatelliteInstaller.swift Sources/Kit/KitArchive.swift 'настройки в установщике'
 
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$F"
