@@ -298,17 +298,10 @@ final class SatelliteInstaller {
 
     /// Распаковывает и проверяет форму архива. Подпись проверяется уже после этого, у результата.
     private func unpack(_ archive: URL, into work: URL, name: String) throws -> URL {
-        // ditto молча убирает `..` и начальный `/`, и такой архив выглядел бы обычным:
-        // смотреть надо до распаковки.
-        for entry in try Self.entries(of: archive) {
-            let parts = entry.split { $0 == "/" || $0 == "\\" }
-            guard !entry.hasPrefix("/"), !parts.contains("..") else {
-                throw SatelliteInstallError.archive("путь выходит за пределы папки: \(entry)")
-            }
-        }
         let unpacked = work.appendingPathComponent("unpacked")
         do {
-            try KitSigning.run("/usr/bin/ditto", ["-x", "-k", archive.path, unpacked.path])
+            // Оглавление смотрится до распаковки: ссылки и пути за пределы папки отвергаются, ничего не записав.
+            try KitArchive.extract(archive, to: unpacked)
         } catch {
             throw SatelliteInstallError.archive(error.localizedDescription)
         }
@@ -372,20 +365,6 @@ final class SatelliteInstaller {
             throw SatelliteInstallError.archive("в бандле нет исполняемого файла")
         }
         return executable
-    }
-
-    private static func entries(of archive: URL) throws -> [String] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
-        process.arguments = ["-Z1", archive.path]
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let listing = out.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { throw SatelliteInstallError.archive("это не zip") }
-        return String(decoding: listing, as: UTF8.self).split(separator: "\n").map(String.init)
     }
 
     private static func realPath(_ path: String) -> String? {

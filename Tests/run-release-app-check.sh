@@ -84,11 +84,7 @@ fi
 check "release-app.sh: хэш тот же, что в KitSigning" has scripts/release-app.sh "$LEAF"
 
 # Подпись как в build.sh.
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 IDENTITIES="$(security find-identity -p codesigning)"
 if [[ "$IDENTITIES" != *"\"$SIGN_NAME\""* ]]; then
   echo "ПРОВАЛ: нет сертификата «${SIGN_NAME}»"

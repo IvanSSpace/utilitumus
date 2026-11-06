@@ -118,11 +118,7 @@ if [ "$(grep -c 'bundledPath' Sources/Modules/Fans/FanHelperInstaller.swift)" !=
 ok "копия из бандла нужна только скрипту установки"
 
 # Подпись как в build.sh.
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 if ! security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   fail "нет сертификата «$SIGN_NAME»"
 fi

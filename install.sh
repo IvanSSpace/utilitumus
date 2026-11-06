@@ -67,6 +67,13 @@ epoch_ok() { # бандл
   matches "$FOUND" '^[0-9]{1,18}$' && [ "$FOUND" -ge "$SECURITY_EPOCH" ]
 }
 
+require_runtime() { # путь, как назвать в сообщении
+  # Через переменную: grep -q закрыл бы канал раньше времени, а при pipefail это выглядит как сбой.
+  local DETAILS
+  DETAILS="$(codesign -d --verbose=1 "$1" 2>&1)" || DETAILS=""
+  matches "$DETAILS" 'flags=0x[0-9a-f]+\([^)]*runtime' || fail "$2 собран без hardened runtime — ничего не установлено."
+}
+
 # Правила те же, что у KitSigning.verifyHelper.
 verify_helper() { # бандл, путь в нём, identifier
   local HELPER="$1/$2"
@@ -82,10 +89,33 @@ verify_helper() { # бандл, путь в нём, identifier
       codesign --verify -R="identifier \"$3\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$HELPER" >/dev/null 2>&1 || refuse "$2"
       ;;
   esac
-  # Через переменную: grep -q закрыл бы канал раньше времени, а при pipefail это выглядит как сбой.
-  local DETAILS
-  DETAILS="$(codesign -d --verbose=1 "$HELPER" 2>&1)" || DETAILS=""
-  matches "$DETAILS" 'flags=0x[0-9a-f]+\([^)]*runtime' || fail "Помощник $2 собран без hardened runtime — ничего не установлено."
+  require_runtime "$HELPER" "Помощник $2"
+}
+
+# Состав архива до распаковки: ditto пишет на диск раньше любой проверки подписи, и ссылка внутри архива с файлом
+# «через» неё увела бы запись за пределы папки. Имена: ни `..`, ни абсолютного пути, ни управляющих символов.
+# Режимы из `unzip -Z`: только обычные файлы и каталоги.
+vet_archive() { # архив
+  local LISTING ENTRY
+  LISTING="$(unzip -Z1 "$1" 2>/dev/null)" || fail "Скачанный файл — не zip."
+  while IFS= read -r ENTRY; do
+    case "/${ENTRY//\\//}/" in
+      //* | */../*) fail "В архиве путь за пределы папки: ${ENTRY}" ;;
+    esac
+    # Вне UTF-8 и без locale: диапазон управляющих символов не зависит от языка системы.
+    if LC_ALL=C grep -q '[[:cntrl:]]' <<<"$ENTRY"; then fail "В архиве управляющий символ в имени."; fi
+  done <<<"$LISTING"
+  if unzip -Z "$1" 2>/dev/null | LC_ALL=C grep -E '^[lcbpsD][-rwxsStTa]{6,9}[[:space:]]' >/dev/null; then
+    fail "В архиве ссылка или особый файл — ничего не установлено."
+  fi
+}
+
+# Сборка со стендовым швом подписана тем же ключом (KitSigning.testPeerEpoch) и не должна встать как настоящая.
+# Образец собран из частей: целиком он был бы строкой в самом скрипте.
+reject_seam() { # бандл
+  local NEEDLE="local.utilitumus.""test." FOUND
+  FOUND="$(find "$1/Contents" -type f \( -path '*/MacOS/*' -o -path '*/Helpers/*' -o -name Info.plist \) -exec grep -laF -e "$NEEDLE" {} + 2>/dev/null || true)"
+  [ -z "$FOUND" ] || fail "В сборке следы тестового шва — ничего не установлено."
 }
 
 # launchd отпускает метку не сразу после bootout.
@@ -137,14 +167,7 @@ install_app() {
     fail "Контрольная сумма архива не совпала с каталогом — ничего не установлено."
   fi
 
-  # ditto молча убирает `..` и начальный `/`, и такой архив выглядел бы обычным: смотреть надо до распаковки.
-  local LISTING ENTRY
-  LISTING="$(unzip -Z1 "$ZIP" 2>/dev/null)" || fail "Скачанный файл — не zip."
-  while IFS= read -r ENTRY; do
-    case "/${ENTRY//\\//}/" in
-      //* | */../*) fail "В архиве путь за пределы папки: ${ENTRY}" ;;
-    esac
-  done <<<"$LISTING"
+  vet_archive "$ZIP"
   ditto -x -k "$ZIP" "$WORK/unpacked"
 
   # Имя станет путём в /Applications и попадёт в плист, поэтому правила те же, что у build-app.sh.
@@ -163,6 +186,7 @@ install_app() {
 
   verify_signature "$APP" "$LABEL" || refuse "$NAME.app"
   epoch_ok "$APP" || fail "У ${NAME}.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+  reject_seam "$APP"
   local HELPER_PATH HELPER_ID
   while IFS='|' read -r HELPER_PATH HELPER_ID; do
     [ -z "$HELPER_PATH" ] || verify_helper "$APP" "$HELPER_PATH" "$HELPER_ID"
@@ -266,15 +290,23 @@ fi
 
 echo "Скачиваю последнюю версию…"
 curl -fsSL -o "$WORK/Utilitumus.zip" "$URL"
+vet_archive "$WORK/Utilitumus.zip"
 ditto -x -k "$WORK/Utilitumus.zip" "$WORK"
 APP="$WORK/Utilitumus.app"
 
 echo "SHA-256 архива: $(shasum -a 256 "$WORK/Utilitumus.zip" | cut -d' ' -f1)"
 verify_signature "$APP" "local.utilitumus" || refuse "Utilitumus.app"
-LINKS="$APP/Contents/Helpers/Utilitumus Links.app"
-if [ -d "$LINKS" ]; then
-  verify_signature "$LINKS" "local.utilitumus.links" || refuse "Utilitumus Links.app"
-fi
+# Старые сборки автора (до 0.5) подписаны тем же ключом, но без метки выпуска и hardened runtime: подпись они проходят.
+epoch_ok "$APP" || fail "У Utilitumus.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+require_runtime "$APP" "Utilitumus.app"
+reject_seam "$APP"
+# Помощники, если они есть в архиве: те же правила, что у KitSigning.verifyHelper. Битая ссылка тоже «есть».
+for HELPER in 'Contents/Helpers/Utilitumus Links.app|local.utilitumus.links' \
+  'Contents/MacOS/utilitumus-fan|local.utilitumus.fan' 'Contents/MacOS/utilitumus-voice|local.utilitumus.voice'; do
+  if [ -e "$APP/${HELPER%%|*}" ] || [ -L "$APP/${HELPER%%|*}" ]; then
+    verify_helper "$APP" "${HELPER%%|*}" "${HELPER##*|}"
+  fi
+done
 # Режимы файлов подпись не запечатывает.
 WRITABLE="$(find "$APP" ! -type l \( -perm -020 -o -perm -002 \))"
 [ -z "$WRITABLE" ] || fail "В архиве запись разрешена группе или всем: ${WRITABLE}"

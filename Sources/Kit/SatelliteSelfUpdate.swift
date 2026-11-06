@@ -26,7 +26,7 @@ enum SatelliteSelfUpdate {
         // На томе цели: замена атомарная.
         let work = try fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target.deletingLastPathComponent(), create: true)
         defer { try? fm.removeItem(at: work) }
-        try KitSigning.run("/usr/bin/ditto", ["-x", "-k", archive.path, work.path])
+        try KitArchive.extract(archive, to: work)
         let name = target.lastPathComponent
         guard try fm.contentsOfDirectory(atPath: work.path) == [name] else {
             throw KitSigning.Failure("В архиве обновления не только \(name)")

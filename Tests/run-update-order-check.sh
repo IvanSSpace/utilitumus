@@ -8,11 +8,7 @@ OUT="${UPDATE_ORDER_CHECK_DIR:-${TMPDIR:-/tmp}/update-order-check}"
 SIGN_NAME="Utilitumus Signing"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 if ! security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   echo "ПРОВАЛ: нет сертификата «$SIGN_NAME»"
   exit 1
@@ -35,6 +31,7 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.utilitumus</string>
 <key>CFBundleExecutable</key><string>Utilitumus</string>
 <key>CFBundleShortVersionString</key><string>9.9.9</string>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 </dict></plist>
 PLIST
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$APP"

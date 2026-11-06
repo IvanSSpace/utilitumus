@@ -34,8 +34,7 @@ satellite_check_setup() {
   FOREIGN="$OUT/$MODULE-check-foreign"
   failures=0
   # Подпись как в build.sh. Без этого codesign ждёт разблокировку связки и висит молча.
-  local kc_password="$HOME/.config/utilitumus/keychain-password" kc="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-  if [ -f "$kc_password" ] && [ -f "$kc" ]; then security unlock-keychain -p "$(cat "$kc_password")" "$kc"; fi
+  scripts/unlock-signing.sh
   mkdir -p "$OUT/src" "$OUT/png"
   rm -f "$OUT"/png/*.png
   trap 'exit 1' HUP INT TERM
@@ -89,7 +88,7 @@ build_module_hub() {
     "$OUT/src/$(basename "$check")" "$OUT/src/SatelliteCheckKit.swift" "$OUT/src/SatelliteStandKit.swift" "$OUT/src/UtilitumusApp.swift" \
     $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
     -framework SwiftUI -framework AppKit -framework Charts -framework CoreAudio -framework AudioToolbox -framework IOKit \
-    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
+    -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
   sign_hub
 }
 
