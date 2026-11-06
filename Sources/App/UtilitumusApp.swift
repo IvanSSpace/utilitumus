@@ -274,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
         // Чтобы вкладка с первого открытия показывала настоящее состояние, а не сохранённые настройки.
-        RemoteAwakeModel.shared.refresh()
+        RemoteModules.external(ModuleManager.shared).forEach { $0.1.refresh() }
         Updater.shared.check(quiet: true)
         // Без значка в Dock окно при обычном запуске должно появиться впереди.
         if !DockMode.showsInDock, !CommandLine.arguments.contains("--background") {

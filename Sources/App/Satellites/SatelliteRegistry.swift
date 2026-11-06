@@ -7,11 +7,25 @@ struct SatelliteCommands {
     var status: @Sendable (String) async throws -> LinkStatus
     var setEnabled: @Sendable (String, Bool) async throws -> Void
     var openWindow: @Sendable (String) async throws -> Void
+    /// Быстрое действие из статуса: байты уходят в `moduleAction` как есть. Ответ — тело `LinkReply`.
+    var action: @Sendable (String, Data) async throws -> Data = { _, _ in throw LinkError.timeout }
+    /// Шаг настройки по id из статуса: просит разрешение сама утилита, потому что macOS показывает имя того, кто спросил.
+    var performStep: @Sendable (String, String) async throws -> LinkReply<LinkStatus> = { _, _ in throw LinkError.timeout }
 
     static let live = SatelliteCommands(
         status: { try await liveStatus($0) },
         setEnabled: { try await liveSetEnabled($0, $1) },
-        openWindow: { try await liveOpenWindow($0) })
+        openWindow: { try await liveOpenWindow($0) },
+        action: { try await liveAction($0, $1) },
+        performStep: { try await livePerformStep($0, $1) })
+
+    @MainActor private static func liveAction(_ id: String, _ action: Data) async throws -> Data {
+        try await LinkClient(id: id).moduleAction(action)
+    }
+
+    @MainActor private static func livePerformStep(_ id: String, _ step: String) async throws -> LinkReply<LinkStatus> {
+        try await LinkClient(id: id).performSetupStep(step)
+    }
 
     @MainActor private static func liveStatus(_ id: String) async throws -> LinkStatus {
         try await LinkClient(id: id).status()
@@ -67,6 +81,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// `setEnabled` при передаче сорвался: повторить, когда утилита снова ответит.
     private var enableOwed: Set<Module> = []
     private var observing = false
+    /// Опрос одного модуля уже идёт: чек-лист просит обновить раз в секунду и не должен копить запросы.
+    private var polling: Set<Module> = []
+    /// Текст последней неудачи действия или шага: «Модуль не ответил» и отказ самой утилиты.
+    @Published private(set) var actionErrors: [Module: String] = [:]
+    @Published private(set) var stepErrors: [String: String] = [:]
 
     init(_ environment: SatelliteEnvironment) {
         self.environment = environment
@@ -96,7 +115,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     /// Только статус одной утилиты, без каталога.
     func refresh(_ module: Module) {
-        Task { await poll(module) }
+        guard polling.insert(module).inserted else { return }
+        Task {
+            await poll(module)
+            polling.remove(module)
+        }
     }
 
     /// Каталог и опрос независимы: зависшая сеть не должна задерживать статусы, и наоборот.
@@ -132,6 +155,52 @@ final class SatelliteRegistry: NSObject, ObservableObject {
             try? await environment.commands.setEnabled(module.rawValue, enabled)
             await poll(module)
         }
+    }
+
+    /// Быстрое действие карточки или меню. Утилита проверяет его как любое другое; отказ или молчание видно на карточке.
+    func perform(_ quick: LinkQuickAction, module: Module) {
+        Task {
+            do {
+                let reply = try await environment.commands.action(module.rawValue, quick.action)
+                setActionError(module, (try? JSONDecoder().decode(LinkReplyError.self, from: reply))?.error)
+            } catch {
+                setActionError(module, "Модуль не ответил, попробуй ещё раз")
+            }
+            await poll(module)
+        }
+    }
+
+    /// Действие с вопросом: сначала спрашивает центр, текст вопроса прислала утилита.
+    func confirmAndPerform(_ quick: LinkQuickAction, module: Module, ask: (DashConfirmation) -> Void) {
+        guard let confirm = quick.confirm else { return perform(quick, module: module) }
+        ask(DashConfirmation(title: confirm.title, message: confirm.message, button: confirm.button,
+                             run: { [weak self] in self?.perform(quick, module: module) }))
+    }
+
+    /// Шаг чек-листа. Ответ несёт новый статус: чек-лист обновляется, не дожидаясь опроса.
+    func performSetupStep(_ module: Module, _ id: String) {
+        let key = "\(module.rawValue).\(id)"
+        Task {
+            do {
+                let reply = try await environment.commands.performStep(module.rawValue, id)
+                stepErrors[key] = reply.error
+                apply(reply.state, to: module)
+            } catch {
+                stepErrors[key] = "Утилита не ответила, попробуй ещё раз"
+            }
+            await poll(module)
+        }
+    }
+
+    private func setActionError(_ module: Module, _ error: String?) {
+        if actionErrors[module] != error { actionErrors[module] = error }
+    }
+
+    private func apply(_ status: LinkStatus, to module: Module) {
+        guard var current = entries[module], current.status != status else { return }
+        current.status = status
+        current.responding = true
+        entries[module] = current
     }
 
     func openWindow(_ module: Module) {
@@ -273,10 +342,22 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         case .satelliteOwns:
             modules.setExternal(module, true)
             if reply != nil, enableOwed.contains(module) { await enable(module, started: started) }
+            // Сброс при первом запуске со Стором коснулся модуля, которого уже ведёт утилита: выключает её сама утилита.
+            if reply != nil, modules.takeUtilityReset(module) {
+                try? await environment.commands.setEnabled(module.rawValue, false)
+                guard !isStale else { return }
+                reply = try? await environment.commands.status(id)
+            }
         }
         // Пока шли вызовы, модуль могли удалить или поставить заново: старый ответ его бы затёр.
         guard !isStale else { return }
-        entries[module] = entry(module, version: version, reply: reply)
+        // Тот же ответ никого не будит: чек-лист опрашивает раз в секунду.
+        let new = entry(module, version: version, reply: reply)
+        if entries[module] != new {
+            entries[module] = new
+            // Статус сменился: прежний отказ действия устарел.
+            setActionError(module, nil)
+        }
     }
 
     private func enable(_ module: Module, started: Int) async {
@@ -314,4 +395,9 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         let info = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
         return info?["CFBundleShortVersionString"] as? String ?? "0"
     }
+}
+
+/// От ответа утилиты на действие нужна только ошибка: состояние разбирает модель модуля.
+private struct LinkReplyError: Decodable {
+    let error: String?
 }

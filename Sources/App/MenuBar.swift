@@ -42,8 +42,6 @@ enum DockMode {
 struct AppMenuBarScene: Scene {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
-    @ObservedObject private var fans = FanController.shared
-    @ObservedObject private var stash = StashStore.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -61,27 +59,19 @@ struct AppMenuBarScene: Scene {
             }
 
             // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.
-            if modules.runsBuiltIn(.fans) {
-                Section("Вентиляторы") {
-                    Toggle("Полная мощность", isOn: $fans.fullPower)
-                    Button("Все в режим «Авто»") { fans.setAllAuto() }
-                }
-            }
+            // Контроллер создаётся только внутри вида, который есть, пока модуль встроенный.
+            if modules.runsBuiltIn(.fans) { FansMenuSection() }
 
             AwakeMenuItem()
 
-            if modules.runsBuiltIn(.stash) {
-                Section("Стеш программ") {
-                    Button("Спрятать выбранные") {
-                        Task {
-                            stash.refresh()
-                            await stash.stashSelected()
-                        }
+            if modules.runsBuiltIn(.stash) { StashMenuSection() }
+
+            // Ведомые модули: быстрые действия приходят в статусе утилиты.
+            ForEach(MenuQuickActions.sections(order: modules.order, modules: modules, entries: satellites.entries), id: \.module) { section in
+                Section(section.module.title) {
+                    ForEach(Array(section.actions.enumerated()), id: \.offset) { _, quick in
+                        Button(quick.title) { MenuQuickActions.run(quick, module: section.module) }
                     }
-                    Button("Вернуть\(stash.stashed.isEmpty ? "" : " (\(stash.stashed.count))")") {
-                        Task { await stash.restore() }
-                    }
-                    .disabled(stash.stashed.isEmpty)
                 }
             }
 
@@ -98,6 +88,69 @@ struct AppMenuBarScene: Scene {
     private func show() {
         openWindow(id: "main")
         DockMode.bringToFront()
+    }
+}
+
+/// Быстрые действия ведомых модулей в меню-баре: секция на модуль, кнопка на действие из статуса.
+@MainActor
+enum MenuQuickActions {
+    struct MenuSection: Equatable {
+        let module: Module
+        let actions: [LinkQuickAction]
+    }
+
+    /// Секции в порядке модулей. Выключенного, неотвечающего и без действий в меню нет, как и у встроенного.
+    /// Модуль, чьё меню рисует его модель (`menuUsesQuickActions == false`), пропускается.
+    static func sections(order: [Module], modules: ModuleManager, entries: [Module: SatelliteRegistry.Entry]) -> [MenuSection] {
+        order.compactMap { module in
+            guard modules.isExternal(module), let status = entries[module]?.status, status.enabled,
+                  !status.quickActions.isEmpty,
+                  RemoteModules.model(module)?.menuUsesQuickActions ?? true else { return nil }
+            return MenuSection(module: module, actions: status.quickActions)
+        }
+    }
+
+    /// Действие с вопросом в меню спрашивает окно: в меню-баре своего диалога нет.
+    static func run(_ quick: LinkQuickAction, module: Module) {
+        guard let confirm = quick.confirm else { return SatelliteRegistry.shared.perform(quick, module: module) }
+        let alert = NSAlert()
+        alert.messageText = confirm.title
+        alert.informativeText = confirm.message
+        alert.addButton(withTitle: confirm.button)
+        alert.addButton(withTitle: "Отмена")
+        DockMode.bringToFront()
+        if alert.runModal() == .alertFirstButtonReturn { SatelliteRegistry.shared.perform(quick, module: module) }
+    }
+}
+
+/// Секции встроенных «Вентиляторов» и «Стеша»: вид существует, только пока модуль встроенный и включён.
+private struct FansMenuSection: View {
+    @ObservedObject private var fans = FanController.shared
+
+    var body: some View {
+        Section("Вентиляторы") {
+            Toggle("Полная мощность", isOn: $fans.fullPower)
+            Button("Все в режим «Авто»") { fans.setAllAuto() }
+        }
+    }
+}
+
+private struct StashMenuSection: View {
+    @ObservedObject private var stash = StashStore.shared
+
+    var body: some View {
+        Section("Стеш программ") {
+            Button("Спрятать выбранные") {
+                Task {
+                    stash.refresh()
+                    await stash.stashSelected()
+                }
+            }
+            Button("Вернуть\(stash.stashed.isEmpty ? "" : " (\(stash.stashed.count))")") {
+                Task { await stash.restore() }
+            }
+            .disabled(stash.stashed.isEmpty)
+        }
     }
 }
 

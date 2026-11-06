@@ -21,6 +21,17 @@ struct DashState: Equatable {
     var attention = false
     var actionTitle: String?
     var actionIcon: String?
+    /// Действие из статуса утилиты: кнопка карточки шлёт его обратно утилите.
+    var quick: LinkQuickAction?
+}
+
+/// Вопрос перед действием карточки: «Закрыть N программ?». Текст приходит от того, кто знает, что закрывается.
+struct DashConfirmation: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let button: String
+    let run: @MainActor () -> Void
 }
 
 /// Видно ли окно приложения: скрытое или свёрнутое окно ничего не рисует, статусы считать незачем.
@@ -66,8 +77,9 @@ final class DashSlot: ObservableObject {
     private var attached = 0
     private var subs: [AnyCancellable] = []
     private var sourceSub: AnyCancellable?
-    /// На какую модель подписан `sourceSub`: при передаче утилите или возврате подписку надо сменить.
-    private var sourceIsRemote = false
+    /// На что подписан `sourceSub`: при передаче утилите или возврате подписку надо сменить.
+    private enum SourceKind { case none, model, builtIn }
+    private var sourceKind = SourceKind.none
     private var visibilitySub: AnyCancellable?
 
     fileprivate init(_ module: Module) {
@@ -107,24 +119,25 @@ final class DashSlot: ObservableObject {
             ]
         }
         // Как при открытии вкладки: один раз, пока статус не был на экране, утилита могла зависнуть.
-        if DashboardLive.hasRemoteModel(module) { RemoteAwakeModel.shared.refresh() }
+        DashboardLive.refreshExternal(module)
         update()
     }
 
     /// Выключенный модуль ничего не публикует: на контроллер подписываемся, только пока он включён.
     private func syncSource() {
-        let remote = DashboardLive.hasRemoteModel(module)
-        if remote || ModuleManager.shared.runsBuiltIn(module) {
-            guard sourceSub == nil || sourceIsRemote != remote else { return }
-            sourceIsRemote = remote
-            // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
-            sourceSub = DashboardLive.source(module)
-                .receive(on: DispatchQueue.main)
-                .throttle(for: 1, scheduler: DispatchQueue.main, latest: true)
-                .sink { [weak self] _ in self?.update() }
-        } else {
+        let kind: SourceKind = DashboardLive.hasRemoteModel(module) ? .model
+            : (ModuleManager.shared.runsBuiltIn(module) ? .builtIn : .none)
+        guard kind != sourceKind || (kind != .none && sourceSub == nil) else { return }
+        sourceKind = kind
+        guard kind != .none, let source = DashboardLive.source(module) else {
             sourceSub = nil
+            return
         }
+        // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
+        sourceSub = source
+            .receive(on: DispatchQueue.main)
+            .throttle(for: 1, scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] _ in self?.update() }
     }
 
     private func update() {
@@ -142,12 +155,20 @@ enum DashboardLive {
 
     static func slot(_ module: Module) -> DashSlot { slots[module]! }
 
-    /// Модуль ведёт утилита, а экран у него свой, с моделью в центре. Остальным утилитам хватает строки статуса.
+    /// Модуль ведёт утилита, а экран у него свой, с моделью в центре (`RemoteModules`). Остальным хватает строки статуса.
     fileprivate static func hasRemoteModel(_ module: Module) -> Bool {
-        module == .awake && ModuleManager.shared.isExternal(module)
+        ModuleManager.shared.isExternal(module) && RemoteModules.model(module) != nil
     }
 
-    fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never> {
+    /// Как при открытии вкладки: пока статус не был на экране, утилита могла зависнуть.
+    fileprivate static func refreshExternal(_ module: Module) {
+        guard ModuleManager.shared.isExternal(module) else { return }
+        if let model = RemoteModules.model(module) { model.refresh() } else { SatelliteRegistry.shared.refresh(module) }
+    }
+
+    /// Что слушать, пока модуль на экране. Встроенный — свой контроллер, ведомый — его модель (статус слушает реестр).
+    fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never>? {
+        if ModuleManager.shared.isExternal(module) { return RemoteModules.model(module)?.changes }
         switch module {
         case .sound: return MonitorState.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mouse: return MouseController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
@@ -156,18 +177,16 @@ enum DashboardLive {
         case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .awake:
-            return hasRemoteModel(module)
-                ? RemoteAwakeModel.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-                : AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         }
     }
 
-    /// Быстрое действие карточки. `askStash` — показать подтверждение «Закрыть N программ?».
-    static func perform(_ module: Module, askStash: () -> Void) {
+    /// Быстрое действие карточки. `ask` — показать подтверждение, если оно нужно.
+    static func perform(_ module: Module, ask: (DashConfirmation) -> Void) {
+        if ModuleManager.shared.isExternal(module) { return performExternal(module, ask: ask) }
         switch module {
         case .fans:
             FanController.shared.fullPower.toggle()
@@ -183,12 +202,17 @@ enum DashboardLive {
                 Task { await store.restore() }
             } else {
                 // Закрытие программ — только через подтверждение, как на экране Стеша.
-                askStash()
+                ask(DashConfirmation(
+                    title: "Закрыть \(programs(store.selected.count))?",
+                    message: store.selected.compactMap(\.localizedName).joined(separator: ", ")
+                        + "\n\nНесохранённое программы спросят сами.",
+                    button: "Закрыть и спрятать",
+                    run: { Task { await StashStore.shared.stashSelected() } }))
             }
         case .load:
             LoadStore.shared.refreshNow()
         case .awake:
-            if hasRemoteModel(module) { RemoteAwakeModel.shared.toggle() } else { AwakeController.shared.toggle() }
+            AwakeController.shared.toggle()
         case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard:
             break
         }
@@ -204,8 +228,10 @@ enum DashboardLive {
     }
 
     fileprivate static func compute(_ module: Module) -> DashState {
-        if hasRemoteModel(module) { return remoteAwake() }
-        if ModuleManager.shared.isExternal(module) { return satellite(module) }
+        if ModuleManager.shared.isExternal(module) {
+            return externalState(status: SatelliteRegistry.shared.entries[module]?.status,
+                                 model: RemoteModules.model(module))
+        }
         guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
         if module.isBlocked { return DashState(text: "нужен доступ", attention: true) }
         switch module {
@@ -223,12 +249,30 @@ enum DashboardLive {
         }
     }
 
-    private static func satellite(_ module: Module) -> DashState {
-        guard let status = SatelliteRegistry.shared.entries[module]?.status else {
+    /// Карточка ведомого модуля из статуса утилиты: те же состояния, что у встроенного (выключен, нужен доступ,
+    /// оранжевое, действие). Чистая функция: проверка не нуждается ни в утилите, ни в центре.
+    /// `model` — тот, чья карточка показывает больше, чем строка статуса.
+    static func externalState(status: LinkStatus?, model: (any RemoteModuleSurface)?) -> DashState {
+        if let model {
+            if !model.responding { return DashState(text: "не отвечает", attention: true) }
+        } else if status == nil {
             return DashState(text: "не отвечает", attention: true)
         }
-        if status.needsSetup > 0 { return DashState(text: "нужны доступы: \(status.needsSetup)", attention: true) }
-        return DashState(text: status.line)
+        if status?.enabled == false { return DashState(on: false, text: "выключен") }
+        if let status, status.needsSetup > 0 { return DashState(text: "нужен доступ", attention: true) }
+        var base = DashState(text: status?.line ?? "", attention: status?.attention ?? false)
+        if let quick = status?.quickActions.first {
+            base.actionTitle = quick.title
+            base.actionIcon = quick.icon
+            base.quick = quick
+        }
+        return model?.dashboardState(base: base, status: status) ?? base
+    }
+
+    private static func performExternal(_ module: Module, ask: (DashConfirmation) -> Void) {
+        if RemoteModules.model(module)?.performDashboardAction() == true { return }
+        guard let quick = slot(module).state.quick else { return }
+        SatelliteRegistry.shared.confirmAndPerform(quick, module: module, ask: ask)
     }
 
     private static func sound() -> DashState {
@@ -325,24 +369,8 @@ enum DashboardLive {
         return DashState(text: fn ? c.currentName : "\(KeyboardFeature.perAppLayout.shortName) · \(c.currentName)")
     }
 
-    private static func remoteAwake() -> DashState {
-        let model = RemoteAwakeModel.shared
-        switch model.screen(SatelliteRegistry.shared) {
-        case .notResponding:
-            return DashState(text: "не отвечает", attention: true)
-        case .off:
-            return DashState(on: false, text: "выключен")
-        case .module:
-            var state = awake(model)
-            if let error = model.actionError {
-                state.text = error
-                state.attention = true
-            }
-            return state
-        }
-    }
-
-    private static func awake(_ c: some AwakeModel) -> DashState {
+    /// И для встроенного модуля, и для `RemoteAwakeModel`: остаток времени в строку статуса не входит.
+    static func awake(_ c: some AwakeModel) -> DashState {
         guard c.isActive else {
             // Как кнопка на экране модуля: включить сейчас нельзя — действия нет.
             return c.canStart ? DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer")
@@ -380,7 +408,7 @@ struct DashboardPage: View, Equatable {
     @ObservedObject private var access = AccessState.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
     @Environment(\.dsTheme) private var theme
-    @State private var confirmStash = false
+    @State private var confirmation: DashConfirmation?
 
     private var shown: [Module] { modules.panelModules }
 
@@ -388,18 +416,17 @@ struct DashboardPage: View, Equatable {
         // В обычном окне всё помещается без прокрутки; в самом маленьком — прокручивается.
         ScrollView(showsIndicators: false) { content }
             .scrollBounceBehavior(.basedOnSize)
-        .confirmationDialog("Закрыть \(programs(StashStore.shared.selected.count))?", isPresented: $confirmStash) {
-            Button("Закрыть и спрятать", role: .destructive) {
-                Task { await StashStore.shared.stashSelected() }
-            }
+        .confirmationDialog(confirmation?.title ?? "", isPresented: Binding(
+            get: { confirmation != nil }, set: { if !$0 { confirmation = nil } }), presenting: confirmation) { item in
+            Button(item.button, role: .destructive) { item.run() }
             Button("Отмена", role: .cancel) {}
-        } message: {
-            Text(StashStore.shared.selected.compactMap(\.localizedName).joined(separator: ", ")
-                 + "\n\nНесохранённое программы спросят сами.")
+        } message: { item in
+            Text(item.message)
         }
         // Список программ для Стеша: один разовый снимок, без подписок. Само не запускается.
+        // Только у встроенного: ведомый Стеш считает это у себя, а `.shared` здесь запустил бы второго.
         .task(id: pageActive) {
-            guard pageActive, modules.isOn(.stash) else { return }
+            guard pageActive, modules.runsBuiltIn(.stash) else { return }
             StashStore.shared.refresh()
             await StashStore.shared.refreshUsage()
         }
@@ -488,7 +515,7 @@ struct DashboardPage: View, Equatable {
     }
 
     private func card(_ module: Module) -> some View {
-        DashCard(module: module, open: { open(module) }, askStash: { confirmStash = true })
+        DashCard(module: module, open: { open(module) }, ask: { confirmation = $0 })
     }
 }
 
@@ -499,15 +526,15 @@ private let dashCardHeight: CGFloat = 64
 private struct DashCard: View {
     let module: Module
     let open: () -> Void
-    let askStash: () -> Void
+    let ask: (DashConfirmation) -> Void
     /// Карточка наблюдает только статус своего модуля.
     @ObservedObject private var slot: DashSlot
     @Environment(\.dsTheme) private var theme
 
-    init(module: Module, open: @escaping () -> Void, askStash: @escaping () -> Void) {
+    init(module: Module, open: @escaping () -> Void, ask: @escaping (DashConfirmation) -> Void) {
         self.module = module
         self.open = open
-        self.askStash = askStash
+        self.ask = ask
         slot = DashboardLive.slot(module)
     }
 
@@ -532,7 +559,7 @@ private struct DashCard: View {
                 DashButton(title: "Включить", solid: true, tint: tint) { DashboardLive.setOn(module, true) }
             } else if let title = state.actionTitle {
                 DashButton(title: title, icon: state.actionIcon, tint: tint) {
-                    DashboardLive.perform(module, askStash: askStash)
+                    DashboardLive.perform(module, ask: ask)
                 }
             }
         }

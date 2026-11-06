@@ -32,6 +32,8 @@ final class ModuleManager: ObservableObject {
     private let hooks: (Module) -> ModuleHooks
     /// Модули, у которых сейчас вызван start без парного stop.
     private var running: Set<Module> = []
+    /// Сброс при первом запуске коснулся модулей, которых ведёт утилита: реестр выключит их у утилиты при первом ответе.
+    private var utilityResets: Set<Module> = []
     /// Пока приложение не запустило модули (или уже гасит их), переключение
     /// только меняет настройку и ничего не стартует.
     private var isActive = false
@@ -47,7 +49,8 @@ final class ModuleManager: ObservableObject {
         self.hooks = hooks
         // Слепок до миграций: они сами пишут `ModulesV2`, и по нему новую установку было бы не отличить.
         let resetPlan = ModuleReset.plan(snapshot: defaults.dictionaryRepresentation(),
-                                         moduleIDs: Module.allCases.map(\.rawValue))
+                                         moduleIDs: Module.allCases.map(\.rawValue),
+                                         handedOver: { defaults.bool(forKey: ModuleHandover.handedOverKey($0)) })
         if defaults.object(forKey: Self.migratedKey) == nil {
             Self.migrate(defaults)
             defaults.set(true, forKey: Self.migratedKey)
@@ -61,6 +64,7 @@ final class ModuleManager: ObservableObject {
             for (key, value) in resetPlan.writes { defaults.set(value, forKey: key) }
             // «Клавиатура» при выходе не возвращала 🌐; без этого после сброса Fn не менял бы язык вообще.
             if resetPlan.restoresSystemFn { FnSystemAction.restore() }
+            utilityResets = Set(resetPlan.askUtility.compactMap(Module.init(rawValue:)))
         }
         order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
@@ -154,6 +158,11 @@ final class ModuleManager: ObservableObject {
 
     /// Модуль ведёт утилита: встроенный останавливается и не стартует. `ModuleOn` не меняется: снимут
     /// утилиту — встроенный вернётся таким, каким был.
+    /// Один раз на модуль: сброс просит утилиту выключиться, а не трогает её настройки сам.
+    func takeUtilityReset(_ module: Module) -> Bool {
+        utilityResets.remove(module) != nil
+    }
+
     func setExternal(_ module: Module, _ isExternal: Bool) {
         guard isExternal != external.contains(module) else { return }
         if isExternal { external.insert(module) } else { external.remove(module) }
@@ -219,7 +228,10 @@ final class ModuleManager: ObservableObject {
             hooks(module).start()
         } else {
             running.remove(module)
-            hooks(module).stop()
+            let hook = hooks(module)
+            // Передача утилите не отменяет настройки человека в системе (🌐 у «Клавиатуры»): утилита продолжает с ними,
+            // поэтому встроенный останавливается как при выходе. Выключил человек — обычная остановка.
+            if external.contains(module) { (hook.quit ?? hook.stop)() } else { hook.stop() }
         }
     }
 }

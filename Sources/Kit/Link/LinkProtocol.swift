@@ -53,17 +53,40 @@ struct LinkHello: Codable, Equatable {
     }
 }
 
+/// Вопрос перед действием: центр показывает его сам, утилита присылает текст. Нужен тому, что закрывает чужие программы.
+struct LinkConfirm: Codable, Equatable, Sendable {
+    let title: String
+    let message: String
+    let button: String
+
+    init(title: String, message: String, button: String) {
+        self.title = String(title.prefix(80))
+        self.message = String(message.prefix(400))
+        self.button = String(button.prefix(40))
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            title: try container.decode(String.self, forKey: .title),
+            message: try container.decode(String.self, forKey: .message),
+            button: try container.decode(String.self, forKey: .button))
+    }
+}
+
 /// Быстрое действие дашборда и меню. Центр байты не разбирает и шлёт их обратно в `moduleAction`,
-/// а утилита проверяет их как любое другое действие.
+/// а утилита проверяет их как любое другое действие. `confirm` — спросить человека до отправки.
 struct LinkQuickAction: Codable, Equatable, Sendable {
     let title: String
     let icon: String?
     let action: Data
+    let confirm: LinkConfirm?
 
-    init(title: String, icon: String? = nil, action: Data) {
+    init(title: String, icon: String? = nil, action: Data, confirm: LinkConfirm? = nil) {
         self.title = String(title.prefix(40))
         self.icon = icon.map { String($0.prefix(64)) }
         self.action = action
+        self.confirm = confirm
     }
 
     init(from decoder: Decoder) throws {
@@ -71,7 +94,8 @@ struct LinkQuickAction: Codable, Equatable, Sendable {
         self.init(
             title: try container.decode(String.self, forKey: .title),
             icon: try container.decodeIfPresent(String.self, forKey: .icon),
-            action: try container.decode(Data.self, forKey: .action))
+            action: try container.decode(Data.self, forKey: .action),
+            confirm: try container.decodeIfPresent(LinkConfirm.self, forKey: .confirm))
     }
 }
 

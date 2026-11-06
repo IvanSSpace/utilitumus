@@ -80,6 +80,21 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
         statusObserver = LinkStatusObserver(id: id) { [weak self] in self?.refresh() }
     }
 
+    // MARK: Дашборд и меню
+
+    /// Модель меняется: карточка дашборда пересчитывается.
+    var changes: AnyPublisher<Void, Never> { objectWillChange.map { _ in }.eraseToAnyPublisher() }
+
+    /// Карточка дашборда. `base` собран из статуса утилиты (строка, оранжевое, быстрое действие). Модуль, чья карточка
+    /// показывает то, что в строку статуса не помещается (обратный отсчёт, градусы, играющие программы), переопределяет.
+    func dashboardState(base: DashState, status: LinkStatus?) -> DashState { base }
+
+    /// Кнопка карточки, которую ведёт сама модель. false — нажатие идёт быстрым действием из статуса.
+    func performDashboardAction() -> Bool { false }
+
+    /// false — пункты меню-бара этого модуля рисует он сам, а не быстрые действия статуса.
+    var menuUsesQuickActions: Bool { true }
+
     /// Реестр снова слышит утилиту или перестал: перечитать. Вкладка, карточка и меню видят одно и то же,
     /// какой бы экран сейчас ни был открыт.
     func follow(_ status: some Publisher<LinkStatus?, Never>) {
@@ -213,3 +228,5 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
         return true
     }
 }
+
+extension RemoteModuleModel: RemoteModuleSurface {}

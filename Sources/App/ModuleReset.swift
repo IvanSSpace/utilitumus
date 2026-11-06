@@ -30,11 +30,14 @@ enum ModuleReset {
         var writes: [String: Bool]
         /// Вернуть системные настройки Fn (`FnSystemAction.restore()`): старая версия при выходе их не возвращала.
         var restoresSystemFn: Bool
+        /// Модули, которых уже ведёт утилита: встроенный выключается записью, а утилиту просит выключиться центр.
+        /// Системные настройки у них снимает сама утилита, поэтому за них `restoresSystemFn` не отвечает.
+        var askUtility: [String] = []
     }
 
     /// nil — флаг уже стоит, делать нечего. Иначе: на новой установке только флаг, на обновлении
     /// ещё и сброс модулей.
-    static func plan(snapshot: [String: Any], moduleIDs: [String]) -> Plan? {
+    static func plan(snapshot: [String: Any], moduleIDs: [String], handedOver: (String) -> Bool = { _ in false }) -> Plan? {
         guard snapshot[flagKey] == nil else { return nil }
         var writes = [flagKey: true]
         let isUpgrade = snapshot.keys.contains { key in upgradePrefixes.contains { key.hasPrefix($0) } }
@@ -47,6 +50,8 @@ enum ModuleReset {
         // (в SavedFnUsage 0 — полноценное прежнее значение, поэтому как Bool его читать нельзя).
         let fnIntent = (snapshot[keepOffKey] as? Bool) == true
             || snapshot[savedUsageKey] != nil || snapshot[savedDictationKey] != nil
-        return Plan(writes: writes, restoresSystemFn: fnIntent)
+        let external = moduleIDs.filter(handedOver)
+        // Клавиатуру ведёт утилита: 🌐 принадлежит ей, центр его не трогает.
+        return Plan(writes: writes, restoresSystemFn: fnIntent && !external.contains("keyboard"), askUtility: external)
     }
 }

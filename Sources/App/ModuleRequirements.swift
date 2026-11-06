@@ -19,11 +19,18 @@ final class AccessState: ObservableObject {
         blocked = Self.compute()
         subs.append(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in
-                FanHelperInstaller.shared.refresh()
+                // Помощника вентиляторов ведёт утилита, когда она владеет модулем: центр его не трогает.
+                if !ModuleManager.shared.isExternal(.fans) { FanHelperInstaller.shared.refresh() }
                 self?.refresh()
             })
         // Установка помощника кончается асинхронно: willChange приходит до смены значения, читаем со следующего витка.
-        subs.append(FanHelperInstaller.shared.objectWillChange
+        if !ModuleManager.shared.isExternal(.fans) {
+            subs.append(FanHelperInstaller.shared.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.refresh() })
+        }
+        // Шаги ведомых модулей приходят в статусе утилиты.
+        subs.append(SatelliteRegistry.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh() })
     }

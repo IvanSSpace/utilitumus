@@ -71,6 +71,43 @@ struct SetupProgress {
     var allDone: Bool { done == total }
 }
 
+// MARK: - Шаги утилиты
+
+extension SetupStep {
+    /// Шаг, который описала утилита. Рисует центр, а выполняет утилита: macOS покажет её имя в запросе.
+    /// Проверить заранее нельзя (`verifiable == false`) — шаг остаётся «спросит сама», готовым он не считается.
+    @MainActor init(_ step: LinkSetupStep, module: Module, registry: SatelliteRegistry) {
+        let kind: Kind
+        switch step.kind {
+        case .permission: kind = .permission
+        case .system: kind = .system
+        case .recommendation: kind = .recommendation
+        }
+        self.init(id: step.id, title: step.title, why: step.why, kind: kind, icon: step.icon,
+                  buttonTitle: step.buttonTitle ?? "Разрешить…", required: step.required,
+                  verifiable: step.verifiable,
+                  isDone: { step.done },
+                  perform: { registry.performSetupStep(module, step.id) },
+                  busy: { step.busy },
+                  lastError: { step.error ?? registry.stepErrors["\(module.rawValue).\(step.id)"] })
+    }
+}
+
+extension Module {
+    /// Шаги из статуса утилиты, если она знает о модуле больше, чем центр: её ведёт утилита, или она стоит и отвечает
+    /// (чек-лист до передачи, Q1). nil — шаги встроенного модуля. Ведомый модуль без ответа — пустой список: что в нём
+    /// сделано, неизвестно, а вкладка и карточка скажут «не отвечает». Встроенные шаги вместо этого показали бы
+    /// разрешения центра как разрешения утилиты.
+    @MainActor var utilitySetupSteps: [SetupStep]? {
+        let registry = SatelliteRegistry.shared
+        let status = registry.entries[self]?.status
+        if let status {
+            return status.setupSteps.map { SetupStep($0, module: self, registry: registry) }
+        }
+        return ModuleManager.shared.isExternal(self) ? [] : nil
+    }
+}
+
 // MARK: - Шаги по модулям
 
 extension SetupStep {
@@ -133,6 +170,7 @@ extension Module {
     /// Шаги настройки по порядку: сначала разрешения, потом наши системные настройки, потом рекомендации.
     @MainActor var setupSteps: [SetupStep] {
         if let steps = SetupFlow.overrides[self] { return steps }
+        if let steps = utilitySetupSteps { return steps }
         switch self {
         case .sound, .load, .awake:
             return []
@@ -212,6 +250,10 @@ extension Module {
 
     /// Живое обновление того, что кешируют контроллеры, пока смотрят на чек-лист.
     @MainActor func refreshSetupSources() {
+        if utilitySetupSteps != nil {
+            SatelliteRegistry.shared.refresh(self)
+            return
+        }
         switch self {
         case .fans: FanHelperInstaller.shared.refresh()
         case .keyboard:
@@ -268,7 +310,7 @@ final class SetupFlow: ObservableObject {
     /// «Сделать всё автоматически»: все наши шаги, потом панель первого недостающего обязательного разрешения.
     func doAll(_ module: Module) {
         let steps = module.setupSteps
-        if module == .keyboard, KeyboardController.shared.isOn(.fnLanguage) {
+        if module == .keyboard, module.utilitySetupSteps == nil, KeyboardController.shared.isOn(.fnLanguage) {
             // 🌐 и диктовка — одной записью и одним применением: по шагу на каждое дёргало систему
             // дважды, и macOS показывала окно «Включить диктовку?».
             KeyboardController.shared.disableAllSystemActions()

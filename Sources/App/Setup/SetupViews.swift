@@ -170,11 +170,14 @@ struct SetupBanner: View {
     @Environment(\.pageActive) private var pageActive
     @Environment(\.dsTheme) private var theme
     @ObservedObject private var flow = SetupFlow.shared
+    /// Шаги ведомого модуля приходят в статусе утилиты: плашка пересчитывается, когда он обновился.
+    @ObservedObject private var satellites = SatelliteRegistry.shared
     let module: Module
     @State private var tick = 0
 
     var body: some View {
         let _ = tick
+        let _ = satellites.entries[module]?.status
         let progress = module.setupProgress
         let onlyOptional = progress.requiredDone
         if progress.total > 0, !progress.allDone, !(onlyOptional && flow.isBannerHidden(module)) {

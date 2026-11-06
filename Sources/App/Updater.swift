@@ -80,8 +80,8 @@ final class Updater: ObservableObject {
             do {
                 try await Self.downloadAndReplace(from: url, expectedVersion: version,
                                                   target: Bundle.main.bundleURL,
-                                                  beforeReplace: { FanController.shared.holdForUpdate() },
-                                                  replaceFailed: { FanController.shared.resumeAfterFailedUpdate() })
+                                                  beforeReplace: { if ModuleManager.shared.runsBuiltIn(.fans) { FanController.shared.holdForUpdate() } },
+                                                  replaceFailed: { if ModuleManager.shared.runsBuiltIn(.fans) { FanController.shared.resumeAfterFailedUpdate() } })
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)

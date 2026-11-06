@@ -35,4 +35,21 @@ final class RemoteAwakeModel: RemoteModuleModel<AwakeState, AwakeAction>, AwakeM
         set { send(.setDuration(newValue.rawValue)) }
     }
     func toggle() { send(.toggle) }
+
+    // Карточка и меню «Не спать» — те же, что у встроенного: остаток времени в строку статуса не входит.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        var state = DashboardLive.awake(self)
+        if let error = actionError {
+            state.text = error
+            state.attention = true
+        }
+        return state
+    }
+
+    override func performDashboardAction() -> Bool {
+        toggle()
+        return true
+    }
+
+    override var menuUsesQuickActions: Bool { false }
 }
