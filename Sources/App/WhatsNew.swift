@@ -62,6 +62,7 @@ final class WhatsNew: ObservableObject {
 struct WhatsNewSheet: View {
     @ObservedObject var whatsNew = WhatsNew.shared
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dsTheme) private var theme
     @State private var selected: String?
 
     private var entry: WhatsNewEntry? {
@@ -98,15 +99,17 @@ struct WhatsNewSheet: View {
         }
     }
 
-    // Шапка: статичный градиент.
+    // Шапка: статичный градиент. У «Графита» серый, в цвет темы: цветной ему не подходит.
+    private var headerColors: [Color] {
+        if theme == .graphite { return [Color(white: 0.30), Color(white: 0.20)] }
+        return [Color(hue: 0.62, saturation: 0.55, brightness: 0.9),
+                Color(hue: 0.80, saturation: 0.6, brightness: 0.75),
+                Color(hue: 0.95, saturation: 0.55, brightness: 0.85)]
+    }
+
     private var header: some View {
         ZStack(alignment: .bottomLeading) {
-            LinearGradient(
-                colors: [Color(hue: 0.62, saturation: 0.55, brightness: 0.9),
-                         Color(hue: 0.80, saturation: 0.6, brightness: 0.75),
-                         Color(hue: 0.95, saturation: 0.55, brightness: 0.85)],
-                startPoint: .top, endPoint: .bottom
-            )
+            LinearGradient(colors: headerColors, startPoint: .top, endPoint: .bottom)
             HStack(spacing: 14) {
                 Image(systemName: "shippingbox.fill")
                     .font(.system(size: 26, weight: .semibold))

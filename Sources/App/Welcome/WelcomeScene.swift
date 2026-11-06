@@ -16,7 +16,7 @@ enum Welcome {
 
     /// Цвета категорий на тёмном фоне: насыщеннее, чем в боковой панели.
     static func tint(_ category: ModuleCategory) -> Color {
-        Color(hue: category.hue, saturation: 0.75, brightness: 0.95)
+        Color(hue: category.hue, saturation: 0.62, brightness: 0.92)
     }
 }
 
@@ -112,7 +112,7 @@ private struct WelcomeBackdrop: View {
                     let color = Welcome.tint(category)
                     context.fill(
                         Path(ellipseIn: CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)),
-                        with: .radialGradient(Gradient(colors: [color.opacity(0.34), color.opacity(0)]),
+                        with: .radialGradient(Gradient(colors: [color.opacity(0.25), color.opacity(0)]),
                                               center: CGPoint(x: cx, y: cy), startRadius: 0, endRadius: radius))
                 }
             }
