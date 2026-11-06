@@ -35,7 +35,12 @@ final class ClipboardController: ObservableObject {
     private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
 
     private(set) var store: ClipboardStore?
-    private var isRunning = false
+    private(set) var isRunning = false
+    /// Утилита открывает хранилище сама: ключ читается вне главного потока и по своему порядку.
+    /// Встроенный модуль оставляет nil и берёт ключ из прежней записи.
+    var storeOpener: (@MainActor () -> Void)?
+    /// false — ни опроса буфера, ни горячей клавиши: для стенда, которому чужой буфер и клавиши не нужны.
+    var observesSystem = true
     private var timer: Timer?
     private var lastChange = 0
     /// changeCount после нашей собственной записи (вставка из панели): такую запись не запоминаем.
@@ -65,6 +70,7 @@ final class ClipboardController: ObservableObject {
         guard !isRunning else { return }
         isRunning = true
         openStore()
+        guard observesSystem else { return }
         lastChange = NSPasteboard.general.changeCount  // что лежало до включения — не берём
         frontHistory = ClipFrontHistory(current: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -100,6 +106,10 @@ final class ClipboardController: ObservableObject {
 
     private func openStore() {
         guard store == nil else { return }
+        if let storeOpener {
+            storeOpener()
+            return
+        }
         guard let key = try? ClipboardKeychain().key() else {
             storeError = "Не удалось получить ключ из Связки ключей — история не ведётся, старая не тронута"
             return
@@ -112,6 +122,33 @@ final class ClipboardController: ObservableObject {
         storeError = nil
         storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
         attach(opened)
+    }
+
+    /// Открытое утилитой хранилище; уведомление об отложенном индексе — как у встроенного.
+    func attachOpened(_ opened: ClipboardStore) {
+        guard opened.isAvailable else {
+            storeUnavailable("Не удалось открыть файл истории — история не ведётся, файл не тронут")
+            return
+        }
+        storeError = nil
+        storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
+        attach(opened)
+    }
+
+    /// Хранилища не будет: история не ведётся, причина видна на экране.
+    func storeUnavailable(_ message: String) {
+        store = nil
+        sync()
+        storeError = message
+    }
+
+    /// Отпустить хранилище: остановленная или пассивная утилита не держит историю в памяти,
+    /// иначе она перезаписала бы файл, которым за это время занялся другой владелец.
+    func detachStore() {
+        store = nil
+        storeError = nil
+        storeNotice = nil
+        sync()
     }
 
     /// Подключить хранилище. Отдельно от `openStore`, чтобы стенд мог подставить своё, не трогая Keychain и диск.

@@ -50,6 +50,8 @@ struct ClipboardState: Codable, Equatable {
     var limit: Int
     var excludedApps: [String]
     var axTrusted: Bool
+    /// Только утилита: слово о ключе истории, чтобы центр знал, когда передать ключ. Самого ключа здесь нет и быть не должно.
+    var keyState: ClipboardKeyState? = nil
 }
 
 extension ClipboardState {
@@ -82,6 +84,48 @@ enum ClipboardAction: Codable, Equatable {
     case resumeHotKey
     case setHotKey(keyCode: UInt32, modifiers: UInt32)
     case resetHotKey
+
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "togglePanel": try wire.none(); self = .togglePanel
+        case "refreshPermissions": try wire.none(); self = .refreshPermissions
+        case "requestAccessibility": try wire.none(); self = .requestAccessibility
+        case "clearHistory": try wire.none(); self = .clearHistory
+        case "suspendHotKey": try wire.none(); self = .suspendHotKey
+        case "resumeHotKey": try wire.none(); self = .resumeHotKey
+        case "resetHotKey": try wire.none(); self = .resetHotKey
+        case "setLimit":
+            try wire.fields("value")
+            self = .setLimit(value: try wire.field("value"))
+        case "addSpace":
+            try wire.fields("name", "colorID")
+            self = .addSpace(name: try wire.field("name"), colorID: try wire.field("colorID"))
+        case "renameSpace":
+            try wire.fields("id", "name")
+            self = .renameSpace(id: try wire.field("id"), name: try wire.field("name"))
+        case "setColor":
+            try wire.fields("id", "colorID")
+            self = .setColor(id: try wire.field("id"), colorID: try wire.field("colorID"))
+        case "moveSpace":
+            try wire.fields("id", "by")
+            self = .moveSpace(id: try wire.field("id"), by: try wire.field("by"))
+        case "deleteSpace":
+            try wire.fields("id")
+            self = .deleteSpace(id: try wire.field("id"))
+        case "addExcluded":
+            try wire.fields("bundleID")
+            self = .addExcluded(bundleID: try wire.field("bundleID"))
+        case "removeExcluded":
+            try wire.fields("bundleID")
+            self = .removeExcluded(bundleID: try wire.field("bundleID"))
+        case "setHotKey":
+            try wire.fields("keyCode", "modifiers")
+            self = .setHotKey(keyCode: try wire.field("keyCode"), modifiers: try wire.field("modifiers"))
+        default:
+            throw wire.refuse()
+        }
+    }
 }
 
 enum ClipboardWireRules {
