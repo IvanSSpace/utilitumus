@@ -180,7 +180,7 @@ func wirePure() {
     check((try? JSONDecoder().decode(MixerState.self, from: Data(old.utf8))) != nil, "без lastError и с новым полем состояние читается")
 
     let actions: [MixerAction] = [.setVolume(id: "com.a/b", value: 0.57), .setVolume(id: "exe:x", value: 1.0 / 3), .setMuted(id: "com.a", muted: true),
-                                  .reset(id: "com.a"), .commitVolumes, .setScreenVisible(visible: true)]
+                                  .reset(id: "com.a"), .commitVolumes]
     for action in actions {
         let text = String(decoding: sorted(action), as: UTF8.self)
         check(wireDecoded(text) == action, "действие переживает кодирование: \(text)")
@@ -244,7 +244,7 @@ func wirePure() {
     check(c.handle(.setVolume(id: "com.a.music", value: -3)) == nil && c.volume(for: "com.a.music") == 0, "громкость −3 зажата до 0")
     check(c.handle(.setMuted(id: "com.a.music", muted: true)) == nil && c.wireState.apps.first?.muted == true, "setMuted виден в состоянии")
     check(c.handle(.reset(id: "com.a.music")) == nil && c.wireState.apps.first == MixerAppState(id: "com.a.music", name: "Музыка", volume: 1, muted: false), "reset возвращает 100 % и звук")
-    check(c.handle(.setScreenVisible(visible: true)) == nil && c.handle(.setScreenVisible(visible: false)) == nil, "setScreenVisible принят")
+    c.setScreenLease(true); c.setScreenLease(false); c.setScreenVisible(true); c.setScreenVisible(false)
 
     c.stop()
     check(c.handle(.setVolume(id: "com.a.music", value: 0.5)) != nil && c.volume(for: "com.a.music") == 1, "после stop() списков нет, действие отвергнуто")
@@ -319,6 +319,7 @@ func installedNotRunning() -> (id: String, path: String)? {
     var otherApps: [MixerApp] { state.otherApps.map(MixerApp.init) }
     var permissionProblem: Bool { state.permissionProblem }
     var lastError: String? { state.lastError }
+    var runsInUtility: Bool { false }
     func isMuted(_ id: String) -> Bool { false }
     func setVolume(_ value: Double, for id: String) {}
     func setMuted(_ value: Bool, for id: String) {}

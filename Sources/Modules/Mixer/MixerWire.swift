@@ -1,7 +1,7 @@
 import AppKit
 
 /// Строка списка на экране. Иконка по связи не ходит: экран находит её по `id`.
-struct MixerAppState: Codable, Equatable {
+struct MixerAppState: Codable, Equatable, Sendable {
     var id: String
     var name: String
     var volume: Double
@@ -9,7 +9,7 @@ struct MixerAppState: Codable, Equatable {
 }
 
 /// То, что экран показывает.
-struct MixerState: Codable, Equatable {
+struct MixerState: Codable, Equatable, Sendable {
     var apps: [MixerAppState]
     var idleApps: [MixerAppState]
     var presetApps: [MixerAppState]
@@ -18,13 +18,32 @@ struct MixerState: Codable, Equatable {
     var lastError: String?
 }
 
-/// Что экран может попросить. Больше модуль ничего не примет.
-enum MixerAction: Codable, Equatable {
+/// Что экран может попросить. Больше модуль ничего не примет. Открыт ли экран, связь знает сама (аренда экрана).
+enum MixerAction: Codable, Equatable, Sendable {
     case setVolume(id: String, value: Double)
     case setMuted(id: String, muted: Bool)
     case reset(id: String)
     case commitVolumes
-    case setScreenVisible(visible: Bool)
+
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "setVolume":
+            try wire.fields("id", "value")
+            self = .setVolume(id: try wire.field("id"), value: try wire.field("value"))
+        case "setMuted":
+            try wire.fields("id", "muted")
+            self = .setMuted(id: try wire.field("id"), muted: try wire.field("muted"))
+        case "reset":
+            try wire.fields("id")
+            self = .reset(id: try wire.field("id"))
+        case "commitVolumes":
+            try wire.none()
+            self = .commitVolumes
+        default:
+            throw wire.refuse()
+        }
+    }
 }
 
 /// Иконка приложения по `id` из состояния: у запущенного как в списках контроллера, у незапущенного
@@ -83,9 +102,12 @@ extension MixerController {
             reset(id)
         case .commitVolumes:
             commitVolumes()
-        case .setScreenVisible(let visible):
-            setScreenVisible(visible)
         }
         return nil
+    }
+
+    /// Действие из связи. Самое длинное настоящее — `setVolume` с bundle id, короче 512 байт.
+    func handle(_ data: Data) -> Data {
+        LinkWire.handle(data, as: MixerAction.self, limit: 512, state: { wireState }) { handle($0) }
     }
 }

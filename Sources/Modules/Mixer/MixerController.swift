@@ -32,6 +32,12 @@ final class MixerController: MixerModel {
     /// Тап без единого вызова IOProc за это время считается нерабочим.
     private static let healthSeconds: TimeInterval = 2
     private static let retrySeconds: TimeInterval = 30
+    #if KIT_TEST_DEFAULTS
+    /// Стенд звук не перехватывает: тап вызвал бы системный запрос разрешения на экране автора.
+    private static let capturing = false
+    #else
+    private static let capturing = true
+    #endif
     private static let volumesKey = "MixerVolumes"
     private static let mutedKey = "MixerMuted"
 
@@ -50,6 +56,8 @@ final class MixerController: MixerModel {
     /// «Запись системного звука».
     @Published private(set) var permissionProblem = false
     @Published private(set) var lastError: String?
+    /// Выставляет утилита при создании модуля: центр со своим встроенным микшером остаётся `false`.
+    var runsInUtility = false
 
     private final class Session {
         var name: String
@@ -96,7 +104,10 @@ final class MixerController: MixerModel {
     private var unlisten: [() -> Void] = []
     /// Экран «Микшер» открыт. Пока нет, молчащие приложения и пресеты не считаются:
     /// в фоне нужны только сессии и тапы.
-    private var screenVisible = false
+    private var viewVisible = false
+    /// Центр держит экран открытым (аренда экрана утилиты).
+    private var leased = false
+    private var screenVisible: Bool { viewVisible || leased }
     /// Отложенная запись громкостей в UserDefaults (слайдер шлёт десятки значений в секунду).
     private var persistTask: Task<Void, Never>?
 
@@ -134,11 +145,17 @@ final class MixerController: MixerModel {
 
     /// Экран показан или скрыт (`onAppear` / `onDisappear`). При показе сразу
     /// досчитываем списки молчащих.
-    func setScreenVisible(_ value: Bool) {
-        guard screenVisible != value else { return }
-        screenVisible = value
+    func setScreenVisible(_ value: Bool) { changeScreen { viewVisible = value } }
+
+    /// Аренда экрана у утилиты: экран может быть открыт в центре, а не в этом процессе.
+    func setScreenLease(_ value: Bool) { changeScreen { leased = value } }
+
+    private func changeScreen(_ change: () -> Void) {
+        let before = screenVisible
+        change()
+        guard screenVisible != before else { return }
         if timer != nil { schedulePoll() }
-        if value { processSnapshot(); refresh() }
+        if screenVisible { processSnapshot(); refresh() }
     }
 
     /// Шаг слайдера: громкость и gain тапа меняются сразу, без обхода HAL. Полный
@@ -475,7 +492,7 @@ final class MixerController: MixerModel {
             return
         }
 
-        guard wantsTap, let outputUID, !session.objectIDs.isEmpty else { return }
+        guard Self.capturing, wantsTap, let outputUID, !session.objectIDs.isEmpty else { return }
         if let failedAt = session.failedAt, now.timeIntervalSince(failedAt) < Self.retrySeconds { return }
         do {
             session.tap = try ProcessTap(processObjectIDs: session.objectIDs, outputUID: outputUID, gain: gain)

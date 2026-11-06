@@ -197,7 +197,9 @@ struct MixerView<Model: MixerModel>: View {
             if model.permissionProblem {
                 DSSection("Нужно разрешение") {
                     DSRow(icon: "lock.shield", title: "Запись системного звука",
-                          subtitle: "Без неё громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.") {
+                          subtitle: model.runsInUtility
+                              ? "Без неё громкость не меняется. Включи Микшер в «Конфиденциальность и безопасность → Запись экрана и системного звука». Если громкость не заработает, выключи модуль и включи снова."
+                              : "Без неё громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.") {
                         DSButton("Открыть настройки…", small: true) {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
                                 NSWorkspace.shared.open(url)
@@ -225,7 +227,9 @@ struct MixerView<Model: MixerModel>: View {
                 if !model.presetApps.isEmpty { presetSection() }
                 if !model.otherApps.isEmpty { othersSection() }
 
-                Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
+                Note(model.runsInUtility
+                     ? "Выше 100 % громкость не поднять. Микшер работает и без Utilitumus. Выключи модуль или выйди из Микшера, и всё вернётся как было."
+                     : "Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
             }
         }
         .onPageActive { model.setScreenVisible($0) }

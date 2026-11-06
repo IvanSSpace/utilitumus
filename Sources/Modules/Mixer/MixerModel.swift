@@ -10,6 +10,8 @@ protocol MixerModel: ObservableObject {
     var otherApps: [MixerApp] { get }
     var permissionProblem: Bool { get }
     var lastError: String? { get }
+    /// Модуль работает в отдельной утилите: от этого зависят два текста экрана, про разрешение и про выход.
+    var runsInUtility: Bool { get }
     func isMuted(_ id: String) -> Bool
     func setVolume(_ value: Double, for id: String)
     func setMuted(_ value: Bool, for id: String)
