@@ -131,7 +131,7 @@ func catalogData(version: String) -> Data {
     print("png  \(name)")
 }
 
-/// Стор рядом с боковой панелью: на снимке видны и вкладки категорий.
+/// Стор рядом с боковой панелью: на снимке видна и сама панель.
 struct StoreWithSidebar: View {
     @State private var dashboard = false
     @State private var store = true

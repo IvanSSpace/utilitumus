@@ -1,6 +1,6 @@
 import Foundation
 
-/// Группы модулей в боковой панели и в «О проекте».
+/// Группы модулей в Сторе, на дашборде и в «О проекте». Боковая панель их не показывает.
 ///
 /// Вся схема — таблица `ModuleCategory.all`: порядок групп, названия, подписи, цвет и состав.
 /// Поменять разбиение = поправить эту таблицу, больше нигде ничего не менять.
@@ -10,10 +10,8 @@ struct ModuleCategory: Identifiable, Hashable {
     let id: String
     let title: String
     let subtitle: String
-    /// Значок вкладки в боковой панели и секции дашборда.
+    /// Значок секции дашборда.
     let icon: String
-    /// Показывать ли у модулей категории в панели вторую строку — живой статус.
-    let showsStatus: Bool
     /// Средний оттенок гаммы (0…1).
     let hue: Double
     /// Разброс оттенков между соседними модулями категории.
@@ -23,15 +21,15 @@ struct ModuleCategory: Identifiable, Hashable {
     static let all: [ModuleCategory] = [
         ModuleCategory(id: "background", title: "Фоном",
                        subtitle: "Настроил и забыл — работает само",
-                       icon: "moon.zzz.fill", showsStatus: true,
+                       icon: "moon.zzz.fill",
                        hue: 0.55, spread: 0.03, modules: [.sound, .mouse, .fans, .browser, .keyboard]),
         ModuleCategory(id: "handy", title: "Под рукой",
                        subtitle: "Пользуешься каждый день",
-                       icon: "hand.point.up.fill", showsStatus: false,
+                       icon: "hand.point.up.fill",
                        hue: 0.80, spread: 0.06, modules: [.stash, .voice, .clipboard, .mixer, .awake]),
         ModuleCategory(id: "ai", title: "С ИИ",
                        subtitle: "Когда агенты съедают память",
-                       icon: "sparkles", showsStatus: false,
+                       icon: "sparkles",
                        hue: 0.11, spread: 0.03, modules: [.load]),
     ]
 
