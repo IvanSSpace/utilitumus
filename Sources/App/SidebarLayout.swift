@@ -124,6 +124,19 @@ struct SidebarLayout: Equatable {
         result[target.zone] = inserted
         return result
     }
+
+    /// Что стоит в зоне на экране, пока тянут `module`. В закреплённых и в списке место вставки открыто пустотой,
+    /// в «Скрытых» остальные не двигаются (там показывается линия вставки) и открывают место, только когда модуль отпустили.
+    func slots(_ zone: Zone, dragging module: Module?, target: Target?, settling: Bool) -> [Module?] {
+        guard let module else { return items(zone) }
+        if zone != .hidden { return preview(module, target: target)[zone] ?? [] }
+        var rows: [Module?] = hidden.filter { $0 != module }
+        guard settling else { return rows }
+        let at: Int?
+        if let target { at = target.zone == .hidden ? target.index : nil } else { at = hidden.firstIndex(of: module) }
+        if let at { rows.insert(nil, at: min(max(at, 0), rows.count)) }
+        return rows
+    }
 }
 
 /// Размеры и места. Всё считается по числам: строки одной высоты, плитки сетки одного размера.
@@ -137,6 +150,9 @@ enum SidebarMetrics {
     static let sectionGap: CGFloat = 8
     /// Пустая зона закреплённых: пунктирная подсказка.
     static let emptyHintHeight: CGFloat = 40
+    /// Отступ от плиток до списка и от верха списка до первой строки.
+    static let pinnedBottomGap: CGFloat = 8
+    static let listTop: CGFloat = 2
 
     /// Столбцов по числу плиток: 1–4 — одной строкой, 5–6 — три, 7–8 — четыре, 9 — три.
     static func columns(_ count: Int) -> Int {
