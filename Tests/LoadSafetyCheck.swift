@@ -9,13 +9,34 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
     if !ok { failed = true }
 }
 
-func process(name: String, exe: String, args: [String] = [], pid: Int32 = 500) -> LoadProcess {
+func process(name: String, exe: String, args: [String] = [], pid: Int32 = 500, cwd: String? = nil) -> LoadProcess {
     LoadProcess(pid: pid, ppid: 1, user: getuid(), uniqueID: 1, startTime: 0, name: name, exe: exe,
                 exeName: String(exe.split(separator: "/").last ?? ""), isClaude: false,
-                terminal: Kinds.terminalApp(exe: exe), cwd: nil, args: args, tty: nil, memMB: 1, residentMB: 1, wiredMB: nil, compressedMB: 0,
+                terminal: Kinds.terminalApp(exe: exe), cwd: cwd, args: args, tty: nil, memMB: 1, residentMB: 1, wiredMB: nil, compressedMB: 0,
                 readable: true, pgid: pid, tpgid: 0, cpuPercent: nil)
 }
 func why(_ p: LoadProcess, root: Bool = true) -> String? { Protection.why(p, fence: [:], root: root) }
+
+// MARK: Бот только для наблюдения
+
+do {
+    var watched = BotSpec.none
+    watched.id = "procbot"
+    watched.name = "Процесс"
+    watched.watchDir = "/p/procbot"
+    let bot = process(name: "python3", exe: "/usr/bin/python3", pid: 700, cwd: "/p/procbot")
+    let shell = process(name: "zsh", exe: "/bin/zsh", pid: 701, cwd: "/p/procbot")
+    let elsewhere = process(name: "python3", exe: "/usr/bin/python3", pid: 702, cwd: "/p/other")
+    let procs = [bot.pid: bot, shell.pid: shell, elsewhere.pid: elsewhere]
+    let tree = ProcessTree(procs)
+    let up = BotRegistry.status(watched, procs: procs, tree: tree, launchd: [:])
+    check("бот с watch_dir работает: «Нагрузка» не пишет «Остановлен»", up.state == .running && up.pids == [700], "\(up.state) \(up.pids)")
+    let fence = BotRegistry.fence([watched], procs: procs, tree: tree, launchd: [:])
+    check("процесс бота с watch_dir защищён от остановки", fence[700] != nil, "\(fence)")
+    check("оболочка и чужая папка под защиту не попали", fence[701] == nil && fence[702] == nil, "\(fence)")
+    let down = BotRegistry.status(watched, procs: [shell.pid: shell], tree: ProcessTree([shell.pid: shell]), launchd: [:])
+    check("процесса нет: бот остановлен", down.state == .stopped, "\(down.state)")
+}
 
 // MARK: Имя процесса
 

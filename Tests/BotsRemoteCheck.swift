@@ -350,6 +350,11 @@ func discoveryPure() {
     defer { chmod(home + "/proj/locked", 0o700); try? fm.removeItem(atPath: home) }
     let result = BotsDiscovery.scan(discoveryRoots(home), known: discoveryKnown(home))
     let byLabel = Dictionary(result.candidates.compactMap { c in c.label.map { ($0, c) } }, uniquingKeysWith: { a, _ in a })
+    for (exe, cwd) in [("/opt/homebrew/bin/python3.12", "/p"), ("/usr/bin/node", "/p"), ("/p/app/bot", "/p/app"), ("/bin/zsh", "/p"), ("/usr/bin/python3", "/"), ("/usr/bin/pythonx", "/p")] {
+        check(BotsDiscovery.isRuntime(exe: exe, cwd: cwd) == BotRegistry.isRuntime(exe: exe, cwd: cwd), "«Боты» и «Нагрузка» одинаково узнают процесс бота: \(exe)")
+    }
+    check(!BotsDiscovery.usable("/Volumes/net/bot", home: home) && !BotsDiscovery.usable("/Volumes", home: home), "том в /Volumes поиск не читает: мёртвое подключение его не повесит")
+    check(BotsDiscovery.usable("/Volumes/Data/Users/x/bot", home: "/Volumes/Data/Users/x"), "дом на отдельном томе остаётся обычной папкой")
     func c(_ label: String) -> BotsDiscovery.Candidate? { byLabel[label] }
 
     check(c("com.example.news-digest")?.strength == .confirmed && c("com.example.news-digest")?.why.contains("aiogram в requirements.txt") == true, "по библиотеке: aiogram в requirements.txt — уверенно")
