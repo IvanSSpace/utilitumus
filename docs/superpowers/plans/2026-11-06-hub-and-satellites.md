@@ -343,6 +343,35 @@
 
 ---
 
+### Task 10: Вкладка «Не спать» выглядит как сейчас
+
+Лаунчер показывает тот же `AwakeView` во вкладке, а работает утилита. Запасной экран `SatellitePage` убирается из обычного пути и остаётся для случая «утилита не отвечает».
+
+**Files:**
+- Create: `Sources/Modules/Awake/AwakeModel.swift`, `Sources/Modules/Awake/AwakeWire.swift`, `Sources/App/Satellites/RemoteAwakeModel.swift`, `Tests/AwakeRemoteCheck.swift`, `Tests/run-awake-remote-check.sh`
+- Modify: `Sources/Modules/Awake/AwakeView.swift`, `Sources/Modules/Awake/AwakeController.swift`, `Sources/Kit/Link/*`, `Sources/Apps/Awake/AwakeApp.swift`, вкладка модуля в `Sources/App`
+
+**Interfaces:**
+- `@MainActor protocol AwakeModel: ObservableObject` — `isActive`, `endDate`, `keepDisplay`, `duration`, `canStart`, `toggle()`. `AwakeView` зависит только от него (через дженерик). `AwakeController` реализует его напрямую. `RemoteAwakeModel` реализует через связь.
+- В `LinkXPC`: `moduleState(reply: (Data) -> Void)`, `moduleAction(_: Data, reply: (Data) -> Void)`; `KitLink.protocolVersion = 2`. Содержимое для центра непрозрачно, разбирает только код модуля. `LinkHello` версии 1 → `incompatible`.
+- `struct AwakeState: Codable, Equatable`, `enum AwakeAction: Codable` — `toggle`, `setKeepDisplay(Bool)`, `setDuration(Int)`. Утилита проверяет значения: длительность только из `AwakeDuration`, неизвестное действие или мусор — ошибка без изменений.
+
+Обновление: по `statusChanged` модель перечитывает состояние, отсчёт времени считает лаунчер локально по `endDate`, без опроса. Действие: применить у утилиты, затем показать ответ; при ошибке или таймауте показать прежнее состояние и короткий текст. Утилита не отвечает: `SatellitePage` с «не отвечает». Лаунчер не держит assertion: `pmset` показывает его только у процесса утилиты. Требование подписи прежнее: команды только от лаунчера.
+
+- [ ] **Step 1: Написать тесты**
+
+Снимок вкладки с `AwakeController` и с `RemoteAwakeModel` в том же состоянии совпадает попиксельно в темах `dusk` и `calm`, состояния «засыпает», «не спать без срока», «не спать 1 ч». `moduleAction` от чужой подписи отвергается. Мусор, неизвестное действие и длительность 12345 — ошибка, состояние не изменилось. Нажатие кнопки в модели создаёт assertion у процесса утилиты, у тестового центра его нет. Вызов к зависшей утилите укладывается в 2,5 с, главный поток не простаивает дольше 0,3 с. Переключение вкладок: `AwakeView` появляется без ожидания ответа, с последним известным состоянием.
+
+- [ ] **Step 2: Запустить, увидеть провал**
+
+- [ ] **Step 3: Реализовать; встроенный вариант работает как раньше; все проверки задач 3, 6, 7, 8 обновлены под версию протокола 2**
+
+- [ ] **Step 4: Тесты проходят, `NO_INSTALL=1 ./build.sh` и `Tests/run-hub-e2e.sh` проходят; PNG приложить к отчёту**
+
+- [ ] **Step 5: Commit** `Вкладка «Не спать» рисует лаунчер, работает утилита`
+
+---
+
 ## Вне этого плана: требует решения автора
 
 - Слияние `hub` в `main`, выпуск центра 0.6.0 и утилиты `awake-v1.0.0`, запись в `Resources/WhatsNew.json`, строка в реальном `Catalog/catalog.json`. Публикация только после проверки автором на своём Mac.
