@@ -528,14 +528,20 @@ PID=""
 for _ in $(seq 1 30); do PID="$(pid_of || true)"; [ -n "$PID" ] && break; sleep 0.1; done
 [ -n "$PID" ] || fail "с KeepAlive служба не запустилась"
 # Сразу после spawn процесс ещё не стал нашим: kill отказывает, пока не дойдёт exec.
+sleep 0.4
+LINES0="$(wc -l < "$LOG")"
 KILLED=""
 for _ in $(seq 1 20); do kill -9 "$PID" 2>/dev/null && { KILLED=1; break; }; sleep 0.05; done
 [ -n "$KILLED" ] || fail "служба не убита: $PID"
 RUNS=1
-for _ in $(seq 1 30); do RUNS="$(runs)"; [ "$RUNS" -ge 2 ] && break; sleep 0.2; done
+for _ in $(seq 1 30); do RUNS="$(runs)"; [ "$RUNS" -ge 2 ] && break; sleep 0.1; done
 [ "$RUNS" -ge 2 ] || fail "после SIGKILL launchd не поднял службу: runs = $RUNS"
+# Выход по простою через 2 с тоже возвращает «Авто», поэтому смотрим раньше: это запись именно при запуске.
+sleep 0.7
+LINES1="$(wc -l < "$LOG")"
+[ "$LINES1" -ge $((LINES0 + 2)) ] || fail "при запуске ручные вентиляторы не возвращены в Авто: было $LINES0, стало $LINES1: $(cat "$LOG")"
+expect_state "running" "после перезапуска служба ещё работает: запись сделана при запуске, не при выходе"
 sleep 3
-[ "$(grep -c 'F0Md=0' "$LOG")" -ge 1 ] && [ "$(grep -c 'F1Md=0' "$LOG")" -ge 1 ] || fail "при запуске ручные вентиляторы не возвращены в Авто: $(cat "$LOG")"
 ok "SIGKILL службы: launchd поднял её, при запуске оба вентилятора в Авто без клиента"
 expect_state "not running" "чистый выход по простою (код 0): служба остаётся остановленной"
 RUNS="$(runs)"
