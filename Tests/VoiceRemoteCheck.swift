@@ -40,8 +40,15 @@ let notOneAction: [(String, String)] = [
 
 @MainActor func death(utility: Int32) async {
     let model = RemoteVoiceModel.shared
+    let registry = SatelliteRegistry.shared
+    // Модель следит за реестром: он должен сперва услышать живую утилиту, иначе смерть не будет переменой статуса.
+    await registry.update()
+    _ = await Stand.open(.dusk)
     killUtilityForGood(utility)
+    // Таймеров в модели нет: смерть замечает реестр, а модель за ним перечитывает.
+    await registry.update()
     check(await until(8) { !model.responding }, "утилита убита: модель показала запасной экран")
+    check(model.screen(of: .voice, registry) == .notResponding, "утилита убита: вкладка показывает «не отвечает»")
     let ticks = TickWatch()
     await model.read()
     check(ticks.maxGap <= 0.3, String(format: "чтение мёртвой утилиты: простой главного потока %.3f с", ticks.maxGap))
