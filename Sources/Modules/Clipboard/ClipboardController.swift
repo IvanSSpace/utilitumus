@@ -30,7 +30,7 @@ final class ClipboardController: ObservableObject {
     @Published private(set) var storeError: String?
     /// История работает, но прежний индекс не открылся и отложен в файл.
     @Published private(set) var storeNotice: String?
-    @Published private(set) var axTrusted = AXIsProcessTrusted()
+    @Published private(set) var axTrusted = Kit.accessTrusted()
 
     /// Последовательная: снимки приходят в том порядке, в каком буфер менялся.
     private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
@@ -286,7 +286,7 @@ final class ClipboardController: ObservableObject {
 
     var historyCount: Int { items.filter { $0.spaceID == nil }.count }
 
-    func refreshPermissions() { axTrusted = AXIsProcessTrusted() }
+    func refreshPermissions() { axTrusted = Kit.accessTrusted() }
 
     func requestAccessibility() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String

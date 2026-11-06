@@ -20,9 +20,12 @@ let notOneAction: [(String, String)] = [
     ("не uuid", #"{"deleteSpace":{"id":"не-uuid"}}"#),
     ("пустое имя пространства", #"{"addSpace":{"name":"   ","colorID":"teal"}}"#),
     ("чужой цвет", #"{"addSpace":{"name":"Х","colorID":"нет-такого"}}"#),
+    ("повтор ключа", #"{"setLimit":{"value":250},"setLimit":{"value":50}}"#),
+]
+/// Разбираются как действия, а отказ даёт утилита при исполнении (текст ошибки, состояние то же).
+let refusedByUtility: [(String, String)] = [
     ("лимит вне списка", #"{"setLimit":{"value":12345}}"#),
     ("плохой bundle id", #"{"addExcluded":{"bundleID":"плохой id"}}"#),
-    ("повтор ключа", #"{"setLimit":{"value":250},"setLimit":{"value":50}}"#),
 ]
 
 // MARK: - Сценарии
@@ -43,7 +46,7 @@ func wirePure() {
 }
 
 @MainActor func garbage() async {
-    await checkBadActions(ClipboardState.self, id: moduleID, extra: notOneAction.map { ($0.0, Data($0.1.utf8)) })
+    await checkBadActions(ClipboardState.self, id: moduleID, extra: (notOneAction + refusedByUtility).map { ($0.0, Data($0.1.utf8)) })
 }
 
 /// Утилита ждала ключ; центр передал его сам, из своей памяти, и утилита сама подтвердила.
@@ -67,8 +70,14 @@ func wirePure() {
     let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     kill(utility, SIGUSR1)
-    check(await until(5) { model.totalCount == 6 }, "утилита приняла выдуманные записи: 6")
-    await model.read()
+    // Утилита сообщает о записях только тому, кто смотрит на экран; стенд читает сам, пока записи не придут.
+    var seeded = false
+    for _ in 0..<50 {
+        await model.read()
+        if model.totalCount == 6 { seeded = true; break }
+        await pause(0.1)
+    }
+    check(seeded, "утилита приняла выдуманные записи: 6")
 
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clipstand-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -106,8 +115,7 @@ func wirePure() {
     let model = RemoteClipboardModel.shared
     let registry = SatelliteRegistry.shared
     let known = await Stand.open(.dusk)
-    kill(utility, SIGKILL)
-    await pause(0.5)
+    killUtilityForGood(utility)
     await model.read()
     await model.read()
     check(!model.responding, "утилита умерла: модель это увидела")

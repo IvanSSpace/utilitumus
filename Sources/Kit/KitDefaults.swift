@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 
 /// Общее для центра и утилит.
@@ -20,6 +21,15 @@ enum Kit {
         ? .standard
         : UserDefaults(suiteName: hubBundleID)!
     #endif
+
+    /// Универсальный доступ у этого процесса. Стенд (сборка со швом) задаёт его ключом `Test.AXTrusted`: у центра в терминале
+    /// и у утилиты под launchd он разный, а пиксели двух экранов сравниваются.
+    static func accessTrusted() -> Bool {
+        #if KIT_TEST_DEFAULTS
+        if let forced = defaults.object(forKey: "Test.AXTrusted") as? Bool { return forced }
+        #endif
+        return AXIsProcessTrusted()
+    }
 
     /// Сравнение по числам: 0.10.0 новее 0.9.1.
     static func isNewer(_ a: String, than b: String) -> Bool {
