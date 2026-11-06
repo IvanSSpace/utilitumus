@@ -251,7 +251,7 @@ private struct ClipCard: View {
     let selected: Bool
     @ObservedObject var model: ClipboardPanelModel
 
-    static let width: CGFloat = 206
+    static let width = ClipboardPreview.cardWidth
 
     private var tint: Color {
         switch item.kind {
@@ -309,9 +309,9 @@ private struct ClipCard: View {
     @ViewBuilder private var preview: some View {
         switch item.kind {
         case .text:
-            Text(String((item.text ?? "").prefix(400)))
-                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
-                .lineLimit(9).multilineTextAlignment(.leading)
+            Text(ClipboardPreview.shownText(item.text ?? ""))
+                .font(.system(size: ClipboardPreview.fontSize)).foregroundStyle(.white.opacity(0.9))
+                .lineLimit(ClipboardPreview.maxLines).multilineTextAlignment(.leading)
         case .link:
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "link").font(.system(size: 15, weight: .semibold))
@@ -358,7 +358,7 @@ private struct ClipCard: View {
 
     private var caption: String {
         switch item.kind {
-        case .text: return "\((item.text ?? "").count) симв."
+        case .text: return ClipboardPreview.caption(for: item.text ?? "")
         case .link: return item.host ?? "ссылка"
         case .image:
             if let w = item.imageWidth, let h = item.imageHeight { return "\(w)×\(h)" }

