@@ -30,8 +30,9 @@ func wirePure() {
     for action in actions {
         check((try? JSONDecoder().decode(FansAction.self, from: LinkWire.encoded(action))) == action, "FansAction \(action) переживает кодирование")
     }
+    // Как в утилите (LinkWire.decodeAction): сверка с каноническим видом ловит повтор ключа, который разбор не видит.
     for (name, payload) in badFansActions.prefix(6) {
-        check((try? JSONDecoder().decode(FansAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается")
+        check(LinkWire.decodeAction(FansAction.self, from: Data(payload.utf8), limit: 2048) == nil, "\(name) не разбирается")
     }
 }
 
