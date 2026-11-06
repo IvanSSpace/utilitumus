@@ -110,9 +110,10 @@ final class KeyboardController: ObservableObject {
     }
 
     /// Выключение модуля пользователем: всё снято, системное действие 🌐 возвращено, если его меняли мы.
-    func stop() {
+    /// `exiting` — процесс выходит сразу после (удаление): система применяет возврат до выхода, а не в фоне.
+    func stop(exiting: Bool = false) {
         teardown()
-        FnSystemAction.restore()
+        FnSystemAction.restore(waitForSystem: exiting)
         refreshSystem()
     }
 

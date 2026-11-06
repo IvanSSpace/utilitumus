@@ -31,7 +31,7 @@ final class KeyboardModule: SatelliteModule {
     func enterPassive() { controller.quit() }
     func stopForUpdate() { controller.quit() }
     /// Удаление: единственное место, где утилита сама возвращает 🌐 и диктовку.
-    func stopForUninstall() { controller.stop() }
+    func stopForUninstall() { controller.stop(exiting: true) }
 
     private var linkID: String { LinkIdentity.id(linkName) }
 

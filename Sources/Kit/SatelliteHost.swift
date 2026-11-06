@@ -272,6 +272,9 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     func linkOpenWindow() { showWindow() }
 
     func linkQuit(_ reason: LinkQuitReason) {
+        // Центр получил ответ раньше и уже снимает агента: SIGTERM от launchd оборвал бы возврат настроек
+        // посередине. Выходим сами, сразу после остановки модуля.
+        signal(SIGTERM, SIG_IGN)
         quitting = true
         working = false
         switch reason {
