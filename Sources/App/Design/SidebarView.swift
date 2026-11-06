@@ -8,6 +8,30 @@ import Combine
 // Состояние перетаскивания лежит в двух объектах: `SidebarDrag` меняется только когда меняется цель,
 // `SidebarFloat` — на каждое движение мыши, и его читает одна поднятая копия, а не вся панель.
 
+#if KIT_TEST_DEFAULTS
+/// Для проверки: где поднятая копия на самом деле (рамка в координатах окна, как её отрисовал вид).
+@MainActor enum SidebarProbe {
+    static var copy: CGRect?
+    static var frames: [Module: CGRect] = [:]
+    static var grid: CGRect = .zero
+    static var header: CGRect = .zero
+    static var line: CGRect?
+    static var menu: [String]?
+    static var interceptsMenu = false
+}
+#endif
+
+extension View {
+    /// Только в проверке: пишет отрисованную рамку вида (в координатах окна, вместе со сдвигами выше по цепочке).
+    @ViewBuilder func probe(_ store: @escaping @MainActor (CGRect) -> Void) -> some View {
+        #if KIT_TEST_DEFAULTS
+        onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { rect in MainActor.assumeIsolated { store(rect) } }
+        #else
+        self
+        #endif
+    }
+}
+
 // MARK: - Состояние перетаскивания
 
 @MainActor
@@ -437,10 +461,12 @@ private struct PinnedZone<Menu: View>: View {
                         .highPriorityGesture(gesture(module))
                         .contextMenu { menu(module) }
                         .opacity(dragged ? 0 : 1)
+                        .probe { SidebarProbe.frames[module] = $0 }
                         .offset(x: frame.minX, y: frame.minY)
                 }
             }
             .frame(width: width, height: height, alignment: .topLeading)
+            .probe { SidebarProbe.grid = $0 }
             if layout.showsNotchHint {
                 Text("Значков много: рядом с вырезом MacBook не все поместятся")
                     .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.38))
@@ -487,6 +513,7 @@ private struct ListZone<Menu: View>: View {
                     .highPriorityGesture(gesture(module))
                     .contextMenu { menu(module) }
                     .opacity(dragged ? 0 : 1)
+                    .probe { SidebarProbe.frames[module] = $0 }
                     .offset(x: frame.minX, y: frame.minY)
             }
         }
@@ -521,6 +548,7 @@ private struct HiddenSection<Menu: View>: View {
                             .highPriorityGesture(gesture(module))
                             .contextMenu { menu(module) }
                             .opacity(dragged ? 0 : 1)
+                            .probe { SidebarProbe.frames[module] = $0 }
                             .offset(x: frame.minX, y: frame.minY)
                     }
                 }
@@ -544,6 +572,7 @@ private struct HiddenSection<Menu: View>: View {
         .padding(.horizontal, 10)
         .frame(width: width, height: SidebarMetrics.headerHeight)
         .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous), normal: .clear, hovered: .white.opacity(0.06))
+        .probe { SidebarProbe.header = $0 }
         .onTapGesture { withAnimation(SidebarMotion.spring) { expanded.toggle() } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Скрытые, \(layout.hidden.count)")
@@ -711,6 +740,10 @@ private struct FloatingCopy: View {
             .frame(width: size.width, height: size.height)
             .scaleEffect(float.lifted && !SidebarMotion.reduced ? 1.04 : 1)
             .shadow(color: .black.opacity(float.lifted ? 0.45 : 0), radius: float.lifted ? 10 : 0, y: float.lifted ? 4 : 0)
+            #if KIT_TEST_DEFAULTS
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { SidebarProbe.copy = $0 }
+            .onDisappear { SidebarProbe.copy = nil }
+            #endif
             .offset(x: float.origin.x, y: float.origin.y)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
