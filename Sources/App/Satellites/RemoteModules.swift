@@ -38,6 +38,8 @@ enum RemoteModules {
         case .clipboard: return RemoteClipboardModel.shared
         // fans
         case .fans: return RemoteFansModel.shared
+        // bots
+        case .bots: return RemoteBotsModel.shared
         }
     }
 

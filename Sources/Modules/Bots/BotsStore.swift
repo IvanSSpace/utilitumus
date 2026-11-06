@@ -1,0 +1,242 @@
+import AppKit
+import Combine
+import Foundation
+
+/// Состояние модуля «Боты». Замеры идут только пока открыт экран (аренда): без неё ни таймера, ни опроса.
+/// Команды из bots.toml запускаются одним путём, `BotRunner`; сюда приходят только id бота и кнопка.
+@MainActor
+final class BotsStore: ObservableObject, BotsModel {
+    static let shared = BotsStore()
+
+    @Published private(set) var state = BotsState.empty
+
+    /// Длиннее настоящего id бота; ещё и предел на разбор действия.
+    static let maxIDBytes = 256
+    static let maxActionBytes = maxIDBytes + 256
+    static let interval: TimeInterval = 5
+
+    private struct Plan {
+        let id: UUID
+        let botID: String
+        let verb: BotVerb
+    }
+
+    private let file: URL
+    private let readLaunchd: @Sendable () -> [String: Int32?]
+    private let probe: BotsMonitor.Probe
+    private let execute: @Sendable (BotVerb, String, URL) throws -> String
+    private var pending: Plan?
+    private var leases = 0
+    private var loop: Task<Void, Never>?
+    private var reading = false
+    private var again = false
+    #if KIT_TEST_DEFAULTS
+    fileprivate(set) var testFrozen = false
+    #endif
+
+    /// Параметры — для проверок: они не должны читать настоящий launchd и запускать что-либо.
+    init(file: URL = BotRegistry.url,
+         readLaunchd: @escaping @Sendable () -> [String: Int32?] = { BotsMonitor.readLaunchd() },
+         probe: @escaping BotsMonitor.Probe = { BotsMonitor.liveProbe($0) },
+         execute: @escaping @Sendable (BotVerb, String, URL) throws -> String = { try BotRunner.run($0, id: $1, file: $2) }) {
+        self.file = file
+        self.readLaunchd = readLaunchd
+        self.probe = probe
+        self.execute = execute
+    }
+
+    // MARK: Аренда экрана
+
+    func screenAppeared() {
+        leases += 1
+        guard loop == nil else { return }
+        refresh()
+        loop = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Self.interval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                self?.refresh()
+            }
+        }
+    }
+
+    func screenDisappeared() {
+        leases = max(0, leases - 1)
+        guard leases == 0 else { return }
+        loop?.cancel()
+        loop = nil
+    }
+
+    var isLeased: Bool { leases > 0 }
+
+    /// Остановка модуля: цикл снят, ожидающее подтверждение забыто.
+    func shutDown() {
+        leases = 0
+        loop?.cancel()
+        loop = nil
+        pending = nil
+        state.prompt = nil
+    }
+
+    // MARK: Замер
+
+    func refreshNow() { refresh() }
+
+    func refresh() {
+        #if KIT_TEST_DEFAULTS
+        if testFrozen { return }
+        #endif
+        guard !reading else { again = true; return }
+        reading = true
+        let file = file, readLaunchd = readLaunchd, probe = probe
+        let apps = runningApps()
+        Task {
+            let fresh = await Task.detached(priority: .utility) { Self.measure(file: file, launchd: readLaunchd(), apps: apps, probe: probe) }.value
+            apply(fresh)
+            reading = false
+            if again { again = false; refresh() }
+        }
+    }
+
+    /// Приложения с bundle id из файла: список берётся здесь, на главном потоке.
+    private func runningApps() -> [String: [Int32]] {
+        let wanted = Set(BotRegistry.load(file).flatMap(\.bundleIDs))
+        guard !wanted.isEmpty else { return [:] }
+        var out: [String: [Int32]] = [:]
+        for app in NSWorkspace.shared.runningApplications {
+            if let id = app.bundleIdentifier, wanted.contains(id) { out[id, default: []].append(app.processIdentifier) }
+        }
+        return out
+    }
+
+    nonisolated static func measure(file: URL, launchd: [String: Int32?], apps: [String: [Int32]], probe: BotsMonitor.Probe) -> (BotsFileState, [BotCard]) {
+        let read = BotRegistry.read(file)
+        return (BotsMonitor.fileState(read), BotsMonitor.cards(read.bots, launchd: launchd, appPIDs: apps, probe: probe))
+    }
+
+    private func apply(_ fresh: (BotsFileState, [BotCard])) {
+        var next = state
+        next.file = fresh.0
+        next.bots = fresh.1
+        // Ожидающее подтверждение живёт, пока бот и кнопка остаются в файле.
+        if let p = pending, !fresh.1.contains(where: { $0.id == p.botID && $0.verbs.contains(p.verb) }) {
+            pending = nil
+            next.prompt = nil
+        }
+        if next != state { state = next }
+    }
+
+    // MARK: Действия
+
+    func request(_ bot: BotCard, _ verb: BotVerb) { _ = handleRequest(id: bot.id, verb: verb) }
+
+    func cancel() {
+        guard !state.running else { return }
+        pending = nil
+        state.prompt = nil
+    }
+
+    func confirm(_ planID: UUID) { _ = handleConfirm(planID) }
+
+    func dismissNotice() { state.notice = nil }
+
+    /// Просьба: бот и кнопка должны быть и в файле сейчас, и на экране. План строит модуль по файлу.
+    fileprivate func handleRequest(id: String, verb: BotVerb) -> String? {
+        guard id.utf8.count <= Self.maxIDBytes else { return "Непонятная команда" }
+        guard !state.running else { return "Уже выполняется другое действие" }
+        guard let card = state.bots.first(where: { $0.id == id }), card.verbs.contains(verb),
+              let spec = BotRegistry.load(file).first(where: { $0.id == id }), let cmd = spec.commands[verb] else {
+            return "Такого действия на экране уже нет — обнови экран"
+        }
+        var command = ""
+        if case .argv(let argv) = cmd { command = Exec.display(argv) }
+        let plan = Plan(id: UUID(), botID: id, verb: verb)
+        pending = plan
+        state.prompt = BotsPrompt(
+            id: plan.id, title: "\(verb.title) \(spec.name)",
+            message: (command.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(command).") + (spec.note.isEmpty ? "" : " \(spec.note)"),
+            command: command, confirmTitle: verb.title, destructive: verb == .stop)
+        return nil
+    }
+
+    fileprivate func handleCancel() -> String? {
+        guard !state.running else { return "Уже выполняется другое действие" }
+        cancel()
+        return nil
+    }
+
+    fileprivate func handleConfirm(_ planID: UUID) -> String? {
+        guard !state.running else { return "Уже выполняется другое действие" }
+        guard let plan = pending, plan.id == planID else { return "Подтверждение устарело — попробуй ещё раз" }
+        run(plan)
+        return nil
+    }
+
+    /// Быстрое действие: тот же путь, но без листа: человека спросил центр. Кнопка проверяется по свежему файлу и состоянию.
+    fileprivate func handleQuick(id: String, verb: BotVerb) -> String? {
+        guard id.utf8.count <= Self.maxIDBytes else { return "Непонятная команда" }
+        guard !state.running else { return "Уже выполняется другое действие" }
+        guard state.bots.first(where: { $0.id == id })?.verbs.contains(verb) == true,
+              let spec = BotRegistry.load(file).first(where: { $0.id == id }), spec.commands[verb] != nil else {
+            return "Такого действия уже нет — обнови экран"
+        }
+        run(Plan(id: UUID(), botID: id, verb: verb))
+        return nil
+    }
+
+    private func run(_ plan: Plan) {
+        pending = nil
+        state.prompt = nil
+        state.running = true
+        state.notice = nil
+        let file = file, execute = execute
+        Task {
+            let outcome: BotsNotice = await Task.detached(priority: .userInitiated) {
+                do {
+                    let message = try execute(plan.verb, plan.botID, file)
+                    ActionLog.write(kind: "bot", label: "\(plan.verb.title) \(plan.botID)", targets: [], ok: true, message: message, id: plan.id.uuidString)
+                    return BotsNotice(text: message, isError: false)
+                } catch let e as BackgroundActionError {
+                    ActionLog.write(kind: "bot", label: "\(plan.verb.title) \(plan.botID)", targets: [], ok: false, message: e.message, id: plan.id.uuidString)
+                    return BotsNotice(text: e.message, isError: true)
+                } catch {
+                    return BotsNotice(text: "внутренняя ошибка", isError: true)
+                }
+            }.value
+            state.running = false
+            state.notice = outcome
+            refresh()
+        }
+    }
+
+    // MARK: Связь
+
+    func handle(_ data: Data) -> Data {
+        LinkWire.handle(data, as: BotsAction.self, limit: Self.maxActionBytes, state: { state }) { handle($0) }
+    }
+
+    /// Действие из связи: сначала проверка, изменения только после неё. Текст — если действие не выполнено.
+    func handle(_ action: BotsAction) -> String? {
+        switch action {
+        case .refresh: refresh()
+        case .request(let id, let verb): return handleRequest(id: id, verb: verb)
+        case .cancel: return handleCancel()
+        case .confirm(let planID): return handleConfirm(planID)
+        case .dismissNotice: dismissNotice()
+        case .quick(let id, let verb): return handleQuick(id: id, verb: verb)
+        }
+        return nil
+    }
+}
+
+#if KIT_TEST_DEFAULTS
+extension BotsStore {
+    /// Стенд ставит состояние сам и снимает замеры: настоящие launchctl и процессы ему не нужны.
+    func testPin(_ pinned: BotsState) {
+        testFrozen = true
+        state = pinned
+    }
+
+    func testUnpin() { testFrozen = false }
+}
+#endif

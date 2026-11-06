@@ -30,7 +30,7 @@ struct ModuleCategory: Identifiable, Hashable {
         ModuleCategory(id: "ai", title: "С ИИ",
                        subtitle: "Когда агенты съедают память",
                        icon: "sparkles",
-                       hue: 0.11, spread: 0.03, modules: [.load]),
+                       hue: 0.125, spread: 0.03, modules: [.load, .bots]),
     ]
 
     /// Оттенок модуля внутри гаммы категории.

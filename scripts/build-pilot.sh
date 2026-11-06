@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.."
 
 VERSION="${PILOT_VERSION:-1.0.0}"
 # Все модули. Автопереход в пилоте выключен: утилита встаёт только по «＋» автора.
-PILOT_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser"
+PILOT_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots"
 MIN_HUB="0.6.0"
 LEAF="$(grep -oE '"[0-9a-f]{40}"' Sources/Kit/KitSigning.swift | head -1 | tr -d '"')"
 HUB_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - Info.plist)"

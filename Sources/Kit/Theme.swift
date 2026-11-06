@@ -179,7 +179,7 @@ struct CustomPalette: Hashable {
     func hue(of m: Module) -> Double { m.category.hue(of: m, base: hue(of: m.category)) }
 
     /// «Сумерки»: палитра, на которой сидит пользователь (насыщенность и яркость фона — как были на ползунках).
-    static let dusk = CustomPalette(hues: ["background": 0.55, "handy": 0.66, "ai": 0.11],
+    static let dusk = CustomPalette(hues: ["background": 0.55, "handy": 0.66, "ai": 0.125],
                                     sat: 0.5653, bright: 0.3487)
 
     /// Значения, при которых «Своя» выглядит как пресет (оттенки — штатные).

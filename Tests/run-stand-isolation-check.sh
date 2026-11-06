@@ -76,7 +76,7 @@ for token in "${TOKENS[@]}"; do
 done | LC_ALL=C sort -u > "$OUT/found.txt"
 REVIEWED="$OUT/reviewed.txt"
 /usr/bin/grep -vE '^[[:space:]]*(#|$)' Tests/stand-reviewed-paths.txt | LC_ALL=C sort -u > "$REVIEWED"
-NEW="$(comm -13 "$REVIEWED" "$OUT/found.txt")"
+NEW="$(LC_ALL=C comm -13 "$REVIEWED" "$OUT/found.txt")"
 if [ -n "$NEW" ]; then
   bad "новый API с настоящим путём или внешним действием не разобран (добавь шов или отказ и впиши в Tests/stand-reviewed-paths.txt):"
   echo "$NEW" | sed 's/^/     /'

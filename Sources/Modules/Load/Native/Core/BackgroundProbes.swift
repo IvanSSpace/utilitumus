@@ -32,16 +32,7 @@ final class LaunchdJobs: @unchecked Sendable {
         }
     }
 
-    static func parse(_ text: String) -> [String: Int32?] {
-        var out: [String: Int32?] = [:]
-        for line in text.split(separator: "\n") {
-            let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard parts.count == 3 else { continue }
-            if let pid = Int32(parts[0]) { out[String(parts[2])] = .some(pid) }
-            else if parts[0] == "-" { out[String(parts[2])] = .some(nil) }
-        }
-        return out
-    }
+    static func parse(_ text: String) -> [String: Int32?] { LaunchdList.parse(text) }
 }
 
 /// Какие модели ollama сейчас загружены: GET /api/ps на 127.0.0.1:11434, таймаут 1 с. Опрашивается в фоне

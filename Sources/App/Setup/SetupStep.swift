@@ -173,7 +173,7 @@ extension Module {
         if let steps = SetupFlow.overrides[self] { return steps }
         if let steps = utilitySetupSteps { return steps }
         switch self {
-        case .sound, .load, .awake:
+        case .sound, .load, .awake, .bots:
             return []
         case .fans:
             return [SetupStep(
