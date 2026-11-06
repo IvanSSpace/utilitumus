@@ -210,7 +210,7 @@ final class ClipboardController: ObservableObject {
     // MARK: Исключения
 
     func addExcluded(_ bundleID: String) {
-        guard bundleID != Bundle.main.bundleIdentifier, !excludedApps.contains(bundleID) else { return }
+        guard !Kit.isOurs(bundleID), !excludedApps.contains(bundleID) else { return }
         excludedApps.append(bundleID)
         UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
     }

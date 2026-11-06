@@ -55,9 +55,6 @@ enum LaunchAgents {
     static let systemDirs = ["/Library/LaunchDaemons"]
     /// Метки не com.apple., но от Apple (например com.openssh.ssh-agent): ищем их plist здесь.
     static let appleDirs = ["/System/Library/LaunchAgents"]
-    /// Сам Utilitumus под launchd (local.utilitumus.plist). Сравнение точное: `local.utilitumus.selftest`
-    /// проверки — обычный чужой агент, а префикс закрыл бы и его.
-    static var selfLabels: Set<String> { Set(["local.utilitumus", Bundle.main.bundleIdentifier ?? ""]).subtracting([""]) }
 
     // начало метки (в нижнем регистре) → производитель, где лежат его программы (начало пути без домашней папки,
     // в нижнем регистре) и что перестанет работать
@@ -128,7 +125,9 @@ enum LaunchAgents {
             return "это запущенное приложение, а не агент"
         }
         if botLabels.contains(label) { return "агент бота из bots.toml — только кнопками бота" }
-        if selfLabels.contains(label) { return "это сама панель" }
+        // Лаунчер, утилиты и помощники под launchd. Сравнение точное: `local.utilitumus.selftest`
+        // проверки — обычный чужой агент, а префикс закрыл бы и его.
+        if Kit.isOurs(label) { return "это сама панель" }
         if domain != "gui" { return rootNote }
         return nil
     }

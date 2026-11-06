@@ -227,7 +227,7 @@ final class KeyboardController: ObservableObject {
     /// Вошли в приложение: вернуть его раскладку. `restore: false` — только запомнить текущую (старт фишки).
     private func enterApp(_ app: NSRunningApplication?, restore: Bool = true) {
         // Наше окно раскладку не меняет и смены в нём ни к какому приложению не приписываем.
-        guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else {
+        guard let id = app?.bundleIdentifier, !Kit.isOurs(id) else {
             frontApp = nil
             return
         }

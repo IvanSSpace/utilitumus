@@ -123,7 +123,7 @@ final class GameModeController: ObservableObject {
         guard isRunning, let app else { return }
         // Список «Добавить…» нужен, только когда открыт наш экран; вернулся в
         // приложение — обновить. На остальных переключениях обход всех процессов не нужен.
-        if app.bundleIdentifier == Bundle.main.bundleIdentifier { refreshRunning() }
+        if Kit.isOurs(app.bundleIdentifier) { refreshRunning() }
         guard isEnabled else { return }
         let info = Self.info(app)
         var entry: GameEntry?
@@ -217,7 +217,7 @@ final class GameModeController: ObservableObject {
     func refreshRunning() {
         let list: [RunningCandidate] = NSWorkspace.shared.runningApplications.compactMap { app -> RunningCandidate? in
             guard app.activationPolicy == .regular, !app.isTerminated,
-                  app.bundleIdentifier != Bundle.main.bundleIdentifier else { return nil }
+                  !Kit.isOurs(app.bundleIdentifier) else { return nil }
             let info = Self.info(app)
             guard let key = info.key else { return nil }
             let icon = Self.iconCache[key] ?? app.icon.map(Self.smallIcon)
