@@ -37,9 +37,16 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
     /// Такой ответ разбирается не на главном потоке.
     private static var offMainDecodeBytes: Int { 32 * 1024 }
 
-    private struct Pending {
+    private final class Pending {
         let ticket: Int
         let action: Action
+        /// Сколько билетов было выдано, когда действие ушло к утилите; nil — ещё не ушло.
+        var sentAt: Int?
+
+        init(ticket: Int, action: Action) {
+            self.ticket = ticket
+            self.action = action
+        }
     }
 
     private let link: RemoteModuleLink
@@ -148,7 +155,8 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
             guard take(ticket) else { return }
             confirmed = new
             // Действия, ушедшие раньше этого чтения, утилита уже выполнила: сообщения одного соединения идут по порядку.
-            pending.removeAll { $0.ticket < ticket }
+            // Ещё не ушедшие остаются на экране: чтение их не видело.
+            pending.removeAll { ($0.sentAt ?? .max) < ticket }
             failedReads = 0
             setResponding(true)
             if ticket > lastActionAnswered { setError(nil) }
@@ -166,16 +174,31 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
 
     /// Показать сразу, применить у утилиты, затем показать её ответ. Сбой — прежнее состояние и текст.
     func perform(_ action: Action) async {
+        await deliver(enqueue(action))
+    }
+
+    /// Показ идёт синхронно: привязка экрана видит новое значение до первой паузы.
+    func send(_ action: Action) {
+        let item = enqueue(action)
+        Task { await deliver(item) }
+    }
+
+    private func enqueue(_ action: Action) -> Pending {
         let item = Pending(ticket: issue(), action: action)
         pending.append(item)
-        guard let key = coalesceKey(action) else {
-            show()
+        if let key = coalesceKey(action) {
+            if let replaced = waiting[key] { pending.removeAll { $0.ticket == replaced.ticket } }
+            waiting[key] = item
+        }
+        show()
+        return item
+    }
+
+    private func deliver(_ item: Pending) async {
+        guard let key = coalesceKey(item.action) else {
             await exchange(item)
             return
         }
-        if let replaced = waiting[key] { pending.removeAll { $0.ticket == replaced.ticket } }
-        waiting[key] = item
-        show()
         guard sending.insert(key).inserted else { return }
         while let next = waiting.removeValue(forKey: key) {
             await exchange(next)
@@ -183,11 +206,8 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
         sending.remove(key)
     }
 
-    func send(_ action: Action) {
-        Task { await perform(action) }
-    }
-
     private func exchange(_ item: Pending) async {
+        item.sentAt = issued
         do {
             let reply = try await decode(LinkReply<State>.self, await link.action(LinkWire.encoded(item.action)))
             pending.removeAll { $0.ticket == item.ticket }
