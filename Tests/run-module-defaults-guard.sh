@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Помощник ссылок собирается без Kit, а эта строка делает то же, что Kit.defaults. Других исключений нет.
-ALLOWED='^Sources/Modules/Browser/BrowserCatalog\.swift:[0-9]+:        Bundle\.main\.bundleIdentifier == defaultsDomain \? \.standard : \(UserDefaults\(suiteName: defaultsDomain\) \?\? \.standard\)$'
+ALLOWED='^Sources/Modules/Browser/BrowserCatalog\.swift:[0-9]+:        return Bundle\.main\.bundleIdentifier == defaultsDomain \? \.standard : \(UserDefaults\(suiteName: defaultsDomain\) \?\? \.standard\)$'
 
 # Шире, чем `UserDefaults.standard` и `= .standard`: `from: .standard` и `?? .standard` тоже дают чужой домен.
 # grep: 0 — нашёл, 1 — пусто, больше — ошибка самого grep (её нельзя принять за «пусто»).
