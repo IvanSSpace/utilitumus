@@ -60,6 +60,12 @@ struct StoreDetail: View {
                     }
                     if state == .installed { installedNotes }
                     if let app, !notes.isEmpty { StoreUpdateNotes(version: app.version, notes: notes, tint: cat) }
+                    if let held = store.satellites.heldByHub[module], store.satellites.hasBundle(module) ? store.satellites.needsNewerHub(module) != nil : app == nil {
+                        DSSection("Отдельное приложение") {
+                            DSRow(icon: "arrow.up.circle", title: "Сначала обнови Utilitumus",
+                                  subtitle: "Ему нужна версия \(held.minHub) или новее", iconTint: .orange)
+                        }
+                    }
                     DSSection("Что делает") {
                         Text(module.summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
                             .fixedSize(horizontal: false, vertical: true)

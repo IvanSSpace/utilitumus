@@ -319,6 +319,7 @@ private struct TrafficLightProbe: NSViewRepresentable {
 struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var updates = UpdateAll.shared
     @Binding var showAbout: Bool
     @Binding var showStore: Bool
     @Binding var peeked: Module?
@@ -331,6 +332,9 @@ struct DSSidebarFooter: View {
                     updater.install()
                 }
                 .frame(maxWidth: .infinity)
+                // Перезапуск центра оборвал бы очередь обновлений утилит.
+                .disabled(updates.running)
+                .help(updates.running ? "Сначала закончится обновление утилит" : "")
                 .padding(.bottom, 6)
             case .installing:
                 HStack(spacing: 6) {
@@ -352,6 +356,7 @@ struct DSSidebarFooter: View {
             default:
                 EmptyView()
             }
+            UpdateAllNotice()
             // Стор внизу, рядом с настройками: открывают его редко, а наверху он занимал много места.
             FooterLink(icon: "bag", title: "Стор", selected: showStore) {
                 peeked = nil
@@ -392,6 +397,10 @@ struct DSSidebarFooter: View {
         .padding(.horizontal, 10)
         // Воздух снизу и слева такой же, как у карточки страницы (10 pt).
         .padding(.bottom, 10)
+        // Таймера нет: каталог перечитывается, когда человек вернулся в центр.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            updates.checkIfStale()
+        }
     }
 }
 

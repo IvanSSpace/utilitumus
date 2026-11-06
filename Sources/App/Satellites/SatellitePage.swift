@@ -14,7 +14,10 @@ struct SatellitePage: View {
                primary: DSAction("Открыть окно", icon: "macwindow") { registry.openWindow(module) },
                controls: false) {
             DSSection("Сейчас") {
-                if let status {
+                if status == nil, registry.busy.contains(module) {
+                    DSRow(icon: "arrow.triangle.2.circlepath", title: "Обновляется…",
+                          subtitle: "Через несколько секунд экран вернётся сам") { EmptyView() }
+                } else if let status {
                     DSRow(icon: module.icon, title: status.line.isEmpty ? module.title : status.line) { EmptyView() }
                 } else {
                     DSRow(icon: "exclamationmark.triangle.fill", title: "Не отвечает",

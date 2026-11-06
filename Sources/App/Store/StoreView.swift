@@ -423,6 +423,9 @@ private struct StoreBar: View {
                 }
             }
             Spacer(minLength: 0)
+            // Плашка в панели появляется сама; здесь проверить вручную и увидеть «всё обновлено».
+            DSButton("Обновления", icon: "arrow.triangle.2.circlepath", style: .plain, small: true) { UpdateAll.shared.showList() }
+                .fixedSize()
         }
         .font(.system(size: 12)).lineLimit(1)
         .padding(.horizontal, 14).padding(.vertical, 8)

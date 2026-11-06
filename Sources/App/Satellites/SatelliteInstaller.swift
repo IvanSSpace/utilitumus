@@ -29,6 +29,8 @@ enum SatelliteInstallError: LocalizedError, Equatable {
     case invalidName(String)
     case server(Int)
     case rollbackFailed(cause: String, problems: [String])
+    /// Утилита занята, её сейчас нельзя перезапускать. Ничего не тронуто.
+    case busy(String)
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +40,7 @@ enum SatelliteInstallError: LocalizedError, Equatable {
         case .server(let code): return "Не удалось скачать модуль: сервер ответил \(code)"
         case .rollbackFailed(let cause, let problems):
             return "\(cause). Вернуть прежнюю версию модуля не удалось: \(problems.joined(separator: "; "))"
+        case .busy(let reason): return "Сейчас нельзя обновить: \(reason)"
         }
     }
 }
@@ -120,7 +123,9 @@ final class SatelliteInstaller {
         self.hooks = hooks
     }
 
-    func install(_ app: CatalogApp, name: String) async throws {
+    /// `beforeQuit` — последний шаг перед остановкой работающей утилиты: скачивание долгое, за это время она могла занять себя.
+    /// Ошибка отсюда оставляет всё как было.
+    func install(_ app: CatalogApp, name: String, beforeQuit: @Sendable () async throws -> Void = {}) async throws {
         try Self.check(id: app.id)
         try Self.check(name: name)
         let archive = try await download(app.url)
@@ -149,7 +154,10 @@ final class SatelliteInstaller {
         let oldBundle = work.appendingPathComponent("previous.app")
         if hadBundle { try fm.copyItem(at: bundle, to: oldBundle) }
 
-        if updating { await link.quit(app.id, .update) }
+        if updating {
+            try await beforeQuit()
+            await link.quit(app.id, .update)
+        }
         if updating { hooks[app.id]?.beforeReplace(bundle) }
         var replaced = false
         do {

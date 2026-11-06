@@ -13,6 +13,11 @@ struct SatelliteCommands {
     var action: @Sendable (String, Data) async throws -> Data = { _, _ in throw LinkError.timeout }
     /// Шаг настройки по id из статуса: просит разрешение сама утилита, потому что macOS показывает имя того, кто спросил.
     var performStep: @Sendable (String, String) async throws -> LinkReply<LinkStatus> = { _, _ in throw LinkError.timeout }
+    /// Состояние модуля: по нему центр видит, занята ли утилита (`UpdateBusy`).
+    var moduleState: @Sendable (String) async throws -> Data = { _ in throw LinkError.timeout }
+    /// Утилиту только что перезапустили: открытый экран перечитывает сам, не ждёт её уведомления,
+    /// оно могло уйти, пока он ещё не слушал. Стендам настоящие модели не нужны.
+    var refreshScreen: @MainActor (Module) -> Void = { _ in }
 
     static let live = SatelliteCommands(
         status: { try await liveStatus($0) },
@@ -20,7 +25,13 @@ struct SatelliteCommands {
         openWindow: { try await liveOpenWindow($0) },
         setMenuIcon: { try await LinkClient(id: $0).setMenuIcon($1) },
         action: { try await liveAction($0, $1) },
-        performStep: { try await livePerformStep($0, $1) })
+        performStep: { try await livePerformStep($0, $1) },
+        moduleState: { try await liveModuleState($0) },
+        refreshScreen: { RemoteModules.model($0)?.refresh() })
+
+    @MainActor private static func liveModuleState(_ id: String) async throws -> Data {
+        try await LinkClient(id: id).moduleState()
+    }
 
     @MainActor private static func liveAction(_ id: String, _ action: Data) async throws -> Data {
         try await LinkClient(id: id).moduleAction(action)
@@ -77,6 +88,12 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     private var defaults: UserDefaults { environment.defaults }
     /// Последний удачный каталог: сбой сети его не стирает.
     private var available: [CatalogApp] = []
+    /// Записи каталога, которым нужен центр новее этого.
+    @Published private(set) var heldByHub: [Module: CatalogApp] = [:]
+    /// Последнее чтение каталога сорвалось: прежние сведения остаются.
+    @Published private(set) var catalogFailed = false
+    /// Когда каталог читали в последний раз, удачно или нет.
+    private(set) var catalogReadAt: Date?
     /// Хвост очереди установщика. Одна операция за раз: параллельные гонялись бы за удаление пустой папки приложений.
     private var installerQueue: Task<Void, Never>?
     /// Растёт с каждой установкой и удалением: опрос, начатый раньше, своё решение выбрасывает.
@@ -145,6 +162,19 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     func hasUpdate(_ module: Module) -> Bool {
         guard let entry = entries[module], let installed = entry.installedVersion, let app = entry.catalog else { return false }
         return Kit.isNewer(app.version, than: installed)
+    }
+
+    /// Новая версия есть, но этой версии центра не по силам. Только у установленного и только если обновиться больше не на что.
+    func needsNewerHub(_ module: Module) -> CatalogApp? {
+        guard let installed = entries[module]?.installedVersion, !hasUpdate(module),
+              let app = heldByHub[module], Kit.isNewer(app.version, than: installed) else { return nil }
+        return app
+    }
+
+    /// Занята ли утилита работой, которую перезапуск оборвал бы. Не ответила — обрывать нечего.
+    func busyReason(_ module: Module) async -> String? {
+        guard let state = try? await environment.commands.moduleState(module.rawValue) else { return nil }
+        return UpdateBusy.reason(module, state: state)
     }
 
     func isEnabled(_ module: Module) -> Bool {
@@ -227,15 +257,24 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         let installer = environment.installer
         let name = Self.bundleName(module)
         do {
-            try await serialized { try await installer.install(app, name: name) }
+            try await serialized {
+                try await installer.install(app, name: name) {
+                    // Распознавание наружу не видно: фраза, сказанная только что, успеет дойти до поля.
+                    if module == .voice { try await Task.sleep(for: .seconds(4)) }
+                    if let reason = await self.busyReason(module) { throw SatelliteInstallError.busy(reason) }
+                }
+            }
         } catch {
             if fresh { defaults.set(previous, forKey: enabledKey) }
             finish(module)
+            // Откат тоже перезапустил утилиту.
+            environment.commands.refreshScreen(module)
             throw error
         }
         finish(module)
         defaults.removeObject(forKey: ModuleMigration.removedKey(module.rawValue))
         await poll(module)
+        environment.commands.refreshScreen(module)
     }
 
     /// Настройки остаются. Встроенный вариант не стартует: сначала `setOn(false)`, потом снятие внешнего.
@@ -278,10 +317,18 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     // MARK: Каталог
 
     private func reloadCatalog() async {
+        catalogReadAt = Date()
         do {
-            let data = try await environment.loadCatalog()
-            available = SatelliteCatalog.available(try SatelliteCatalog.decode(data), hubVersion: environment.hubVersion)
+            let catalog = try SatelliteCatalog.decode(try await environment.loadCatalog())
+            available = SatelliteCatalog.available(catalog, hubVersion: environment.hubVersion)
+            var held: [Module: CatalogApp] = [:]
+            for app in catalog.apps where !available.contains(app) {
+                if let module = Module(rawValue: app.id) { held[module] = app }
+            }
+            heldByHub = held
+            catalogFailed = false
         } catch {
+            catalogFailed = true
             return
         }
         for module in Module.allCases {

@@ -406,8 +406,31 @@ final class StoreModel: ObservableObject {
         }
     }
 
+    /// Идёт ли над модулем операция: своя, из очереди обновлений или переход на утилиту при запуске центра.
+    func isOperating(_ module: Module) -> Bool { operations[module] != nil || satellites.busy.contains(module) }
+
+    /// Обновление из очереди: та же запись в `operations`, что у кнопки, поэтому плитка видит ход и может отменить,
+    /// а удаление и второе обновление не начнутся. Итог возвращается очереди, внизу Стора ничего не всплывает.
+    func updateFromQueue(_ module: Module, app: CatalogApp) async -> Error? {
+        guard !isOperating(module) else { return URLError(.cancelled) }
+        return await withCheckedContinuation { done in
+            operations[module] = Task {
+                var failure: Error?
+                do {
+                    try await satellites.install(module, app: app)
+                } catch {
+                    NSLog("Utilitumus: обновление модуля %@: %@", module.rawValue, String(describing: error))
+                    failure = error
+                }
+                operations[module] = nil
+                done.resume(returning: failure)
+            }
+        }
+    }
+
     private func run(_ module: Module, fallback: String, _ work: @escaping () async throws -> Void) {
-        guard operations[module] == nil else { return }
+        // Реестр молча вышел бы из занятого модуля, а дальше здесь шла бы «удача»: удаление стёрло бы модели.
+        guard !isOperating(module) else { return }
         failure = nil
         operations[module] = Task {
             do {
@@ -505,6 +528,10 @@ final class StoreModel: ObservableObject {
             return
         }
         pendingRemoval = nil
+        guard !isOperating(module) else {
+            failure = StoreFailure(module: module, message: "Модуль сейчас обновляется, удалить можно, когда закончится")
+            return
+        }
         run(module, fallback: "Не удалось удалить модуль") {
             try await self.satellites.uninstall(module)
             self.removeBuiltIn(module)

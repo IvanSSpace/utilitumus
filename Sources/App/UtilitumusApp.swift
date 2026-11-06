@@ -47,6 +47,7 @@ struct MainView: View {
     @AppStorage("SelectedModule") private var selection: Module = .sound
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var whatsNew = WhatsNew.shared
+    @ObservedObject private var updates = UpdateAll.shared
     @Environment(\.dsTheme) private var theme
     @AppStorage(DS.sidebarHiddenKey) private var sidebarHidden = false
     /// «О проекте» — не модуль, поэтому отдельный флаг; не сохраняем, окно открывается на модуле.
@@ -141,6 +142,7 @@ struct MainView: View {
         .ignoresSafeArea()
         .sheet(item: $modules.infoModule) { ModuleInfoSheet(module: $0).dsThemed() }
         .sheet(isPresented: $whatsNew.isShown) { WhatsNewSheet().dsThemed() }
+        .sheet(isPresented: $updates.listShown, onDismiss: { updates.listClosed() }) { UpdateAllSheet().dsThemed() }
         // Настройки модулей — лист поверх окна, а не отдельное окно: настроил, закрыл и сразу в приложении.
         .sheet(isPresented: $modules.settingsShown) { SettingsView().dsThemed() }
         .onAppear {
