@@ -101,7 +101,7 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
                 throw Boom()
             },
             verify: { _, _ in },
-            link: SatelliteLink(quit: { _ in journal.add("quit") }, hello: { _ in }))
+            link: SatelliteLink(quit: { _, _ in journal.add("quit") }, hello: { _ in }))
         registry = SatelliteRegistry(SatelliteEnvironment(
             paths: paths,
             defaults: defaults,

@@ -7,6 +7,8 @@ struct CatalogApp: Codable, Equatable {
     let url: URL
     let sha256: String
     let sizeMB: Int
+    /// Что изменилось в этой версии: простой текст после `SatelliteCatalog.cleanNotes`.
+    var notes: [String] = []
 }
 
 extension CatalogApp {
@@ -27,7 +29,9 @@ extension CatalogApp {
             minHub: minHub,
             url: try container.decode(URL.self, forKey: .url),
             sha256: try container.decode(String.self, forKey: .sha256),
-            sizeMB: try container.decode(Int.self, forKey: .sizeMB))
+            sizeMB: try container.decode(Int.self, forKey: .sizeMB),
+            // Заметки только для чтения человеком: кривые не должны отвергать весь каталог.
+            notes: SatelliteCatalog.cleanNotes((try? container.decodeIfPresent([String].self, forKey: .notes)) ?? []))
     }
 }
 
@@ -80,5 +84,44 @@ enum SatelliteCatalog {
     /// До 18 цифр в части: больше не влезает в Int, и `Kit.isNewer` посчитал бы такую часть нулём.
     static func isValidVersion(_ version: String) -> Bool {
         version.range(of: #"^[0-9]{1,18}(\.[0-9]{1,18})*\z"#, options: .regularExpression) != nil
+    }
+
+    /// Те же пределы проверяет scripts/release-app.sh: при выпуске заметку не молча обрежут, а откажут.
+    static let maxNotes = 8
+    static let maxNoteLength = 200
+
+    /// Заметки приходят из сети. Пустые не считаются в предел, лишние отбрасываются.
+    static func cleanNotes(_ notes: [String]) -> [String] {
+        Array(notes.lazy.compactMap(cleanNote).prefix(maxNotes))
+    }
+
+    /// Одна строка без управляющих символов: они ломают строку и переворачивают текст (U+202E).
+    /// Диакритика ограничена, иначе знаки, наложенные друг на друга, вылезают за строку.
+    private static func cleanNote(_ note: String) -> String? {
+        var kept = String.UnicodeScalarView()
+        var marks = 0
+        var space = false
+        for scalar in note.unicodeScalars {
+            if scalar.properties.isWhitespace {
+                space = !kept.isEmpty
+                continue
+            }
+            switch scalar.properties.generalCategory {
+            case .control, .format, .privateUse, .surrogate, .unassigned:
+                continue
+            case .nonspacingMark, .enclosingMark:
+                marks += 1
+                if marks > 2 { continue }
+            default:
+                marks = 0
+            }
+            if space { kept.append(" ") }
+            space = false
+            kept.append(scalar)
+            if kept.count > maxNoteLength {
+                return String(String.UnicodeScalarView(kept.prefix(maxNoteLength - 1))) + "…"
+            }
+        }
+        return kept.isEmpty ? nil : String(kept)
     }
 }

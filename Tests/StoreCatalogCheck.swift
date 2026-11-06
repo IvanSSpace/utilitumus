@@ -72,7 +72,7 @@ func catalogData(version: String) -> Data {
                 try KitSigning.verifySignature(of: fixtureZip, identifier: "local.utilitumus.test.nobody", strict: false)
             }
         },
-        link: SatelliteLink(quit: { _ in journal.add("quit") }, hello: { _ in }))
+        link: SatelliteLink(quit: { _, _ in journal.add("quit") }, hello: { _ in }))
     return SatelliteEnvironment(
         paths: paths,
         defaults: Kit.defaults,

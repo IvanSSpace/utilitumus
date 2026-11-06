@@ -30,7 +30,7 @@ final class KnownDeviceStore {
 
     private init(key: String) {
         self.key = key
-        if let data = UserDefaults.standard.data(forKey: key),
+        if let data = Kit.defaults.data(forKey: key),
            let decoded = try? JSONDecoder().decode([KnownDevice].self, from: data) {
             known = Self.deduplicated(decoded)
             if known.map(\.uid) != decoded.map(\.uid) { persist() }
@@ -53,7 +53,7 @@ final class KnownDeviceStore {
 
     private func persist() {
         guard let data = try? JSONEncoder().encode(known) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        Kit.defaults.set(data, forKey: key)
     }
 
     /// Обновляет имя/тип уже известных устройств (могли переименоваться) и дописывает новые.
