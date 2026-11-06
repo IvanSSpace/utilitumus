@@ -26,6 +26,8 @@ enum InputSources {
     }
 
     static func select(_ source: Source) {
+        // Стенд не переключает настоящую раскладку автора.
+        if Kit.standRefuses("раскладка \(source.id)") { return }
         TISSelectInputSource(source.ref)
     }
 
@@ -56,8 +58,13 @@ enum FnSystemAction {
 
     /// Текущее значение; nil — ключа нет (система действует по умолчанию, это не «ничего»).
     static var usage: Int? {
+        // Стенд читает не настоящие настройки macOS, а свой ключ в тестовом домене.
+        #if KIT_TEST_DEFAULTS
+        return Kit.defaults.object(forKey: "Test.FnUsage") as? Int
+        #else
         CFPreferencesAppSynchronize(domain)  // значение могли поменять снаружи
         return (CFPreferencesCopyAppValue(key, domain) as? NSNumber)?.intValue
+        #endif
     }
 
     /// Система сама переключит язык или сделает что-то ещё по одному нажатию 🌐.
@@ -167,14 +174,21 @@ enum FnSystemAction {
 
     /// Только запись, без `activateSettings`: применяет вызывающий, один раз на все записи.
     private static func writeUsage(_ value: Int?) {
+        #if KIT_TEST_DEFAULTS
+        if let value { Kit.defaults.set(value, forKey: "Test.FnUsage") } else { Kit.defaults.removeObject(forKey: "Test.FnUsage") }
+        return
+        #else
         CFPreferencesSetAppValue(key, value.map { NSNumber(value: $0) }, domain)
         CFPreferencesAppSynchronize(domain)
+        #endif
     }
 
     /// macOS не перечитывает AppleFnUsageType сама: TextInputSwitcher держит старое значение и
     /// показывает своё окошко. Просим систему применить настройки и перезапускаем его.
     /// Не на главном потоке; трогаем только процесс текущего пользователя.
     private static func applyToSystem(restartSwitcher: Bool = true) {
+        // Стенд не перезапускает настройки и TextInputSwitcher настоящей сессии.
+        if Kit.standRefuses("activateSettings и перезапуск TextInputSwitcher") { return }
         DispatchQueue.global(qos: .utility).async {
             let tool = "/System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings"
             if FileManager.default.isExecutableFile(atPath: tool) {
@@ -214,8 +228,12 @@ enum FnSystemAction {
     private static let savedDictationKey = "Keyboard.SavedDictationEnabled"
 
     private static var hotKeys: [String: Any]? {
+        #if KIT_TEST_DEFAULTS
+        return Kit.defaults.dictionary(forKey: "Test.HotKeys")
+        #else
         CFPreferencesAppSynchronize(hotKeysDomain)
         return CFPreferencesCopyAppValue(hotKeysKey, hotKeysDomain) as? [String: Any]
+        #endif
     }
 
     /// Диктовка по двойному нажатию Fn: горячая клавиша 164 в symbolichotkeys с модификатором Fn.
@@ -267,8 +285,12 @@ enum FnSystemAction {
     }
 
     private static func writeHotKeys(_ all: [String: Any]) {
+        #if KIT_TEST_DEFAULTS
+        Kit.defaults.set(all, forKey: "Test.HotKeys")
+        #else
         CFPreferencesSetAppValue(hotKeysKey, all as CFDictionary, hotKeysDomain)
         CFPreferencesAppSynchronize(hotKeysDomain)
+        #endif
     }
 }
 

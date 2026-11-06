@@ -202,7 +202,7 @@ struct MixerView<Model: MixerModel>: View {
                               : "Без неё громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.") {
                         DSButton("Открыть настройки…", small: true) {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-                                NSWorkspace.shared.open(url)
+                                if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
                             }
                         }
                     }

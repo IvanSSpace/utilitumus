@@ -76,6 +76,7 @@ hub() { "$OUT/client-hub" "$@"; }
 
 # Снимает прошлый агент, ставит новый. RunAtLoad как в настоящем плисте утилиты.
 start_agent() {
+  mkdir -p "$OUT/home/Library"
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   : > "$LOG"
   cat > "$PLIST" <<PLIST_EOF
@@ -86,6 +87,7 @@ start_agent() {
 <key>KeepAlive</key><false/>
 <key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>
 <key>StandardErrorPath</key><string>$LOG</string>
+<key>EnvironmentVariables</key><dict><key>CFFIXED_USER_HOME</key><string>$OUT/home</string><key>HOME</key><string>$OUT/home</string></dict>
 </dict></plist>
 PLIST_EOF
   for _ in 1 2 3 4 5 6 7 8 9 10; do

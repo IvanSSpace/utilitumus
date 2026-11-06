@@ -46,6 +46,7 @@ final class MixerModule: SatelliteModule {
     }
 
     func performSetupStep(_ id: String) -> String? {
+        if Kit.standRefuses("системные настройки") { return nil }
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture"),
               NSWorkspace.shared.open(url) else { return "Не получилось открыть настройки" }
         return nil

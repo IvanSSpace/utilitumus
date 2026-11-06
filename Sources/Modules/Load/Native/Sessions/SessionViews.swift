@@ -224,8 +224,8 @@ struct SessionCard: View {
                         Text(s.resumeCommand).font(.caption.monospaced()).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         DSButton("", icon: "doc.on.doc", style: .plain, small: true) {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(s.resumeCommand, forType: .string)
+                            Kit.pasteboard.clearContents()
+                            Kit.pasteboard.setString(s.resumeCommand, forType: .string)
                         }
                         .help("Скопировать команду")
                         .accessibilityLabel("Скопировать команду")

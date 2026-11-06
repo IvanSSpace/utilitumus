@@ -76,7 +76,16 @@ final class SatelliteInstaller {
     private let hooks: [String: SatelliteHooks]
     private let fm = FileManager.default
 
-    static let liveLaunchctl: ([String]) throws -> Void = { try KitSigning.run("/bin/launchctl", $0) }
+    static let liveLaunchctl: ([String]) throws -> Void = { args in
+        #if KIT_TEST_DEFAULTS
+        // Стенд трогает только свои метки `local.utilitumus.test.*`; путь агента проверяет `init`.
+        for arg in args where arg.hasPrefix("gui/") && arg.split(separator: "/").count > 2 && !arg.contains("local.utilitumus.test.") {
+            fputs("СТЕНД ЗАТРОНУЛ НАСТОЯЩЕЕ (launchctl): \(args)\n", stderr)
+            fatalError("Стенд не трогает настоящие метки launchd: \(arg)")
+        }
+        #endif
+        try KitSigning.run("/bin/launchctl", args)
+    }
 
     /// URLSession не ставит карантинный атрибут (см. `Updater`). Скачанное убирает `install`.
     static let liveDownload: (URL) async throws -> URL = { url in
@@ -100,6 +109,9 @@ final class SatelliteInstaller {
         link: SatelliteLink = .live,
         hooks: [String: SatelliteHooks] = [:]
     ) {
+        // Настоящие /Applications/Utilitumus и ~/Library/LaunchAgents стенду не даются.
+        Kit.assertStandPath(paths.appsDir, "каталог утилит")
+        Kit.assertStandPath(paths.agentsDir, "каталог агентов")
         self.paths = paths
         self.launchctl = launchctl
         self.download = download

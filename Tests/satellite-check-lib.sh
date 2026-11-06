@@ -26,6 +26,9 @@ satellite_check_setup() {
   # Его читает Kit.defaults в сборке со швом: и центр стенда, и утилита (через плист).
   SUITE="local.utilitumus.test.kit.$MODULE"
   export KIT_TEST_SUITE="$SUITE"
+  # Дом стенда под launchd: подставной. Без него утилита живёт с настоящим домом и всё, что идёт от NSHomeDirectory,
+  # homeDirectoryForCurrentUser и urls(for:), попадает в настоящие каталоги автора.
+  STAND_HOME="$OUT/home"
   # Для killUtilityForGood в SatelliteCheckKit.swift.
   export SATELLITE_CHECK_LABEL="$LABEL" SATELLITE_CHECK_DOMAIN="$DOMAIN"
   SIGN_NAME="Utilitumus Signing"
@@ -38,7 +41,7 @@ satellite_check_setup() {
   failures=0
   # Подпись как в build.sh. Без этого codesign ждёт разблокировку связки и висит молча.
   scripts/unlock-signing.sh
-  mkdir -p "$OUT/src" "$OUT/png"
+  mkdir -p "$OUT/src" "$OUT/png" "$STAND_HOME/Library"
   rm -f "$OUT"/png/*.png
   trap 'exit 1' HUP INT TERM
   trap satellite_check_cleanup EXIT
@@ -115,7 +118,7 @@ start_agent() {
 <key>KeepAlive</key><false/>
 <key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>
 <key>StandardErrorPath</key><string>$LOG</string>
-<key>EnvironmentVariables</key><dict><key>KIT_TEST_SUITE</key><string>$SUITE</string></dict>
+<key>EnvironmentVariables</key><dict><key>KIT_TEST_SUITE</key><string>$SUITE</string><key>CFFIXED_USER_HOME</key><string>$STAND_HOME</string><key>HOME</key><string>$STAND_HOME</string></dict>
 ${THROTTLE:+<key>ThrottleInterval</key><integer>$THROTTLE</integer>}
 </dict></plist>
 PLIST_EOF

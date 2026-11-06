@@ -40,7 +40,14 @@ enum BrowserHelper {
     static let testURL = URL(string: "https://example.com/#utilitumus-test")!
 
     static var defaults: UserDefaults {
-        Bundle.main.bundleIdentifier == defaultsDomain ? .standard : (UserDefaults(suiteName: defaultsDomain) ?? .standard)
+        #if KIT_TEST_DEFAULTS
+        // Помощник собирается без Kit, поэтому тот же тестовый домен берём здесь напрямую: настоящий `local.utilitumus` стенду недоступен.
+        let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
+        precondition(suite.hasPrefix("local.utilitumus.test."), "Стенд пишет только в тестовый домен")
+        return UserDefaults(suiteName: suite)!
+        #else
+        return Bundle.main.bundleIdentifier == defaultsDomain ? .standard : (UserDefaults(suiteName: defaultsDomain) ?? .standard)
+        #endif
     }
 
     /// Ключи те же, что у `ModuleManager.onKey`, `ModuleHandover.handedOverKey` и `SatelliteEnabled.key`. Помощник

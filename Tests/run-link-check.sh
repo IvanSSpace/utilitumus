@@ -97,6 +97,8 @@ agent() {
     echo '</array>'
     echo "<key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>"
     echo "<key>StandardErrorPath</key><string>$OUT/agent.log</string>"
+    mkdir -p "$OUT/home/Library"
+    echo "<key>EnvironmentVariables</key><dict><key>CFFIXED_USER_HOME</key><string>$OUT/home</string><key>HOME</key><string>$OUT/home</string></dict>"
     if [ -n "${THROTTLE:-}" ]; then echo "<key>ThrottleInterval</key><integer>$THROTTLE</integer>"; fi
     echo '</dict></plist>'
   } > "$PLIST"

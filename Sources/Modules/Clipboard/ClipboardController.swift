@@ -72,7 +72,7 @@ final class ClipboardController: ObservableObject {
         isRunning = true
         openStore()
         guard observesSystem else { return }
-        lastChange = NSPasteboard.general.changeCount  // что лежало до включения — не берём
+        lastChange = Kit.pasteboard.changeCount  // что лежало до включения — не берём
         frontHistory = ClipFrontHistory(current: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -171,7 +171,7 @@ final class ClipboardController: ObservableObject {
     // MARK: Слежение
 
     private func poll() {
-        let pasteboard = NSPasteboard.general
+        let pasteboard = Kit.pasteboard
         let count = pasteboard.changeCount
         guard count != lastChange else { return }
         lastChange = count
@@ -184,7 +184,7 @@ final class ClipboardController: ObservableObject {
         let sourceName = front?.localizedName
         // Большое содержимое не должно останавливать главный поток: на нём живёт перехват прокрутки «Мыши».
         Self.readQueue.async {
-            guard var snap = ClipboardPasteboard.snapshot(of: NSPasteboard.general, change: count) else { return }
+            guard var snap = ClipboardPasteboard.snapshot(of: Kit.pasteboard, change: count) else { return }
             snap.sourceBundleID = sourceID
             snap.sourceName = sourceName
             DispatchQueue.main.async {
@@ -292,7 +292,7 @@ final class ClipboardController: ObservableObject {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
+            if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
         }
     }
 
@@ -301,7 +301,7 @@ final class ClipboardController: ObservableObject {
     /// Кладёт запись в буфер и шлёт ⌘V в программу, которая была впереди (панель её не активирует).
     func paste(_ item: ClipItem) {
         guard let store else { return }
-        let pasteboard = NSPasteboard.general
+        let pasteboard = Kit.pasteboard
         ownChange = ClipboardPasteboard.write(item, imageData: store.imageData(item), to: pasteboard)
         lastChange = ownChange
         store.touch(item.id)

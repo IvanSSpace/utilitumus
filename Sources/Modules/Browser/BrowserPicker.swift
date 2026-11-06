@@ -336,8 +336,8 @@ final class BrowserPicker {
         if flags.contains(.command) {
             // ⌘C по физической клавише: с русской раскладкой символ другой.
             if event.keyCode == 8 {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(model.fullLink, forType: .string)
+                Kit.pasteboard.clearContents()
+                Kit.pasteboard.setString(model.fullLink, forType: .string)
                 close()
                 return true
             }

@@ -4,6 +4,7 @@ import Foundation
 /// ставим и на уже существующие, созданные старой версией с 0644.
 enum PrivateLog {
     static func prepare(file: URL) {
+        Kit.assertStandPath(file, "журнал")
         let fm = FileManager.default
         let dir = file.deletingLastPathComponent()
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

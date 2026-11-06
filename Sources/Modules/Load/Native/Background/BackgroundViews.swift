@@ -115,8 +115,8 @@ struct AgentRow: View {
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     Spacer(minLength: 8)
                     DSButton("", icon: "doc.on.doc", style: .plain, small: true) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(hint, forType: .string)
+                        Kit.pasteboard.clearContents()
+                        Kit.pasteboard.setString(hint, forType: .string)
                     }
                     .help("Скопировать команду").accessibilityLabel("Скопировать команду")
                 }

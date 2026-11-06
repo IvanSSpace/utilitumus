@@ -13,6 +13,7 @@ enum LegacyFanHelper {
 
     /// Текст ошибки; nil — успех. Только вне главного потока: и `codesign`, и помощник — процессы.
     static func restoreAuto(fans: [Int], path: String) -> String? {
+        if Kit.standRefuses("прежний помощник вентиляторов") { return "Стенд не запускает помощника" }
         do {
             try KitSigning.verifySignature(of: URL(fileURLWithPath: path), identifier: "local.utilitumus.fan", strict: false)
         } catch {

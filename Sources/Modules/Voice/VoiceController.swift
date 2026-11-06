@@ -403,7 +403,7 @@ final class VoiceController: ObservableObject {
             VoiceHUD.shared.hide()
             return
         }
-        let pasteboard = NSPasteboard.general
+        let pasteboard = Kit.pasteboard
         guard AXIsProcessTrusted() else {
             axTrusted = false
             pasteboard.clearContents()
@@ -468,7 +468,7 @@ final class VoiceController: ObservableObject {
 
     private static func openSettings(_ pane: String) {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") {
-            NSWorkspace.shared.open(url)
+            if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
         }
     }
 }

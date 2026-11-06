@@ -151,6 +151,7 @@ final class Updater: ObservableObject {
     /// Открыть новую версию после выхода текущей. Выход штатный —
     /// applicationWillTerminate вернёт вентиляторы в «Авто».
     static func relaunch(_ app: URL) {
+        if Kit.standRefuses("перезапуск приложения") { return }
         // Новый экземпляр открываем только после того, как этот процесс действительно
         // завершился: иначе `open` просто активирует ещё живое старое окно.
         let pid = ProcessInfo.processInfo.processIdentifier

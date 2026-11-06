@@ -204,6 +204,7 @@ enum DashboardLive {
             FanController.shared.fullPower.toggle()
         case .browser:
             // Тестовая ссылка идёт тем же путём, что и кнопка «Проверить» на экране браузера.
+            if Kit.standRefuses("тестовая ссылка помощнику") { return }
             NSWorkspace.shared.open([BrowserHelper.testURL], withApplicationAt: BrowserHelper.appURL,
                                     configuration: NSWorkspace.OpenConfiguration()) { _, error in
                 if let error { NSLog("Utilitumus: помощник ссылок не запустился: %@", error.localizedDescription) }

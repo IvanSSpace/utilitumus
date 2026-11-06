@@ -259,6 +259,8 @@ final class FanHelperInstaller: ObservableObject {
     /// для центра не отвечает. Пока окно открыто, второе не поднимается. Один поток на все вызовы: AppleScript держим на нём.
     private func run(admin shell: String, then finish: @escaping @MainActor (FanHelperInstaller) -> Void) {
         guard !adminRunning else { return }
+        // Окно пароля и root-скрипт: стенду нельзя ни ставить службу, ни снимать настоящую.
+        if Kit.standRefuses("администратор: служба вентиляторов") { lastError = "Стенд не ставит и не снимает службу"; return }
         adminRunning = true
         lastError = nil
         Self.scrubRootShellEnvironment()

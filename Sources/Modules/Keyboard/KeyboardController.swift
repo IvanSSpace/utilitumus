@@ -386,8 +386,8 @@ final class KeyboardController: ObservableObject {
     }
 
     func copyLog() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(KeyboardLog.shared.text(), forType: .string)
+        Kit.pasteboard.clearContents()
+        Kit.pasteboard.setString(KeyboardLog.shared.text(), forType: .string)
     }
 
     // MARK: Доступ и системные настройки
@@ -405,7 +405,7 @@ final class KeyboardController: ObservableObject {
     func requestAccess() {
         _ = CGRequestListenEventAccess()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
+            if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
         }
     }
 
@@ -433,7 +433,7 @@ final class KeyboardController: ObservableObject {
 
     func openKeyboardSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
-            NSWorkspace.shared.open(url)
+            if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
         }
     }
 

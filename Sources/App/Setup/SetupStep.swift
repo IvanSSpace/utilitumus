@@ -127,6 +127,7 @@ extension SetupStep {
 
     /// Системный обработчик для обеих схем; macOS покажет своё подтверждение.
     @MainActor static func makeDefaultBrowser() {
+        if Kit.standRefuses("браузер по умолчанию") { return }
         let appURL = BrowserHelper.appURL
         LSRegisterURL(appURL as CFURL, true)
         Task {
@@ -198,7 +199,7 @@ extension Module {
                 isDone: { !MixerController.shared.permissionProblem },
                 perform: {
                     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-                        NSWorkspace.shared.open(url)
+                        if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
                     }
                 })]
         case .clipboard:

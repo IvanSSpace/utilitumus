@@ -250,8 +250,13 @@ enum BotRegistry {
     /// переопределяется переменной окружения: bots.toml задаёт команды, которые
     /// запускает панель, и подсунуть другой файл через окружение нельзя.
     static var url: URL {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не читает настоящий bots.toml: в нём команды, которые панель запускает.
+        return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("utilitumus-test-bots.toml")
+        #else
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Utilitumus/bots.toml")
+        #endif
     }
 
     private static let lock = NSLock()

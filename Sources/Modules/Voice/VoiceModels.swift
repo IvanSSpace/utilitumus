@@ -98,8 +98,10 @@ final class VoiceModelStore: ObservableObject {
     nonisolated static var modelsRoot: URL {
         #if KIT_TEST_DEFAULTS
         let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
-        return URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("utilitumus-test-models/\(suite)/Voice/Models", isDirectory: true)
+        Kit.assertStandPath(root, "модели Голоса")
+        return root
         #else
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Utilitumus/Voice/Models", isDirectory: true)

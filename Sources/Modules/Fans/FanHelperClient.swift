@@ -42,6 +42,7 @@ enum FanHelperClient {
 
     /// Версия службы; nil — служба не ответила или не прошла проверку подписи.
     static func version() -> String? {
+        if refusesRealService { return nil }
         let connection = open()
         defer { connection.invalidate() }
         return try? handshake(connection, .now() + timeout)
@@ -49,6 +50,7 @@ enum FanHelperClient {
 
     /// Текст ошибки; nil — успех.
     static func send(_ command: Command, until deadline: DispatchTime = .now() + timeout) -> String? {
+        if refusesRealService { return "Стенд не говорит с настоящей службой вентиляторов" }
         guard DispatchTime.now() < deadline else { return Failure.timeout.localizedDescription }
         if case .set = command, setsStopped.value { return Failure.cancelled.localizedDescription }
         let connection = open()
@@ -74,6 +76,10 @@ enum FanHelperClient {
     ) {
         // Пустой список — обычный случай: подключение подняло бы root-службу без дела.
         guard !commands.isEmpty else { return }
+        if refusesRealService {
+            commands.forEach { finished($0, "Стенд не говорит с настоящей службой вентиляторов") }
+            return
+        }
         let deadline = DispatchTime.now() + budget
         runBounded(on: queue, within: budget) {
             let connection = open()
@@ -121,6 +127,16 @@ enum FanHelperClient {
     }
 
     private static let setsStopped = Latch()
+
+    /// Стенд (сборка со швом, но не с поддельной службой `FAN_TEST_FAKE_SMC`) не подключается к настоящей службе:
+    /// через неё он выставил бы обороты настоящих вентиляторов.
+    private static var refusesRealService: Bool {
+        #if KIT_TEST_DEFAULTS && !FAN_TEST_FAKE_SMC
+        return Kit.standRefuses("XPC настоящей службы вентиляторов")
+        #else
+        return false
+        #endif
+    }
 
     private static func open() -> NSXPCConnection {
         let connection = NSXPCConnection(machServiceName: FanLink.service, options: FanLink.connectionOptions)

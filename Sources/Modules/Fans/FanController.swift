@@ -291,6 +291,8 @@ final class FanController: ObservableObject {
     /// Закрывает ту программу, которую сейчас показывает экран; устаревший или чужой id — false.
     func closeConflictingApp(id: String) -> Bool {
         guard let app = conflictingApp, id == conflictID else { return false }
+        // Стенд не закрывает настоящие программы.
+        if Kit.standRefuses("закрыть \(app.bundleIdentifier ?? "программу")") { return false }
         app.terminate()
         return true
     }
@@ -540,7 +542,13 @@ final class FanController: ObservableObject {
     /// Журнал управления вентиляторами: что и когда отправили, что увидели в SMC.
     /// ~/Library/Logs/Utilitumus/fans.log — разбирать «иногда не включается».
     nonisolated static func log(_ line: String) {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не пишет в настоящий ~/Library/Logs/Utilitumus: свой файл во временной папке.
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("utilitumus-fans-test.log")
+        #else
         let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus/fans.log")
+        #endif
+        Kit.assertStandPath(url, "журнал вентиляторов")
         let stamp = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: [.withTime, .withColonSeparatorInTime, .withFractionalSeconds])
         let data = Data("\(stamp) \(line)\n".utf8)
         // Журнал не растёт бесконечно: больше 512 КБ — начать заново.

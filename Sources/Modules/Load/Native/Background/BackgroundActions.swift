@@ -136,6 +136,16 @@ enum ActionLog {
 
     static var file: URL { directory.appendingPathComponent("actions.log") }
 
+    /// Куда пишет `write`. Стенд пишет не в настоящий ~/Library/Logs/Utilitumus, а во временную папку;
+    /// `file` остаётся настоящим путём, чтобы проверки видели, что он не менялся.
+    private static var target: URL {
+        #if KIT_TEST_DEFAULTS
+        return URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("utilitumus-test-logs/actions.log")
+        #else
+        return file
+        #endif
+    }
+
     private static let lock = NSLock()
 
     /// Как у keyboard.log.
@@ -152,6 +162,8 @@ enum ActionLog {
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }
         lock.lock()
         defer { lock.unlock() }
+        let file = target
+        Kit.assertStandPath(file, "журнал действий")
         PrivateLog.prepare(file: file)
         rotateIfNeeded(file)
         guard let h = try? FileHandle(forWritingTo: file) else { return }
@@ -369,6 +381,10 @@ final class BackgroundExecutor: @unchecked Sendable {
 
         var outs: [String] = []
         for args in cmds {
+            // Стенд не гасит и не включает настоящие агенты; проверки с заглушкой launchctl идут как обычно.
+            if Exec.launchctl == "/bin/launchctl", Kit.standRefuses("launchctl \(args.joined(separator: " "))") {
+                throw BackgroundActionError(message: "Стенд не трогает настоящие агенты")
+            }
             let r = Exec.run([Exec.launchctl] + args, env: Exec.launchctlEnv(), timeout: Self.agentTimeout)
             if let e = r.launchError { throw BackgroundActionError(message: "Не удалось запустить launchctl: \(e)") }
             if r.timedOut {

@@ -222,7 +222,15 @@ enum StopExecutor {
     static let grace: TimeInterval = 5
 
     private static func signal(_ pid: Int32, _ sig: Int32) -> Bool {
-        Darwin.kill(pid, sig) == 0
+        #if KIT_TEST_DEFAULTS
+        // Стенд сигналит только своим детям: настоящие процессы автора ему не цель.
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(MemoryLayout<proc_bsdinfo>.size))
+        if size <= 0 || info.pbi_ppid != UInt32(getpid()) {
+            return !Kit.standRefuses("сигнал \(sig) процессу \(pid), не дочернему")
+        }
+        #endif
+        return Darwin.kill(pid, sig) == 0
     }
 
     private static func alive(_ items: [(Int32, UInt64)]) -> [(Int32, UInt64)] {

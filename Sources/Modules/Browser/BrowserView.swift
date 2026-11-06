@@ -225,6 +225,7 @@ struct BrowserView: View {
 
     /// Тестовая ссылка идёт тем же путём, что и настоящая: через помощника.
     private func openTest() {
+        if Kit.standRefuses("тестовая ссылка помощнику") { return }
         let configuration = NSWorkspace.OpenConfiguration()
         NSWorkspace.shared.open([BrowserHelper.testURL], withApplicationAt: BrowserHelper.appURL,
                                 configuration: configuration) { _, error in
@@ -234,6 +235,7 @@ struct BrowserView: View {
 
     /// Системный обработчик для обеих схем; macOS покажет своё подтверждение.
     private func setDefault(to appURL: URL) {
+        if Kit.standRefuses("браузер по умолчанию") { return }
         LSRegisterURL(appURL as CFURL, true)
         busy = true
         errorText = nil

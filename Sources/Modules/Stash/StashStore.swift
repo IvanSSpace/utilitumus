@@ -472,6 +472,7 @@ final class StashStore: ObservableObject {
     // MARK: Доступ
 
     func requestAccess() {
+        if Kit.standRefuses("запрос доступа и настройки") { return }
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
@@ -512,7 +513,7 @@ final class StashStore: ObservableObject {
         stashed = stashed.filter { !ids.contains($0.bundleID) } + records
         save()
 
-        for app in targets { app.terminate() }
+        for app in targets where Kit.standMayClose(bundlePath: app.bundleURL?.path, app.bundleIdentifier ?? "программу") { app.terminate() }
 
         let deadline = Date().addingTimeInterval(Self.waitSeconds)
         while Date() < deadline, targets.contains(where: { !$0.isTerminated }) {
@@ -526,7 +527,8 @@ final class StashStore: ObservableObject {
 
     /// Принудительное закрытие — только по явной просьбе, только для тех, что не закрылись сами.
     func forceTerminate(_ entry: RunningEntry) {
-        guard Self.isEligible(entry.app) else { return }
+        guard Self.isEligible(entry.app),
+              Kit.standMayClose(bundlePath: entry.app.bundleURL?.path, entry.bundleID) else { return }
         entry.app.forceTerminate()
         stubborn.removeAll { $0.bundleID == entry.bundleID }
         refresh()

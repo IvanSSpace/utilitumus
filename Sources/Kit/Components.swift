@@ -462,3 +462,15 @@ struct DSHeaderLayout<Badge: View, Controls: View>: View {
         }
     }
 }
+
+extension Kit {
+    /// Буфер обмена. Стенд (сборка со швом) работает с отдельным именованным буфером: настоящий буфер автора
+    /// он не читает и не перезаписывает.
+    static var pasteboard: NSPasteboard {
+        #if KIT_TEST_DEFAULTS
+        return NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.pasteboard"))
+        #else
+        return NSPasteboard.general
+        #endif
+    }
+}
