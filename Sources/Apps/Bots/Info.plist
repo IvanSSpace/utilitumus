@@ -22,6 +22,12 @@
 	<true/>
 	<key>UtilitumusSecurityEpoch</key>
 	<string>1</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Поиск ботов читает файлы зависимостей и имена ключей в папке проекта. Токены не читаются.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

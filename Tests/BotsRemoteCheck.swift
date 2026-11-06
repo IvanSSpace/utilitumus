@@ -674,7 +674,7 @@ func knownTOML(_ home: String) -> String {
     check(model.state.discovery?.skipped == 1, "подделанная метка посчитана и не предложена")
     let byName = Dictionary(uniqueKeysWithValues: (model.state.discovery?.found ?? []).map { ($0.name, $0) })
     check(byName["news-digest"]?.possible == false && byName["digest-env"]?.possible == false && byName["helperbot"]?.possible == true
-          && byName["genericenv"]?.possible == true && byName["locked-app"]?.possible == false && byName["locked-app"]?.why.contains("Нет доступа к папке") == true,
+          && byName["genericenv"]?.possible == true && byName["locked-app"]?.possible == true && byName["locked-app"]?.why.contains("Нет доступа к папке") == true,
           "уверенные и «возможно» разделены; закрытая папка названа «нет доступа»")
     let json = String(decoding: LinkWire.encoded(model.state), as: UTF8.self)
     for value in planted { check(!json.contains(value), "значение «\(value)» не дошло до центра") }
@@ -694,9 +694,13 @@ func knownTOML(_ home: String) -> String {
     check(await until(5) { model.state.bots.count == 6 && !foundNames(model).contains("news-digest") }, "бот появился на экране и исчез из найденных")
     let added = BotRegistry.load(BotRegistry.url).first { $0.launchd == ["com.example.news-digest"] }
     let plist = home + "/Library/LaunchAgents/a1.plist"
-    check(added?.commands[.start] == .argv(["/bin/launchctl", "bootstrap", "gui/\(getuid())", plist])
+    // /tmp и /private/tmp — одно место: путь плиста сравниваем после раскрытия ссылок.
+    var startArgs: [String] = []
+    if case .argv(let a)? = added?.commands[.start] { startArgs = a }
+    func resolved(_ p: String) -> String { URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+    check(Array(startArgs.prefix(3)) == ["/bin/launchctl", "bootstrap", "gui/\(getuid())"] && startArgs.count == 4 && resolved(startArgs[3]) == resolved(plist)
           && added?.commands[.stop] == .argv(["/bin/launchctl", "bootout", "gui/\(getuid())/com.example.news-digest"])
-          && added?.commands[.restart] == .argv(["/bin/launchctl", "kickstart", "-k", "gui/\(getuid())/com.example.news-digest"]), "команды записи — /bin/launchctl против gui/<uid>/<метка> и плиста")
+          && added?.commands[.restart] == .argv(["/bin/launchctl", "kickstart", "-k", "gui/\(getuid())/com.example.news-digest"]), "команды записи — /bin/launchctl против gui/<uid>/<метка> и плиста: \(startArgs)")
     let mode = ((try? fm.attributesOfItem(atPath: BotRegistry.url.path))?[.posixPermissions] as? Int) ?? 0
     let text = (try? String(contentsOf: BotRegistry.url, encoding: .utf8)) ?? ""
     check(mode == 0o600 && String(decoding: fileBefore, as: UTF8.self).isEmpty == false && text.hasPrefix(String(decoding: fileBefore, as: UTF8.self)), "файл 0600, прежнее содержимое на месте")
@@ -765,9 +769,13 @@ func knownTOML(_ home: String) -> String {
         check(differingPixels(seen[seen.count - 3], seen[seen.count - 2]) > 0 && differingPixels(seen[seen.count - 2], seen[seen.count - 1]) > 0, "\(themeName): три состояния выглядят по-разному, снимки не пустые")
     }
     // Результаты поиска: утилита нашла ботов в поддельном доме, центр и утилита рисуют одно и то же.
+    // Для снимка оставляем трёх: уверенный и двое «возможно», иначе список не влезает на экран.
+    for file in ["a1", "a5", "a6", "a7", "a8", "a9", "b2", "b3", "b4", "b5", "b6"] { try? fm.removeItem(atPath: standHome() + "/Library/LaunchAgents/\(file).plist") }
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        for (name, text) in [("found", fixtureTOML()), ("found-empty", nil)] as [(String, String?)] {
+        // Работающего бота в файле нет: его память меняется от замера к замеру и портила бы сравнение пикселей.
+        let still = fixtureTOML().replacingOccurrences(of: utilityLabel, with: "com.example.absent-alpha")
+        for (name, text) in [("found", still), ("found-empty", nil)] as [(String, String?)] {
             writeBots(text)
             await model.perform(.refresh)
             await model.perform(.find)
@@ -786,8 +794,18 @@ func knownTOML(_ home: String) -> String {
             if name == "found", let base = plainBots[themeName] { check(differingPixels(base, remote) > 0, "\(themeName): экран с найденными отличается от экрана без них") }
             await model.perform(.dismissFound)
         }
-        // Поиск идёт: только локальный снимок состояния, чтобы увидеть экран.
+        // Все виды карточек разом и поиск в ходу: только локальные снимки состояния, чтобы увидеть экран.
         modules.setExternal(.bots, false)
+        var all = BotsState.empty
+        all.file = .ok
+        all.discovery = BotsDiscoveryState(scanning: false, found: [
+            BotFound(id: "1", name: "news-digest", place: "LaunchAgent com.example.news-digest · ~/proj/news", why: "aiogram в requirements.txt", possible: false, monitorOnly: false),
+            BotFound(id: "2", name: "procbot", place: "Процесс · ~/proj/procbot", why: "ключ TELEGRAM_TOKEN в .env", possible: false, monitorOnly: true),
+            BotFound(id: "3", name: "helperbot", place: "LaunchAgent com.example.helperbot · ~/proj/plain", why: "по названию (bot, tg, telegram); зависимостей Telegram в папке не нашлось", possible: true, monitorOnly: false),
+            BotFound(id: "4", name: "locked", place: "LaunchAgent com.example.locked · ~/Documents/locked", why: "папку проекта проверить не удалось. Нет доступа к папке: разрешите в «Конфиденциальность и безопасность»", possible: true, monitorOnly: false),
+        ], skipped: 1)
+        pinLocal(all)
+        Stand.save(await Stand.open(theme), "\(themeName)-found-all-local")
         var scanning = BotsState.empty
         scanning.file = .ok
         scanning.discovery = .scanning
