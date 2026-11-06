@@ -89,6 +89,26 @@ final class ClipboardStore {
 
     var isAvailable: Bool { key != nil && !isBlocked }
 
+    /// Открывается ли индекс этим ключом. Ничего не меняет и не откладывает: проверка до того, как ключ принят.
+    enum IndexCheck: Equatable {
+        case noIndex, readable, unreadable
+        /// Файл есть или его нельзя прочитать иначе, чем «нет такого файла».
+        case unknown
+    }
+
+    static func indexCheck(directory: URL, key: SymmetricKey) -> IndexCheck {
+        let sealed: Data
+        do {
+            sealed = try Data(contentsOf: directory.appendingPathComponent("index.bin"))
+        } catch {
+            let missing = (error as NSError).domain == NSCocoaErrorDomain && (error as NSError).code == NSFileReadNoSuchFileError
+            return missing ? .noIndex : .unknown
+        }
+        guard let box = try? AES.GCM.SealedBox(combined: sealed), let plain = try? AES.GCM.open(box, using: key),
+              (try? JSONDecoder().decode(Index.self, from: plain)) != nil else { return .unreadable }
+        return .readable
+    }
+
     static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Utilitumus/Clipboard", isDirectory: true)

@@ -28,7 +28,8 @@ final class LinkServer: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
         connection.setCodeSigningRequirement(requirement)
         connection.exportedInterface = NSXPCInterface(with: LinkXPC.self)
         connection.remoteObjectInterface = NSXPCInterface(with: LinkPingXPC.self)
-        let session = LinkSession(handler: handler, server: self, connection: connection)
+        let session = LinkSession(handler: handler, server: self, connection: connection,
+                                  fromHub: LinkCaller.peerIsHub(pid: connection.processIdentifier))
         connection.exportedObject = session
         // Клиент умер или закрыл соединение: аренда и подписка кончаются здесь, а не по его просьбе.
         // Сообщения этого соединения к этому моменту уже ушли на главный поток, порядок сохраняется.
@@ -77,7 +78,11 @@ private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
     /// Только на главном потоке.
     var level = LinkWatch.none
 
-    init(handler: LinkHandler, server: LinkServer, connection: NSXPCConnection) {
+    /// Подписан как центр, а не как копия самой утилиты.
+    private let fromHub: Bool
+
+    init(handler: LinkHandler, server: LinkServer, connection: NSXPCConnection, fromHub: Bool) {
+        self.fromHub = fromHub
         self.handler = handler
         self.server = server
         self.connection = connection
@@ -102,7 +107,9 @@ private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
     }
 
     func moduleAction(_ action: Data, reply: @escaping @Sendable (Data) -> Void) {
-        onMain { reply($0.linkModuleAction(action)) }
+        onMain { [fromHub] handler in
+            reply(LinkCaller.run(fromHub: fromHub) { handler.linkModuleAction(action) })
+        }
     }
 
     func performSetupStep(_ id: String, reply: @escaping @Sendable (Data) -> Void) {
