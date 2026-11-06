@@ -349,5 +349,63 @@ sync {
     check(result == .failed("Прежняя запись не удалена (код \(errSecAuthFailed))") && ring.items[.own] != nil, "центр: удаление не вышло, это видно")
 }
 
+// 12. Затвор «только центр»: единственная защита передачи ключа. Настоящий модуль утилиты со связкой в памяти;
+// сборка со швом: буфер обмена не опрашивается, горячей клавиши нет. Подпись и XPC здесь не проверяются:
+// как сервер определяет центр, видно только в проверке с подписью (run-clipboard-remote-check.sh).
+func spin(_ seconds: Double, until condition: () -> Bool) {
+    let deadline = Date().addingTimeInterval(seconds)
+    while !condition(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+}
+
+@MainActor func keyState(_ module: ClipboardModule) -> ClipboardKeyState? {
+    (try? JSONDecoder().decode(ClipboardState.self, from: module.state()))?.keyState
+}
+
+func received(_ reply: Data) -> Bool? { (try? JSONDecoder().decode(ClipboardKeyReply.self, from: reply))?.received }
+
+MainActor.assumeIsolated {
+    check(!LinkCaller.isHub, "затвор: вне вызова по связи центром никто не считается")
+    check(LinkCaller.run(fromHub: true) { LinkCaller.isHub }, "затвор: в вызове от центра isHub истинно")
+    check(!LinkCaller.run(fromHub: false) { LinkCaller.isHub }, "затвор: в вызове от не-центра isHub ложно")
+    _ = LinkCaller.run(fromHub: true) { 0 }
+    check(!LinkCaller.isHub, "затвор: после вызова от центра сброшен")
+
+    for (name, caller) in [("копия утилиты или чужой", false as Bool?), ("вызов без пометки", nil)] {
+        let dir = makeDir(index: history)
+        let ring = FakeKeyring()
+        ring.items[.legacy] = keyData(history)
+        let module = ClipboardModule(keyring: ring, directory: dir)
+        module.start()
+        spin(5) { keyState(module) == .waiting }
+        check(keyState(module) == .waiting, "затвор (\(name)): утилита ждёт ключ")
+        let message = LinkWire.encoded(ClipboardKeyMessage(key: keyData(history)))
+        let reply = caller.map { flag in LinkCaller.run(fromHub: flag) { module.handle(message) } } ?? module.handle(message)
+        check(received(reply) == false, "затвор (\(name)): ключ не принят")
+        spin(0.5) { keyState(module) == .ready }
+        check(keyState(module) == .waiting && ring.adds.isEmpty && ring.items[.own] == nil, "затвор (\(name)): своей записи нет, состояние то же")
+        module.stop()
+    }
+    do {
+        let dir = makeDir(index: history)
+        let ring = FakeKeyring()
+        ring.items[.legacy] = keyData(history)
+        let module = ClipboardModule(keyring: ring, directory: dir)
+        module.start()
+        spin(5) { keyState(module) == .waiting }
+        let message = LinkWire.encoded(ClipboardKeyMessage(key: keyData(history)))
+        let reply = LinkCaller.run(fromHub: true) { module.handle(message) }
+        check(received(reply) == true, "затвор: от центра ключ принят к проверке")
+        spin(5) { keyState(module) == .ready }
+        check(keyState(module) == .ready && ring.items[.own] == keyData(history), "затвор: от центра своя запись появилась, состояние ready")
+        check(ring.deletes.isEmpty && ring.items[.legacy] != nil, "затвор: утилита прежнюю запись не удаляет")
+        let again = LinkCaller.run(fromHub: true) { module.handle(message) }
+        check(received(again) == false, "затвор: готовой утилите даже центр второй раз не передаёт")
+        let json = String(decoding: module.state(), as: UTF8.self) + module.statusLine(passiveReason: nil)
+        check(!json.contains(keyData(history).base64EncodedString()), "затвор: ни состояние, ни статус не несут ключа")
+        module.stop()
+    }
+
+}
+
 print(failures == 0 ? "ВСЁ ПРОШЛО" : "ПРОВАЛОВ: \(failures)")
 exit(failures == 0 ? 0 : 1)

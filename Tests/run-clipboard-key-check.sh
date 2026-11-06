@@ -15,7 +15,11 @@ case "$status" in
 esac
 
 cp Tests/ClipboardKeyCheck.swift "$OUT/main.swift"
-swiftc -o "$OUT/check" "$OUT/main.swift" \
+# Сборка со швом: настройки в своём suite, модуль без опроса буфера и горячей клавиши.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.clipboardkey"
+trap 'defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"' EXIT
+swiftc -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/main.swift" \
+  Sources/Apps/Clipboard/ClipboardModule.swift \
   $(find Sources/Modules/Clipboard -name '*.swift') \
   $(find Sources/Kit -name '*.swift') \
   -framework SwiftUI -framework AppKit -framework CryptoKit -framework Security -framework Carbon

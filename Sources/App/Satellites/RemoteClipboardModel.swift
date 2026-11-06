@@ -11,8 +11,14 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
     private var handoverRunning = false
     private var stateSub: AnyCancellable?
 
-    init(id: String, keyring: ClipboardKeyring = SystemClipboardKeyring(), link: RemoteModuleLink? = nil,
+    init(id: String, keyring: ClipboardKeyring? = nil, link: RemoteModuleLink? = nil,
          canRead: @escaping () -> Bool) {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не касается настоящей Связки ключей.
+        let keyring = keyring ?? MemoryClipboardKeyring.forStand()
+        #else
+        let keyring = keyring ?? SystemClipboardKeyring()
+        #endif
         let link = link ?? .live(id: id)
         self.link = link
         self.keyring = keyring

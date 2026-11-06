@@ -24,7 +24,7 @@ final class ClipboardModule: SatelliteModule {
 
     init(keyring: ClipboardKeyring? = nil, directory: URL? = nil) {
         #if KIT_TEST_DEFAULTS
-        self.keyring = keyring ?? MemoryClipboardKeyring()
+        self.keyring = keyring ?? MemoryClipboardKeyring.forStand()
         self.directory = directory ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("clipboard-stand-\(UUID().uuidString)", isDirectory: true)
         controller.observesSystem = false
@@ -189,32 +189,13 @@ final class ClipboardModule: SatelliteModule {
 
     func windowRoot() -> AnyView { AnyView(ClipboardView(model: controller)) }
     var windowSize: CGSize { CGSize(width: 520, height: 520) }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд: сигнал USR1 кладёт в историю выдуманные записи, буфер обмена не нужен.
+    func standCommand() {
+        guard let store = controller.store else { return }
+        ClipboardStandFixture.seed(store)
+        controller.attach(store)
+    }
+    #endif
 }
-
-#if KIT_TEST_DEFAULTS
-/// Связка стенда: в памяти, настоящая не нужна.
-final class MemoryClipboardKeyring: ClipboardKeyring, @unchecked Sendable {
-    private let lock = NSLock()
-    private var items: [ClipboardKeyItem: Data] = [:]
-
-    func read(_ item: ClipboardKeyItem) -> ClipboardKeyRead {
-        lock.withLock { items[item].map(ClipboardKeyRead.found) ?? .absent }
-    }
-
-    func probe(_ item: ClipboardKeyItem) -> ClipboardKeyProbe {
-        lock.withLock { items[item] == nil ? .absent : .exists }
-    }
-
-    func add(_ item: ClipboardKeyItem, key: Data) -> OSStatus {
-        lock.withLock {
-            guard items[item] == nil else { return errSecDuplicateItem }
-            items[item] = key
-            return errSecSuccess
-        }
-    }
-
-    func delete(_ item: ClipboardKeyItem) -> OSStatus {
-        lock.withLock { items.removeValue(forKey: item) == nil ? errSecItemNotFound : errSecSuccess }
-    }
-}
-#endif

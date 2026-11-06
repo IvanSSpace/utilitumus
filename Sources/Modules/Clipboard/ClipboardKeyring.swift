@@ -275,3 +275,54 @@ struct ClipboardKeyHandover: Sendable {
         }
     }
 }
+
+#if KIT_TEST_DEFAULTS
+/// Связка стенда: в памяти, настоящая не нужна. `Test.ClipboardLegacyKey` (base64) кладёт прежнюю запись.
+final class MemoryClipboardKeyring: ClipboardKeyring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [ClipboardKeyItem: Data] = [:]
+
+    static func forStand() -> MemoryClipboardKeyring {
+        let ring = MemoryClipboardKeyring()
+        if let text = Kit.defaults.string(forKey: "Test.ClipboardLegacyKey"), let key = Data(base64Encoded: text) {
+            ring.items[.legacy] = key
+        }
+        return ring
+    }
+
+    func read(_ item: ClipboardKeyItem) -> ClipboardKeyRead {
+        lock.withLock { items[item].map(ClipboardKeyRead.found) ?? .absent }
+    }
+
+    func probe(_ item: ClipboardKeyItem) -> ClipboardKeyProbe {
+        lock.withLock { items[item] == nil ? .absent : .exists }
+    }
+
+    func add(_ item: ClipboardKeyItem, key: Data) -> OSStatus {
+        lock.withLock {
+            guard items[item] == nil else { return errSecDuplicateItem }
+            items[item] = key
+            return errSecSuccess
+        }
+    }
+
+    func delete(_ item: ClipboardKeyItem) -> OSStatus {
+        lock.withLock { items.removeValue(forKey: item) == nil ? errSecItemNotFound : errSecSuccess }
+    }
+}
+
+/// Одни и те же выдуманные записи для утилиты и для встроенного экрана стенда: снимки сравниваются по пикселям.
+enum ClipboardStandFixture {
+    static func seed(_ store: ClipboardStore) {
+        let work = store.addSpace(name: "Работа", colorID: "teal")
+        store.addSpace(name: "Дом", colorID: "pink")
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let rows = ["первая строка", "https://example.com/page", "третья строка с длинным текстом для обрезки в колонке экрана", "четвёртая", "пятая", "шестая"]
+        for (index, text) in rows.enumerated() {
+            let snap = ClipSnapshot(types: ["public.utf8-plain-text"], text: text, sourceBundleID: "com.apple.Safari", sourceName: "Safari")
+            store.ingest(snap, now: base.addingTimeInterval(Double(index)))
+        }
+        if let first = store.items.last { store.pin(first.id, to: work.id) }
+    }
+}
+#endif
