@@ -194,7 +194,7 @@ final class FanHelperInstaller: ObservableObject {
                 + " /usr/sbin/chown root:wheel \"$O\"; /bin/chmod 0755 \"$O\";"
                 + " if (\(verify("$O"))) 2>/dev/null; then"
                 + " V=$(\"$O\" version 2>/dev/null) || V='';"
-                + " case \"$V\" in ''|*[!0-9]*) ;; *) if [ \"$V\" -gt \(shQuote(helperVersion)) ]; then"
+                + " case \"$V\" in ''|*[!0-9]*) ;; *) if /bin/test \"$V\" -gt \(shQuote(helperVersion)); then"
                 + " /bin/echo 'Уже стоит более новая версия помощника: обнови приложение' >&2; exit 1; fi ;; esac;"
                 + " fi; fi",
             // Жёсткая ссылка на старый файл сохранила бы его inode с setuid и после mv.

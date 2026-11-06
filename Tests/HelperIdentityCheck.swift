@@ -101,7 +101,7 @@ func verifyAll(fixtures: URL, work: URL) async {
     for target in helperCases {
         let identifier = KitLink.bundleID(target.id)
 
-        // Установщик центра: настоящий liveVerify, остальное подставное.
+        // Установщик центра: проверка настоящая, остальное подставное.
         let hub = Stand(target, work: work, tag: "hub")
         let first = await hub.install(zipURL(fixtures, "\(target.id)-v1"), version: "1.0.0")
         check(first == nil && hub.version == "1.0.0", "\(target.id): 1.0.0 с настоящим помощником ставится (\(first ?? "-"))")
