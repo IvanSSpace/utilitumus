@@ -62,6 +62,12 @@ func waitUntil(_ condition: () -> Bool) -> Bool {
 /// Команды идут строго по одной на главной очереди, из всех соединений.
 final class FanService: NSObject, FanHelperXPC {
     private lazy var smc = HelperSMC()
+    /// Сторож: клиент, который взял вентилятор в ручной режим, обязан повторять удержание. Не повторяет (убит, завис,
+    /// потерял связь) — вентиляторы возвращаются в «Авто» сами, иначе ручной режим держал бы обороты вечно.
+    /// Клиент подключается на одну команду, поэтому закрытие соединения сигналом не служит: считается время
+    /// последнего удержания. Только на главной очереди.
+    private var holdWatchdog: DispatchWorkItem?
+    private var releaseRetries = 0
 
     func version(reply: @escaping (String) -> Void) {
         #if FAN_TEST_FAKE_SMC
@@ -102,6 +108,32 @@ final class FanService: NSObject, FanHelperXPC {
         return nil
     }
 
+    /// Каждый вентилятор в ручном режиме — в «Авто», что бы ни стояло в настройках. Сторож не спрашивает, кто взял вентилятор.
+    /// Не вышло — ещё несколько попыток: после них вентилятор остаётся таким, какой есть, и об этом писать некому.
+    func releaseManualFans() {
+        watchdogStop()
+        guard let smc, let count = smc.uint8("FNum") else { return }
+        var failed = false
+        for fan in 0..<Int(count) where smc.uint8("F\(fan)Md") == 1 {
+            if auto(fan) != nil { failed = true }
+        }
+        guard failed, releaseRetries < 3 else { releaseRetries = 0; return }
+        releaseRetries += 1
+        watchdogArm(after: FanLink.holdRetry)
+    }
+
+    private func watchdogStop() {
+        holdWatchdog?.cancel()
+        holdWatchdog = nil
+    }
+
+    private func watchdogArm(after seconds: TimeInterval) {
+        watchdogStop()
+        let work = DispatchWorkItem { [weak self] in self?.releaseManualFans() }
+        holdWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
     private func hold(_ fan: Int, _ requested: Double) -> String? {
         let smc: HelperSMC
         switch controllable(fan) {
@@ -114,6 +146,9 @@ final class FanService: NSObject, FanHelperXPC {
         }
         // Зажим до перевода во Float: очень большое конечное Double дало бы бесконечность.
         let rpm = Float(min(max(requested, Double(minRPM)), Double(maxRPM)))
+        // Сторож заводится до записи: режим мог встать, а цель нет.
+        releaseRetries = 0
+        watchdogArm(after: FanLink.holdTimeout)
         guard smc.setUInt8("F\(fan)Md", 1), smc.setFloat("F\(fan)Tg", rpm) else {
             return "SMC отклонил запись (нужен root?)"
         }
@@ -132,15 +167,19 @@ final class FanService: NSObject, FanHelperXPC {
 }
 
 /// Сюда доходят только прошедшие проверку подписи. Без соединений служба выходит: launchd
-/// поднимет её снова при следующем подключении, а root-процесс не висит без дела.
+/// поднимет её снова при следующем подключении, а root-процесс не висит без дела. Перед выходом вентиляторы
+/// в ручном режиме отдаются системе.
 final class FanListenerDelegate: NSObject, NSXPCListenerDelegate {
-    private let service = FanService()
+    let service = FanService()
     private var connections = 0
     private var idleExit: DispatchWorkItem?
 
     /// Только на главной очереди.
     func armIdleExit() {
-        let work = DispatchWorkItem { exit(0) }
+        let work = DispatchWorkItem {
+            self.service.releaseManualFans()
+            exit(0)
+        }
         idleExit = work
         DispatchQueue.main.asyncAfter(deadline: .now() + FanLink.idleExit, execute: work)
     }

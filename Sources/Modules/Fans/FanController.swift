@@ -128,6 +128,9 @@ final class FanController: ObservableObject {
     private var legacyRestoreTried = false
     /// Последняя отправленная помощником цель по вентиляторам: от неё считается гистерезис.
     private var lastSent: [Int: (rpm: Double, at: Date)] = [:]
+    /// Когда вентилятору в последний раз отправили `set`. Служба отдаёт «Авто», если удержание долго не повторяют,
+    /// поэтому ручной режим подтверждается заново, даже когда цель уже стоит.
+    private var lastHold: [Int: Date] = [:]
     /// Сглаженные температуры для кривой «По датчику»; безопасность смотрит на сырые.
     private var cpuSmoother = TempSmoother()
     private var gpuSmoother = TempSmoother()
@@ -246,6 +249,7 @@ final class FanController: ObservableObject {
         screensAsleep = false
         sensorEngaged = []
         lastSent = [:]
+        lastHold = [:]
         cpuSmoother.reset(); gpuSmoother.reset()
         smoothedCPU = nil; smoothedGPU = nil
         pendingApply?.cancel()
@@ -399,19 +403,22 @@ final class FanController: ObservableObject {
             let target = Double(smc.float("F\(i)Tg") ?? 0)
             let command: FanHelperClient.Command
             if let rpm = desired {
-                // Дрожание датчика на пару градусов не стоит записи в SMC.
-                guard !isManual || abs(target - rpm) >= 50 else { continue }
+                let holdDue = lastHold[i].map { Date().timeIntervalSince($0) >= FanGate.holdRefresh } ?? true
+                // Дрожание датчика на пару градусов не стоит записи в SMC. Но удержание повторяем.
+                guard !isManual || abs(target - rpm) >= 50 || holdDue else { continue }
                 // Шум датчика качает цель на десятки об/мин, а команда помощнику дорога:
                 // в «По датчику» шлём не чаще порога/таймера. Остальное — сразу.
                 let urgent = configs[i].mode != .sensor || fullPower || GameModeController.shared.isActive
-                    || safetyTripped || !isManual
+                    || safetyTripped || !isManual || holdDue
                 let last = lastSent[i]
                 guard FanGate.shouldSend(desired: rpm, lastSent: last?.rpm, lastSentAt: last?.at,
                                          now: Date(), urgent: urgent) else { continue }
                 lastSent[i] = (rpm.rounded(), Date())
+                lastHold[i] = Date()
                 command = .set(i, Double(Int(rpm)))
             } else {
                 lastSent[i] = nil
+                lastHold[i] = nil
                 guard isManual else { continue }
                 command = .auto(i)
             }
