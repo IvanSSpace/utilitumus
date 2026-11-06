@@ -1,6 +1,6 @@
 #!/bin/bash
-# Сборка и выпуск утилит. Ничего не выкладывает: release-app.sh и install.sh запускаются только с --dry-run,
-# в подставном репозитории со своим origin, с подставными gh и launchctl; настоящий каталог не трогается.
+# Сборка и выпуск утилит. Ничего не выкладывает: release-app.sh запускается только с --dry-run, install.sh ставит
+# только в папку стенда; подставные репозиторий со своим origin, gh и launchctl; настоящий каталог не трогается.
 # Sources/Apps/Awake — заготовка стенда, настоящая появится в следующей задаче.
 # Папка стенда: RELEASE_APP_CHECK_DIR, иначе $TMPDIR/release-app-check. Нужен сертификат «Utilitumus Signing».
 set -euo pipefail
@@ -18,7 +18,7 @@ LAUNCHCTL_LOG="$OUT/launchctl.log"
 SIGN_NAME="Utilitumus Signing"
 LEAF="$(grep -oE '"[0-9a-f]{40}"' Sources/Kit/KitSigning.swift | head -1 | tr -d '"')"
 RAW_CATALOG="$(grep -oE 'https://raw[^"]+catalog\.json' Sources/Kit/SatelliteCatalog.swift)"
-SCRIPTS=(build.sh install.sh scripts/release.sh scripts/build-app.sh scripts/release-app.sh Tests/run-release-app-check.sh)
+SCRIPTS=(build.sh install.sh scripts/release.sh scripts/build-app.sh scripts/build-pilot.sh scripts/release-app.sh Tests/run-release-app-check.sh Tests/run-pilot-build-check.sh)
 
 fails=0
 pass() { echo "ok   $1"; }
@@ -71,6 +71,10 @@ for script in "${SCRIPTS[@]}"; do
   same "$script: нет \$VAR вплотную к не-ASCII" "$found" ""
 done
 check "release.sh передаёт --latest=true" has scripts/release.sh '--latest=true'
+# Иначе утилита сочла бы центр старым, а центр не показал бы в каталоге ничего с minHub 0.6.0.
+HUB_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - Info.plist)"
+ARBITER="$(sed -n 's/.*arbiterVersion = "\(.*\)".*/\1/p' Sources/Kit/SatelliteRole.swift)"
+same "версия центра не младше версии арбитра ${ARBITER}" "$(printf '%s\n%s\n' "$ARBITER" "$HUB_VERSION" | sort -V | head -1)" "$ARBITER"
 check "сборка центра не берёт Sources/Apps" has build.sh "-not -path 'Sources/Apps/*'"
 check "install.sh: хэш тот же, что в KitSigning" has install.sh "$LEAF"
 check "install.sh: адрес каталога тот же, что в SatelliteCatalog" has install.sh "$RAW_CATALOG"
@@ -103,6 +107,12 @@ EOF
 cat > "$FAKE/launchctl" <<EOF
 #!/bin/bash
 echo "launchctl \$*" >> "$LAUNCHCTL_LOG"
+# Первые REFUSE_BOOTSTRAP вызовов bootstrap отказывают, счётчик в файле.
+if [ "\$1" = bootstrap ] && [ -n "\${REFUSE_BOOTSTRAP:-}" ]; then
+  count="\$(cat "\$REFUSE_COUNT" 2>/dev/null || echo 0)"
+  echo "\$((count + 1))" > "\$REFUSE_COUNT"
+  [ "\$count" -ge "\$REFUSE_BOOTSTRAP" ]
+fi
 EOF
 # Отдаёт CURL_SERVES вместо скачивания и записывает адрес.
 cat > "$OUT/curl-stub" <<EOF
@@ -195,6 +205,7 @@ refused "id c .. в начале" "id" "$BA" ../x Awake 1.2.3 "$OUT/x"
 refused "имя вне папки" "имя" "$BA" awake ../Evil 1.2.3 "$OUT/x"
 refused "имя с пробелом" "имя" "$BA" awake "My App" 1.2.3 "$OUT/x"
 refused "версия с мусором" "верси" "$BA" awake Awake 1.2.x "$OUT/x"
+refused "версия, которая не влезает в число" "верси" "$BA" awake Awake 1.9999999999999999999 "$OUT/x"
 refused "нет исходников" "Sources/Apps/Nope" "$BA" nope Nope 1.2.3 "$OUT/x"
 refused "мало аргументов" "build-app.sh" "$BA" awake Awake
 check "после отказов папка вывода не создана" test ! -e "$OUT/x"
@@ -382,6 +393,8 @@ refused "чужой identifier: архив awake под id fresh" "Подпис�
 BAD_VERSION="$OUT/badversion.json"
 catalog_for "$BAD_VERSION" awake 1.x "$ZIP"
 refused "версия с мусором в каталоге" "версия" inst "$BAD_VERSION" awake --dry-run
+catalog_for "$BAD_VERSION" awake 1.9999999999999999999 "$ZIP"
+refused "версия, которая не влезает в число" "версия" inst "$BAD_VERSION" awake --dry-run
 
 # variant <дело>: копия хорошего бандла в своей папке.
 variant() {
@@ -448,6 +461,62 @@ refused "не zip" "не zip" inst "$C" awake --dry-run
 
 check "launchctl не вызывался ни разу" test ! -s "$LAUNCHCTL_LOG"
 check "папка установки не появилась" test ! -e "$OUT/inst"
+
+echo "== install.sh <id>: запись и откат"
+# Всё в папке стенда, launchctl подставной: настоящие /Applications и launchd не задействованы.
+REAL="$OUT/inst/Utilitumus/Awake.app"
+REAL_AGENT="$OUT/home/Library/LaunchAgents/local.utilitumus.app.awake.plist"
+REFUSE_COUNT="$OUT/refuse.count"
+export REFUSE_COUNT
+: > "$LAUNCHCTL_LOG"
+inst "$GOOD_CATALOG" awake > "$OUT/inst-write.txt" 2>&1 || { cat "$OUT/inst-write.txt"; bad "install.sh awake упал"; }
+check "первая установка: бандл на месте" test -d "$REAL"
+check "первая установка: подпись цела" codesign --verify --deep --strict "$REAL"
+check "первая установка: плист на месте" test -f "$REAL_AGENT"
+check "первая установка: агент загружен" has "$LAUNCHCTL_LOG" "bootstrap"
+same "первая установка: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
+
+# Отличие старой версии от новой: метка внутри бандла и плиста.
+echo старая > "$REAL/Contents/old-marker"
+echo "<!-- старый -->" >> "$REAL_AGENT"
+: > "$LAUNCHCTL_LOG"
+rm -f "$REFUSE_COUNT"
+# Десять отказов: новая версия не загрузилась, откат загрузил старую одиннадцатой попыткой.
+REFUSE_BOOTSTRAP=10 refused "launchd отказал: установка сорвалась" "Прежняя версия возвращена" inst "$GOOD_CATALOG" awake
+check "отказ launchd: старый бандл вернулся" test -f "$REAL/Contents/old-marker"
+check "отказ launchd: старый плист вернулся" has "$REAL_AGENT" "<!-- старый -->"
+same "отказ launchd: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
+same "отказ launchd: старый агент загружен, всего попыток" "$(grep -c bootstrap "$LAUNCHCTL_LOG")" "11"
+
+# mv отказывает при переносе новой версии на место: старая версия возвращается.
+mkdir -p "$OUT/mv-refuses"
+cat > "$OUT/mv-refuses/mv" <<'EOF'
+#!/bin/bash
+case "$1" in *.new) echo "mv: отказ" >&2; exit 1 ;; esac
+exec /bin/mv "$@"
+EOF
+chmod +x "$OUT/mv-refuses/mv"
+: > "$LAUNCHCTL_LOG"
+refused "mv отказал: установка сорвалась" "Прежняя версия возвращена" \
+  env PATH="$OUT/mv-refuses:$FAKE:$PATH" HOME="$OUT/home" INSTALL_DIR="$OUT/inst" CATALOG_URL="file://$GOOD_CATALOG" "$ROOT/install.sh" awake
+check "отказ mv: старый бандл вернулся" test -f "$REAL/Contents/old-marker"
+check "отказ mv: старый плист вернулся" has "$REAL_AGENT" "<!-- старый -->"
+same "отказ mv: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
+
+: > "$LAUNCHCTL_LOG"
+inst "$GOOD_CATALOG" awake > "$OUT/inst-write.txt" 2>&1 || { cat "$OUT/inst-write.txt"; bad "обновление install.sh упало"; }
+check "обновление: метки старой версии нет" test ! -e "$REAL/Contents/old-marker"
+check "обновление: старый плист заменён" lacks "$REAL_AGENT" "<!-- старый -->"
+same "обновление: рядом ничего" "$(ls -A "$OUT/inst/Utilitumus")" "Awake.app"
+
+# Первая установка, launchd отказал: возвращать нечего, от утилиты не остаётся ничего.
+rm -rf "$OUT/inst" "$OUT/home/Library/LaunchAgents"
+rm -f "$REFUSE_COUNT"
+REFUSE_BOOTSTRAP=99 refused "первая установка, launchd отказал" "не установлен" inst "$GOOD_CATALOG" awake
+same "отказ при первой установке: бандла нет" "$(ls -A "$OUT/inst/Utilitumus")" ""
+check "отказ при первой установке: плиста нет" test ! -e "$REAL_AGENT"
+rm -rf "$OUT/inst"
+rm -rf "$OUT/home/Library"
 
 echo "== install.sh без аргумента"
 # Архив с подписью ad-hoc: скрипт останавливается на проверке подписи, до записи в INSTALL_DIR.

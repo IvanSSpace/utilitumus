@@ -236,6 +236,8 @@ enum StoreState: Equatable {
 struct StoreFailure: Equatable {
     let module: Module
     let message: String
+    /// Отдельное приложение поставить не вышло не по его вине: можно взять встроенный вариант.
+    var offersBuiltIn = false
 }
 
 enum StoreTab: String, CaseIterable, Hashable {
@@ -359,6 +361,12 @@ final class StoreModel: ObservableObject {
             runInstall(module, app)
             return
         }
+        installBuiltIn(module)
+    }
+
+    /// Встроенный вариант: сразу, без сети. Его же предлагает ошибка установки отдельного приложения.
+    func installBuiltIn(_ module: Module) {
+        failure = nil
         modules.setHidden(module, false)
         modules.setOn(module, true)
         downloadResources(module)
@@ -413,7 +421,9 @@ final class StoreModel: ObservableObject {
     private func show(_ error: Error, module: Module, fallback: String) {
         if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
         NSLog("Utilitumus: модуль %@: %@", module.rawValue, String(describing: error))
-        failure = StoreFailure(module: module, message: Self.failureMessage(error, fallback: fallback))
+        // Бандл есть — сорвалось обновление: встроенный рядом с живой утилитой работал бы дважды.
+        failure = StoreFailure(module: module, message: Self.failureMessage(error, fallback: fallback),
+                               offersBuiltIn: Self.offersBuiltIn(error) && !satellites.hasBundle(module))
     }
 
     func dismissFailure() { failure = nil }
@@ -427,13 +437,33 @@ final class StoreModel: ObservableObject {
         case let error as SatelliteInstallError:
             return error.errorDescription ?? fallback
         case let error as KitSigning.Failure:
-            return error.errorDescription ?? fallback
+            return error.userMessage ?? fallback
         case is LinkError:
             return "Модуль не ответил после запуска, прежняя версия возвращена"
         case is URLError:
             return "Не удалось скачать модуль: проверь сеть"
+        case _ where isPermissionFailure(error):
+            return "Нет прав на запись в папку «Программы»"
         default:
             return fallback
+        }
+    }
+
+    /// Только сеть и права: это не говорит ничего плохого о самом приложении. Чужая подпись, не та контрольная
+    /// сумма и плохой архив встроенным не лечатся: человек должен увидеть именно эту ошибку.
+    static func offersBuiltIn(_ error: Error) -> Bool {
+        switch error {
+        case is URLError, SatelliteInstallError.server: return true
+        default: return isPermissionFailure(error)
+        }
+    }
+
+    private static func isPermissionFailure(_ error: Error) -> Bool {
+        let error = error as NSError
+        switch error.domain {
+        case NSCocoaErrorDomain: return [NSFileWriteNoPermissionError, NSFileReadNoPermissionError].contains(error.code)
+        case NSPOSIXErrorDomain: return [Int(EACCES), Int(EPERM)].contains(error.code)
+        default: return false
         }
     }
 

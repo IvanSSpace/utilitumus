@@ -115,6 +115,7 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
                 setEnabled: { _, on in
                     let handed = box.defaults?.bool(forKey: "App.awake.HandedOver") == true
                     journal.add("setEnabled \(on) handed=\(handed)")
+                    try await Task.sleep(for: .seconds(box.enableDelay))
                     if box.takeEnableFailure() { throw Boom() }
                 },
                 openWindow: { _ in journal.add("openWindow") }),
@@ -148,6 +149,7 @@ final class RigBox: @unchecked Sendable {
     private var _launchctlDelay: TimeInterval = 0
     private var _downloadDelay: TimeInterval = 0
     private var _enableFailures = 0
+    private var _enableDelay: TimeInterval = 0
     private var _catalog: Result<Data, Error> = .failure(Boom())
     var defaults: UserDefaults?
 
@@ -157,6 +159,7 @@ final class RigBox: @unchecked Sendable {
     var launchctlDelay: TimeInterval { get { locked { _launchctlDelay } } set { locked { _launchctlDelay = newValue } } }
     var downloadDelay: TimeInterval { get { locked { _downloadDelay } } set { locked { _downloadDelay = newValue } } }
     var enableFailures: Int { get { locked { _enableFailures } } set { locked { _enableFailures = newValue } } }
+    var enableDelay: TimeInterval { get { locked { _enableDelay } } set { locked { _enableDelay = newValue } } }
     var catalog: Result<Data, Error> { get { locked { _catalog } } set { locked { _catalog = newValue } } }
     func takeEnableFailure() -> Bool {
         locked {
@@ -292,6 +295,46 @@ func tableChecks() {
         check(rig.defaults.bool(forKey: ModuleManager.onKey(.awake)), "передача: ModuleOn не тронут")
         await rig.registry.update()
         check(rig.journal.count("setEnabled true handed=true") == 1, "повторный опрос не шлёт setEnabled")
+    }
+    do {
+        // Человек выключил утилиту сам, центр запустился позже: встроенный не работал, передавать нечего.
+        let rig = Rig("hand-over-module-off", bundle: true)
+        rig.box.reply = .success(ready)
+        await rig.registry.update()
+        check(rig.handedOverKey && rig.modules.isExternal(.awake), "модуль был выключен: передача записана")
+        check(!rig.journal.has("setEnabled"), "модуль был выключен: setEnabled утилите не уходит")
+        check(rig.registry.entries[.awake]?.status == ready, "модуль был выключен: статус записан")
+    }
+    do {
+        // Модуль удалили, пока утилита медлила с ответом на setEnabled.
+        let rig = Rig("stale-enable", moduleOn: true, bundle: true)
+        rig.makeAgent()
+        rig.box.reply = .success(ready)
+        rig.box.enableDelay = 0.4
+        let polling = Task { @MainActor in await rig.registry.update() }
+        for _ in 0..<40 where !rig.journal.has("setEnabled") { try? await Task.sleep(for: .seconds(0.01)) }
+        try? await rig.registry.uninstall(.awake)
+        let before = rig.journal.count("status")
+        await polling.value
+        check(rig.registry.entries[.awake]?.installedVersion == nil, "удаление во время setEnabled: старый опрос не вернул запись")
+        check(rig.journal.count("status") == before, "удаление во время setEnabled: статус удалённого не спрашиваем")
+    }
+    do {
+        // Тот же случай, setEnabled ещё и сорвался: долга перед удалённой утилитой быть не должно.
+        let rig = Rig("stale-enable-failed", moduleOn: true, bundle: true)
+        rig.makeAgent()
+        rig.box.reply = .success(ready)
+        rig.box.enableDelay = 0.4
+        rig.box.enableFailures = 1
+        let polling = Task { @MainActor in await rig.registry.update() }
+        for _ in 0..<40 where !rig.journal.has("setEnabled") { try? await Task.sleep(for: .seconds(0.01)) }
+        try? await rig.registry.uninstall(.awake)
+        await polling.value
+        rig.box.enableDelay = 0
+        rig.defaults.set(true, forKey: "App.awake.HandedOver")
+        rig.makeBundle()
+        await rig.registry.update()
+        check(rig.journal.count("setEnabled true handed=true") == 1, "сорвавшийся setEnabled удалённой утилиты не повторяется для новой")
     }
     do {
         let rig = Rig("owns-no-reply", moduleOn: true, handedOver: true, bundle: true)

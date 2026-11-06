@@ -1,5 +1,5 @@
+import AppKit
 import Combine
-import Foundation
 
 /// Команды запущенной утилите. Каждая своим соединением: опросы редкие, а `LinkClient` сам рукопожимается.
 /// `@Sendable`: замыкание, созданное на главном акторе, иначе на нём бы и выполнялось.
@@ -22,6 +22,8 @@ struct SatelliteCommands {
     }
 
     @MainActor private static func liveOpenWindow(_ id: String) async throws {
+        // Иначе macOS 14+ не отдаст фокус фоновому процессу и окно откроется позади центра.
+        NSApp.yieldActivation(toApplicationWithBundleIdentifier: KitLink.bundleID(id))
         try await LinkClient(id: id).openWindow()
     }
 }
@@ -92,6 +94,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         Task { await update() }
     }
 
+    /// Только статус одной утилиты, без каталога.
+    func refresh(_ module: Module) {
+        Task { await poll(module) }
+    }
+
     /// Каталог и опрос независимы: зависшая сеть не должна задерживать статусы, и наоборот.
     func update() async {
         async let catalog: Void = reloadCatalog()
@@ -136,18 +143,21 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     // MARK: Установка и удаление
 
-    /// Включённость утилита при первом запуске берёт из `ModuleOn`, а там «выключен»: «＋» значит «включить».
+    /// «＋» значит «включить»: утилита иначе взяла бы «выключен» из `ModuleOn` или с прошлой установки.
+    /// Обновление включённость не трогает: её выбрал человек.
     func install(_ module: Module, app: CatalogApp) async throws {
         guard busy.insert(module).inserted else { return }
         let enabledKey = ModuleHandover.enabledKey(module.rawValue)
-        let firstInstall = defaults.object(forKey: enabledKey) == nil
-        if firstInstall { defaults.set(true, forKey: enabledKey) }
+        let previous = defaults.object(forKey: enabledKey)
+        let bundle = environment.paths.appsDir.appendingPathComponent(Self.bundleName(module) + ".app")
+        let fresh = !FileManager.default.fileExists(atPath: bundle.path)
+        if fresh { defaults.set(true, forKey: enabledKey) }
         let installer = environment.installer
         let name = Self.bundleName(module)
         do {
             try await serialized { try await installer.install(app, name: name) }
         } catch {
-            if firstInstall { defaults.removeObject(forKey: enabledKey) }
+            if fresh { defaults.set(previous, forKey: enabledKey) }
             finish(module)
             throw error
         }
@@ -235,9 +245,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         let info = environment.paths.appsDir.appendingPathComponent(Self.bundleName(module) + ".app")
         let version = await Task.detached { Self.installedVersion(ofBundle: info) }.value
 
+        var isStale: Bool { busy.contains(module) || generation[module, default: 0] != started }
+
         var reply: LinkStatus?
         if version != nil { reply = try? await environment.commands.status(id) }
-        guard !busy.contains(module), generation[module, default: 0] == started else { return }
+        guard !isStale else { return }
 
         let handedOver = defaults.bool(forKey: ModuleHandover.handedOverKey(id))
         switch ModuleHandover.decide(bundlePresent: version != nil, handedOver: handedOver, reply: reply) {
@@ -247,25 +259,32 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         case .returnToBuiltIn:
             await returnToBuiltIn(module)
         case .handOver:
+            // Встроенный был выключен: утилита передачи не ждёт, а её выключенность выбрал человек.
+            let moduleWasOn = modules.enabled.contains(module)
             modules.setExternal(module, true)
             defaults.set(true, forKey: ModuleHandover.handedOverKey(id))
             // Утилита читает ключ из другого процесса, как только получит setEnabled.
             defaults.synchronize()
-            await enable(module)
-            reply = try? await environment.commands.status(id)
+            if moduleWasOn {
+                await enable(module, started: started)
+                guard !isStale else { return }
+                reply = try? await environment.commands.status(id)
+            }
         case .satelliteOwns:
             modules.setExternal(module, true)
-            if reply != nil, enableOwed.contains(module) { await enable(module) }
+            if reply != nil, enableOwed.contains(module) { await enable(module, started: started) }
         }
+        // Пока шли вызовы, модуль могли удалить или поставить заново: старый ответ его бы затёр.
+        guard !isStale else { return }
         entries[module] = entry(module, version: version, reply: reply)
     }
 
-    private func enable(_ module: Module) async {
+    private func enable(_ module: Module, started: Int) async {
         do {
             try await environment.commands.setEnabled(module.rawValue, true)
             enableOwed.remove(module)
         } catch {
-            enableOwed.insert(module)
+            if generation[module, default: 0] == started { enableOwed.insert(module) }
         }
     }
 

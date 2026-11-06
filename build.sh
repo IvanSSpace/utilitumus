@@ -3,6 +3,17 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# Только для scripts/build-pilot.sh: аргумент, а не переменная окружения, чтобы случайно окружение release.sh
+# и CI подменить адрес каталога не могло. Такая сборка не ставится.
+PILOT_ARGS=()
+if [ $# -eq 2 ] && [ "$1" = "--pilot-catalog-source" ]; then
+  [ -n "${NO_INSTALL:-}" ] || { echo "Сборку пилота ставит автор: нужен NO_INSTALL=1." >&2; exit 1; }
+  PILOT_ARGS=(-D KIT_PILOT_CATALOG "$2")
+elif [ $# -ne 0 ]; then
+  echo "Использование: ./build.sh" >&2
+  exit 1
+fi
+
 APP_NAME="Utilitumus"
 BUILD_DIR="${BUILD_DIR:-build}"  # своя папка — для параллельных сборок
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
@@ -36,7 +47,7 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-swiftc -O -parse-as-library -target "$TARGET" \
+swiftc -O -parse-as-library -target "$TARGET" ${PILOT_ARGS[@]+"${PILOT_ARGS[@]}"} \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*') \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit

@@ -146,7 +146,18 @@ fake fake-ours garbage
 scenario client garbage
 
 cleanup
-if launchctl list | grep -q "$LABEL"; then
+# Список в переменной: `launchctl list | grep -q` при pipefail падает от SIGPIPE и выглядит как «метки нет».
+listed() {
+  local list
+  list="$(launchctl list)"
+  [[ "$list" == *"$LABEL"* ]]
+}
+# bootout снимает метку не сразу.
+for _ in $(seq 1 50); do
+  listed || break
+  sleep 0.1
+done
+if listed; then
   echo "ПРОВАЛ: метка $LABEL осталась"
   exit 1
 fi

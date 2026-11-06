@@ -33,5 +33,7 @@ struct SatellitePage: View {
                 }
             }
         }
+        // Таймера нет: на открытой заново странице могла остаться строка упавшей утилиты.
+        .onAppear { registry.refresh(module) }
     }
 }

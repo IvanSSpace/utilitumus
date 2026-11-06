@@ -28,15 +28,18 @@ final class Journal: @unchecked Sendable {
 
 /// Что сейчас отвечают подставные каталог, загрузка и связь.
 final class Stage: @unchecked Sendable {
-    enum CatalogMode { case down, hang, app(version: String) }
+    enum CatalogMode { case down, hang, empty, app(version: String) }
+    enum VerifyMode { case ok, foreign }
     private let lock = NSLock()
     private var _catalog = CatalogMode.down
     private var _downloadFails = true
     private var _reply: LinkStatus?
+    private var _verify = VerifyMode.ok
     private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
     var catalog: CatalogMode { get { locked { _catalog } } set { locked { _catalog = newValue } } }
     var downloadFails: Bool { get { locked { _downloadFails } } set { locked { _downloadFails = newValue } } }
     var reply: LinkStatus? { get { locked { _reply } } set { locked { _reply = newValue } } }
+    var verify: VerifyMode { get { locked { _verify } } set { locked { _verify = newValue } } }
 }
 
 let journal = Journal()
@@ -62,7 +65,13 @@ func catalogData(version: String) -> Data {
             try fm.copyItem(at: fixtureZip, to: copy)
             return copy
         },
-        verify: { _, _ in journal.add("verify") },
+        verify: { _, _ in
+            journal.add("verify")
+            // Настоящий текст отказа: codesign с требованием, которому неподписанный архив не отвечает.
+            if stage.verify == .foreign {
+                try KitSigning.verifySignature(of: fixtureZip, identifier: "local.utilitumus.test.nobody", strict: false)
+            }
+        },
         link: SatelliteLink(quit: { _ in journal.add("quit") }, hello: { _ in }))
     return SatelliteEnvironment(
         paths: paths,
@@ -70,6 +79,7 @@ func catalogData(version: String) -> Data {
         installer: installer,
         commands: SatelliteCommands(
             status: { _ in
+                journal.add("status")
                 guard let reply = stage.reply else { throw LinkError.timeout }
                 return reply
             },
@@ -81,6 +91,7 @@ func catalogData(version: String) -> Data {
             case .hang:
                 try await Task.sleep(for: .seconds(60))
                 throw URLError(.timedOut)
+            case .empty: return Data(#"{"schema":1,"apps":[]}"#.utf8)
             case .app(let version): return catalogData(version: version)
             }
         },
@@ -168,6 +179,49 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     check(hasCyrillic(offline) && offline != "запасное", "нет сети: русский текст («\(offline)»)")
     check(StoreModel.failureMessage(NSError(domain: "x", code: 1), fallback: "запасное") == "запасное",
           "неизвестная ошибка: запасной текст вместо системного")
+
+    // Настоящий текст системной программы: так launchctl отказывает в bootstrap.
+    do {
+        try KitSigning.run("/bin/sh", ["-c", "echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5"])
+        check(false, "команда с кодом 5 должна упасть")
+    } catch {
+        let text = StoreModel.failureMessage(error, fallback: "Не удалось установить модуль")
+        check(text == "Не удалось установить модуль", "отказ системной программы: без английского («\(text)»)")
+        check(error.localizedDescription.contains("Bootstrap failed"), "сырой текст остаётся для журнала")
+    }
+    let own = StoreModel.failureMessage(KitSigning.Failure("Скачанное повреждено"), fallback: "запасное")
+    check(own == "Скачанное повреждено", "свой русский текст показывается как есть")
+    do {
+        try KitSigning.verifySignature(of: fixtureZip, identifier: "local.utilitumus.test.nobody", strict: false)
+        check(false, "неподписанный архив должен быть отвергнут")
+    } catch {
+        let text = StoreModel.failureMessage(error, fallback: "запасное")
+        check(text == "Подпись Awake.zip не от автора Utilitumus", "отказ по подписи: коротко («\(text)»)")
+        check(!StoreModel.offersBuiltIn(error), "отказ по подписи: встроенный не предлагается")
+    }
+
+    let offers: [(Error, String)] = [
+        (URLError(.notConnectedToInternet), "нет сети"),
+        (URLError(.timedOut), "сеть зависла"),
+        (SatelliteInstallError.server(404), "сервер ответил 404"),
+        (CocoaError(.fileWriteNoPermission), "нет прав на запись"),
+        (POSIXError(.EACCES), "EACCES"),
+        (POSIXError(.EPERM), "EPERM"),
+    ]
+    for (error, name) in offers { check(StoreModel.offersBuiltIn(error), "\(name): предлагается встроенный") }
+    let noOffers: [(Error, String)] = [
+        (SatelliteInstallError.checksum, "контрольная сумма"),
+        (SatelliteInstallError.archive("x"), "плохой архив"),
+        (SatelliteInstallError.rollbackFailed(cause: "x", problems: []), "сорвался откат"),
+        (KitSigning.Failure("Подпись x не от автора"), "подпись"),
+        (LinkError.timeout, "модуль не ответил"),
+        (CocoaError(.fileNoSuchFile), "нет файла"),
+    ]
+    for (error, name) in noOffers { check(!StoreModel.offersBuiltIn(error), "\(name): встроенный не предлагается") }
+    let denied = StoreModel.failureMessage(CocoaError(.fileWriteNoPermission), fallback: "запасное")
+    check(hasCyrillic(denied) && denied != "запасное", "нет прав: русский текст («\(denied)»)")
+    let refused = StoreModel.failureMessage(SatelliteInstallError.server(503), fallback: "запасное")
+    check(refused.contains("503"), "сервер отказал: код виден («\(refused)»)")
 }
 
 @MainActor func catalogDownScenario(_ store: StoreModel, _ registry: SatelliteRegistry, _ modules: ModuleManager) async {
@@ -190,6 +244,20 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     store.install(.awake)
     check(modules.isOn(.awake), "зависшая сеть не мешает поставить встроенный")
     store.remove(.awake)
+
+    // Пустой каталог, как в выпуске 0.6.0 до первой утилиты: Стор идёт теми же путями, что и в 0.5.3.
+    stage.catalog = .empty
+    await registry.update()
+    check(Module.allCases.allSatisfy { registry.catalogApp($0) == nil && !registry.hasBundle($0) }, "пустой каталог: записей нет")
+    check(Module.allCases.allSatisfy { store.state($0) == .available }, "пустой каталог: все модули с «＋»")
+    for module in [Module.awake, .clipboard] {
+        store.install(module)
+        check(modules.isOn(module) && !modules.isExternal(module) && store.state(module) == .installed, "пустой каталог: \(module.rawValue) ставится встроенным")
+        store.remove(module)
+        check(store.state(module) == .available && !modules.isOn(module), "пустой каталог: \(module.rawValue) удаляется как раньше")
+    }
+    check(journal.count("download") == 0 && store.failure == nil && registry.busy.isEmpty, "пустой каталог: установщика и ошибок нет")
+    check(Kit.defaults.object(forKey: "App.awake.Enabled") == nil, "пустой каталог: ключей утилиты нет")
     stage.catalog = .down
 }
 
@@ -211,16 +279,49 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     check(!modules.isOn(.awake) && !modules.isExternal(.awake), "после ошибки установщика модуль не включён")
     check(store.failure?.module == .awake && hasCyrillic(store.failure?.message ?? ""),
           "ошибка видна («\(store.failure?.message ?? "нет")»)")
+    check(store.failure?.offersBuiltIn == true, "сеть: ошибка предлагает встроенный")
     await snapshot("store-install-failed", StoreWithSidebar())
     store.open(.awake)
     await pause(0.3)
     await snapshot("store-detail-failed", StoreView())
     store.close()
+
+    let downloads = journal.count("download")
+    store.installBuiltIn(.awake)
+    check(modules.isOn(.awake) && !modules.isExternal(.awake), "предложенный встроенный включён")
+    check(store.failure == nil && store.state(.awake) == .installed, "ошибки больше нет, плитка «Установлен»")
+    check(journal.count("download") == downloads && registry.busy.isEmpty, "встроенный не идёт через установщик")
+    await registry.update()
+    check(modules.isOn(.awake) && !modules.isExternal(.awake), "опрос оставляет встроенный: бандла нет")
+    store.remove(.awake)
+    check(store.state(.awake) == .available, "встроенный снова удаляется как раньше")
+
+    // Настоящий отказ файловой системы: папка приложений без права записи.
+    stage.downloadFails = false
+    try! fm.createDirectory(at: paths.appsDir, withIntermediateDirectories: true)
+    try! fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: paths.appsDir.path)
+    store.install(.awake)
+    await waitIdle(store)
+    try! fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.appsDir.path)
+    check(store.failure?.offersBuiltIn == true, "нет прав на папку: ошибка предлагает встроенный («\(store.failure?.message ?? "нет")»)")
+    check(!fm.fileExists(atPath: bundleURL.path) && !modules.isOn(.awake), "нет прав на папку: модуль не появился")
+
+    // Подпись: архив тот же, отказ настоящий, встроенный здесь не лекарство.
+    stage.verify = .foreign
+    store.install(.awake)
+    await waitIdle(store)
+    check(store.failure?.message.contains("не от автора") == true, "чужая подпись: причина видна («\(store.failure?.message ?? "нет")»)")
+    check(store.failure?.offersBuiltIn == false, "чужая подпись: встроенный не предлагается")
+    check(!modules.isOn(.awake) && !fm.fileExists(atPath: bundleURL.path), "чужая подпись: ничего не поставлено")
+    await snapshot("store-install-foreign", StoreWithSidebar())
+    stage.verify = .ok
+    stage.downloadFails = true
+    store.dismissFailure()
 }
 
 @MainActor func installScenario(_ store: StoreModel, _ registry: SatelliteRegistry, _ modules: ModuleManager) async {
     stage.downloadFails = false
-    stage.reply = LinkStatus(enabled: true, line: "Mac не уснёт · ещё 1 ч", needsSetup: 0)
+    stage.reply = LinkStatus(enabled: true, line: "Mac не уснёт", needsSetup: 0)
     Kit.defaults.set("значение", forKey: "Awake.Настройка")
     store.install(.awake)
     check(store.failure == nil, "новая установка снимает прежнюю ошибку")
@@ -229,7 +330,7 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     check(fm.fileExists(atPath: bundleURL.path), "бандл на месте")
     check(journal.count("launchctl bootstrap") == 1, "агент загружен")
     check(modules.isExternal(.awake), "чек-лист сделан: модуль передан утилите")
-    check(journal.count("setEnabled true") == 1, "утилите сказано включиться")
+    check(journal.count("setEnabled true") == 0, "встроенный был выключен: команду включиться утилита не получает")
     check(Kit.defaults.bool(forKey: "App.awake.HandedOver"), "HandedOver в настройках")
     check(Kit.defaults.bool(forKey: "App.awake.Enabled"), "App.awake.Enabled в настройках")
     check(!Kit.defaults.bool(forKey: ModuleManager.onKey(.awake)), "ModuleOn не включён")
@@ -237,7 +338,9 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     check(store.justInstalled == .awake, "подтверждение после установки")
     await snapshot("store-installed", StoreWithSidebar())
 
+    let polls = journal.count("status")
     await snapshot("satellite-page", ModuleDetail(module: .awake))
+    check(journal.count("status") > polls, "страница утилиты при открытии перечитывает статус")
     stage.reply = LinkStatus(enabled: true, line: "Ждёт доступов", needsSetup: 2)
     await registry.update()
     check(registry.entries[.awake]?.status?.needsSetup == 2, "страница видит чек-лист")
@@ -270,6 +373,12 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     await waitIdle(store)
     check(store.failure != nil && modules.isExternal(.awake) && fm.fileExists(atPath: bundleURL.path),
           "неудачное обновление: ошибка видна, установленное цело")
+    stage.downloadFails = true
+    store.downloadResources(.awake)
+    await waitIdle(store)
+    check(store.failure?.message.contains("сеть") == true && store.failure?.offersBuiltIn == false,
+          "обновление без сети: встроенный не предлагается, рядом с живой утилитой он работал бы дважды")
+    stage.downloadFails = false
 }
 
 @MainActor func removeScenario(_ store: StoreModel, _ registry: SatelliteRegistry, _ modules: ModuleManager) async {
@@ -290,6 +399,15 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     check(store.state(.awake) == .available, "«Удалить»: плитка снова «＋»")
     check(removed.value, "«Удалить»: главное окно уходит со страницы")
     check(Kit.defaults.string(forKey: "Awake.Настройка") == "значение", "«Удалить»: настройки остаются")
+
+    // Выключили перед удалением, потом снова «＋»: включённым становится с установки, а не командой.
+    Kit.defaults.set(false, forKey: "App.awake.Enabled")
+    store.install(.awake)
+    await waitIdle(store)
+    check(store.failure == nil && fm.fileExists(atPath: bundleURL.path), "повторная установка прошла")
+    check(Kit.defaults.object(forKey: "App.awake.Enabled") as? Bool == true, "«＋» значит «включить» и при повторной установке")
+    store.remove(.awake)
+    await waitIdle(store)
 }
 
 final class Box: @unchecked Sendable { var value = false }

@@ -46,6 +46,11 @@ struct StoreDetail: View {
                         VStack(spacing: 0) {
                             noteRow(icon: "exclamationmark.triangle.fill", tint: .orange, title: "Не получилось",
                                     subtitle: failure.message, button: "Закрыть") { store.dismissFailure() }
+                            if failure.offersBuiltIn {
+                                noteRow(icon: "shippingbox.fill", tint: .white.opacity(0.7), title: "Можно встроенный",
+                                        subtitle: "Работает прямо в Utilitumus, скачивать не нужно",
+                                        button: "Поставить") { store.installBuiltIn(module) }
+                            }
                         }
                         .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
                     }

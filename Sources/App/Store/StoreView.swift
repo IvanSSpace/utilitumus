@@ -322,6 +322,10 @@ private struct StoreFailureToast: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text("\(failure.module.title): \(failure.message)").fontWeight(.medium).lineLimit(2)
+            if failure.offersBuiltIn {
+                DSButton("Поставить встроенный", style: .secondary, small: true) { store.installBuiltIn(failure.module) }
+                    .fixedSize()
+            }
             DSButton("", icon: "xmark", style: .plain, small: true) { store.dismissFailure() }
                 .help("Закрыть")
         }

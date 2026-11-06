@@ -52,7 +52,13 @@ enum SatelliteCatalogError: LocalizedError, Equatable {
 
 /// Какие утилиты можно поставить и откуда. Доверие держится не на каталоге, а на подписи скачанного.
 enum SatelliteCatalog {
+    /// Подмена адреса только флагом компилятора: окружение, аргументы и настройки здесь не читаются.
+    /// `KitPilotCatalog` пишет scripts/build-pilot.sh, в обычной сборке этого имени нет.
+    #if KIT_PILOT_CATALOG
+    static let url = URL(fileURLWithPath: KitPilotCatalog.path)
+    #else
     static let url = URL(string: "https://raw.githubusercontent.com/IvanSSpace/utilitumus/main/Catalog/catalog.json")!
+    #endif
 
     /// Одно приложение с плохим `id` или версией отвергает весь каталог: см. `CatalogApp.init(from:)`.
     static func decode(_ data: Data) throws -> Catalog {
@@ -71,7 +77,8 @@ enum SatelliteCatalog {
         id.range(of: #"^[a-z0-9][a-z0-9.-]*\z"#, options: .regularExpression) != nil
     }
 
+    /// До 18 цифр в части: больше не влезает в Int, и `Kit.isNewer` посчитал бы такую часть нулём.
     static func isValidVersion(_ version: String) -> Bool {
-        version.range(of: #"^[0-9]+(\.[0-9]+)*\z"#, options: .regularExpression) != nil
+        version.range(of: #"^[0-9]{1,18}(\.[0-9]{1,18})*\z"#, options: .regularExpression) != nil
     }
 }

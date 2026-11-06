@@ -29,7 +29,8 @@ enum KitSigning {
                 lastError = error
             }
         }
-        throw Failure("Подпись \(path.lastPathComponent) не от автора Utilitumus: \(lastError?.localizedDescription ?? "")")
+        let message = "Подпись \(path.lastPathComponent) не от автора Utilitumus"
+        throw Failure(log: "\(message): \(lastError?.localizedDescription ?? "")", user: message)
     }
 
     /// Запускает системную программу и ждёт её. Код выхода не 0 — ошибка с текстом из stderr.
@@ -45,12 +46,20 @@ enum KitSigning {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             let text = String(data: output, encoding: .utf8) ?? ""
-            throw Failure("\((tool as NSString).lastPathComponent): \(text.trimmingCharacters(in: .whitespacesAndNewlines))")
+            throw Failure(log: "\((tool as NSString).lastPathComponent): \(text.trimmingCharacters(in: .whitespacesAndNewlines))", user: nil)
         }
     }
 
     struct Failure: LocalizedError {
         let errorDescription: String?
-        init(_ message: String) { errorDescription = message }
+        /// Для интерфейса. Вывод системных программ английский, ему место в журнале: nil — своего текста нет.
+        let userMessage: String?
+
+        init(_ message: String) { self.init(log: message, user: message) }
+
+        init(log: String, user: String?) {
+            errorDescription = log
+            userMessage = user
+        }
     }
 }

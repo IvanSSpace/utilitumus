@@ -14,19 +14,43 @@ enum AwakeIdentity {
     #endif
 }
 
-/// Подключается к своему сервису, просит показать окно и выходит. Не вышло — всё равно выходит:
-/// второй работающей копии быть не должно.
+/// launchd придерживает перезапуск процесса, прожившего меньше 10 с: столько копия может не отвечать.
+private let forwardRetryWindow: TimeInterval = 12
+
+/// Подключается к своему сервису, просит показать окно и выходит. Копия не ответила за всё окно ожидания —
+/// говорит об этом и тоже выходит: второй работающей копии быть не должно.
 @MainActor func forwardOpenWindowAndExit() -> Never {
-    let client = LinkClient(id: AwakeIdentity.id)
     Task { @MainActor in
-        do {
-            try await client.openWindow()
-        } catch {
-            fputs("Не спать: работающая копия не ответила: \(error)\n", stderr)
-        }
-        exit(0)
+        let deadline = Date().addingTimeInterval(forwardRetryWindow)
+        var failure: Error?
+        repeat {
+            do {
+                try await LinkClient(id: AwakeIdentity.id).openWindow()
+                exit(0)
+            } catch {
+                failure = error
+                try? await Task.sleep(for: .seconds(0.5))
+            }
+        } while Date() < deadline
+        fputs("Не спать: работающая копия не ответила: \(String(describing: failure))\n", stderr)
+        showForwardFailure()
+        exit(1)
     }
     dispatchMain()
+}
+
+@MainActor private func showForwardFailure() {
+    #if KIT_TEST_DEFAULTS
+    // Стенд: видимых окон нет.
+    fputs("Не спать: окно об ошибке запуска\n", stderr)
+    #else
+    NSApplication.shared.setActivationPolicy(.accessory)
+    NSApp.activate(ignoringOtherApps: true)
+    let alert = NSAlert()
+    alert.messageText = "«Не спать» не запускается"
+    alert.informativeText = "Его фоновая часть не ответила. Поставь приложение заново: в Сторе Utilitumus или через install.sh."
+    alert.runModal()
+    #endif
 }
 
 #if KIT_TEST_DEFAULTS
@@ -51,6 +75,8 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
     private var statusItem: NSStatusItem?
     private var subscriptions: Set<AnyCancellable> = []
     private var observers: [NSObjectProtocol] = []
+    private var runningApps: NSKeyValueObservation?
+    private var hubRunning = false
 
     var canStart: Bool { mode == .active && enabled }
 
@@ -78,13 +104,10 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
             .sink { _ in KitLink.postStatusChanged(AwakeIdentity.id) }
             .store(in: &subscriptions)
 
-        let workspace = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { note in
-                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-                guard app?.bundleIdentifier == Kit.hubBundleID else { return }
-                MainActor.assumeIsolated { AwakeSatellite.shared.refresh() }
-            })
+        // Не didLaunch/didTerminate: о приложениях без Dock (утилита сама такая, центр — при выключенной настройке Dock)
+        // они не сообщают, и значок не вернулся бы после выхода центра.
+        runningApps = NSWorkspace.shared.observe(\.runningApplications) { _, _ in
+            Task { @MainActor in AwakeSatellite.shared.hubMayHaveChanged() }
         }
         observers.append(NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { CustomPaletteStore.shared.reload() }
@@ -94,6 +117,8 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
                                 peerIdentifiers: [Kit.hubBundleID, KitLink.bundleID(AwakeIdentity.id)])
         server.resume()
         self.server = server
+        // Центр мог спросить раньше, чем сервис поднялся, и теперь показывает «Не отвечает».
+        KitLink.postStatusChanged(AwakeIdentity.id)
 
         #if KIT_TEST_DEFAULTS
         installTestSignals()
@@ -108,9 +133,17 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         Kit.defaults.synchronize()
         mode = Self.currentMode()
         enabled = SatelliteEnabled.load(id: AwakeIdentity.id, defaults: Kit.defaults)
-        if !canStart { controller.stop() }
-        statusItem?.isVisible = !SatelliteHub.isRunning
+        if SatelliteRole.mustRelease(mode: mode, enabled: enabled) { controller.stop() }
+        hubRunning = SatelliteHub.isRunning
+        statusItem?.isVisible = !hubRunning
+        #if KIT_TEST_DEFAULTS
+        fputs("Не спать: значок \(hubRunning ? "скрыт" : "виден")\n", stderr)
+        #endif
         if statusLine() != before { KitLink.postStatusChanged(AwakeIdentity.id) }
+    }
+
+    private func hubMayHaveChanged() {
+        if SatelliteHub.isRunning != hubRunning { refresh() }
     }
 
     func setEnabled(_ on: Bool) {
@@ -124,13 +157,11 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         if controller.isActive || canStart { controller.toggle() }
     }
 
-    func statusLine(now: Date = Date()) -> String {
+    /// Без остатка времени: центр перечитывает строку редко, и «ещё 2 ч» застывало бы у него на экране.
+    func statusLine() -> String {
+        if controller.isActive { return "Mac не уснёт" }
         if case .passive(let reason) = mode { return reason }
-        guard controller.isActive else { return "Mac засыпает как обычно" }
-        guard let end = controller.endDate else { return "Mac не уснёт" }
-        var left = AwakeController.remainingText(until: end, now: now)
-        if left.hasSuffix(" 0 мин") { left.removeLast(" 0 мин".count) }
-        return "Mac не уснёт · ещё \(left)"
+        return "Mac засыпает как обычно"
     }
 
     // MARK: - LinkHandler
@@ -167,9 +198,10 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         window.setFrameOrigin(NSPoint(x: -10000, y: 0))
         window.orderBack(nil)
         #else
-        window.center()
+        // Активацию система может не дать: окно всё равно должно выйти вперёд.
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         #endif
         let frame = window.frame
         fputs("Не спать: окно показано \(Int(frame.width))x\(Int(frame.height)) x=\(Int(frame.minX))\n", stderr)
@@ -188,6 +220,8 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         host.sizingOptions = []
         window.contentView = host
         window.setContentSize(NSSize(width: 480, height: 520))
+        // Один раз: при следующих показах окно остаётся там, куда его поставили.
+        window.center()
         return window
     }
 
@@ -211,10 +245,11 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         guard !SatelliteHub.isRunning else { return }
         let key = "App.\(AwakeIdentity.id).LastUpdateCheck"
         if let last = Kit.defaults.object(forKey: key) as? Date, Date().timeIntervalSince(last) < 86400 { return }
-        Kit.defaults.set(Date(), forKey: key)
         do {
             let (data, _) = try await URLSession.shared.data(from: SatelliteCatalog.url)
             let catalog = try SatelliteCatalog.decode(data)
+            // Только после удачного чтения: Mac без сети проверит снова через час, а не через сутки.
+            Kit.defaults.set(Date(), forKey: key)
             guard let app = SatelliteSelfUpdate.newer(in: catalog, id: AwakeIdentity.id, than: linkHello().version) else { return }
             try await SatelliteSelfUpdate.install(app, target: Bundle.main.bundleURL)
             restartPending = true
@@ -267,12 +302,10 @@ struct AwakeWindowRoot: View {
     var body: some View {
         VStack(spacing: 0) {
             AwakeView(canStart: satellite.canStart)
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text(satellite.statusLine(now: context.date))
-                    .font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.6))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-            }
+            Text(satellite.statusLine())
+                .font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.6))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
         }
         .background(AwakeBackground())
         .environment(\.moduleControls) { _ in AnyView(AwakeControls()) }

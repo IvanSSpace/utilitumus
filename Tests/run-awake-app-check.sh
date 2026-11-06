@@ -20,11 +20,17 @@ PLIST="$OUT/$LABEL.plist"
 APP="$OUT/Awake.app"
 EXE="$APP/Contents/MacOS/Awake"
 LOG="$OUT/agent.log"
+FAKE_HUB_ID="local.utilitumus.test.fakehub"
+FAKE_HUB="$OUT/FakeHub.app"
+FAKE_HUB_PID=""
+WATCH_PID=""
 
 reset_suite() {
   defaults delete "$SUITE" 2>/dev/null || true
 }
 cleanup() {
+  if [ -n "$FAKE_HUB_PID" ]; then kill -9 "$FAKE_HUB_PID" 2>/dev/null || true; fi
+  if [ -n "$WATCH_PID" ]; then kill -9 "$WATCH_PID" 2>/dev/null || true; fi
   launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
   reset_suite
@@ -54,6 +60,15 @@ signed() {
   codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$2" "$OUT/$1" 2>/dev/null
 }
 signed client-hub "local.utilitumus"
+# Подставной центр: приложение без Dock и без окон, как настоящий при выключенной настройке Dock.
+cat > "$OUT/src/fakehub.swift" <<'SWIFT_EOF'
+import AppKit
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+app.run()
+SWIFT_EOF
+mkdir -p "$FAKE_HUB/Contents/MacOS"
+swiftc -target "$TARGET" -o "$FAKE_HUB/Contents/MacOS/FakeHub" "$OUT/src/fakehub.swift" -framework AppKit
 signed client-foreign "local.utilitumus.test.awake.foreign"
 hub() { "$OUT/client-hub" "$@"; }
 
@@ -129,6 +144,29 @@ png() {
   if wait_until "PNG $1" test -s "$1"; then ok "окно за экраном отрисовано: $1"; fi
 }
 
+# fake_hub_start <версия>: версию утилита может узнать только из Info.plist запущенного бандла.
+fake_hub_start() {
+  cat > "$FAKE_HUB/Contents/Info.plist" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$FAKE_HUB_ID</string>
+<key>CFBundleExecutable</key><string>FakeHub</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>$1</string>
+<key>LSUIElement</key><true/>
+</dict></plist>
+PLIST_EOF
+  "$FAKE_HUB/Contents/MacOS/FakeHub" & FAKE_HUB_PID=$!
+}
+# fake_hub_stop <сигнал>
+fake_hub_stop() {
+  kill "-$1" "$FAKE_HUB_PID"
+  wait "$FAKE_HUB_PID" 2>/dev/null || true
+  FAKE_HUB_PID=""
+}
+last_icon() { grep 'значок' "$LOG" | tail -1; }
+icon_is() { [ "$(last_icon)" = "Не спать: значок $1" ]; }
+expect_icon() { if wait_until "$1" icon_is "$2"; then ok "$1"; else bad "$1: $(last_icon)"; fi; }
+
 echo "== первый запуск: связь и включённость из ModuleOn"
 reset_suite
 defaults write "$SUITE" "ModuleOn.$ID" -bool true
@@ -175,7 +213,7 @@ echo "== длительность в статусе"
 defaults write "$SUITE" AwakeDuration -int 3600
 start_agent
 command_keep_awake "$(agent_pid)"
-expect_line "статус с остатком" "Mac не уснёт · ещё 1 ч"
+expect_line "со сроком статус без остатка: центр не перечитывает его по таймеру" "Mac не уснёт"
 PID="$(agent_pid)"
 hub quit
 defaults write "$SUITE" AwakeDuration -int 0
@@ -202,12 +240,101 @@ launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 sleep 0.3
 START=$(date +%s)
 XPC_SERVICE_NAME=0 "$EXE" 2> "$OUT/direct.log" & DIRECT=$!
-if wait_until "прямой запуск без агента вышел" has_exited "$DIRECT"; then
+# launchd держит перезапуск 10 с, поэтому утилита ждёт дольше и только потом сдаётся.
+for _ in $(seq 1 200); do has_exited "$DIRECT" && break; sleep 0.1; done
+if has_exited "$DIRECT"; then
   ELAPSED=$(( $(date +%s) - START ))
-  if [ "$ELAPSED" -le 3 ]; then ok "без агента вышел за ${ELAPSED} с"; else bad "без агента шёл ${ELAPSED} с"; fi
+  if [ "$ELAPSED" -ge 11 ] && [ "$ELAPSED" -le 18 ]; then ok "без агента ждал ${ELAPSED} с и вышел"; else bad "без агента шёл ${ELAPSED} с"; fi
+else
+  bad "прямой запуск без агента не вышел за 20 с"
 fi
 wait "$DIRECT" 2>/dev/null || true
-if [ -s "$OUT/direct.log" ]; then ok "без агента в журнале: $(head -1 "$OUT/direct.log")"; else bad "без агента журнал пуст"; fi
+if grep -q "окно об ошибке запуска" "$OUT/direct.log"; then ok "без агента человеку показана ошибка: $(head -1 "$OUT/direct.log")"; else bad "без агента нет ошибки: $(cat "$OUT/direct.log")"; fi
+
+# Агент поднялся, пока запуск ещё пробует: окно должно открыться, а не ошибка.
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+sleep 0.3
+XPC_SERVICE_NAME=0 "$EXE" 2> "$OUT/direct.log" & DIRECT=$!
+sleep 3
+start_agent
+for _ in $(seq 1 100); do has_exited "$DIRECT" && break; sleep 0.1; done
+wait "$DIRECT" 2>/dev/null || true
+if grep -q "окно показано" "$LOG" && ! grep -q "окно об ошибке" "$OUT/direct.log"; then ok "агент поднялся через 3 с: повтор дошёл, ошибки нет"; else bad "повтор не дошёл: $(cat "$OUT/direct.log")"; fi
+hub quit
+wait_until "вышел" has_exited "$(agent_pid)" || true
+
+echo "== утилита объявляет о себе после старта"
+reset_suite
+defaults write "$SUITE" Test.HubBundleID -string "$FAKE_HUB_ID"
+: > "$OUT/watch.log"
+"$OUT/client-hub" watch > "$OUT/watch.log" & WATCH_PID=$!
+wait_until "наблюдатель готов" grep -q "слушаю" "$OUT/watch.log" || true
+start_agent
+sees_status() { grep -q "statusChanged" "$OUT/watch.log"; }
+if wait_until "statusChanged при старте" sees_status; then ok "после старта сервиса ушёл statusChanged"; fi
+kill -9 "$WATCH_PID" 2>/dev/null || true
+wait "$WATCH_PID" 2>/dev/null || true
+WATCH_PID=""
+
+echo "== утилиту поставили отдельно: центра не было"
+same "нет ModuleOn: утилита включена" "$(hub status | cut -d'|' -f1)" "true"
+same "нет ModuleOn: включённость записана" "$(defaults read "$SUITE" "App.$ID.Enabled")" "1"
+PID="$(agent_pid)"
+command_keep_awake "$PID"
+expect_assertion "нет ModuleOn: команда работает" "$PID"
+command_keep_awake "$PID"
+expect_no_assertion "и снимается" "$PID"
+hub quit
+wait_until "вышел" has_exited "$PID" || true
+
+echo "== центр без Dock появляется и выходит"
+reset_suite
+defaults write "$SUITE" Test.HubBundleID -string "$FAKE_HUB_ID"
+defaults write "$SUITE" "ModuleOn.$ID" -bool true
+start_agent
+PID="$(agent_pid)"
+expect_icon "центра нет: значок виден" "виден"
+expect_line "центра нет: утилита активна" "Mac засыпает как обычно"
+command_keep_awake "$PID"
+expect_assertion "человек сам включил блокировку" "$PID"
+fake_hub_start 0.6.0
+expect_icon "центр запущен: значок скрыт" "скрыт"
+expect_line "запуск центра не снимает блокировку: статус честный" "Mac не уснёт"
+if holds_assertion "$PID"; then ok "запуск центра не снимает блокировку"; else bad "запуск центра снял блокировку"; fi
+command_keep_awake "$PID"
+expect_no_assertion "кнопка снимает блокировку и в пассивном режиме" "$PID"
+expect_line "теперь ждём передачу: версия взята из Info.plist запущенного центра" "Ждём передачу от центра"
+command_keep_awake "$PID"
+expect_still_no_assertion "снова включить, пока ждём передачу, нельзя" "$PID"
+fake_hub_stop TERM
+expect_icon "центр вышел без Dock: значок вернулся" "виден"
+expect_line "центр вышел: пассивная утилита решила заново" "Mac засыпает как обычно"
+fake_hub_start 0.6.0
+expect_line "центр снова запущен: снова ждём" "Ждём передачу от центра"
+fake_hub_stop KILL
+expect_icon "центр упал: значок вернулся" "виден"
+expect_line "центр упал: утилита активна" "Mac засыпает как обычно"
+
+echo "== старый центр"
+command_keep_awake "$PID"
+expect_assertion "блокировка перед запуском старого центра" "$PID"
+fake_hub_start 0.5.3
+expect_no_assertion "старый центр снимает блокировку: модуль может работать в нём" "$PID"
+expect_line "старый центр: версия из его Info.plist" "Модуль уже работает в Utilitumus — обновите центр"
+fake_hub_stop TERM
+expect_line "старый центр вышел: активна" "Mac засыпает как обычно"
+
+echo "== выключенная утилита при центре"
+command_keep_awake "$PID"
+expect_assertion "блокировка перед выключением" "$PID"
+fake_hub_start 0.6.0
+expect_line "центр запущен: блокировка держится" "Mac не уснёт"
+hub disable
+expect_no_assertion "выключение снимает блокировку" "$PID"
+fake_hub_stop TERM
+hub quit
+wait_until "вышел" has_exited "$PID" || true
+defaults delete "$SUITE" Test.HubBundleID
 
 echo "== пассивный режим и передача от центра"
 reset_suite
@@ -251,5 +378,12 @@ if "$OUT/client-hub" replace "$OUT/update.zip" "$SUM" 9.9.9 "$TARGET_APP" > /dev
 codesign --verify --deep --strict "$TARGET_APP" && ok "подпись заменённого цела" || bad "подпись заменённого"
 
 cleanup
-if launchctl list | grep -q "$LABEL"; then bad "метка $LABEL осталась"; else ok "launchctl list без $LABEL"; fi
+# Список в переменной: `launchctl list | grep -q` при pipefail падает от SIGPIPE и выглядит как «метки нет».
+listed() {
+  local list
+  list="$(launchctl list)"
+  [[ "$list" == *"$LABEL"* ]]
+}
+not_listed() { ! listed; }
+if wait_until "launchctl list без $LABEL" not_listed; then ok "launchctl list без $LABEL"; fi
 if [ "$failures" -eq 0 ]; then echo "НЕ СПАТЬ: ВСЁ ОК"; else echo "ПРОВАЛОВ: $failures"; exit 1; fi

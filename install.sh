@@ -49,6 +49,16 @@ matches() { local LC_ALL=C; [[ "$1" =~ $2 ]]; }
 catalog_field() { plutil -extract "$1" raw -o - "$WORK/catalog.json" 2>/dev/null; }
 info_field() { plutil -extract "$1" raw -o - "$2/Contents/Info.plist" 2>/dev/null; }
 
+# launchd отпускает метку не сразу после bootout.
+load_agent() {
+  local ATTEMPT=1
+  until launchctl bootstrap "gui/$UID" "$1" 2>/dev/null; do
+    [ "$ATTEMPT" -lt 10 ] || return 1
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 0.3
+  done
+}
+
 install_app() {
   local ID="$1" DRY_RUN=""
   # id подставляется в требование подписи и в путь к плисту. Те же правила, что у SatelliteCatalog.isValidID.
@@ -79,7 +89,7 @@ install_app() {
     INDEX=$((INDEX + 1))
   done
   [ -n "$URL" ] || fail "Утилиты ${ID} нет в каталоге."
-  matches "$VERSION" '^[0-9]+(\.[0-9]+)*$' || fail "В каталоге недопустимая версия: ${VERSION}"
+  matches "$VERSION" '^[0-9]{1,18}(\.[0-9]{1,18})*$' || fail "В каталоге недопустимая версия: ${VERSION}"
 
   echo "Скачиваю ${ID} ${VERSION}…"
   local ZIP="$WORK/app.zip"
@@ -160,21 +170,33 @@ PLIST
 
   # Рядом и переносом: пока копия не готова, старая версия цела и работает.
   mkdir -p "$INSTALL_DIR/Utilitumus" "$HOME/Library/LaunchAgents"
-  rm -rf -- "$DEST.new"
+  rm -rf -- "$DEST.new" "$DEST.old"
   ditto "$APP" "$DEST.new"
+  local OLD_AGENT="$WORK/old-agent.plist"
+  if [ -f "$AGENT" ]; then cp "$AGENT" "$OLD_AGENT"; fi
+  local HAD_OLD=""
+  if [ -e "$DEST" ]; then HAD_OLD=1; fi
   # Отказ — обычно значит «не был загружен»; настоящий сбой покажет bootstrap.
   launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
-  rm -rf -- "$DEST"
-  mv "$DEST.new" "$DEST"
-  cp "$WORK/agent.plist" "$AGENT"
-  # launchd отпускает метку не сразу после bootout.
-  local ATTEMPT=1
-  until launchctl bootstrap "gui/$UID" "$AGENT" 2>/dev/null; do
-    [ "$ATTEMPT" -lt 10 ] || fail "launchd не загрузил ${LABEL}: ${AGENT}"
-    ATTEMPT=$((ATTEMPT + 1))
-    sleep 0.3
-  done
-  echo "$NAME $VERSION установлен в $DEST."
+  if { [ -z "$HAD_OLD" ] || mv "$DEST" "$DEST.old"; } && mv "$DEST.new" "$DEST" && cp "$WORK/agent.plist" "$AGENT" && load_agent "$AGENT"; then
+    rm -rf -- "$DEST.old"
+    echo "$NAME $VERSION установлен в $DEST."
+    return
+  fi
+
+  # Сорвалось после снятия старой версии: вернуть её, иначе у человека не осталось бы ничего.
+  launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
+  # Старая версия могла и не уехать в .old: тогда она всё ещё на месте и удалять её нельзя.
+  if [ -z "$HAD_OLD" ] || [ -e "$DEST.old" ]; then rm -rf -- "$DEST"; fi
+  rm -rf -- "$DEST.new"
+  rm -f -- "$AGENT"
+  if [ -e "$DEST.old" ]; then mv "$DEST.old" "$DEST"; fi
+  if [ -f "$OLD_AGENT" ]; then
+    cp "$OLD_AGENT" "$AGENT"
+    load_agent "$AGENT" || fail "$NAME $VERSION не установлен, и прежнюю версию launchd не загрузил: ${AGENT}"
+  fi
+  if [ -n "$HAD_OLD" ]; then fail "$NAME $VERSION не установлен. Прежняя версия возвращена."; fi
+  fail "$NAME $VERSION не установлен: не удалось положить приложение или загрузить ${LABEL}."
 }
 
 if [ $# -gt 0 ]; then

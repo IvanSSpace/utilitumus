@@ -14,6 +14,7 @@ enum SatelliteInstallError: LocalizedError, Equatable {
     case checksum
     case archive(String)
     case invalidName(String)
+    case server(Int)
     case rollbackFailed(cause: String, problems: [String])
 
     var errorDescription: String? {
@@ -21,6 +22,7 @@ enum SatelliteInstallError: LocalizedError, Equatable {
         case .checksum: return "Скачанный архив модуля повреждён: контрольная сумма не совпала"
         case .archive(let reason): return "Архив модуля не подходит: \(reason)"
         case .invalidName(let name): return "Недопустимое имя модуля: \(name)"
+        case .server(let code): return "Не удалось скачать модуль: сервер ответил \(code)"
         case .rollbackFailed(let cause, let problems):
             return "\(cause). Вернуть прежнюю версию модуля не удалось: \(problems.joined(separator: "; "))"
         }
@@ -67,7 +69,7 @@ final class SatelliteInstaller {
         let (file, response) = try await URLSession.shared.download(from: url)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             try? FileManager.default.removeItem(at: file)
-            throw KitSigning.Failure("Не удалось скачать модуль: сервер ответил \(http.statusCode)")
+            throw SatelliteInstallError.server(http.statusCode)
         }
         return file
     }

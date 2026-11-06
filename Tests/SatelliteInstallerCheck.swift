@@ -57,11 +57,12 @@ func catalogChecks() {
         check((try? SatelliteCatalog.decode(json(ids: [good]))) != nil, "id «\(good)» принимается")
     }
 
-    for bad in ["", "abc", "1.0-beta", "1..0", ".1", "1.", "1.0\n", "v1.0", "１.０"] {
+    // Девятнадцать девяток не влезают в Int: `Kit.isNewer` посчитал бы такую часть нулём.
+    for bad in ["", "abc", "1.0-beta", "1..0", ".1", "1.", "1.0\n", "v1.0", "１.０", "9999999999999999999", "1.99999999999999999999"] {
         check(decodeError(json(version: bad)) == .invalidVersion(bad), "version «\(bad)» отвергается")
         check(decodeError(json(minHub: bad)) == .invalidVersion(bad), "minHub «\(bad)» отвергается")
     }
-    for good in ["1", "0.6.0", "10.20.30.40"] {
+    for good in ["1", "0.6.0", "10.20.30.40", "999999999999999999"] {
         check((try? SatelliteCatalog.decode(json(version: good, minHub: good))) != nil, "версия «\(good)» принимается")
     }
 

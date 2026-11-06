@@ -27,7 +27,7 @@ matches() { local LC_ALL=C; [[ "$1" =~ $2 ]]; }
 
 # Те же правила, что у SatelliteCatalog.isValidID и isValidVersion: иначе каталог не прочитается.
 matches "$ID" '^[a-z0-9][a-z0-9.-]*$' || fail "Недопустимый id: ${ID}"
-matches "$VERSION" '^[0-9]+(\.[0-9]+)*$' || fail "Недопустимая версия: ${VERSION}"
+matches "$VERSION" '^[0-9]{1,18}(\.[0-9]{1,18})*$' || fail "Недопустимая версия: ${VERSION}"
 # Имя становится именем модуля swiftc, путём и именем ассета: GitHub заменяет в нём пробелы и не-ASCII.
 matches "$NAME" '^[A-Za-z][A-Za-z0-9]*$' || fail "Недопустимое имя: ${NAME}"
 

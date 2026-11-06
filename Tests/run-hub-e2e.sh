@@ -83,7 +83,12 @@ holds_assertion() { pmset -g assertions | grep -F "$ASSERTION" | grep -qE "pid $
 no_assertion() { ! holds_assertion "$1"; }
 has_exited() { ! kill -0 "$1" 2>/dev/null; }
 no_label() { ! launchctl print "$DOMAIN/$LABEL" > /dev/null 2>&1; }
-no_label_listed() { ! launchctl list | grep -qF "local.utilitumus.app."; }
+# Список в переменной: `launchctl list | grep -q` при pipefail падает от SIGPIPE и выглядит как «метки нет».
+no_label_listed() {
+  local list
+  list="$(launchctl list)" || return 1
+  [[ "$list" != *"local.utilitumus.app."* ]]
+}
 hub_line() { "$HUB" "$OUT" state | cut -d'|' -f"$1"; }
 line_is() { [ "$(hub_line 4)" = "$1" ]; }
 suite_key() { defaults read "$SUITE" "$1" 2>/dev/null || echo "нет"; }

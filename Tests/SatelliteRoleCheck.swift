@@ -42,6 +42,20 @@ func roleChecks() {
     check(decide(true, true, nil, false, false) == .active, "центр без версии, модуль выключен — active")
 }
 
+func releaseChecks() {
+    let cases: [(SatelliteRole.Mode, Bool, Bool, String)] = [
+        (.active, true, false, "активна и включена — держать"),
+        (waiting, true, false, "центр запустился, ждём передачу — держать: кнопку встроенного ещё никто не нажал"),
+        (waiting, false, true, "ждём передачу, но выключена — снять"),
+        (outdated, true, true, "старый центр — снять"),
+        (outdated, false, true, "старый центр и выключена — снять"),
+        (.active, false, true, "активна, но выключена — снять"),
+    ]
+    for (mode, enabled, release, name) in cases {
+        check(SatelliteRole.mustRelease(mode: mode, enabled: enabled) == release, "блокировка: " + name)
+    }
+}
+
 func keyChecks() {
     check(SatelliteEnabled.key("awake") == "App.awake.Enabled", "ключ включённости")
     check(SatelliteRole.handedOverKey("awake") == "App.awake.HandedOver", "ключ передачи")
@@ -79,8 +93,11 @@ func enabledChecks() {
     check(defaults.object(forKey: "App.awake.Enabled") as? Bool == false, "false тоже записан")
 
     reset()
-    check(!SatelliteEnabled.load(id: "awake", defaults: defaults), "нет ни ключа, ни ModuleOn — false")
-    check(defaults.object(forKey: "App.awake.Enabled") as? Bool == false, "и записан")
+    check(SatelliteEnabled.load(id: "awake", defaults: defaults), "нет ни ключа, ни ModuleOn: поставили отдельно — true")
+    check(defaults.object(forKey: "App.awake.Enabled") as? Bool == true, "и записан")
+    defaults.set(true, forKey: "ModuleOn.awake")
+    defaults.set(false, forKey: "App.awake.Enabled")
+    check(!SatelliteEnabled.load(id: "awake", defaults: defaults), "записанный при первом запуске ключ дальше решает сам")
 
     reset()
     defaults.set(true, forKey: "ModuleOn.awake")
@@ -106,6 +123,19 @@ func updateChecks() {
 }
 
 // MARK: - Клиент для стенда
+
+/// Печатает каждое `statusChanged` утилиты: она объявляет о себе сама.
+func watchStatus() -> Never {
+    _ = DistributedNotificationCenter.default().addObserver(
+        forName: KitLink.statusChanged("test.awake"), object: nil, queue: .main) { _ in
+        print("statusChanged")
+        fflush(stdout)
+    }
+    print("слушаю")
+    fflush(stdout)
+    RunLoop.main.run()
+    exit(0)
+}
 
 /// Печатает результат; код выхода 0, только если вызов прошёл.
 @MainActor func client(_ args: [String]) async -> Int32 {
@@ -148,6 +178,7 @@ func updateChecks() {
 let args = Array(CommandLine.arguments.dropFirst())
 if args.isEmpty {
     roleChecks()
+    releaseChecks()
     keyChecks()
     enabledChecks()
     requirementChecks()
@@ -155,6 +186,7 @@ if args.isEmpty {
     print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
     exit(failures == 0 ? 0 : 1)
 }
+if args[0] == "watch" { watchStatus() }
 Task { @MainActor in
     exit(args[0] == "replace" ? await replace(Array(args.dropFirst())) : await client(args))
 }
