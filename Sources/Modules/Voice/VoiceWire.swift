@@ -21,7 +21,8 @@ struct VoiceModelRow: Codable, Equatable {
     var status: VoiceModelStore.Status
 }
 
-/// То, что экран показывает. Уровень звука и фаза записи остаются в утилите.
+/// То, что экран показывает. Уровень звука остаётся в утилите; идёт ли запись, нужно карточке дашборда («идёт запись…»),
+/// и это уходит только в ответе на запрос по проверенной связи, не в строке статуса и не в уведомлениях.
 struct VoiceState: Codable, Equatable {
     var hotKeyLabel: String
     var hotKeyError: String?
@@ -33,6 +34,7 @@ struct VoiceState: Codable, Equatable {
     var selected: VoiceModel
     /// nil — режим проверки выключен.
     var test: VoiceTestState?
+    var recording: Bool
 }
 
 /// Что экран может попросить. Больше модуль ничего не примет.
@@ -93,7 +95,8 @@ extension VoiceController {
         return VoiceState(hotKeyLabel: hotKeyLabel, hotKeyError: hotKeyError, mode: mode, micUID: micUID,
                           excludedApps: excludedApps, axTrusted: axTrusted,
                           models: VoiceModel.allCases.map { VoiceModelRow(model: $0, status: Self.wireStatus(store.status($0))) },
-                          selected: store.selected, test: liveTest)
+                          selected: store.selected, test: liveTest,
+                          recording: phase == .recording)
     }
 
     /// Что экран покажет до первого ответа утилиты: сохранённые настройки и модели на диске. Контроллер не создаётся.
@@ -108,7 +111,8 @@ extension VoiceController {
             // Подсказка про «Универсальный доступ» не должна мигнуть до ответа.
             axTrusted: true,
             models: VoiceModel.allCases.map { VoiceModelRow(model: $0, status: VoiceModelStore.isInstalled($0) ? .installed : .notInstalled) },
-            selected: d.string(forKey: VoiceModelStore.selectedKey).flatMap(VoiceModel.init(rawValue:)) ?? .gigaam, test: nil)
+            selected: d.string(forKey: VoiceModelStore.selectedKey).flatMap(VoiceModel.init(rawValue:)) ?? .gigaam, test: nil,
+            recording: false)
     }
 
     /// Прогресс приходит на каждый блок загрузки; на экран хватает целых процентов, тогда и состояние меняется реже.

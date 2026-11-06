@@ -70,4 +70,15 @@ final class RemoteLoadModel: RemoteModuleModel<LoadState, LoadAction>, LoadModel
     func cancelStop() { send(.cancelStop) }
     func confirmStop(_ planID: UUID) { send(.confirmStop(planID: planID)) }
     func dismissNotice() { send(.dismissNotice) }
+
+    // Карточка та же, что у встроенного: память из последнего замера, которого без открытой вкладки нет.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        guard let memory = measure?.memory else { return DashState(text: "открой для замера", actionTitle: "Обновить") }
+        return DashState(text: "память \(Fmt.gb(Double(memory.usedMB))) из \(Fmt.gb(Double(memory.totalMB))) ГБ", actionTitle: "Обновить")
+    }
+
+    override func performDashboardAction() -> Bool {
+        refreshNow()
+        return true
+    }
 }

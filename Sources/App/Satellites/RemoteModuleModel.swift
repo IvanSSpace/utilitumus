@@ -47,6 +47,9 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
     private let optimistic: (inout State, Action) -> Void
     private let coalesceKey: (Action) -> String?
     private let baseWatch: LinkWatch
+    private let dashboardWatch: LinkWatch
+    private var screenIsOpen = false
+    private var dashboardIsVisible = false
 
     /// Что подтвердила утилита.
     private var confirmed: State
@@ -65,7 +68,8 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
 
     /// `canRead`: нет бандла — нет и запроса, иначе launchd пытался бы поднять мёртвого агента.
     /// `baseWatch`: `.changes`, если модель нужна и при закрытом экране (пункт меню).
-    init(id: String, initial: State, baseWatch: LinkWatch = .none, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool,
+    /// `dashboardWatch`: `.changes`, если карточке дашборда нужны живые данные; действует, только пока дашборд на экране.
+    init(id: String, initial: State, baseWatch: LinkWatch = .none, dashboardWatch: LinkWatch = .none, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool,
          optimistic: @escaping (inout State, Action) -> Void = { _, _ in },
          coalesceKey: @escaping (Action) -> String? = { _ in nil }) {
         self.link = link ?? .live(id: id)
@@ -73,6 +77,7 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
         self.optimistic = optimistic
         self.coalesceKey = coalesceKey
         self.baseWatch = baseWatch
+        self.dashboardWatch = dashboardWatch
         state = initial
         confirmed = initial
         self.link.setWatch(baseWatch)
@@ -89,6 +94,9 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
     /// показывает то, что в строку статуса не помещается (обратный отсчёт, градусы, играющие программы), переопределяет.
     func dashboardState(base: DashState, status: LinkStatus?) -> DashState { base }
 
+    /// Кнопка карточки, которой нужно подтверждение (`ask`). По умолчанию — без него.
+    func performDashboardAction(ask: (DashConfirmation) -> Void) -> Bool { performDashboardAction() }
+
     /// Кнопка карточки, которую ведёт сама модель. false — нажатие идёт быстрым действием из статуса.
     func performDashboardAction() -> Bool { false }
 
@@ -103,7 +111,20 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
 
     /// Аренда экрана. Сам вызов соединение не поднимает: его поднимет ближайшее чтение.
     func setScreenOpen(_ open: Bool) {
-        link.setWatch(open ? .screen : baseWatch)
+        screenIsOpen = open
+        applyWatch()
+    }
+
+    /// Дашборд на экране: утилита сообщает о смене состояния, пока он виден, и молчит, когда нет.
+    func setDashboardVisible(_ visible: Bool) {
+        guard dashboardIsVisible != visible else { return }
+        dashboardIsVisible = visible
+        applyWatch()
+    }
+
+    private func applyWatch() {
+        if screenIsOpen { return link.setWatch(.screen) }
+        link.setWatch(dashboardIsVisible && dashboardWatch.rawValue > baseWatch.rawValue ? dashboardWatch : baseWatch)
     }
 
     func refresh() {

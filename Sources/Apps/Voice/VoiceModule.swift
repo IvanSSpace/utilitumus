@@ -78,8 +78,9 @@ final class VoiceModule: SatelliteModule {
     func state() -> Data { LinkWire.encoded(controller.wireState) }
     func handle(_ action: Data) -> Data { controller.handle(action) }
 
-    /// Только когда меняется то, что видит экран. Фаза записи и уровень звука в `objectWillChange` контроллера тоже
-    /// приходят, но состояние от них то же, и пинг, по которому видно, что диктуют, не уходит.
+    /// Только когда меняется то, что видит экран. Уровень звука в `objectWillChange` контроллера приходит часто, но
+    /// состояние от него то же, и пинг не уходит. Начало и конец записи состояние меняют (`recording`) и идут только
+    /// по проверенной связи: в статус и уведомления они не попадают.
     var changes: AnyPublisher<Void, Never> {
         controller.objectWillChange.merge(with: store.objectWillChange)
             // `objectWillChange` приходит до записи значения.

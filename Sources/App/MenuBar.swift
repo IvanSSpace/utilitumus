@@ -61,10 +61,12 @@ struct AppMenuBarScene: Scene {
             // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.
             // Контроллер создаётся только внутри вида, который есть, пока модуль встроенный.
             if modules.runsBuiltIn(.fans) { FansMenuSection() }
+            if modules.isExternal(.fans) { RemoteFansMenuSection() }
 
             AwakeMenuItem()
 
             if modules.runsBuiltIn(.stash) { StashMenuSection() }
+            if modules.isExternal(.stash) { RemoteStashMenuSection() }
 
             // Ведомые модули: быстрые действия приходят в статусе утилиты.
             ForEach(MenuQuickActions.sections(order: modules.order, modules: modules, entries: satellites.entries), id: \.module) { section in
@@ -131,6 +133,39 @@ private struct FansMenuSection: View {
         Section("Вентиляторы") {
             Toggle("Полная мощность", isOn: $fans.fullPower)
             Button("Все в режим «Авто»") { fans.setAllAuto() }
+        }
+    }
+}
+
+/// Те же пункты, что у встроенных, когда модуль ведёт утилита: «Полная мощность» с галочкой, а не быстрое действие из статуса.
+private struct RemoteFansMenuSection: View {
+    @ObservedObject private var fans = RemoteFansModel.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
+
+    var body: some View {
+        if fans.screen(of: .fans, satellites) == .module {
+            Section("Вентиляторы") {
+                Toggle("Полная мощность", isOn: Binding(get: { fans.fullPower }, set: { fans.fullPower = $0 }))
+                Button("Все в режим «Авто»") { fans.setAllAuto() }
+            }
+            .onAppear { fans.refresh() }
+        }
+    }
+}
+
+private struct RemoteStashMenuSection: View {
+    @ObservedObject private var stash = RemoteStashModel.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
+
+    var body: some View {
+        if stash.screen(of: .stash, satellites) == .module {
+            Section("Стеш программ") {
+                Button("Спрятать выбранные") { Task { await stash.stashSelected() } }
+                let count = stash.stashedPrograms.count
+                Button("Вернуть\(count == 0 ? "" : " (\(count))")") { Task { await stash.restore() } }
+                    .disabled(count == 0)
+            }
+            .onAppear { stash.refresh() }
         }
     }
 }

@@ -62,7 +62,8 @@ func check(_ ok: Bool, _ name: String) {
     check(mode?.error == nil && mode?.state.mode == .hold, "setMode проходит")
     _ = controller.handle(LinkWire.encoded(VoiceAction.setMode(.toggle)))
     let json = String(decoding: LinkWire.encoded(before), as: UTF8.self)
-    check(!json.contains("phase") && !json.contains("level"), "в состоянии нет фазы записи и уровня звука")
+    check(json.contains("\"recording\":false") && !json.contains("phase") && !json.contains("level"),
+          "в состоянии есть только флаг записи, фазы и уровня звука нет")
 }
 
 @main

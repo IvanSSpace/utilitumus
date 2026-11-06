@@ -103,9 +103,14 @@ final class DashSlot: ObservableObject {
         stop()
     }
 
+    /// Модель, у которой включено слежение за дашбордом: снять его надо у неё же, даже если модуль уже вернулся.
+    private var watched: (any RemoteModuleSurface)?
+
     private func stop() {
         subs = []
         sourceSub = nil
+        watched?.setDashboardVisible(false)
+        watched = nil
     }
 
     private func reconcile() {
@@ -119,6 +124,13 @@ final class DashSlot: ObservableObject {
             ]
         }
         // Как при открытии вкладки: один раз, пока статус не был на экране, утилита могла зависнуть.
+        // Живые данные карточки утилита шлёт, только пока дашборд виден.
+        let model = ModuleManager.shared.isExternal(module) ? RemoteModules.model(module) : nil
+        if watched !== model {
+            watched?.setDashboardVisible(false)
+            watched = model
+            model?.setDashboardVisible(true)
+        }
         DashboardLive.refreshExternal(module)
         update()
     }
@@ -227,7 +239,15 @@ enum DashboardLive {
         }
     }
 
+    #if KIT_TEST_DEFAULTS
+    /// Карточка встроенного модуля, которую проверка задаёт сама: настоящим контроллерам нужны железо и данные человека.
+    static var testBuiltIn: [Module: DashState] = [:]
+    #endif
+
     fileprivate static func compute(_ module: Module) -> DashState {
+        #if KIT_TEST_DEFAULTS
+        if !ModuleManager.shared.isExternal(module), let fixture = testBuiltIn[module] { return fixture }
+        #endif
         if ModuleManager.shared.isExternal(module) {
             return externalState(status: SatelliteRegistry.shared.entries[module]?.status,
                                  model: RemoteModules.model(module))
@@ -270,7 +290,7 @@ enum DashboardLive {
     }
 
     private static func performExternal(_ module: Module, ask: (DashConfirmation) -> Void) {
-        if RemoteModules.model(module)?.performDashboardAction() == true { return }
+        if RemoteModules.model(module)?.performDashboardAction(ask: ask) == true { return }
         guard let quick = slot(module).state.quick else { return }
         SatelliteRegistry.shared.confirmAndPerform(quick, module: module, ask: ask)
     }

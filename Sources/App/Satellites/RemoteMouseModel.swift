@@ -4,12 +4,12 @@ import SwiftUI
 /// Каждое поле настроек уходит своим действием: утилита проверяет их по одному.
 @MainActor
 final class RemoteMouseModel: RemoteModuleModel<MouseState, MouseAction>, MouseModel {
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один.
         // Доступ и перехват центру неизвестны; «запускаю» тревожит меньше, чем «нет доступа».
         super.init(id: id,
                    initial: MouseState(settings: MouseSettings.load(), axTrusted: true, tapActive: false),
-                   baseWatch: .none, canRead: canRead,
+                   baseWatch: .none, link: link, canRead: canRead,
                    optimistic: { state, action in
                        // Показ сразу, ответ утилиты заменит: отказ откатится сам.
                        switch action {
@@ -38,6 +38,16 @@ final class RemoteMouseModel: RemoteModuleModel<MouseState, MouseAction>, MouseM
     var axTrusted: Bool { state.axTrusted }
     var tapActive: Bool { state.tapActive }
     func refreshAccess() { send(.refreshAccess) }
+
+    // Карточка та же, что у встроенного: настройки из состояния.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        let s = settings
+        guard s.needsTap else { return DashState(text: "всё как в системе") }
+        var parts: [String] = []
+        if s.mouseDirection == .reversed || s.magicMouseDirection == .reversed { parts.append("прокрутка обратная") }
+        if s.smoothEnabled { parts.append("плавность \(Int((s.smoothness * 100).rounded())) %") }
+        return DashState(text: parts.joined(separator: " · "))
+    }
 
     var settings: MouseSettings {
         get { state.settings }
