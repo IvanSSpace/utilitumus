@@ -23,8 +23,9 @@ forbid() {
   esac
 }
 status=0
+# Ищем настоящие `.live`, `Тип.live` и `liveИмя`; поле `state.live` и слова вроде keepalive сюда не попадают.
 # liveVerify только читает бандл и не меняет ничего, а проверка помощников должна идти через настоящую.
-found="$(grep -rnE '\.live|live[A-Z]' Tests --include='*.swift' | grep -v 'SatelliteInstaller\.liveVerify')" || status=$?
+found="$(grep -rnE '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive[A-Z(]' Tests --include='*.swift' | grep -v 'SatelliteInstaller\.liveVerify')" || status=$?
 case "$status" in
   0) echo "ПРОВАЛ: настоящие замыкания и пути в тестах:"; echo "$found"; exit 1 ;;
   1) echo "ok   настоящие замыкания и пути в тестах: нет" ;;
@@ -44,7 +45,7 @@ fi
 
 echo 'int main(void) { return 0; }' | clang -x c -target "$TARGET" -o "$F/exe" -
 
-# bundle <папка> <версия> [имя]: неподписанный бандл, внутри относительная ссылка в пределах бандла.
+# bundle <папка> <версия> [имя]: неподписанный бандл из обычных файлов. KitArchive отвергает любую ссылку, даже внутри бандла.
 bundle() {
   local app="$1/${3:-$NAME}.app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
@@ -57,7 +58,6 @@ bundle() {
     echo '</dict></plist>'
   } > "$app/Contents/Info.plist"
   echo data > "$app/Contents/Resources/data.txt"
-  ln -s data.txt "$app/Contents/Resources/inner"
 }
 # sign <бандл> <подпись> <identifier>
 sign() { codesign --force --options runtime --sign "$2" --identifier "$3" "$1" 2>/dev/null; }
@@ -84,6 +84,7 @@ good two 2.0.0; good two-second 2.0.0; mv "$F/two-second/$NAME.app" "$F/two/Othe
 good renamed 2.0.0; mv "$F/renamed/$NAME.app" "$F/renamed/Other.app"; (cd "$F/renamed" && zip -qry "$F/renamed.zip" Other.app)
 good extra 2.0.0; echo x > "$F/extra/readme.txt"; (cd "$F/extra" && zip -qry "$F/extra.zip" "$NAME.app" readme.txt)
 good link-rel 2.0.0; ln -s ../../../../outside "$F/link-rel/$NAME.app/Contents/Resources/out"; touch "$F/link-rel/outside"; (cd "$F/link-rel" && zip -qry "$F/link-rel.zip" "$NAME.app")
+good link-inner 2.0.0; ln -s data.txt "$F/link-inner/$NAME.app/Contents/Resources/inner"; (cd "$F/link-inner" && zip -qry "$F/link-inner.zip" "$NAME.app")
 good link-abs 2.0.0; ln -s /etc "$F/link-abs/$NAME.app/Contents/Resources/out"; (cd "$F/link-abs" && zip -qry "$F/link-abs.zip" "$NAME.app")
 good link-dangling 2.0.0; ln -s nowhere "$F/link-dangling/$NAME.app/Contents/Resources/out"; (cd "$F/link-dangling" && zip -qry "$F/link-dangling.zip" "$NAME.app")
 good link-top 2.0.0; mv "$F/link-top/$NAME.app" "$F/link-top/real"; ln -s real "$F/link-top/$NAME.app"; (cd "$F/link-top" && zip -qy "$F/link-top.zip" "$NAME.app")
@@ -100,7 +101,7 @@ sign "$F/plist-id/$NAME.app" "$SIGN_NAME" "$IDENT"; pack plist-id
 
 cp Tests/SatelliteInstallerCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name SatelliteInstallerCheck -o "$OUT/check" "$OUT/src/main.swift" \
-  Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/SatelliteCatalog.swift \
+  Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/KitArchive.swift Sources/Kit/SatelliteCatalog.swift \
   $(find Sources/Kit/Link -name '*.swift') Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift
 
 "$OUT/check" "$F" "$OUT/work" Catalog/catalog.json

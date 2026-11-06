@@ -71,9 +71,13 @@ let notOneAction: [(String, String)] = [
     let builtIn = physical(model.displayOutputs, SoundPolicy.speakerMarker).builtIn
     if let builtIn { await model.perform(.selectOutput(builtIn.uid)) }
     check(model.outputChoice == .builtIn, "динамики MacBook выбраны обратно")
+    // Строка статуса «Звука» — имя микрофона, блокировка в неё не входит, поэтому `statusChanged` не уходит.
+    // Изменение утилита объявляет пингом тем, кто следит: экран открыт.
+    model.setScreenOpen(true)
     let other = LinkClient(id: moduleID)
     _ = try? await other.moduleAction(LinkWire.encoded(SoundAction.setBluetoothLocked(false)))
-    check(await until(2) { !model.isBluetoothLocked }, "настройку поменяли снаружи: центр увидел по statusChanged")
+    check(await until(2) { !model.isBluetoothLocked }, "настройку поменяли снаружи: открытый экран увидел по пингу утилиты")
+    model.setScreenOpen(false)
     await model.perform(.setBluetoothLocked(true))
 }
 
@@ -197,8 +201,10 @@ enum Main {
     static func main() {
         MainActor.assumeIsolated {
             ModuleCheck.main(.sound, foreignAction: LinkWire.encoded(SoundAction.setBluetoothLocked(false))) { utility in
+                // Как разбирает утилита: с лимитом в 1 КБ и сверкой с каноническим видом. Повтор ключа и длинный uid
+                // голый JSONDecoder пропускает, отказ даёт `LinkWire.decodeAction`, а ответы утилиты проверяет `garbage()`.
                 for (name, payload) in notOneAction {
-                    check((try? JSONDecoder().decode(SoundAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается")
+                    check(LinkWire.decodeAction(SoundAction.self, from: Data(payload.utf8), limit: 1024) == nil, "\(name) не разбирается")
                 }
                 await garbage()
                 await actions()
