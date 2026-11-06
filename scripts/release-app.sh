@@ -7,6 +7,7 @@
 # и архив оставляет во временной папке.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[ -z "${UTILITUMUS_DEV_CACHE:-}" ] || { echo "UTILITUMUS_DEV_CACHE задан: выпуск только из обычной сборки (-O)." >&2; exit 1; }
 
 fail() { echo "$1" >&2; exit 1; }
 

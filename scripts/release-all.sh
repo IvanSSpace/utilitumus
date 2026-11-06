@@ -10,6 +10,7 @@
 # старые центры берут /releases/latest, и пока в каталоге нет утилит, центр не должен стать «последним».
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[ -z "${UTILITUMUS_DEV_CACHE:-}" ] || { echo "UTILITUMUS_DEV_CACHE задан: выпуск только из обычной сборки (-O)." >&2; exit 1; }
 
 fail() { echo "$1" >&2; exit 1; }
 USAGE='Использование: ./scripts/release-all.sh [--dry-run | --publish] [--only id,id] --note <id>="Что изменилось" ...'
