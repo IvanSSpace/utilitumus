@@ -50,10 +50,7 @@ final class KeyboardController: ObservableObject {
     /// Приложения, где раскладку не трогаем (в порядке добавления).
     @Published private(set) var excludedApps: [String]
 
-    struct LayoutItem: Identifiable, Equatable {
-        let id: String
-        let name: String
-    }
+    typealias LayoutItem = KeyboardLayoutItem
 
     private static let savedKey = "Keyboard.AppLayout.Saved"
     private static let excludedKey = "Keyboard.AppLayout.Excluded"
@@ -67,6 +64,11 @@ final class KeyboardController: ObservableObject {
     private var activationObserver: NSObjectProtocol?
     /// Модуль включён.
     private var started = false
+    /// Работает ли модуль сейчас: после `stop`, `quit` и передачи нет.
+    var isStarted: Bool { started }
+    /// Журнал уходит в `logTail` и `logCount`, а значит в экран и по связи. Запись о каждом событии Fn не должна будить
+    /// центр: утилита включает это только под открытым экраном (`setLogShown`), встроенному модулю можно всегда.
+    private var logShown = true
     /// Какие фишки сейчас держат ресурсы.
     private var fnRunning = false
     private var appRunning = false
@@ -266,9 +268,6 @@ final class KeyboardController: ObservableObject {
         Kit.defaults.set(excludedApps, forKey: Self.excludedKey)
     }
 
-    /// Название раскладки по id для экрана; удалённую из системы показываем как есть.
-    func layoutName(_ id: String) -> String { layouts.first { $0.id == id }?.name ?? id }
-
     // MARK: Самовосстановление tap
 
     /// Сон, разблокировка и возврат сессии могут тихо убить tap: после них создаём его заново.
@@ -371,8 +370,19 @@ final class KeyboardController: ObservableObject {
 
     private func note(_ text: String) {
         KeyboardLog.shared.add(text)
-        logTail = KeyboardLog.shared.recent(8)
-        logCount = KeyboardLog.shared.count
+        if logShown { syncLog() }
+    }
+
+    private func syncLog() {
+        let tail = KeyboardLog.shared.recent(8), count = KeyboardLog.shared.count
+        if tail != logTail { logTail = tail }
+        if count != logCount { logCount = count }
+    }
+
+    /// Экран открыт или закрыт. Закрытый не читает журнал, поэтому записи ему не посылаются; открытый получает текущие.
+    func setLogShown(_ shown: Bool) {
+        logShown = shown
+        if shown { syncLog() }
     }
 
     func copyLog() {

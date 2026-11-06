@@ -3,7 +3,7 @@ import Foundation
 /// Журнал модуля «Клавиатура» для диагностики: последние записи в памяти и файл с ротацией.
 /// Нажатые клавиши не пишем: только Fn и тип события. Без AppKit: проверяется тестом.
 final class KeyboardLog: @unchecked Sendable {
-    struct Entry: Equatable {
+    struct Entry: Codable, Equatable {
         let date: Date
         let text: String
     }
@@ -11,8 +11,14 @@ final class KeyboardLog: @unchecked Sendable {
     static let maxEntries = 50
     static let maxFileBytes = 200_000
 
+    #if KIT_TEST_DEFAULTS
+    /// Стенд не пишет в настоящий журнал пользователя: свой файл во временной папке.
+    static let shared = KeyboardLog(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("utilitumus-keyboard-test.log"))
+    #else
     static let shared = KeyboardLog(fileURL: FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Utilitumus/keyboard.log"))
+    #endif
 
     private let fileURL: URL?
     private let lock = NSLock()
