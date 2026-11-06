@@ -85,10 +85,20 @@ func legacyChecks() {
     for name in ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "BASH_ENV", "IFS"] {
         check(installer.contains("\"\(name)\""), "окружение: убирается \(name)")
     }
-    if let unset = runAdmin.range(of: "unsetenv"), let script = runAdmin.range(of: "NSAppleScript(source") {
+    if let unset = runAdmin.range(of: "scrubRootShellEnvironment()"), let script = runAdmin.range(of: "NSAppleScript(source") {
         check(unset.lowerBound < script.lowerBound, "окружение чистится до вызова оболочки root")
     } else {
         check(false, "окружение чистится до вызова оболочки root")
+    }
+    check(runAdmin.contains("appleScriptQuote(Self.adminCommand(shell))"), "оболочка root получает команду с пустым окружением")
+
+    check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
+    let updater = source("Sources/App/Updater.swift")
+    check(updater.contains("FanController.shared.restoreAutoBlocking()"), "обновление отдаёт вентиляторы")
+    if let hook = updater.range(of: "await beforeReplace()"), let replace = updater.range(of: "replaceItemAt") {
+        check(hook.lowerBound < replace.lowerBound, "вентиляторы отданы раньше подмены бандла")
+    } else {
+        check(false, "вентиляторы отданы раньше подмены бандла")
     }
 }
 
@@ -265,7 +275,7 @@ func scriptChecks() {
         return x < y
     }
     let steps = ["/usr/bin/mktemp -d", "/bin/cp -X ", "/usr/sbin/chown root:wheel", "/bin/chmod 0755",
-                 "/usr/bin/codesign --verify", "\"$T\" version", "/bin/chmod 0755 '/Library/PrivilegedHelperTools/local.utilitumus.fan' 2>/dev/null || true",
+                 "/usr/bin/codesign --verify", "\"$T\" version", "/bin/chmod 0755 '/Library/PrivilegedHelperTools/local.utilitumus.fan' 2>/dev/null || /usr/bin/true",
                  "/bin/mv -f", "/bin/chmod 0644", "/bin/launchctl bootout",
                  "/bin/launchctl bootstrap system"]
     for (a, b) in zip(steps, steps.dropFirst()) {
@@ -277,14 +287,25 @@ func scriptChecks() {
 
     // Только значение строки, без `do shell script`: кавычки и кириллица доходят до sh без потерь.
     var error: NSDictionary?
-    let quoted = NSAppleScript(source: "return " + FanHelperInstaller.appleScriptQuote(install))?.executeAndReturnError(&error)
-    check(quoted?.stringValue == install, "скрипт переживает кавычки AppleScript: \(error ?? [:])")
+    let command = FanHelperInstaller.adminCommand(install)
+    let quoted = NSAppleScript(source: "return " + FanHelperInstaller.appleScriptQuote(command))?.executeAndReturnError(&error)
+    check(quoted?.stringValue == command, "команда переживает кавычки AppleScript: \(error ?? [:])")
+    check(command.hasPrefix("/usr/bin/env -i /bin/sh -c '"), "скрипт идёт в оболочку с пустым окружением")
+    check(FanHelperInstaller.adminCommand("a'b") == #"/usr/bin/env -i /bin/sh -c 'a'\''b'"#, "кавычки внутри скрипта экранируются")
 
     let remove = FanHelperInstaller.uninstallScript
     check(remove.contains("/bin/launchctl bootout system/local.utilitumus.fan"), "удаление снимает службу")
     check(remove.contains("/bin/rm -f '/Library/LaunchDaemons/local.utilitumus.fan.plist'"), "удаление убирает плист")
     check(remove.contains("/bin/rm -f '/Library/PrivilegedHelperTools/local.utilitumus.fan'"), "удаление убирает бинарник")
     check(before("bootout", "/bin/rm", in: remove), "удаление: сначала снять службу")
+    check(before("/bin/chmod 0755 '/Library/PrivilegedHelperTools/local.utilitumus.fan'", "/bin/rm -f '/Library/PrivilegedHelperTools/local.utilitumus.fan'", in: remove), "удаление: setuid снимается раньше rm")
+
+    // Функция из окружения подменила бы `[`, `echo` или `true`. Пустое окружение её не пропустит, а скрипт ещё и не зовёт такие имена.
+    for (name, script) in [("установка", install), ("удаление", remove)] {
+        for (word, pattern) in [("[", #"(^|[;(&| ])\[ "#), ("echo", #"(^|[;{(&| ])echo "#), ("true", #"(^|[;{(&| ])true($|[; ])"#)] {
+            check(script.range(of: pattern, options: .regularExpression) == nil, "\(name): нет встроенного «\(word)»")
+        }
+    }
 }
 
 // MARK: - Роли со швом
@@ -465,13 +486,75 @@ func quitRole(_ scenario: String) {
     }
 }
 
+/// Набор из ревью: всё это оболочка исполнила бы при старте. Безвредно: только создаёт файлы в папке стенда.
+func poison(_ dir: String) {
+    setenv("BASH_FUNC_[%%", "() { /usr/bin/touch \(dir)/pwn-func; }", 1)
+    setenv("BASH_FUNC_echo%%", "() { /usr/bin/touch \(dir)/pwn-func; }", 1)
+    setenv("SHELLOPTS", "xtrace", 1)
+    setenv("PS4", "$(/usr/bin/touch \(dir)/pwn-ps4)", 1)
+    setenv("IFS", "e", 1)
+    setenv("ENV", "\(dir)/poison.sh", 1)
+    setenv("BASH_ENV", "\(dir)/poison.sh", 1)
+}
+
+/// `do shell script` без прав администратора: та же внешняя команда, что идёт root, со скриптом-пустышкой.
+/// Пустышка сама зовёт `[` и `echo`: подмена сработала бы на них. Никакого пароля и никакого root.
+func poisonRole(_ mode: String, _ dir: String) -> Never {
+    poison(dir)
+    let harmless = "[ 1 = 1 ]; echo x; /usr/bin/touch \(dir)/ran"
+    var command = harmless
+    switch mode {
+    case "raw": break
+    case "env-only": command = FanHelperInstaller.adminCommand(harmless)
+    case "full":
+        FanHelperInstaller.scrubRootShellEnvironment()
+        command = FanHelperInstaller.adminCommand(harmless)
+    default: fatalError("неизвестный режим")
+    }
+    var error: NSDictionary?
+    NSAppleScript(source: "do shell script " + FanHelperInstaller.appleScriptQuote(command))?.executeAndReturnError(&error)
+    if let error { print("do shell script: \(error)") }
+    exit(0)
+}
+
+/// `set` уже прошёл рукопожатие, пока выход отменял такие команды: уйти он не должен.
+func cancelAfterHandshakeRole() {
+    clearWrites()
+    let queue = DispatchQueue(label: "test.helper")
+    let lock = NSLock()
+    var queued: String?
+    queue.async {
+        let error = FanHelperClient.send(.set(0, 2000), until: .now() + 3)
+        lock.lock(); queued = error; lock.unlock()
+    }
+    usleep(100_000)
+    FanHelperClient.sendAll([.auto(0)], on: queue, within: 1) { _, _ in }
+    spin(2)
+    lock.lock()
+    check(queued == FanHelperClient.Failure.cancelled.localizedDescription, "set после рукопожатия отменён: \(queued ?? "nil")")
+    lock.unlock()
+    check(!writes().contains("F0Md=1"), "set не дошёл до SMC: \(writes())")
+}
+
+/// Прежний помощник при выходе: не дольше срока, а запущенный доделает и без нас.
+func legacyBoundedRole(_ path: String) {
+    let started = Date()
+    LegacyFanHelper.restoreAutoWithin(fans: [0, 1], path: path, on: DispatchQueue(label: "test.helper")) { _ in }
+    let elapsed = Date().timeIntervalSince(started)
+    check(elapsed < 1.8, "прежний помощник: ожидание в пределах срока: \(elapsed)")
+    print("ждали \(elapsed)")
+}
+
 // MARK: - Вход
 
 let args = Array(CommandLine.arguments.dropFirst())
 switch args.first {
 case nil: pureChecks()
-case "print-install": print(FanHelperInstaller.installScript(source: args[1])); exit(0)
-case "print-uninstall": print(FanHelperInstaller.uninstallScript); exit(0)
+case "print-install": print(FanHelperInstaller.adminCommand(FanHelperInstaller.installScript(source: args[1]))); exit(0)
+case "print-uninstall": print(FanHelperInstaller.adminCommand(FanHelperInstaller.uninstallScript)); exit(0)
+case "poison": poisonRole(args[1], args[2])
+case "cancel-after-handshake": cancelAfterHandshakeRole()
+case "legacy-bounded": legacyBoundedRole(args[1])
 case "legacy":
     if let error = LegacyFanHelper.restoreAuto(fans: args[2...].compactMap { Int($0) }, path: args[1]) { print(error); exit(1) }
     exit(0)

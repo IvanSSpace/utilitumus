@@ -79,7 +79,8 @@ final class Updater: ObservableObject {
         Task {
             do {
                 try await Self.downloadAndReplace(from: url, expectedVersion: version,
-                                                  target: Bundle.main.bundleURL)
+                                                  target: Bundle.main.bundleURL,
+                                                  beforeReplace: { FanController.shared.restoreAutoBlocking() })
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)
@@ -124,7 +125,10 @@ final class Updater: ObservableObject {
     /// Скачивает zip, распаковывает, проверяет, что внутри именно Utilitumus
     /// нужной версии с целой подписью, и подменяет `target`. Старая версия
     /// удаляется только после успешной подмены.
-    nonisolated static func downloadAndReplace(from url: URL, expectedVersion: String, target: URL) async throws {
+    nonisolated static func downloadAndReplace(
+        from url: URL, expectedVersion: String, target: URL,
+        beforeReplace: @escaping @MainActor @Sendable () -> Void
+    ) async throws {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("utilitumus-update-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -137,7 +141,10 @@ final class Updater: ObservableObject {
 
         let unpacked = work.appendingPathComponent("unpacked")
         try KitSigning.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
-        try UpdateBundle.install(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target)
+        let staged = try UpdateBundle.stage(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target)
+        // После подмены бандла на диске служба может не принять этот процесс по подписи: «Авто» при выходе не дойдёт.
+        await beforeReplace()
+        try UpdateBundle.commit(staged, expectedVersion: expectedVersion, target: target)
     }
 
     /// Открыть новую версию после выхода текущей. Выход штатный —

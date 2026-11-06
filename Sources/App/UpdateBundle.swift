@@ -30,22 +30,37 @@ enum UpdateBundle {
         }
     }
 
+    /// Проверяет `app` и кладёт копию рядом с целью (тот же том, подмена будет атомарной). `target` не тронут.
     /// `afterCopy` нужен только проверке: подмена копии в промежутке между копированием и заменой.
-    static func install(_ app: URL, expectedVersion: String, target: URL, afterCopy: (URL) throws -> Void = { _ in }) throws {
+    static func stage(_ app: URL, expectedVersion: String, target: URL, afterCopy: (URL) throws -> Void = { _ in }) throws -> URL {
         let fm = FileManager.default
         try verify(app, expectedVersion: expectedVersion)
-        // Копия рядом с целью (тот же том) — тогда подмена атомарная.
         let staged = target.deletingLastPathComponent().appendingPathComponent("Utilitumus.app.new")
         try? fm.removeItem(at: staged)
         try fm.copyItem(at: app, to: staged)
         do {
             try afterCopy(staged)
-            // Распакованную папку могли изменить после первой проверки, поэтому ещё раз — то, что встанет на место.
+        } catch {
+            try? fm.removeItem(at: staged)
+            throw error
+        }
+        return staged
+    }
+
+    /// Распакованную папку и копию могли изменить после первой проверки, поэтому ещё раз — то, что встанет на место.
+    static func commit(_ staged: URL, expectedVersion: String, target: URL) throws {
+        let fm = FileManager.default
+        do {
             try verify(staged, expectedVersion: expectedVersion)
             _ = try fm.replaceItemAt(target, withItemAt: staged)
         } catch {
             try? fm.removeItem(at: staged)
             throw error
         }
+    }
+
+    static func install(_ app: URL, expectedVersion: String, target: URL, afterCopy: (URL) throws -> Void = { _ in }) throws {
+        let staged = try stage(app, expectedVersion: expectedVersion, target: target, afterCopy: afterCopy)
+        try commit(staged, expectedVersion: expectedVersion, target: target)
     }
 }
