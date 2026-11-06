@@ -1,0 +1,1 @@
+{"frameworks":["CoreAudio","AudioToolbox"],"entitlements":"Sources/Apps/Mixer/Mixer.entitlements"}

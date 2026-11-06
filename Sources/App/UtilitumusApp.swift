@@ -11,6 +11,7 @@ struct ModuleDetail: View {
             case .awake: RemoteAwakePage()
             case .sound: RemoteSoundPage()
             case .mouse: RemoteMousePage()
+            case .mixer: RemoteMixerPage()
             default: SatellitePage(module: module)
             }
         } else {

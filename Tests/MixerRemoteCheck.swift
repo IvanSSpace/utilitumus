@@ -1,0 +1,177 @@
+import AppKit
+import SwiftUI
+
+// Вкладка «Микшер» в лаунчере, работа в утилите. Запуск: Tests/run-mixer-remote-check.sh
+// Звук не перехватывается: утилита стенда собрана со швом, тапы в ней не создаются. Захват проверяется руками.
+
+let moduleID = "test.mixer"
+/// Не одно известное действие: разбор отказывает, сколько бы известного в этом ни было.
+let notOneAction: [(String, String)] = [
+    ("чужой ключ рядом", #"{"commitVolumes":{},"x":1}"#),
+    ("чужой ключ внутри", #"{"reset":{"id":"a","x":1}}"#),
+    ("два действия", #"{"commitVolumes":{},"reset":{"id":"a"}}"#),
+    ("без значения", #"{"setVolume":{"id":"a"}}"#),
+    ("громкость строкой", #"{"setVolume":{"id":"a","value":"1"}}"#),
+    ("pid вместо id", #"{"reset":{"id":4242}}"#),
+    ("старое действие экрана", #"{"setScreenVisible":{"visible":true}}"#),
+    ("commitVolumes не объект", #"{"commitVolumes":1}"#),
+]
+
+@MainActor func allRows(_ state: MixerState) -> [MixerAppState] { state.apps + state.idleApps + state.presetApps + state.otherApps }
+
+/// Локальный контроллер в том же состоянии, что утилита: списки из её ответа, иконки по id.
+@MainActor func pinLocal(to state: MixerState) {
+    func rows(_ list: [MixerAppState]) -> [MixerApp] { list.map(MixerApp.init) }
+    MixerController.shared.testPin(apps: rows(state.apps), idle: rows(state.idleApps), preset: rows(state.presetApps),
+                                   other: rows(state.otherApps), permissionProblem: state.permissionProblem, lastError: state.lastError)
+}
+
+func wirePure() {
+    let decode = { (text: String) in try? JSONDecoder().decode(MixerAction.self, from: Data(text.utf8)) }
+    check(decode(#"{"setVolume":{"id":"com.a","value":0.5}}"#) == .setVolume(id: "com.a", value: 0.5), "настоящее действие разбирается")
+    check(decode(#"{"commitVolumes":{}}"#) == .commitVolumes, "commitVolumes разбирается")
+    for (name, text) in notOneAction {
+        check(decode(text) == nil, "\(name) не разбирается: \(text)")
+    }
+}
+
+@MainActor func garbage() async {
+    await checkBadActions(MixerState.self, id: moduleID, extra: notOneAction.map { ($0.0, Data($0.1.utf8)) })
+}
+
+@MainActor func actions() async {
+    let model = RemoteMixerModel.shared
+    await model.read()
+    check(model.responding, "утилита отвечает")
+    let state = model.state
+    // Приложения, которые играют, не трогаем: тап утилита стенда всё равно не создаст, но строка могла бы исчезнуть.
+    guard let target = (state.idleApps + state.otherApps).first else { return check(false, "нет ни одного молчащего приложения для проверки") }
+    await model.perform(.setVolume(id: "com.evil.app", value: 0.5))
+    check(model.actionError != nil, "чужой id: отказ с текстом («\(model.actionError ?? "нет")»)")
+    check(!allRows(model.state).contains { $0.id == "com.evil.app" }, "чужой id в списках не появился")
+
+    await model.perform(.setVolume(id: target.id, value: 0.3))
+    await model.perform(.commitVolumes)
+    check(model.actionError == nil, "громкость принята без текста ошибки")
+    await model.read()
+    check(allRows(model.state).first { $0.id == target.id }?.volume == 0.3, "громкость 0,3 видна в состоянии утилиты")
+    await model.perform(.setMuted(id: target.id, muted: true))
+    await model.read()
+    check(model.isMuted(target.id), "без звука виден в состоянии утилиты")
+    await model.perform(.reset(id: target.id))
+    await model.read()
+    let after = allRows(model.state).first { $0.id == target.id }
+    check(after?.volume == 1 && after?.muted == false, "reset вернул 100 % и звук")
+
+    // Частые шаги ползунка: в пути одно на ключ, последнее значение доходит.
+    for step in 1...20 { model.setVolume(Double(step) / 40, for: target.id) }
+    check(allRows(model.state).first { $0.id == target.id }?.volume == 0.5, "ползунок: сразу виден последний шаг")
+    check(await until(3) { allRows(model.state).first { $0.id == target.id }?.volume == 0.5 && model.actionError == nil }, "ползунок: ответ утилиты совпал с последним шагом")
+    await model.perform(.reset(id: target.id))
+    await model.perform(.commitVolumes)
+}
+
+@MainActor func pixels() async {
+    let model = RemoteMixerModel.shared
+    let modules = ModuleManager.shared
+    let registry = SatelliteRegistry.shared
+    let local = MixerController.shared
+    for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
+        Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
+        for variant in ["live", "volume"] {
+            if variant == "volume", let target = (model.state.idleApps + model.state.otherApps).first {
+                await model.perform(.setVolume(id: target.id, value: 0.4))
+                await model.perform(.commitVolumes)
+            }
+            await model.read()
+            let known = model.state
+            modules.setExternal(.mixer, false)
+            pinLocal(to: known)
+            // Два текста экрана про утилиту: у встроенного они другие, поэтому для сравнения включаем те же.
+            local.runsInUtility = true
+            let localShot = await Stand.open(theme)
+            local.runsInUtility = false
+            Stand.save(localShot, "\(themeName)-\(variant)-local")
+
+            modules.setExternal(.mixer, true)
+            await registry.update()
+            let remoteShot = await Stand.open(theme)
+            Stand.save(remoteShot, "\(themeName)-\(variant)-remote")
+            check(model.state == known, "\(themeName) \(variant): за время снимка состояние утилиты не менялось")
+            let diff = differingPixels(localShot, remoteShot)
+            check(diff == 0, "\(themeName) \(variant): снимки совпали, разных пикселей \(diff) из \(localShot.pixelsWide * localShot.pixelsHigh)")
+        }
+    }
+    // Встроенный экран и экран утилиты различаются только двумя текстами: это видно по снимку.
+    modules.setExternal(.mixer, false)
+    pinLocal(to: model.state)
+    let builtIn = await Stand.open(.dusk)
+    modules.setExternal(.mixer, true)
+    check(differingPixels(builtIn, await Stand.open(.dusk)) > 0, "встроенный экран и экран утилиты различаются текстом про выход")
+    Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
+    local.testPin()
+}
+
+/// Пассивная значит остановленная: центр запущен и модуль ещё его, утилита снимает всё и ничего не принимает.
+@MainActor func passive() async {
+    let defaults = Kit.defaults
+    let client = LinkClient(id: moduleID)
+    let model = RemoteMixerModel.shared
+    await model.read()
+    guard let target = (model.state.idleApps + model.state.otherApps).first else { return check(false, "пассивность: нет приложения для проверки") }
+    defaults.set(true, forKey: "Test.HubRunning")
+    defaults.set("0.6.0", forKey: "Test.HubVersion")
+    defaults.set(true, forKey: SatelliteRole.hubModuleOnKey(moduleID))
+    defaults.set(false, forKey: SatelliteRole.handedOverKey(moduleID))
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+    await model.read()
+    check(allRows(model.state).isEmpty, "пассивная: списков нет, опрос и тапы остановлены")
+    await model.perform(.setVolume(id: target.id, value: 0.5))
+    check(model.actionError != nil && allRows(model.state).isEmpty, "пассивная: действие отвергнуто («\(model.actionError ?? "нет")»)")
+    let line = try? await client.status().line
+    check(line == "Ждём передачу от центра", "пассивная: статус говорит почему («\(line ?? "нет")»)")
+
+    defaults.set(true, forKey: SatelliteRole.handedOverKey(moduleID))
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+    var back = false
+    for _ in 0..<50 where !back {
+        await model.read()
+        back = !allRows(model.state).isEmpty
+        if !back { await pause(0.1) }
+    }
+    check(back, "передача: утилита снова работает, списки вернулись")
+    defaults.set(false, forKey: "Test.HubRunning")
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+}
+
+/// Утилиту убили: вкладка узнаёт, что она не отвечает.
+@MainActor func death(utility: Int32) async {
+    let model = RemoteMixerModel.shared
+    let registry = SatelliteRegistry.shared
+    await model.read()
+    check(model.responding && model.screen(of: .mixer, registry) == .module, "до этого экран модуля")
+    kill(utility, SIGKILL)
+    await registry.update()
+    check(await until(6) { !model.responding }, "утилиту убили: модель это увидела")
+    check(model.screen(of: .mixer, registry) == .notResponding, "и вкладка показывает запасной экран")
+    Stand.save(await Stand.open(.dusk), "dusk-not-responding")
+}
+
+@main
+enum Main {
+    static func main() {
+        MainActor.assumeIsolated {
+            ModuleCheck.main(.mixer, foreignAction: LinkWire.encoded(MixerAction.commitVolumes)) { utility in
+                wirePure()
+                await garbage()
+                await actions()
+                await pixels()
+                await passive()
+                await death(utility: utility)
+            }
+        }
+    }
+}
