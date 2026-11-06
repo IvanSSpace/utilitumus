@@ -480,19 +480,22 @@ private struct FloatingCopy: View {
                 switch drag.kind {
                 case .pinned:
                     TileFace(module: module, on: actions.isOn(module), selected: true, attention: false)
+                        .transition(.identity)
                 case .list:
                     RowFace(module: module, on: actions.isOn(module), selected: actions.selected == module,
                             status: DashboardLive.snapshot(module))
                         .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous).fill(.black.opacity(0.35)))
+                        .transition(.identity)
                 case .hidden:
                     HiddenRowView(module: module, selected: false, open: {})
                         .background(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous).fill(.black.opacity(0.35)))
+                        .transition(.identity)
                 }
             }
             .frame(width: size.width, height: size.height)
             .scaleEffect(float.lifted && !SidebarMotion.reduced ? 1.04 : 1)
             .shadow(color: .black.opacity(float.lifted ? 0.45 : 0), radius: float.lifted ? 10 : 0, y: float.lifted ? 4 : 0)
-            .opacity(float.fading ? 0 : 0.92)
+            .opacity(float.fading ? 0 : 0.88)
             .animation(SidebarMotion.spring, value: float.lifted)
             .animation(SidebarMotion.spring, value: size)
             .animation(SidebarMotion.land, value: float.fading)

@@ -287,9 +287,9 @@ let all = Module.allCases
 
 @MainActor func lay() -> SidebarLayout { SidebarModel.shared.layout() }
 
-/// Строки списка стоят столбцом с одним пустым местом `gap` (счёт среди остальных); верх столбца — от сетки.
-@MainActor func listGap(others: [Module], gap: Int, scrollY: CGFloat = 0) -> Bool {
-    let top = SidebarProbe.grid.maxY + 8 + 2 - scrollY
+/// Строки списка стоят столбцом с одним пустым местом `gap` (счёт среди остальных); верх столбца — верх прокрутки (по AppKit).
+@MainActor func listGap(_ rig: Rig, others: [Module], gap: Int) -> Bool {
+    let top = rig.viewport.minY + SidebarMetrics.listTop - rig.scrollY
     for (i, m) in others.enumerated() {
         guard let f = SidebarProbe.frames[m] else { return false }
         let slot = i < gap ? i : i + 1
@@ -351,7 +351,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     let top = rig.rest[list[0]]!.minY
     var aim = rig.rowSlot(5, top: top)
     var trace = await drag(rig, "rows-down", from: s, via: [aim], grabbed: m, midCheck: {
-        check(listGap(others: list.filter { $0 != m }, gap: 5), "строка вниз: остальные расступились, пустое место на пятом месте")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 5), "строка вниз: остальные расступились, пустое место на пятом месте")
         check(SidebarProbe.copy != nil, "копия на экране, пока кнопка зажата")
     })
     check(trace.sawCopy, "строка вниз: перетаскивание началось")
@@ -370,7 +370,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     s = center(rig.rest[m]!)
     aim = rig.rowSlot(1, top: rig.rest[list[0]]!.minY)
     trace = await drag(rig, "rows-up", from: s, via: [aim], grabbed: m, midCheck: {
-        check(listGap(others: list.filter { $0 != m }, gap: 1), "строка вверх: пустое место на втором месте")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 1), "строка вверх: пустое место на втором месте")
     })
     expected = list.filter { $0 != m }; expected.insert(m, at: 1)
     check(lay().list == expected, "строка вверх: легла на второе место")
@@ -403,7 +403,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     let grid4 = rig.gridFrames(4)
     var trace = await drag(rig, "list-to-grid", from: s, via: [center(grid4[1])], grabbed: m, midCheck: {
         check(tilesMatch(rig, slots: [tiles[0], nil, tiles[1], tiles[2]]), "список -> сетка: плитки перестроились на четыре столбца, место открыто")
-        check(listGap(others: list.filter { $0 != m }, gap: 100), "список -> сетка: список сомкнулся")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 100), "список -> сетка: список сомкнулся")
         if let copy = SidebarProbe.copy { check(abs(copy.width - grid4[0].width) < 3, "список -> сетка: копия стала плиткой") }
     })
     check(lay().pinned == [tiles[0], m, tiles[1], tiles[2]], "список -> сетка: встала вторым номером")
@@ -424,7 +424,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
                        then: { center(grid5[4]) }, midCheck: {
         check(tilesMatch(rig, slots: [tiles[0], tiles[1], tiles[2], tiles[3], nil]), "четыре -> пять: три столбца, две строки, место в конце")
         check(abs(SidebarProbe.grid.height - SidebarMetrics.pinnedHeight(count: 5)) < 1.5, "четыре -> пять: сетка стала выше на строку")
-        check(listGap(others: list.filter { $0 != m }, gap: 100), "четыре -> пять: список сомкнулся и сдвинулся под сетку")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 100), "четыре -> пять: список сомкнулся и сдвинулся под сетку")
     })
     check(lay().pinned == tiles + [m], "четыре -> пять: плитка пятая")
     rig.close()
@@ -440,13 +440,30 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     let aim = rig.rowSlot(2, top: rowTop)
     trace = await drag(rig, "grid-to-list", from: s, via: [CGPoint(x: s.x, y: s.y + 30), aim], grabbed: m, midCheck: {
         check(tilesMatch(rig, slots: Array(tiles.prefix(4))), "сетка -> список: сетка сомкнулась на четыре плитки в одну строку")
-        check(listGap(others: list, gap: 2), "сетка -> список: пустое место открылось под курсором")
+        check(listGap(rig, others: list, gap: 2), "сетка -> список: пустое место открылось под курсором")
         if let copy = SidebarProbe.copy { check(abs(copy.width - rig.width) < 4, "сетка -> список: копия стала строкой") }
     })
     var expected = list; expected.insert(m, at: 2)
     check(lay().list == expected && lay().pinned == Array(tiles.prefix(4)), "сетка -> список: встала третьей строкой")
     check(trace.kindSwitches <= 1, "сетка -> список: копия сменила вид один раз, без мерцания (\(trace.kindSwitches))")
     check(trace.maxOutside < 1, "сетка -> список: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
+    rig.close()
+
+    // Семь плиток (под ними подсказка про вырез): девятая плитка встаёт в конец, строки списка считаются от нового верха.
+    await prepare(pinned: Array(all.prefix(7)))
+    rig = await Rig(height: 680)
+    list = lay().list
+    tiles = lay().pinned
+    m = list[2]
+    s = center(rig.rest[m]!)
+    check(SidebarProbe.grid.maxY + 8 < rig.viewport.minY, "семь плиток: под сеткой подсказка про вырез, список ниже неё")
+    let grid8 = rig.gridFrames(8)
+    trace = await drag(rig, "seven-pins", from: s, via: [center(rig.rest[tiles[0]]!)], grabbed: m, then: { center(grid8[7]) }, midCheck: {
+        check(tilesMatch(rig, slots: tiles.map { Optional($0) } + [nil]), "семь плиток: восемь мест, плитки на своих местах, место открыто в конце")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 100), "семь плиток: список сомкнулся под сеткой с подсказкой")
+    })
+    check(lay().pinned == tiles + [m], "семь плиток: восьмая плитка в конце")
+    check(trace.maxOutside < 1, "семь плиток: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
     rig.close()
 
     // Десятая плитка: отказ, копия возвращается.
@@ -522,7 +539,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     s = center(rig.rest[m]!)
     var aim = rig.rowSlot(3, top: rig.rest[list[0]]!.minY)
     trace = await drag(rig, "hidden-to-list", from: s, via: [CGPoint(x: s.x, y: s.y - 40), aim], grabbed: m, midCheck: {
-        check(listGap(others: list, gap: 3), "скрытые -> список: пустое место на четвёртом месте")
+        check(listGap(rig, others: list, gap: 3), "скрытые -> список: пустое место на четвёртом месте")
     }, frames: true)
     var expected = list; expected.insert(m, at: 3)
     check(lay().list == expected && lay().hidden == [hidden[0]] && !ModuleManager.shared.isHidden(m), "скрытые -> список: модуль в списке и больше не скрыт")
@@ -574,7 +591,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
         rig.esc()
     }, release: false)
     await pause(0.5)
-    check(listGap(others: list.filter { $0 != m }, gap: 1), "Esc: остальные вернулись, пустое место на прежнем месте")
+    check(listGap(rig, others: list.filter { $0 != m }, gap: 1), "Esc: остальные вернулись, пустое место на прежнем месте")
     rig.up(aim)
     await pause(0.6)
     check(lay() == before && SidebarProbe.copy == nil, "Esc: раскладка прежняя, копия убрана")
@@ -592,7 +609,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     s = center(rig.rest[m]!)
     aim = CGPoint(x: 640, y: s.y + 40)
     let trace = await drag(rig, "outside", from: s, via: [CGPoint(x: s.x + 120, y: s.y + 20), aim], grabbed: m, midCheck: {
-        check(listGap(others: list.filter { $0 != m }, gap: 2), "вне панели: пустое место вернулось на прежнее место")
+        check(listGap(rig, others: list.filter { $0 != m }, gap: 2), "вне панели: пустое место вернулось на прежнее место")
     })
     check(lay() == before && SidebarProbe.copy == nil, "отпустили вне панели: всё на месте, копия убрана")
     check(trace.maxOutside < 1, "вне панели: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
