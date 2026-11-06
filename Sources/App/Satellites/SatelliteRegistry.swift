@@ -69,7 +69,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// Модули, которые сейчас ставятся или удаляются.
     @Published private(set) var busy: Set<Module> = []
 
-    private let environment: SatelliteEnvironment
+    let environment: SatelliteEnvironment
     private var modules: ModuleManager { environment.modules }
     private var defaults: UserDefaults { environment.defaults }
     /// Последний удачный каталог: сбой сети его не стирает.
@@ -231,6 +231,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
             throw error
         }
         finish(module)
+        defaults.removeObject(forKey: ModuleMigration.removedKey(module.rawValue))
         await poll(module)
     }
 
@@ -242,6 +243,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         let id = module.rawValue, name = Self.bundleName(module)
         try await serialized { try await installer.remove(id: id, name: name) }
         defaults.removeObject(forKey: ModuleHandover.handedOverKey(id))
+        defaults.set(true, forKey: ModuleMigration.removedKey(id))
         enableOwed.remove(module)
         modules.setOn(module, false)
         modules.setExternal(module, false)
@@ -379,13 +381,15 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         do {
             try await serialized { try installer.removeStaleAgent(id: id) }
             defaults.removeObject(forKey: ModuleHandover.handedOverKey(id))
+            // Бандл убрали руками: это тоже выбор человека, автопереход его не отменяет.
+            defaults.set(true, forKey: ModuleMigration.removedKey(id))
         } catch {
             return
         }
     }
 
     /// Как у `scripts/build-app.sh`: `Sources/Apps/<Имя>` и имя бандла совпадают с папкой модуля.
-    static func bundleName(_ module: Module) -> String {
+    nonisolated static func bundleName(_ module: Module) -> String {
         module.rawValue.capitalized
     }
 

@@ -283,6 +283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DockMode.start()
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
+        SatelliteRegistry.shared.startMigration()
         // Чтобы вкладка с первого открытия показывала настоящее состояние, а не сохранённые настройки.
         RemoteModules.external(ModuleManager.shared).forEach { $0.1.refresh() }
         Updater.shared.check(quiet: true)
