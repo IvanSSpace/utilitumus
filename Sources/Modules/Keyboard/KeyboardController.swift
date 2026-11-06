@@ -47,10 +47,7 @@ final class KeyboardController: ObservableObject {
     /// Приложения, где раскладку не трогаем (в порядке добавления).
     @Published private(set) var excludedApps: [String]
 
-    struct LayoutItem: Identifiable, Equatable {
-        let id: String
-        let name: String
-    }
+    typealias LayoutItem = KeyboardLayoutItem
 
     private static let savedKey = "Keyboard.AppLayout.Saved"
     private static let excludedKey = "Keyboard.AppLayout.Excluded"
@@ -262,9 +259,6 @@ final class KeyboardController: ObservableObject {
         memory.excluded = Set(excludedApps)
         UserDefaults.standard.set(excludedApps, forKey: Self.excludedKey)
     }
-
-    /// Название раскладки по id для экрана; удалённую из системы показываем как есть.
-    func layoutName(_ id: String) -> String { layouts.first { $0.id == id }?.name ?? id }
 
     // MARK: Самовосстановление tap
 
