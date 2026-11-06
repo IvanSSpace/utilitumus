@@ -70,6 +70,25 @@ enum LoadStopTarget: Codable, Equatable {
     case shellChild(shell: LoadRowID, child: LoadRowID)
     case orphan(LoadRowID)
 
+    /// Ровно одна известная цель и ровно её поля.
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "process": self = .process(try wire.value())
+        case "group": self = .group(try wire.value())
+        case "session": self = .session(try wire.value())
+        case "sessionChild":
+            try wire.fields("session", "child")
+            self = .sessionChild(session: try wire.field("session"), child: try wire.field("child"))
+        case "shell": self = .shell(try wire.value())
+        case "shellChild":
+            try wire.fields("shell", "child")
+            self = .shellChild(shell: try wire.field("shell"), child: try wire.field("child"))
+        case "orphan": self = .orphan(try wire.value())
+        default: throw wire.refuse()
+        }
+    }
+
     /// Процессы цели: каждый должен быть всё тем же процессом, что и в выданной строке.
     fileprivate var rows: [LoadRowID] {
         switch self {
@@ -96,6 +115,35 @@ enum LoadAction: Codable, Equatable {
     case confirmBackground(planID: UUID)
     case setBackgroundTabOpen(Bool)
     case reloadJournal
+
+    /// Ровно одно известное действие и ровно его поля: синтезированный разбор чужих ключей не видит.
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "refreshNow": try wire.none(); self = .refreshNow
+        case "screenAppeared": try wire.none(); self = .screenAppeared
+        case "screenDisappeared": try wire.none(); self = .screenDisappeared
+        case "cancelStop": try wire.none(); self = .cancelStop
+        case "dismissNotice": try wire.none(); self = .dismissNotice
+        case "cancelBackground": try wire.none(); self = .cancelBackground
+        case "reloadJournal": try wire.none(); self = .reloadJournal
+        case "requestStop": self = .requestStop(try wire.value())
+        case "confirmStop":
+            try wire.fields("planID")
+            self = .confirmStop(planID: try wire.field("planID"))
+        case "confirmBackground":
+            try wire.fields("planID")
+            self = .confirmBackground(planID: try wire.field("planID"))
+        case "setBackgroundTabOpen": self = .setBackgroundTabOpen(try wire.value())
+        case "requestAgent":
+            try wire.fields("label", "verb")
+            self = .requestAgent(label: try wire.field("label"), verb: try wire.field("verb"))
+        case "requestBot":
+            try wire.fields("id", "verb")
+            self = .requestBot(id: try wire.field("id"), verb: try wire.field("verb"))
+        default: throw wire.refuse()
+        }
+    }
 }
 
 extension LoadMeasure {
@@ -208,6 +256,13 @@ extension LoadStore {
                   live: LoadLive(measureMillis: live.measureMillis, selfMemMB: live.selfMemMB, selfCPU: live.selfCPU),
                   history: history, stopPrompt: stopPrompt, stopRunning: stopRunning, notice: notice,
                   background: background.wireState)
+    }
+
+    /// Самое длинное настоящее действие — метка или id группы до `maxIDBytes` байт в JSON.
+    static let maxActionBytes = maxIDBytes + 512
+
+    func handle(_ data: Data) -> Data {
+        LinkWire.handle(data, as: LoadAction.self, limit: Self.maxActionBytes, state: { wireState }) { handle($0) }
     }
 
     /// Действие из связи: сначала проверка, изменения только после неё. Возвращает текст, если действие не выполнено.

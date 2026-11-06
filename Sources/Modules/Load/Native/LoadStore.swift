@@ -15,6 +15,11 @@ protocol LoadMeasuring: Sendable {
     func historyWindow() async -> HistoryWindow
     func refreshNow() async -> LoadSnapshot
     func execute(_ plan: StopPlan) async -> StopResult
+    func releaseHistory() async
+}
+
+extension LoadMeasuring {
+    func releaseHistory() async {}
 }
 
 extension LoadEngine: LoadMeasuring {
@@ -55,6 +60,8 @@ final class LoadStore: LoadModel {
     private var historyLoop: Task<Void, Never>?
     private var liveLoop: Task<Void, Never>?
     private(set) var watchers = 0
+    /// Считать ли сейчас. У встроенного модуля — окно видно; в утилите окна центра у неё нет, там решает аренда экрана.
+    var visibleGate: @MainActor () -> Bool = { LoadStore.windowIsVisible() }
     private var noticeTimer: Task<Void, Never>?
 
     /// Идёт ли запись истории.
@@ -99,6 +106,8 @@ final class LoadStore: LoadModel {
         liveLoop?.cancel()
         liveLoop = nil
         watchers = 0
+        let engine = engine
+        Task { await engine.releaseHistory() }
     }
 
     // MARK: Экран открыт / закрыт
@@ -110,7 +119,7 @@ final class LoadStore: LoadModel {
             var first = true
             while !Task.isCancelled {
                 guard let self else { return }
-                if Self.windowIsVisible() {
+                if visibleGate() {
                     let s = await engine.measure()
                     guard !Task.isCancelled else { return }
                     apply(s)
@@ -131,7 +140,7 @@ final class LoadStore: LoadModel {
     }
 
     /// Окно скрыто или свёрнуто — считать нечего.
-    private static func windowIsVisible() -> Bool {
+    static func windowIsVisible() -> Bool {
         guard NSApp != nil else { return true }
         return NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
     }

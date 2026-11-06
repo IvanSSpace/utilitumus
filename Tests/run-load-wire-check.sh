@@ -120,6 +120,7 @@ PY
   mutation LoadWire.swift 'guard label.utf8.count <= LoadStore.maxIDBytes else { return "Непонятная команда" }' '' "длина метки не ограничена"
   mutation LoadWire.swift 'guard !stopRunning else { return "Остановка уже идёт" }
             guard pendingStop?.id' 'guard pendingStop?.id' "второе подтверждение во время остановки"
+  mutation Native/Core/LoadHistory.swift 'guard claimWriter() else {' 'guard true || claimWriter() else {' "второй писатель истории"
   mutation LoadWire.swift 'guard watchers < Self.maxWatchers else { return "Экран и так открыт" }' '' "открытия экрана без предела"
   mutation LoadWire.swift 'for i in m.sessions.claude.indices { m.sessions.claude[i].activity.lastPromptTS = nil }' '' "состояние не приведено к связи"
   rm -rf "$M"

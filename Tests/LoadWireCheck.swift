@@ -304,10 +304,19 @@ func realFileStamp(_ url: URL?) -> String {
     for raw in garbage {
         check((try? JSONDecoder().decode(LoadAction.self, from: Data(raw.utf8))) == nil, "разбор отказал: \(raw)")
     }
-    // Лишние поля разбор не видит: их отсекает общая сверка с повторным кодированием.
+    // Лишние поля отсекает сам разбор (LinkActionFields), а не только сверка байтов.
     let extra = Data(#"{"confirmStop":{"pids":[1,2],"planID":"\#(planID.uuidString)"}}"#.utf8)
-    let parsed = try? JSONDecoder().decode(LoadAction.self, from: extra)
-    check(parsed == .confirmStop(planID: planID) && parsed.map(encoded) != extra, "план с лишними pid: pid не читаются, сверка байтов его отсечёт")
+    check((try? JSONDecoder().decode(LoadAction.self, from: extra)) == nil, "план с лишними pid: разбор отказал")
+    let twoKeys = Data(#"{"refreshNow":{},"cancelStop":{}}"#.utf8)
+    check((try? JSONDecoder().decode(LoadAction.self, from: twoKeys)) == nil, "два действия в одном: разбор отказал")
+    let nestedExtra = Data(#"{"requestStop":{"_0":{"group":{"_0":"x","argv":["/bin/rm"]}}}}"#.utf8)
+    check((try? JSONDecoder().decode(LoadAction.self, from: nestedExtra)) == nil, "цель с лишним argv: разбор отказал")
+    func replyError(_ raw: Data) -> String? {
+        (try? JSONDecoder().decode(LinkReply<LoadState>.self, from: store.handle(raw)))?.error
+    }
+    check(replyError(extra) == "Непонятная команда", "через связь: лишние поля — «Непонятная команда»")
+    check(replyError(Data(repeating: 0x20, count: LoadStore.maxActionBytes + 1)) == "Непонятная команда", "через связь: слишком длинное — «Непонятная команда»")
+    check(replyError(encoded(LoadAction.dismissNotice)) == nil, "через связь: настоящее действие принято")
 
     // MARK: Отказы
     func refuse(_ action: LoadAction, _ name: String, expect: String? = nil) {
@@ -451,6 +460,28 @@ func realFileStamp(_ url: URL?) -> String {
     refuse(.screenAppeared, "открытий экрана больше предела", expect: "Экран и так открыт")
     for _ in 0..<(LoadStore.maxWatchers + 2) { _ = store.handle(.screenDisappeared) }
     check(store.watchers == 0, "закрытий больше, чем открытий: счётчик не уходит в минус")
+
+    // MARK: Единственный писатель истории
+    do {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("load-history-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("load-history.json")
+        let snap = fixtureSnapshot()
+        let t = Int(Date().timeIntervalSince1970)
+        let first = LoadHistory(url: url), second = LoadHistory(url: url)
+        first.record(memory: snap.memory, groups: snap.groups, swapoutsMB: nil, now: t)
+        let written = try? Data(contentsOf: url)
+        check(written != nil, "первый писатель записал файл")
+        second.record(memory: snap.memory, groups: snap.groups, swapoutsMB: nil, now: t + 60)
+        check((try? Data(contentsOf: url)) == written, "второй писатель файл не меняет")
+        check(second.samples.map(\.ts) == [t], "второй видит записанное первым")
+        first.releaseWriter()
+        second.record(memory: snap.memory, groups: snap.groups, swapoutsMB: nil, now: t + 120)
+        check(second.samples.map(\.ts) == [t, t + 120] && (try? Data(contentsOf: url)) != written, "после отпускания замка пишет второй")
+        first.record(memory: snap.memory, groups: snap.groups, swapoutsMB: nil, now: t + 180)
+        check(LoadHistory(url: url).samples.map(\.ts) == [t, t + 120], "первый, потерявший замок, файл не меняет")
+        second.releaseWriter()
+    }
 
     check(zip(realFiles, stamps).allSatisfy { realFileStamp($0) == $1 }, "настоящие load-history.json и actions.log не менялись")
 }
