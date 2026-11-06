@@ -62,10 +62,10 @@ func bundle(_ name: String, in dir: URL) {
     return rep
 }
 
-func differing(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
+func differing(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep, fromRow: Int = 0) -> Int {
     guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh, let x = a.bitmapData, let y = b.bitmapData else { return Int.max }
     var count = 0
-    for i in 0..<(a.pixelsWide * a.pixelsHigh) where memcmp(x + i * 4, y + i * 4, 4) != 0 { count += 1 }
+    for i in (fromRow * a.pixelsWide)..<(a.pixelsWide * a.pixelsHigh) where memcmp(x + i * 4, y + i * 4, 4) != 0 { count += 1 }
     return count
 }
 
@@ -367,6 +367,8 @@ final class WireBox: @unchecked Sendable {
         RemoteModules.testModels[f.module] = f.model
         DashboardLive.testBuiltIn[f.module] = f.builtIn
         modules.setOn(f.module, true)
+        AccessState.shared.refresh()
+        let blockedHere = f.module.isBlocked
         let builtIn = await snapshot("fixture-builtin-\(f.module.rawValue)", DashboardPage(open: { _ in }))
         modules.setOn(f.module, false)
         bundle(SatelliteRegistry.bundleName(f.module), in: appsDir)
@@ -375,7 +377,11 @@ final class WireBox: @unchecked Sendable {
         await registry.update()
         check(modules.isExternal(f.module), "\(f.module.rawValue): утилита ведёт модуль")
         let external = await snapshot("fixture-external-\(f.module.rawValue)", DashboardPage(open: { _ in }))
-        let diff = differing(builtIn, external)
+        // Шапка у встроенного зависит от разрешений этого Mac (помощник вентиляторов, Универсальный доступ, микрофон): без них
+        // там «Нужен доступ: …» и оранжевая точка, а у утилиты со статусом «всё готово» зелёная. Это не расхождение карточки,
+        // поэтому, когда встроенный здесь заблокирован, шапка (первые 200 px) не сравнивается, а карточки сверяются целиком.
+        let diff = differing(builtIn, external, fromRow: blockedHere ? 200 : 0)
+        check(!f.module.isBlocked, "\(f.module.rawValue): у утилиты без шагов шапка не просит доступ")
         // Причина, если когда-нибудь не ноль, называется здесь: карточка встроенного задана руками, потому что
         // настоящим контроллерам нужны железо, права и данные человека (история буфера, SMC, микрофон).
         check(diff == 0, "\(f.module.rawValue): карточка и шапка совпали, разных пикселей \(diff)")
@@ -413,6 +419,41 @@ final class WireBox: @unchecked Sendable {
         m.setDashboardVisible(true)
         m.setDashboardVisible(false)
         check(wire.watches.last == .screen, "аренда экрана сильнее слежения дашборда: \(wire.watches)")
+    }
+    // Вентиляторы и Нагрузка шлют и меряют только при аренде экрана: пока дашборд виден, карточка живая, скрыт — аренды нет.
+    do {
+        let wire = WireBox()
+        var ping: (@MainActor () -> Void)?
+        let link = RemoteModuleLink(state: { wire.data }, action: { _ in wire.refusal },
+                                    setWatch: { wire.watches.append($0) }, onPing: { ping = $0 })
+        let model = RemoteFansModel(id: "t.fans.live", link: link, canRead: { true })
+        func publish(rpm: Double) {
+            var state = model.state
+            state.helperStatus = .ready
+            state.fans = [FanReading(index: 0, actual: rpm, min: 1200, max: 6000, isManual: false, target: 0)]
+            wire.data = LinkWire.encoded(state)
+        }
+        func text() -> String { model.dashboardState(base: DashState(text: "статус"), status: nil).text }
+        check(wire.watches == [.none], "вентиляторы: до показа дашборда аренды нет: \(wire.watches)")
+        model.setDashboardVisible(true)
+        check(wire.watches == [.none, .screen], "вентиляторы: дашборд виден, аренда экрана: \(wire.watches)")
+        publish(rpm: 2000)
+        ping?()
+        await pause(0.3)
+        check(text().contains("2000 об/мин"), "вентиляторы: пинг утилиты обновил карточку: \(text())")
+        publish(rpm: 3000)
+        ping?()
+        await pause(0.3)
+        check(text().contains("3000 об/мин"), "вентиляторы: следующий пинг тоже: \(text())")
+        model.setDashboardVisible(false)
+        check(wire.watches == [.none, .screen, .none], "вентиляторы: дашборд скрыт, аренда снята: \(wire.watches)")
+    }
+    do {
+        let (m, wire) = await fixtureModel(make: { RemoteLoadModel(id: "t.load2", canRead: { true }, link: $0) }) { (_: inout LoadState) in }
+        check(wire.watches == [.none], "нагрузка: до показа дашборда аренды нет: \(wire.watches)")
+        m.setDashboardVisible(true)
+        m.setDashboardVisible(false)
+        check(wire.watches == [.none, .screen, .none], "нагрузка: аренда экрана только пока дашборд виден: \(wire.watches)")
     }
 }
 

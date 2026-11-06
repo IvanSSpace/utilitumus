@@ -22,6 +22,7 @@ final class RemoteLoadBackground: LoadBackgroundModel {
 /// Модель вкладки «Нагрузка», когда модуль ведёт утилита. Планов остановки у центра нет: подтверждение
 /// называет утилите только id плана, который она сама показала. Замеры идут, пока открыта вкладка:
 /// аренду экрана ведёт `RemoteModulePage`, поэтому `screenAppeared` и `screenDisappeared` здесь пустые.
+/// Карточка дашборда живая: пока дашборд виден, держится та же аренда экрана (`dashboardWatch`), без неё утилита не меряет.
 @MainActor
 final class RemoteLoadModel: RemoteModuleModel<LoadState, LoadAction>, LoadModel {
     let background = RemoteLoadBackground()
@@ -34,7 +35,7 @@ final class RemoteLoadModel: RemoteModuleModel<LoadState, LoadAction>, LoadModel
                    initial: LoadState(measure: nil, live: LoadLive(measureMillis: 0, selfMemMB: 0, selfCPU: nil), history: nil,
                                       stopPrompt: nil, stopRunning: false, notice: nil,
                                       background: LoadBackgroundState(data: BackgroundData(), prompt: nil, running: false, journal: [])),
-                   link: link, canRead: canRead,
+                   dashboardWatch: .screen, link: link, canRead: canRead,
                    optimistic: { state, action in
                        // Закрыть окно подтверждения и баннер можно сразу; остальное показывается по ответу утилиты.
                        switch action {

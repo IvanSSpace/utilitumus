@@ -76,6 +76,7 @@ class RemoteModuleModel<State: Codable & Equatable & Sendable, Action: Codable &
     /// `canRead`: нет бандла — нет и запроса, иначе launchd пытался бы поднять мёртвого агента.
     /// `baseWatch`: `.changes`, если модель нужна и при закрытом экране (пункт меню).
     /// `dashboardWatch`: `.changes`, если карточке дашборда нужны живые данные; действует, только пока дашборд на экране.
+    /// `.screen` — если утилита шлёт и меряет только при аренде экрана (вентиляторы, нагрузка).
     init(id: String, initial: State, baseWatch: LinkWatch = .none, dashboardWatch: LinkWatch = .none, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool,
          optimistic: @escaping (inout State, Action) -> Void = { _, _ in },
          coalesceKey: @escaping (Action) -> String? = { _ in nil }) {

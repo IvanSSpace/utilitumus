@@ -10,7 +10,7 @@ final class RemoteFansModel: RemoteModuleModel<FansState, FansAction>, FansModel
                                       conflict: nil, lastError: nil, helperStatus: .notInstalled, helperError: nil,
                                       gameModeEnabled: false, myGames: [], gameLaunchers: [], addable: [],
                                       gameName: nil, gameLeavingUntil: nil),
-                   baseWatch: .none, link: link, canRead: canRead,
+                   baseWatch: .none, dashboardWatch: .screen, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setFullPower(let on): state.fullPower = on
