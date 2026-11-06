@@ -281,7 +281,7 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
 }
 
 /// Живое обновление: экран настоящего контроллера перерисовывается от каждого из четырёх объектов.
-@MainActor func liveUpdates() async {
+@MainActor func streamedUpdates() async {
     let size = NSSize(width: 738, height: 660)
     pin(fixture())
     let view = await Stand.show(SoundView(), DSTheme.dusk, size: size)
@@ -421,7 +421,7 @@ enum Main {
             wirePure()
             validations()
             await pixels()
-            await liveUpdates()
+            await streamedUpdates()
             await clicks()
             await lifecycle()
             print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
