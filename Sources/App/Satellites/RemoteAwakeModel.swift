@@ -1,8 +1,9 @@
+import Combine
 import Foundation
 
 /// Модель вкладки «Не спать», когда модуль ведёт утилита. Показывает последнее известное состояние и работает
-/// только через связь: своего assertion у центра нет. Перечитывает по `statusChanged` и при открытии вкладки,
-/// без опроса: отсчёт времени экран считает сам по `endDate`.
+/// только через связь: своего assertion у центра нет. Перечитывает по `statusChanged`, при смене статуса в реестре
+/// и при открытии экрана, без опроса: отсчёт времени экран считает сам по `endDate`.
 @MainActor
 final class RemoteAwakeModel: NSObject, AwakeModel {
     @Published private(set) var state: AwakeState
@@ -16,6 +17,7 @@ final class RemoteAwakeModel: NSObject, AwakeModel {
     /// Ответы приходят асинхронно: опоздавший не должен затереть более новый.
     private var issued = 0
     private var applied = 0
+    private var statusSub: AnyCancellable?
 
     /// `canRead`: нет бандла — нет и запроса, иначе launchd пытался бы поднять мёртвого агента.
     init(id: String, canRead: @escaping () -> Bool) {
@@ -53,6 +55,12 @@ final class RemoteAwakeModel: NSObject, AwakeModel {
     func toggle() { send(.toggle) }
 
     // MARK: Связь
+
+    /// Реестр снова слышит утилиту или перестал: перечитать. Вкладка, карточка и меню видят одно и то же,
+    /// какой бы экран сейчас ни был открыт.
+    func follow(_ status: some Publisher<LinkStatus?, Never>) {
+        statusSub = status.removeDuplicates().dropFirst().sink { [weak self] _ in self?.refresh() }
+    }
 
     func refresh() {
         guard canRead() else { return }

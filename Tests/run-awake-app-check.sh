@@ -101,6 +101,7 @@ agent_pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*
 
 # Имя в pmset могло остаться и у настоящего приложения пользователя, поэтому только по pid стенда.
 holds_assertion() { pmset -g assertions | grep -F "$ASSERTION" | grep -qE "pid $1\("; }
+holds_display_assertion() { pmset -g assertions | grep -F "$ASSERTION" | grep -E "pid $1\(" | grep -qE 'DisplaySleep'; }
 
 # wait_until <что> <команда...>: до 5 с, тишина при успехе.
 wait_until() {
@@ -362,16 +363,20 @@ expect_line "центр ≥0.6.0, модуль включён: ждём пере
 command_keep_awake "$PID"
 expect_still_no_assertion "пассивный режим: команда не создаёт assertion" "$PID"
 png "$OUT/awake-passive.png"
+# Модуль вёл центр: настройка изменилась уже после запуска утилиты.
+defaults write "$SUITE" AwakeKeepDisplay -bool true
 defaults write "$SUITE" "App.$ID.HandedOver" -bool true
 hub enable
 expect_line "передача: пассивная стала активной без перезапуска" "Mac засыпает как обычно"
 same "без перезапуска" "$(agent_pid)" "$PID"
 command_keep_awake "$PID"
 expect_assertion "после передачи команда работает" "$PID"
+if holds_display_assertion "$PID"; then ok "после передачи настройка не устаревшая: экран тоже не гаснет"; else bad "после передачи утилита работает со старой настройкой экрана"; fi
 hub quit
 wait_until "вышел" has_exited "$PID" || true
 
 defaults delete "$SUITE" "App.$ID.HandedOver"
+defaults delete "$SUITE" AwakeKeepDisplay
 hub_state true 0.5.3
 start_agent
 expect_line "центр старше 0.6.0: обновите центр" "Модуль уже работает в Utilitumus — обновите центр"

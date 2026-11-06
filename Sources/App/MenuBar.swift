@@ -44,7 +44,6 @@ struct AppMenuBarScene: Scene {
     @ObservedObject private var satellites = SatelliteRegistry.shared
     @ObservedObject private var fans = FanController.shared
     @ObservedObject private var stash = StashStore.shared
-    @ObservedObject private var awake = AwakeController.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -69,10 +68,7 @@ struct AppMenuBarScene: Scene {
                 }
             }
 
-            if modules.runsBuiltIn(.awake) {
-                Toggle("Не спать", isOn: Binding(
-                    get: { awake.isActive }, set: { $0 ? awake.activate() : awake.deactivate() }))
-            }
+            AwakeMenuItem()
 
             if modules.runsBuiltIn(.stash) {
                 Section("Стеш программ") {
@@ -102,6 +98,38 @@ struct AppMenuBarScene: Scene {
     private func show() {
         openWindow(id: "main")
         DockMode.bringToFront()
+    }
+}
+
+/// Пункт «Не спать» в меню-баре: тот же переключатель, кто бы ни вёл модуль. Выключенного модуля в меню нет.
+struct AwakeMenuItem: View {
+    @ObservedObject private var modules = ModuleManager.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
+    @ObservedObject private var remote = RemoteAwakeModel.shared
+
+    var body: some View {
+        if modules.isExternal(.awake) {
+            switch remote.screen(satellites) {
+            case .module: AwakeMenuToggle(model: remote)
+            case .notResponding: Button("Не спать: не отвечает") {}.disabled(true)
+            case .off: EmptyView()
+            }
+        } else if modules.runsBuiltIn(.awake) {
+            AwakeMenuToggle(model: AwakeController.shared)
+        }
+    }
+}
+
+struct AwakeMenuToggle<Model: AwakeModel>: View {
+    @ObservedObject var model: Model
+
+    var isOn: Binding<Bool> {
+        Binding(get: { model.isActive }, set: { if $0 != model.isActive { model.toggle() } })
+    }
+
+    var body: some View {
+        // Как кнопка на экране модуля.
+        Toggle("Не спать", isOn: isOn).disabled(!model.canStart && !model.isActive)
     }
 }
 

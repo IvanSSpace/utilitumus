@@ -1,5 +1,5 @@
 #!/bin/bash
-# Вкладка «Не спать»: рисует центр, работает утилита. Настоящие подписанная утилита, launchd, связь и pmset.
+# Вкладка, карточка дашборда и пункт меню «Не спать»: рисует центр, работает утилита. Настоящие подписанная утилита, launchd, связь и pmset.
 # Обе стороны собраны со швом KIT_TEST_DEFAULTS: настройки в suite стенда, окно за экраном. Настоящие Utilitumus
 # и его настройки не трогаются. Не запускать вместе с run-awake-app-check.sh: у них одна метка и один suite.
 # Нужен сертификат «Utilitumus Signing». Папка стенда: AWAKE_REMOTE_DIR, иначе $TMPDIR/awake-remote-check; снимки в ней, в png/.
@@ -44,9 +44,9 @@ ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; failures=$((failures + 1)); }
 same() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1: ждали «$3», получили «$2»"; fi; }
 
-# Таймера в модели и странице быть не должно: grep 0 — нашёл, 1 — пусто, больше — ошибка самого grep.
+# Таймера в модели и на её экранах быть не должно: grep 0 — нашёл, 1 — пусто, больше — ошибка самого grep.
 status=0
-FOUND="$(grep -nE 'Timer|asyncAfter|DispatchSource|Task\.sleep|\.wait\(|DispatchSemaphore' Sources/App/Satellites/RemoteAwakeModel.swift Sources/App/Satellites/RemoteAwakePage.swift)" || status=$?
+FOUND="$(grep -nE 'Timer|asyncAfter|DispatchSource|Task\.sleep|\.wait\(|DispatchSemaphore' Sources/App/Satellites/RemoteAwakeModel.swift Sources/App/Satellites/RemoteAwakePage.swift Sources/App/Design/Dashboard.swift Sources/App/MenuBar.swift)" || status=$?
 case "$status" in
   0) echo "ПРОВАЛ: модель вкладки ждёт или опрашивает:"; echo "$FOUND"; exit 1 ;;
   1) ok "в модели вкладки нет таймеров и синхронных ожиданий" ;;
@@ -109,17 +109,20 @@ same "после отказа тот же процесс" "$(agent_pid)" "$PID"
 echo "== вкладка"
 "$HUB" run "$OUT" "$PID"
 
-echo "== простой: вкладка открыта, утилита работает"
-"$HUB" idle "$OUT" > "$OUT/idle.log" & IDLE_PID=$!
-for _ in $(seq 1 100); do grep -q готов "$OUT/idle.log" && break; sleep 0.1; done
-sleep 10
-for who in "центр(стенд) $IDLE_PID" "утилита $PID"; do
-  set -- $who
-  echo "     $1: rss $(ps -o rss= -p "$2" | tr -d ' ') КБ, footprint $(footprint -p "$2" 2>/dev/null | sed -n 's/.*phys_footprint: *//p;s/.*Footprint: *//p' | head -1), CPU за 20 с: $(top -l 3 -s 10 -pid "$2" -stats cpu | tail -1 | tr -d ' ') %"
+for role in idle idle-dashboard; do
+  echo "== простой ($role): экран открыт, утилита работает"
+  "$HUB" "$role" "$OUT" > "$OUT/idle.log" & IDLE_PID=$!
+  for _ in $(seq 1 100); do grep -q готов "$OUT/idle.log" && break; sleep 0.1; done
+  sleep 10
+  for who in "центр(стенд) $IDLE_PID" "утилита $PID"; do
+    set -- $who
+    echo "     $1: rss $(ps -o rss= -p "$2" | tr -d ' ') КБ, footprint $(footprint -p "$2" 2>/dev/null | sed -n 's/.*phys_footprint: *//p;s/.*Footprint: *//p' | head -1), CPU за 20 с: $(top -l 3 -s 10 -pid "$2" -stats cpu | tail -1 | tr -d ' ') %"
+  done
+  kill -9 "$IDLE_PID" 2>/dev/null || true
+  wait "$IDLE_PID" 2>/dev/null || true
+  IDLE_PID=""
+  : > "$OUT/idle.log"
 done
-kill -9 "$IDLE_PID" 2>/dev/null || true
-wait "$IDLE_PID" 2>/dev/null || true
-IDLE_PID=""
 
 cleanup
 listed() {

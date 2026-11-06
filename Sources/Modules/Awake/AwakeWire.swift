@@ -26,6 +26,40 @@ enum AwakeAction: Codable, Equatable {
     case toggle
     case setKeepDisplay(Bool)
     case setDuration(Int)
+
+    /// Имена как у синтезированного кодирования: его `encode(to:)` остаётся. Синтезированное чтение не видит
+    /// чужих ключей, поэтому `{"toggle":{},"x":1}` проходило бы как `toggle`.
+    private struct Key: CodingKey {
+        let stringValue: String
+        init(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    /// Ровно одно известное действие и ровно его поля, всё остальное — ошибка разбора.
+    init(from decoder: Decoder) throws {
+        let root = try decoder.container(keyedBy: Key.self)
+        func refuse() -> DecodingError {
+            .dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Не одно известное действие"))
+        }
+        guard root.allKeys.count == 1, let key = root.allKeys.first else { throw refuse() }
+        let payload = try root.nestedContainer(keyedBy: Key.self, forKey: key)
+        let value = Key(stringValue: "_0")
+        let fields = payload.allKeys.map(\.stringValue)
+        switch key.stringValue {
+        case "toggle":
+            guard fields.isEmpty else { throw refuse() }
+            self = .toggle
+        case "setKeepDisplay":
+            guard fields == [value.stringValue] else { throw refuse() }
+            self = .setKeepDisplay(try payload.decode(Bool.self, forKey: value))
+        case "setDuration":
+            guard fields == [value.stringValue] else { throw refuse() }
+            self = .setDuration(try payload.decode(Int.self, forKey: value))
+        default:
+            throw refuse()
+        }
+    }
 }
 
 /// Ответ на действие: состояние после него и текст, если действие не выполнено.
@@ -49,7 +83,9 @@ extension AwakeController {
     /// Действие из связи: сначала проверка, изменения только после неё.
     func handle(_ data: Data) -> AwakeReply {
         // Самое длинное настоящее действие короче: длинное и разбирать незачем.
-        guard data.count <= 256, let action = try? JSONDecoder().decode(AwakeAction.self, from: data) else {
+        // Сверка с кодированием: повтор ключа разбор не видит, он молча берёт первый.
+        guard data.count <= 256, let action = try? JSONDecoder().decode(AwakeAction.self, from: data),
+              AwakeWire.encoded(action) == data else {
             return AwakeReply(state: wireState, error: "Непонятная команда")
         }
         switch action {

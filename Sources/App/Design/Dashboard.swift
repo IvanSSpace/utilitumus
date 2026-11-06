@@ -45,9 +45,14 @@ final class WindowVisibility: ObservableObject {
     }
 
     private func recompute() {
+        #if KIT_TEST_DEFAULTS
+        // Окно стенда за экраном и всегда перекрыто, а картинку снимает cacheDisplay.
+        let visible = true
+        #else
         let visible = NSApp.map { app in
             !app.isHidden && app.windows.contains { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) }
         } ?? true
+        #endif
         if visible != isVisible { isVisible = visible }
     }
 }
@@ -61,6 +66,8 @@ final class DashSlot: ObservableObject {
     private var attached = 0
     private var subs: [AnyCancellable] = []
     private var sourceSub: AnyCancellable?
+    /// На какую модель подписан `sourceSub`: при передаче утилите или возврате подписку надо сменить.
+    private var sourceIsRemote = false
     private var visibilitySub: AnyCancellable?
 
     fileprivate init(_ module: Module) {
@@ -99,13 +106,17 @@ final class DashSlot: ObservableObject {
                 SatelliteRegistry.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
             ]
         }
+        // Как при открытии вкладки: один раз, пока статус не был на экране, утилита могла зависнуть.
+        if DashboardLive.hasRemoteModel(module) { RemoteAwakeModel.shared.refresh() }
         update()
     }
 
     /// Выключенный модуль ничего не публикует: на контроллер подписываемся, только пока он включён.
     private func syncSource() {
-        if ModuleManager.shared.runsBuiltIn(module) {
-            guard sourceSub == nil else { return }
+        let remote = DashboardLive.hasRemoteModel(module)
+        if remote || ModuleManager.shared.runsBuiltIn(module) {
+            guard sourceSub == nil || sourceIsRemote != remote else { return }
+            sourceIsRemote = remote
             // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
             sourceSub = DashboardLive.source(module)
                 .receive(on: DispatchQueue.main)
@@ -131,6 +142,11 @@ enum DashboardLive {
 
     static func slot(_ module: Module) -> DashSlot { slots[module]! }
 
+    /// Модуль ведёт утилита, а экран у него свой, с моделью в центре. Остальным утилитам хватает строки статуса.
+    fileprivate static func hasRemoteModel(_ module: Module) -> Bool {
+        module == .awake && ModuleManager.shared.isExternal(module)
+    }
+
     fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never> {
         switch module {
         case .sound: return MonitorState.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
@@ -140,7 +156,10 @@ enum DashboardLive {
         case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .awake:
+            return hasRemoteModel(module)
+                ? RemoteAwakeModel.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+                : AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
@@ -169,13 +188,23 @@ enum DashboardLive {
         case .load:
             LoadStore.shared.refreshNow()
         case .awake:
-            AwakeController.shared.toggle()
+            if hasRemoteModel(module) { RemoteAwakeModel.shared.toggle() } else { AwakeController.shared.toggle() }
         case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard:
             break
         }
     }
 
+    /// Переключатель модуля на карточке: утилита выключается у себя, `ModuleOn` — настройка встроенного.
+    static func setOn(_ module: Module, _ on: Bool) {
+        if ModuleManager.shared.isExternal(module) {
+            SatelliteRegistry.shared.setEnabled(module, on)
+        } else {
+            ModuleManager.shared.setOn(module, on)
+        }
+    }
+
     fileprivate static func compute(_ module: Module) -> DashState {
+        if hasRemoteModel(module) { return remoteAwake() }
         if ModuleManager.shared.isExternal(module) { return satellite(module) }
         guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
         if module.isBlocked { return DashState(text: "нужен доступ", attention: true) }
@@ -187,7 +216,7 @@ enum DashboardLive {
         case .stash: return stash()
         case .voice: return voice()
         case .clipboard: return clipboard()
-        case .awake: return awake()
+        case .awake: return awake(AwakeController.shared)
         case .mixer: return mixer()
         case .load: return load()
         case .keyboard: return keyboard()
@@ -296,9 +325,29 @@ enum DashboardLive {
         return DashState(text: fn ? c.currentName : "\(KeyboardFeature.perAppLayout.shortName) · \(c.currentName)")
     }
 
-    private static func awake() -> DashState {
-        let c = AwakeController.shared
-        guard c.isActive else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
+    private static func remoteAwake() -> DashState {
+        let model = RemoteAwakeModel.shared
+        switch model.screen(SatelliteRegistry.shared) {
+        case .notResponding:
+            return DashState(text: "не отвечает", attention: true)
+        case .off:
+            return DashState(on: false, text: "выключен")
+        case .module:
+            var state = awake(model)
+            if let error = model.actionError {
+                state.text = error
+                state.attention = true
+            }
+            return state
+        }
+    }
+
+    private static func awake(_ c: some AwakeModel) -> DashState {
+        guard c.isActive else {
+            // Как кнопка на экране модуля: включить сейчас нельзя — действия нет.
+            return c.canStart ? DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer")
+                              : DashState(text: "можно спать")
+        }
         let tail = c.endDate.map { " · ещё \(AwakeController.remainingText(until: $0))" } ?? ""
         return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
     }
@@ -329,6 +378,7 @@ struct DashboardPage: View, Equatable {
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var access = AccessState.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
     @Environment(\.dsTheme) private var theme
     @State private var confirmStash = false
 
@@ -374,7 +424,8 @@ struct DashboardPage: View, Equatable {
     // MARK: Шапка
 
     private var header: some View {
-        let on = shown.filter { modules.isOn($0) }
+        // Выключенная утилита остаётся установленной: в шапке она не «включена», как и на своей карточке.
+        let on = shown.filter { modules.isExternal($0) ? satellites.entries[$0]?.status?.enabled ?? true : modules.isOn($0) }
         let needAccess = on.filter { $0.isBlocked }
         return HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -478,7 +529,7 @@ private struct DashCard: View {
             .opacity(on ? 1 : 0.45)
             Spacer(minLength: 4)
             if !on {
-                DashButton(title: "Включить", solid: true, tint: tint) { ModuleManager.shared.setOn(module, true) }
+                DashButton(title: "Включить", solid: true, tint: tint) { DashboardLive.setOn(module, true) }
             } else if let title = state.actionTitle {
                 DashButton(title: title, icon: state.actionIcon, tint: tint) {
                     DashboardLive.perform(module, askStash: askStash)
@@ -492,7 +543,7 @@ private struct DashCard: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.2), lineWidth: 0.7))
         .onTapGesture(perform: open)
         .contextMenu {
-            Button(on ? "Выключить модуль" : "Включить модуль") { ModuleManager.shared.setOn(module, !on) }
+            Button(on ? "Выключить модуль" : "Включить модуль") { DashboardLive.setOn(module, !on) }
             Button("Открыть", action: open)
         }
         .accessibilityElement(children: .contain)
