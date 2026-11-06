@@ -81,6 +81,11 @@ struct SidebarContent: View {
     @State private var expandWork: DispatchWorkItem?
     @Environment(\.dsTheme) private var theme
 
+    #if KIT_TEST_DEFAULTS
+    /// Проверка ставит панель в середину перетаскивания: кто, куда целится и где поднятая копия.
+    @MainActor static var testDrag: (Module, SidebarLayout.Target, CGPoint)?
+    #endif
+
     private let width = DS.sidebarWidth - 20
     private let listTop: CGFloat = 2
 
@@ -111,6 +116,17 @@ struct SidebarContent: View {
         .onPreferenceChange(PinnedOriginKey.self) { geo.pinnedOrigin = $0 }
         .overlay(alignment: .topLeading) { FloatingCopy(layout: layout, drag: drag, float: float, actions: actions, width: width) }
         .onDisappear { finishSession() }
+        #if KIT_TEST_DEFAULTS
+        .onAppear {
+            if let test = Self.testDrag {
+                drag.module = test.0
+                drag.target = test.1
+                drag.kind = test.1.zone
+                float.origin = test.2
+                float.lifted = true
+            }
+        }
+        #endif
         .focusable()
         .onKeyPress(keys: [.upArrow, .downArrow]) { press in key(press) }
     }
@@ -426,7 +442,7 @@ private struct PinnedZone<Menu: View>: View {
             }
             .frame(width: width, height: height, alignment: .topLeading)
             if layout.showsNotchHint {
-                Text("Значков много: на MacBook с вырезом часть может не поместиться в строке меню")
+                Text("Значков много: рядом с вырезом MacBook не все поместятся")
                     .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.38))
                     .fixedSize(horizontal: false, vertical: true)
             }
