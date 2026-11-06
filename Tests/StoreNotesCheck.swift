@@ -318,20 +318,20 @@ let longNotes = [longNote, solidNote, "**жирный** [ссылка](https://e
 
     // Без заметок: те же пиксели, что у сборки, где заметок ещё не было.
     await renderPlain()
-    expectIdentical("нет заметок, есть обновление, против BASE", (pngDir, "plain"), (baseDir, "plain"), scene: updateScene, looks: [dusk, graphiteLight, duskLight, midnight])
+    expectIdentical("нет заметок, есть обновление, без кода заметок", (pngDir, "plain"), (baseDir, "plain"), scene: updateScene, looks: [dusk, graphiteLight, duskLight, midnight])
     for scene in [upToDateScene, absentScene, featuredScene] {
-        expectIdentical("нет заметок, \(scene.name), против BASE", (pngDir, "plain"), (baseDir, "plain"), scene: scene, looks: [dusk])
+        expectIdentical("нет заметок, \(scene.name), без кода заметок", (pngDir, "plain"), (baseDir, "plain"), scene: scene, looks: [dusk])
     }
     let empties: [(String, Any)] = [("empty", [String]()), ("blank", ["  ", "\n"]), ("wrongtype", 42)]
     for (label, notes) in empties {
         await render(label, updateScene, notes: notes, looks: [dusk], sizes: [wide, narrow])
-        expectIdentical("notes «\(label)» против BASE", (pngDir, label), (baseDir, "plain"), scene: updateScene, looks: [dusk])
+        expectIdentical("notes «\(label)» без кода заметок", (pngDir, label), (baseDir, "plain"), scene: updateScene, looks: [dusk])
     }
     // Заметки есть, а обновления нет: показывать нечего.
     for scene in [upToDateScene, absentScene] {
         await render("idle", scene, notes: longNotes, looks: [dusk], sizes: [wide, narrow])
         check(store.updateNotes(scene.module).isEmpty, "\(scene.name): заметок к показу нет")
-        expectIdentical("заметки в каталоге, \(scene.name), против BASE", (pngDir, "idle"), (baseDir, "plain"), scene: scene, looks: [dusk])
+        expectIdentical("заметки в каталоге, \(scene.name), без кода заметок", (pngDir, "idle"), (baseDir, "plain"), scene: scene, looks: [dusk])
     }
 
     // Обновление с заметками.

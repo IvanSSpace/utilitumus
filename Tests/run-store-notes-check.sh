@@ -1,15 +1,15 @@
 #!/bin/bash
 # Заметки к обновлению: чтение из каталога и вид в Сторе. Стенд за экраном собирается дважды: из нынешних исходников
-# и из BASE, где заметок ещё нет. Без заметок снимки обеих сборок должны совпасть попиксельно, а BASE заодно
-# показывает, как каталог с заметками читает старый центр. Вид Стора поменяли намеренно — BASE переносится на коммит
-# с этим видом. Настройки: Kit.defaults подменён на домен бинарника, настоящий домен и настоящие пути не трогаются.
+# и из тех же исходников без кода заметок (BASE: из HEAD отменён коммит NOTES_COMMIT, который их добавил). Вид Стора
+# менялся и без заметок, поэтому старый коммит для сравнения не годится. Без заметок снимки обеих сборок должны
+# совпасть попиксельно, а BASE заодно показывает, как каталог с заметками читает центр без их кода. Настройки: Kit.defaults подменён на домен бинарника, настоящий домен и настоящие пути не трогаются.
 # Папка: STORE_NOTES_CHECK_DIR, иначе $TMPDIR/store-notes-check. PNG остаются в ней: base/png, new/png.
 # STORE_NOTES_REUSE_BASE=1 берёт снимки BASE с прошлого запуска.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 
-BASE=509cdb3
+NOTES_COMMIT=49c5537
 OUT="${STORE_NOTES_CHECK_DIR:-${TMPDIR:-/tmp}/store-notes-check}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 BIN="store-notes-stand"
@@ -63,9 +63,15 @@ trap 'defaults delete "$BIN" >/dev/null 2>&1 || true' EXIT
 if [ -z "${STORE_NOTES_REUSE_BASE:-}" ] || [ ! -d "$OUT/base/png" ]; then
   rm -rf "$OUT"
   mkdir -p "$OUT/base/tree"
-  /usr/bin/git cat-file -e "$BASE^{commit}" || { echo "ПРОВАЛ: нет коммита $BASE"; exit 1; }
-  /usr/bin/git archive "$BASE" Sources | tar -x -C "$OUT/base/tree"
-  echo "== сборка из $BASE: заметок в коде нет"
+  /usr/bin/git cat-file -e "$NOTES_COMMIT^{commit}" || { echo "ПРОВАЛ: нет коммита $NOTES_COMMIT"; exit 1; }
+  /usr/bin/git archive HEAD Sources | tar -x -C "$OUT/base/tree"
+  # Обратный патч с запасом по строкам: позже в тех же файлах правили и другое.
+  /usr/bin/git diff "$NOTES_COMMIT^" "$NOTES_COMMIT" -- Sources > "$OUT/base/notes.diff"
+  [ -s "$OUT/base/notes.diff" ] || { echo "ПРОВАЛ: коммит $NOTES_COMMIT не меняет Sources"; exit 1; }
+  (cd "$OUT/base/tree" && patch -R -p1 -F3 --no-backup-if-mismatch < "$OUT/base/notes.diff" > "$OUT/base/patch.log") \
+    || { echo "ПРОВАЛ: заметки не отделились от нынешних исходников"; cat "$OUT/base/patch.log"; exit 1; }
+  ! grep -rq 'updateNotes\|StoreUpdateNotes' "$OUT/base/tree/Sources" || { echo "ПРОВАЛ: в BASE остался код заметок"; exit 1; }
+  echo "== сборка из HEAD без кода заметок"
   build "$OUT/base/tree" "$OUT/base" -D BASE_BUILD
   run "$OUT/base"
 fi
