@@ -33,7 +33,7 @@ grep -q baselineModel "$OUT/src/BaselineKeyboardView.swift" || { echo "ПРОВ�
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name KeyboardWireCheck -o "$OUT/$NAME" \
   Tests/KeyboardWireCheck.swift Tests/KeyboardWireStubs.swift "$OUT/src/KeyboardView.swift" "$OUT/src/BaselineKeyboardView.swift" \
   $(find Sources/Modules/Keyboard -name '*.swift' -not -name InputSources.swift -not -name KeyboardView.swift) \
-  $(find Sources/Kit -name '*.swift') Sources/App/Design/Pages.swift Sources/Modules/Voice/VoiceExcludedApps.swift \
+  $(find Sources/Kit -name '*.swift') Sources/App/Design/Pages.swift Sources/Apps/Keyboard/KeyboardModule.swift \
   -framework SwiftUI -framework AppKit -framework CoreGraphics
 
 # В файле стенда нет кода, который мог бы тронуть систему.

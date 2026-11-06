@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // Клавиатура: состояние и действия по связи, проверки действий, экран до и после переноса на модель.
@@ -106,7 +107,11 @@ let allActions: [KeyboardAction] = [
 
     for bad in [#"{"explode":{}}"#, #"{"setFeature":{"feature":"ghost","on":true}}"#, #"{"setTrigger":{"_0":"x"}}"#,
                 #"{"setMode":{"_0":1}}"#, #"{"addExcluded":{"_0":1}}"#, #"{"repair":{},"x":1}"#, #"{"repair":{"x":1}}"#,
-                #"{"setNewAppLayout":{"_0":null}}"#, "{}", "[]"] {
+                #"{"setNewAppLayout":{"_0":null}}"#, "{}", "[]",
+                #"{"repair":{},"copyLog":{}}"#, #"{"setTrigger":{"_0":"onPress"},"x":1}"#,
+                #"{"setFeature":{"feature":"fnLanguage","on":true,"x":1}}"#, #"{"setFeature":{"feature":"fnLanguage"}}"#,
+                #"{"setNewAppLayout":{"_0":"a","x":1}}"#, #"{"setNewAppLayout":{"x":1}}"#, #"{"repair":1}"#,
+                #"{"addExcluded":{}}"#, #"{"setMode":{"_0":"cycle"},"setMode":{"_0":"lastTwo"}}"#] {
         check(canonicalAction(bad) == nil, "разбор отказывает: \(bad)")
     }
     check(canonicalAction(#"{"repair":{}}"#) == .repair, "разбор принимает настоящее действие")
@@ -159,8 +164,10 @@ func clearSettings() {
 
     // Разрешённое доходит до контроллера.
     Stub.calls = []
-    check(c.handle(.setFeature(feature: .perAppLayout, on: true)) == nil && c.isOn(.perAppLayout) && Stub.calls == ["access.refresh"],
-          "setFeature включает фишку")
+    KeyboardController.onFeaturesChanged = { Stub.calls.append("features.changed") }
+    check(c.handle(.setFeature(feature: .perAppLayout, on: true)) == nil && c.isOn(.perAppLayout) && Stub.calls == ["features.changed"],
+          "setFeature включает фишку и сообщает центру через onFeaturesChanged")
+    KeyboardController.onFeaturesChanged = {}
     check(c.handle(.setTrigger(.onPress)) == nil && c.trigger == .onPress, "setTrigger")
     check(c.handle(.setMode(.cycle)) == nil && c.mode == .cycle, "setMode")
     check(c.handle(.setNewAppLayout(abc)) == nil && c.newAppLayout == abc, "setNewAppLayout: выданный id")
@@ -194,8 +201,88 @@ func clearSettings() {
     check(c.wireState.features == ["fnLanguage", "perAppLayout"], "features в порядке экрана")
     check(roundTrips(c.wireState), "wireState настоящего контроллера проходит JSON")
     KeyboardLog.shared.flush()
-    let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus/keyboard.log")
-    check(FileManager.default.fileExists(atPath: log.path), "журнал пишется в подменённую домашнюю папку")
+    let log = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("utilitumus-keyboard-test.log")
+    check(FileManager.default.fileExists(atPath: log.path), "журнал стенда пишется во временную папку, а не в настоящий журнал")
+    let realLog = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Utilitumus/keyboard.log")
+    check(!FileManager.default.fileExists(atPath: realLog.path), "в подменённой домашней папке журнала нет")
+    clearSettings()
+}
+
+// MARK: - Утилита: остановки, журнал под экраном, шаги
+
+func decodedState(_ data: Data) -> KeyboardState? { try? JSONDecoder().decode(KeyboardState.self, from: data) }
+
+@MainActor func checkModule() {
+    clearSettings()
+    // Только «Раскладка для каждого приложения»: ей tap не нужен, она ничего не пишет в систему.
+    KeyboardFeature.fnLanguage.isOn = false
+    KeyboardFeature.perAppLayout.isOn = true
+    let module = KeyboardModule()
+    let controller = KeyboardController.shared
+    let enabledKey = SatelliteEnabled.key(LinkIdentity.id(module.linkName))
+    func restored(_ name: String, _ expected: Bool, _ body: () -> Void) {
+        module.start()
+        Stub.calls = []
+        let wasStarted = controller.isStarted
+        body()
+        check(wasStarted && !controller.isStarted, "\(name): модуль был запущен и остановлен")
+        check(Stub.calls.contains("restore") == expected, "\(name): 🌐 и диктовка \(expected ? "возвращены" : "не тронуты") (\(Stub.calls))")
+    }
+    check(!controller.isStarted, "init утилиты ничего не запускает")
+    Kit.defaults.set(true, forKey: enabledKey)
+    restored("передача центру (enterPassive)", false) { module.enterPassive() }
+    restored("обновление (stopForUpdate)", false) { module.stopForUpdate() }
+    restored("утилита включена, stop зовёт старый центр", false) { module.stop() }
+    restored("удаление (stopForUninstall)", true) { module.stopForUninstall() }
+    Kit.defaults.set(false, forKey: enabledKey)
+    restored("утилиту выключили (stop)", true) { module.stop() }
+    Kit.defaults.removeObject(forKey: enabledKey)
+    restored("ключа включённости нет (stop)", false) { module.stop() }
+    module.start()
+    module.enterPassive()
+    module.enterPassive()
+    check(!controller.isStarted, "повторный enterPassive безвреден")
+
+    // Журнал уходит в состояние и пинги только под открытым экраном.
+    // «Язык по Fn» включён, но модуль не запущен: tap не создаётся, а действие доходит до заглушки и пишет в журнал.
+    controller.setFeature(.fnLanguage, on: true)
+    let fnModule = KeyboardModule()
+    var pings = 0
+    let sink = fnModule.changes.sink { pings += 1 }
+    let disableDictation = LinkWire.encoded(KeyboardAction.disableDictationDoubleFn)
+    let before = KeyboardLog.shared.count
+    let reply = fnModule.handle(disableDictation)
+    check(!String(decoding: reply, as: UTF8.self).contains("\"error\""), "действие принято: \(String(decoding: reply, as: UTF8.self).prefix(80))")
+    check(KeyboardLog.shared.count > before, "запись попала в журнал")
+    check(pings == 0, "экран закрыт: запись журнала не будит центр (пингов \(pings))")
+    check(decodedState(fnModule.state())?.logCount == 0 && decodedState(fnModule.state())?.logTail.isEmpty == true,
+          "экран закрыт: журнал в состоянии пуст")
+    fnModule.screenOpen(true)
+    check(pings > 0, "экран открыт: текущий журнал отправлен (\(pings))")
+    check((decodedState(fnModule.state())?.logCount ?? 0) > 0, "экран открыт: журнал в состоянии")
+    let open = pings
+    _ = fnModule.handle(disableDictation)
+    check(pings > open, "экран открыт: новая запись будит центр")
+    fnModule.screenOpen(false)
+    let closed = pings
+    _ = fnModule.handle(disableDictation)
+    check(pings == closed, "экран закрыт снова: тишина")
+    sink.cancel()
+
+    // Шаги и статус.
+    let steps = fnModule.setupSteps
+    check(steps.map(\.id) == ["keyboard.input", "keyboard.globe", "keyboard.dictation"], "шаги «Языка по Fn»")
+    check(steps.map(\.required) == [true, true, false] && steps.map(\.kind) == [.permission, .system, .recommendation], "обязательность и виды шагов")
+    Stub.calls = []
+    check(fnModule.performSetupStep("keyboard.globe") == nil && Stub.calls == ["disable"], "шаг «🌐» доходит до заглушки")
+    check(fnModule.performSetupStep("keyboard.dictation") == nil && Stub.calls == ["disable", "disableDictation"], "шаг «диктовка» доходит до заглушки")
+    check(fnModule.performSetupStep("keyboard.nothing") != nil, "незнакомый шаг отвергнут")
+    controller.setFeature(.fnLanguage, on: false)
+    check(fnModule.setupSteps.isEmpty, "без «Языка по Fn» шагов нет")
+    let line = fnModule.statusLine(passiveReason: nil)
+    check(line == "по приложениям" && !line.contains("Русск") && !line.contains("ABC"), "статус без названия раскладки: «\(line)»")
+    check(fnModule.statusLine(passiveReason: "Ждём передачу от центра") == "Ждём передачу от центра", "статус пассивной утилиты")
+    check(!fnModule.attention, "незапущенный модуль не требует внимания")
     clearSettings()
 }
 
@@ -331,6 +418,7 @@ enum Main {
         Task { @MainActor in
             checkCoding()
             checkHandle()
+            checkModule()
             await checkScreen(out: out)
             print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)
