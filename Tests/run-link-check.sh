@@ -159,6 +159,8 @@ fake fake-ours silent
 scenario client silent
 fake fake-ours v99
 scenario client v99
+fake fake-ours next
+scenario client next
 fake fake-ours garbage
 scenario client garbage
 

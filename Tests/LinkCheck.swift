@@ -44,13 +44,34 @@ func pureChecks() {
     } catch {
         check((error as? LinkError) == .incompatible(99), "hello с версией 99 — incompatible(99)")
     }
-    check(KitLink.protocolVersion == 2, "версия протокола 2")
-    do {
-        _ = try LinkClient.decodeHello(try! JSONEncoder().encode(LinkHello(id: "awake", version: "1", protocolVersion: 1)))
-        check(false, "hello с версией 1 отвергается")
-    } catch {
-        check((error as? LinkError) == .incompatible(1), "hello с версией 1 — incompatible(1)")
+    check(KitLink.protocolVersion == 3, "версия протокола 3")
+    for old in [1, 2] {
+        do {
+            _ = try LinkClient.decodeHello(try! JSONEncoder().encode(LinkHello(id: "awake", version: "1", protocolVersion: old)))
+            check(false, "hello с версией \(old) отвергается")
+        } catch {
+            check((error as? LinkError) == .incompatible(old), "hello с версией \(old) — incompatible(\(old))")
+        }
     }
+    let oldest = KitLink.oldestProtocolVersion, current = KitLink.protocolVersion
+    let ranges: [(Int, Int?, Bool, String)] = [
+        (current, nil, true, "своя версия без диапазона"),
+        (current, oldest, true, "своя версия со своим диапазоном"),
+        (current + 1, current, true, "утилита новее, но понимает нашу версию"),
+        (current + 1, nil, false, "утилита новее и понимает только свою"),
+        (current + 1, current + 1, false, "утилита новее, наша версия ей уже чужая"),
+        (oldest - 1, nil, false, "утилита старее нашего диапазона"),
+        (oldest - 1, oldest - 1, false, "утилита старее, диапазон тоже"),
+        (current, current + 1, false, "диапазон утилиты перевёрнут"),
+    ]
+    for (version, oldestOfPeer, accepted, name) in ranges {
+        let hello = LinkHello(id: "awake", version: "1", protocolVersion: version, oldestProtocolVersion: oldestOfPeer)
+        check(KitLink.isCompatible(hello) == accepted, "диапазон версий: \(name) (\(version), \(oldestOfPeer.map(String.init) ?? "нет")) — \(accepted ? "принят" : "отвергнут")")
+        check((try? LinkClient.decodeHello(JSONEncoder().encode(hello))) != nil == accepted, "диапазон версий: decodeHello то же для «\(name)»")
+    }
+    let oldStatus = #"{"enabled":true,"line":"x","needsSetup":0}"#
+    let tolerant = try? JSONDecoder().decode(LinkStatus.self, from: Data(oldStatus.utf8))
+    check(tolerant?.attention == false && tolerant?.quickActions == [] && tolerant?.setupSteps == [], "статус без новых полей читается: они необязательны")
     check((try? LinkClient.decodeHello(Data("{не json".utf8))) == nil, "битый JSON в hello — ошибка, не падение")
     check((try? LinkClient.decodeStatus(Data("{не json".utf8))) == nil, "битый JSON в status — ошибка, не падение")
 
@@ -107,14 +128,20 @@ func recordedCalls(in dir: String, file name: String = "calls.log") -> [String] 
         hangIfAsked("moduleAction")
         return Data(action.reversed())
     }
+    func linkPerformSetupStep(_ id: String) -> Data {
+        record("performSetupStep(\(id))", in: dir)
+        return LinkWire.encoded(LinkReply(state: linkStatus(), error: nil))
+    }
+    func linkScreenOpen(_ open: Bool) { record("screenOpen(\(open))", in: dir) }
+    func linkWatcherLost() { record("watcherLost", in: dir) }
     func linkSetEnabled(_ on: Bool) {
         record("setEnabled(\(on))", in: dir)
         enabled = on
         KitLink.postStatusChanged(testID)
     }
     func linkOpenWindow() { record("openWindow", in: dir) }
-    func linkQuit() {
-        record("quit", in: dir)
+    func linkQuit(_ reason: LinkQuitReason) {
+        record("quit(\(reason))", in: dir)
         exit(0)
     }
 }
@@ -147,6 +174,7 @@ final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
         switch mode {
         case "silent": unanswered.append(reply)  // держим блок: ответа просто нет
         case "v99": reply(try! JSONEncoder().encode(LinkHello(id: testID, version: "1", protocolVersion: 99)))
+        case "next": reply(try! JSONEncoder().encode(LinkHello(id: testID, version: "1", protocolVersion: KitLink.protocolVersion + 1, oldestProtocolVersion: KitLink.protocolVersion)))
         case "garbage": reply(Data("{не json".utf8))
         default: reply(try! JSONEncoder().encode(good))
         }
@@ -163,6 +191,14 @@ final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
         record("moduleAction", in: dir)
         reply(Data())
     }
+    func performSetupStep(_ id: String, reply: @escaping @Sendable (Data) -> Void) {
+        record("performSetupStep", in: dir)
+        reply(Data())
+    }
+    func watch(_ level: Int, reply: @escaping @Sendable () -> Void) {
+        record("watch", in: dir)
+        reply()
+    }
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void) {
         record("setEnabled(\(enabled))", in: dir)
         reply()
@@ -171,7 +207,7 @@ final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
         record("openWindow", in: dir)
         reply()
     }
-    func quit(reply: @escaping @Sendable () -> Void) {
+    func quit(reason: Int, reply: @escaping @Sendable () -> Void) {
         record("quit", in: dir)
         reply()
     }
@@ -346,6 +382,15 @@ func onlyHello(in dir: String, _ label: String) {
         await pause(0.3)
         onlyHello(in: dir, "чужая версия")
 
+    case "next":
+        let client = LinkClient(id: testID)
+        do {
+            try await client.setEnabled(true)
+            check(recordedCalls(in: dir) == ["hello", "setEnabled(true)"], "утилита на версию новее, понимает нашу: команда прошла (\(recordedCalls(in: dir)))")
+        } catch {
+            check(false, "утилита на версию новее: \(error)")
+        }
+
     case "garbage":
         let client = LinkClient(id: testID)
         do {
@@ -419,10 +464,11 @@ func onlyHello(in dir: String, _ label: String) {
         let client = LinkClient(id: testID)
         do {
             guard let pid = Int32(try await client.status().line) else { return check(false, "pid сервера") }
-            try await client.quit()
+            try await client.quit(.uninstall)
             check(true, "quit подтверждён ответом")
             for _ in 0..<40 where kill(pid, 0) == 0 { await pause(0.05) }
             check(kill(pid, 0) != 0, "quit: процесс вышел")
+            check(recordedCalls(in: dir).last == "quit(uninstall)", "quit: причина дошла (\(recordedCalls(in: dir).last ?? "нет"))")
         } catch {
             check(false, "quit: \(error)")
         }
