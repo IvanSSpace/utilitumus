@@ -7,9 +7,14 @@ enum Kit {
     /// Домен настроек один на центр и утилиты. Свой bundle id как suiteName macOS не принимает,
     /// поэтому в центре именно `.standard`.
     /// Сборка со швом `KIT_TEST_DEFAULTS` (тесты и стенды) пишет только в свой suite: код Kit в процессе
-    /// без bundle id центра иначе менял бы настоящие настройки. Переменной окружения здесь нет намеренно.
+    /// без bundle id центра иначе менял бы настоящие настройки. Переменная окружения есть только в этой сборке:
+    /// так проверки разных модулей живут в своих suite и идут одновременно. Домен вне тестовых сборка не примет.
     #if KIT_TEST_DEFAULTS
-    static let defaults = UserDefaults(suiteName: "local.utilitumus.test.kit")!
+    static let defaults: UserDefaults = {
+        let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
+        precondition(suite.hasPrefix("local.utilitumus.test."), "Стенд пишет только в тестовый домен")
+        return UserDefaults(suiteName: suite)!
+    }()
     #else
     static let defaults: UserDefaults = Bundle.main.bundleIdentifier == hubBundleID
         ? .standard
