@@ -1,18 +1,17 @@
 import SwiftUI
 
 /// Экран модуля «Нагрузка»: шапка `DSPage` (давление и своп в строке, «Обновить»), вкладки, «Просто / Подробно» и содержимое.
-struct LoadScreen: View {
+struct LoadScreen<Model: LoadModel>: View {
     @Environment(\.pageActive) private var pageActive
-    @ObservedObject var store: LoadStore
-    @ObservedObject var background: BackgroundStore
+    @ObservedObject var store: Model
+    @ObservedObject var background: Model.Background
     @AppStorage("LoadViewMode") private var modeRaw = LoadViewMode.full.rawValue
     @AppStorage("LoadTab") private var tabRaw = LoadTab.overview.rawValue
     @State private var drill: MemoryPart?
 
-    @MainActor init(store: LoadStore? = nil) {
-        let s = store ?? LoadStore.shared
-        self.store = s
-        background = s.background
+    @MainActor init(model: Model) {
+        store = model
+        background = model.background
     }
 
     private var mode: LoadViewMode { LoadViewMode(rawValue: modeRaw) ?? .full }
@@ -20,18 +19,6 @@ struct LoadScreen: View {
         let t = LoadTab(rawValue: tabRaw) ?? .overview
         // «Фоновое» скрыто, пока нет ни агентов, ни ботов; выбор при этом не стираем — вкладка вернётся сама.
         return t == .background && !background.hasContent ? .overview : t
-    }
-
-    static func pressureWord(_ p: MemoryPressure) -> String {
-        switch p {
-        case .normal: return "норма"
-        case .warn: return "высокое"
-        case .critical: return "критическое"
-        }
-    }
-
-    static func swapIsHot(_ m: MemoryTotals) -> Bool {
-        m.swapTotalMB > 0 && Double(m.swapUsedMB) / Double(m.swapTotalMB) > 0.7
     }
 
     var body: some View {
@@ -52,19 +39,19 @@ struct LoadScreen: View {
             }
         }
         .onChange(of: tab) { background.setTabOpen(pageActive && $1 == .background) }
-        .sheet(item: Binding(get: { store.pendingStop }, set: { if $0 == nil { store.cancelStop() } })) { plan in
+        .sheet(item: Binding(get: { store.stopPrompt }, set: { if $0 == nil { store.cancelStop() } })) { plan in
             StopConfirmSheet(store: store, plan: plan).dsThemed()
         }
-        .sheet(item: Binding(get: { background.pending }, set: { if $0 == nil { background.cancel() } })) { plan in
+        .sheet(item: Binding(get: { background.prompt }, set: { if $0 == nil { background.cancel() } })) { plan in
             BackgroundConfirmSheet(background: background, plan: plan).dsThemed()
         }
     }
 
     /// «Давление: норма · Своп 2.1/4 GB» — строка под названием.
     private var subtitle: String {
-        guard let m = store.snapshot?.memory else { return "Считаю…" }
-        return "Давление: \(Self.pressureWord(m.pressure)) · Своп \(Fmt.gb(Double(m.swapUsedMB)))/\(Fmt.gb(Double(m.swapTotalMB))) GB"
-            + (Self.swapIsHot(m) ? " · много" : "")
+        guard let m = store.measure?.memory else { return "Считаю…" }
+        return "Давление: \(LoadText.pressureWord(m.pressure)) · Своп \(Fmt.gb(Double(m.swapUsedMB)))/\(Fmt.gb(Double(m.swapTotalMB))) GB"
+            + (LoadText.swapIsHot(m) ? " · много" : "")
     }
 
     /// Вкладки и «Просто / Подробно».
@@ -84,7 +71,7 @@ struct LoadScreen: View {
                 .foregroundStyle(n.isError ? Color.orange : Color.green)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            DSButton("Закрыть", style: .plain, small: true) { store.notice = nil }
+            DSButton("Закрыть", style: .plain, small: true) { store.dismissNotice() }
         }
         .font(.callout)
     }
@@ -103,5 +90,12 @@ struct LoadScreen: View {
         case .memory:
             MemoryTab(store: store, mode: mode, drill: $drill) { modeRaw = LoadViewMode.full.rawValue }
         }
+    }
+}
+
+extension LoadScreen where Model == LoadStore {
+    /// Встроенный экран: модель — сам модуль.
+    @MainActor init(store: LoadStore? = nil) {
+        self.init(model: store ?? LoadStore.shared)
     }
 }

@@ -16,6 +16,12 @@ final class LiveStats: ObservableObject {
         selfMemMB = s.selfMemMB
         selfCPU = s.selfCPU
     }
+
+    func update(from s: LoadLive) {
+        measureMillis = s.measureMillis
+        selfMemMB = s.selfMemMB
+        selfCPU = s.selfCPU
+    }
 }
 
 /// Отпечаток заметных данных снимка. Два снимка с одним отпечатком на экране выглядят одинаково

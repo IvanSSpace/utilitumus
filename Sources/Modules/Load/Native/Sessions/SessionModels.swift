@@ -1,6 +1,6 @@
 import Foundation
 
-enum SessionStatus: String, Sendable {
+enum SessionStatus: String, Sendable, Codable {
     case idle, busy, shell, unknown
 
     /// Слово для экрана. `shell` — сессия выполняет команду: для человека это та же работа.
@@ -18,7 +18,7 @@ enum SessionStatus: String, Sendable {
 }
 
 /// Потомок сессии или шелла: dev-сервер, MCP, шелл, прочее.
-struct SessionChild: Sendable, Identifiable {
+struct SessionChild: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var name: String
     var kind: ProcessKind
@@ -28,14 +28,16 @@ struct SessionChild: Sendable, Identifiable {
     var stoppable: Bool
     /// Где запущен, если не там же, где его хозяин (сессия или шелл).
     var place: ProcessPlace?
+    var uniqueID: UInt64 = 0
     var id: Int32 { pid }
+    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
 
     /// Dev-сервер или от 500 MB: на такие смотрим в первую очередь.
     var isHot: Bool { kind == .devServer || (memMB ?? 0) >= SessionsBuilder.heavyMB }
 }
 
 /// Живая сессия Claude Code.
-struct ClaudeSession: Sendable, Identifiable {
+struct ClaudeSession: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var sessionID: String?
     var name: String
@@ -55,12 +57,14 @@ struct ClaudeSession: Sendable, Identifiable {
     /// Панель запущена из этой сессии (она — предок панели).
     var isSelf: Bool
     var stoppable: Bool
+    var uniqueID: UInt64 = 0
     var id: Int32 { pid }
+    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
 
     var kidsMB: Double { children.reduce(0) { $0 + ($1.memMB ?? 0) } }
 }
 
-struct TerminalShell: Sendable, Identifiable {
+struct TerminalShell: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     var tty: String?
     var cwd: String?
@@ -69,12 +73,17 @@ struct TerminalShell: Sendable, Identifiable {
     var foreground: String
     var children: [SessionChild]
     /// Сессии Claude, запущенные в этом шелле: закрытие шелла завершит и их.
-    var sessions: [ClaudeSession]
+    var sessions: [ClaudeSession] = []
     var stoppable: Bool
+    var uniqueID: UInt64 = 0
     var id: Int32 { pid }
+    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
+
+    /// `sessions` нужен только тексту подтверждения, его строит модуль; на экране сессии уже есть в своей секции.
+    private enum CodingKeys: String, CodingKey { case pid, tty, cwd, project, foreground, children, stoppable, uniqueID }
 }
 
-struct TerminalHost: Sendable, Identifiable {
+struct TerminalHost: Sendable, Codable, Equatable, Identifiable {
     var app: String
     var hostPid: Int32
     var shells: [TerminalShell]
@@ -82,8 +91,8 @@ struct TerminalHost: Sendable, Identifiable {
 }
 
 /// Сколько памяти держит ИИ: каждый процесс — в одной части.
-struct AIMemory: Sendable {
-    struct Part: Sendable, Identifiable {
+struct AIMemory: Sendable, Codable, Equatable {
+    struct Part: Sendable, Codable, Equatable, Identifiable {
         var label: String
         var memMB: Double
         var count: Int
@@ -96,7 +105,7 @@ struct AIMemory: Sendable {
 }
 
 /// Всё, что экрану «Сессии», карточке «ИИ» и подсказкам нужно знать о сессиях, — один раз за замер.
-struct SessionsData: Sendable {
+struct SessionsData: Sendable, Codable, Equatable {
     var claude: [ClaudeSession] = []
     var terminals: [TerminalHost] = []
     var tmux = TmuxInfo()
@@ -107,4 +116,16 @@ struct SessionsData: Sendable {
     var ai = AIMemory()
 
     static let empty = SessionsData()
+
+    /// Порядок множества от запуска к запуску разный, а байты состояния должны совпадать.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(claude, forKey: .claude)
+        try c.encode(terminals, forKey: .terminals)
+        try c.encode(tmux, forKey: .tmux)
+        try c.encode(docker, forKey: .docker)
+        try c.encode(orphans, forKey: .orphans)
+        try c.encode(stoppableOrphans.sorted(), forKey: .stoppableOrphans)
+        try c.encode(ai, forKey: .ai)
+    }
 }

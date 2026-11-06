@@ -116,13 +116,16 @@ enum Exec {
 /// Журнал действий: по строке JSON на действие в `~/Library/Logs/Utilitumus/actions.log`
 /// (что остановлено, отключено, включено и когда). Пишется и для отказов. Права 0600.
 enum ActionLog {
-    struct Entry: Identifiable, Sendable {
+    struct Entry: Sendable, Codable, Equatable, Identifiable {
         var id = UUID()
         var time: Date
-        var kind: String
-        var label: String
+        var kind: String = ""
+        var label: String = ""
         var ok: Bool
         var message: String
+
+        /// `kind` и `label` экран не показывает.
+        private enum CodingKeys: String, CodingKey { case id, time, ok, message }
     }
 
     /// Путь не переопределяется переменной окружения (раньше был UTILITUMUS_LOGS): иначе
@@ -231,6 +234,12 @@ struct BackgroundPlan: Identifiable, Sendable {
     var totalMB: Double
     var confirmTitle: String
     var destructive: Bool
+
+    /// Что показать на подтверждении.
+    var prompt: LoadBackgroundPrompt {
+        LoadBackgroundPrompt(id: id, title: title, message: message, command: command, targets: targets,
+                             totalMB: totalMB, confirmTitle: confirmTitle, destructive: destructive)
+    }
 
     private static func capitalized(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }
 

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Вид потомка: по нему решаем, что считать dev-сервером, сборкой и что показывать подписью.
-enum ProcessKind: String, Sendable {
+enum ProcessKind: String, Sendable, Codable {
     case shell, mcp, devServer, build, other
 }
 
@@ -130,6 +130,14 @@ enum Kinds {
     }
 
     // MARK: Подписи
+
+    private static let rowKinds: [ProcessKind: String] = [.devServer: "dev-сервер", .build: "сборка", .mcp: "MCP", .shell: "шелл"]
+
+    /// Вторая строка процесса в раскрытой группе: чем он занят, если это понятно.
+    static func rowNote(_ p: LoadProcess) -> String? {
+        if isClaude(p) { return "сессия Claude" }
+        return rowKinds[childKind(p)]
+    }
 
     /// «Arc · вкладка», «Chrome · GPU»: хелпер браузера или Electron. Он всегда внутри .app —
     /// так «webpack --type=prod» из проекта не примем за хелпер.

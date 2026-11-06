@@ -1,6 +1,6 @@
 import Foundation
 
-enum GroupKind: String, Sendable {
+enum GroupKind: String, Sendable, Codable {
     case project, app, system, other
 
     var title: String {

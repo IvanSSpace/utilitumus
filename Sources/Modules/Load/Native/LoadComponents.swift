@@ -311,13 +311,13 @@ struct MemoryBar: View {
 
 /// Содержимое карточки «Память»: итоги, полоса, легенда и (в «Подробно») раскрываемый разбор.
 struct MemoryCard: View {
-    let snapshot: LoadSnapshot
+    let snapshot: LoadMeasure
     let palette: LoadPalette
     let mode: LoadViewMode
     /// Крупная версия для вкладки «Память»: с легендой «кто держит» и пояснением.
     var big = false
     @Binding var drill: MemoryPart?
-    var onStop: (Int32) -> Void
+    var onStop: (LoadRowID) -> Void
 
     private var m: MemoryTotals { snapshot.memory }
     private var map: MemoryMap { snapshot.map }
@@ -379,7 +379,7 @@ struct MemoryCard: View {
     private var simpleHeader: some View {
         VStack(alignment: .leading, spacing: 4) {
             (Text("Занято ") + Text(Fmt.gb(Double(m.usedMB))).fontWeight(.semibold) + Text(" из \(Fmt.gb(Double(m.totalMB))) GB · давление ")
-                + Text(LoadScreen.pressureWord(m.pressure)).fontWeight(.semibold))
+                + Text(LoadText.pressureWord(m.pressure)).fontWeight(.semibold))
                 .font(.title3).monospacedDigit()
             summaryLine(simple: true)
         }
@@ -457,10 +457,10 @@ struct MemoryCard: View {
 
 /// Разбор части полосы: из чего она состоит.
 struct DrillPanel: View {
-    let snapshot: LoadSnapshot
+    let snapshot: LoadMeasure
     let part: MemoryPart
     let palette: LoadPalette
-    var onStop: (Int32) -> Void
+    var onStop: (LoadRowID) -> Void
 
     private var map: MemoryMap { snapshot.map }
 
@@ -504,7 +504,7 @@ struct DrillPanel: View {
                         Spacer()
                         Text(Fmt.mb(r.mb)).monospacedDigit()
                         if r.stoppable {
-                            StopButton(help: "Остановить \(r.name)") { onStop(r.pid) }
+                            StopButton(help: "Остановить \(r.name)") { onStop(r.rowID) }
                         }
                     }
                 }

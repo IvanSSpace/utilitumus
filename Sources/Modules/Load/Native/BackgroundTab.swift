@@ -5,8 +5,8 @@ import SwiftUI
 // Вкладка скрыта в `LoadScreen`, пока показывать нечего.
 
 /// Вкладка «Фоновое». «Просто» — по строке на агента и боту с одной кнопкой; «Подробно» — всё как в lambscape.
-struct BackgroundTab: View {
-    @ObservedObject var background: BackgroundStore
+struct BackgroundTab<Background: LoadBackgroundModel>: View {
+    @ObservedObject var background: Background
     let mode: LoadViewMode
     var openFull: () -> Void
 
@@ -95,8 +95,8 @@ private struct SimpleLine: View {
 }
 
 /// Сводка фонового в «Обзоре»: боты с кнопками и одна строка про агентов. Нечего показывать — секции нет.
-struct BackgroundCompactSection: View {
-    @ObservedObject var background: BackgroundStore
+struct BackgroundCompactSection<Background: LoadBackgroundModel>: View {
+    @ObservedObject var background: Background
     var open: () -> Void
 
     var body: some View {

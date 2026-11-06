@@ -1,17 +1,26 @@
 import Foundation
 
 /// Процесс в составе группы. Сам процесс берётся из `LoadSnapshot.procs` по pid.
-struct GroupMember: Sendable, Identifiable {
+struct GroupMember: Sendable, Codable, Equatable, Identifiable {
     var pid: Int32
     /// Округлённая память; nil — неизвестна (root вне кэша `top`).
     var memMB: Int?
-    var why: String
+    var why: String = ""
     /// Можно ли остановить его кнопкой (не системный, не чужой, не сама панель).
     var stoppable: Bool
+    var uniqueID: UInt64 = 0
+    /// Подпись строки: `Kinds.label`.
+    var label = "—"
+    var note: String?
+    var cpuPercent: Double?
     var id: Int32 { pid }
+    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
+
+    /// `why` экран не показывает.
+    private enum CodingKeys: String, CodingKey { case pid, memMB, stoppable, uniqueID, label, note, cpuPercent }
 }
 
-struct SystemHint: Sendable, Identifiable {
+struct SystemHint: Sendable, Codable, Equatable, Identifiable {
     var title: String
     var how: String
     var savesMB: Int
@@ -19,7 +28,7 @@ struct SystemHint: Sendable, Identifiable {
 }
 
 /// Группа процессов: проект, приложение, система или прочее.
-struct ProcessGroup: Sendable, Identifiable {
+struct ProcessGroup: Sendable, Codable, Equatable, Identifiable {
     var id: String
     var kind: GroupKind
     var name: String
@@ -72,7 +81,12 @@ enum Grouping {
             let parts = fit(known.map { $0.mem ?? 0 } + [max(0, g.mem - topSum)], total: total)
             out.append(ProcessGroup(
                 id: id, kind: kind, name: Attribution.groupName(id), path: g.path, memMB: total, count: sorted.count,
-                members: sorted.map { GroupMember(pid: $0.pid, memMB: $0.mem.map { Int($0.rounded()) }, why: $0.why, stoppable: $0.stop) },
+                members: sorted.map { m in
+                    let p = procs[m.pid]
+                    return GroupMember(pid: m.pid, memMB: m.mem.map { Int($0.rounded()) }, why: m.why, stoppable: m.stop,
+                                       uniqueID: p?.uniqueID ?? 0, label: p.map { Kinds.label($0) } ?? "—",
+                                       note: p.flatMap(Kinds.rowNote), cpuPercent: p?.cpuPercent)
+                },
                 topMB: Array(parts.dropLast()), restCount: sorted.count - known.count, restMB: parts.last ?? 0,
                 stoppableMB: sorted.filter(\.stop).reduce(0.0) { $0 + ($1.mem ?? 0) }))
         }

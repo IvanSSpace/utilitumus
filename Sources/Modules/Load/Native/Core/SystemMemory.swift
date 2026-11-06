@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-enum MemoryPressure: Int, Sendable {
+enum MemoryPressure: Int, Sendable, Codable {
     case normal = 1, warn = 2, critical = 4
 
     init(level: Int) {
@@ -10,7 +10,7 @@ enum MemoryPressure: Int, Sendable {
 }
 
 /// Итоги памяти мака — как в Мониторе активности, в целых MB.
-struct MemoryTotals: Sendable {
+struct MemoryTotals: Sendable, Codable, Equatable {
     var totalMB: Int
     /// Занято = приложения + wired + сжатое.
     var usedMB: Int
@@ -24,7 +24,7 @@ struct MemoryTotals: Sendable {
     var pressure: MemoryPressure
 }
 
-struct HostInfo: Sendable {
+struct HostInfo: Sendable, Codable, Equatable {
     var chip: String
     var ramMB: Int
     var macOS: String

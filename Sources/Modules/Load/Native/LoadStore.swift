@@ -2,10 +2,23 @@ import AppKit
 import SwiftUI
 
 /// Результат последнего действия «Остановить» — показывается баннером на экране.
-struct LoadNotice: Identifiable {
-    let id = UUID()
+struct LoadNotice: Identifiable, Codable, Equatable {
+    var id = UUID()
     var text: String
     var isError: Bool
+}
+
+/// Что `LoadStore` просит у движка. Проверки подставляют свой, который ничего не запускает и не останавливает.
+protocol LoadMeasuring: Sendable {
+    func recordHistory() async -> HistoryWindow
+    func measure() async -> LoadSnapshot
+    func historyWindow() async -> HistoryWindow
+    func refreshNow() async -> LoadSnapshot
+    func execute(_ plan: StopPlan) async -> StopResult
+}
+
+extension LoadEngine: LoadMeasuring {
+    func measure() -> LoadSnapshot { measure(light: false) }
 }
 
 /// Состояние модуля «Нагрузка».
@@ -15,7 +28,7 @@ struct LoadNotice: Identifiable {
 ///
 /// Вся работа — в `LoadEngine` (актор): сюда доезжают только готовые снимки.
 @MainActor
-final class LoadStore: ObservableObject {
+final class LoadStore: LoadModel {
     static let shared = LoadStore()
 
     static let liveInterval: Duration = .seconds(3)
@@ -36,12 +49,12 @@ final class LoadStore: ObservableObject {
     @Published private(set) var stopRunning = false
     @Published var notice: LoadNotice?
 
-    let engine: LoadEngine
+    let engine: any LoadMeasuring
     /// Вкладка «Фоновое»: агенты launchd и боты.
-    let background = BackgroundStore()
+    let background: BackgroundStore
     private var historyLoop: Task<Void, Never>?
     private var liveLoop: Task<Void, Never>?
-    private var watchers = 0
+    private(set) var watchers = 0
     private var noticeTimer: Task<Void, Never>?
 
     /// Идёт ли запись истории.
@@ -49,11 +62,19 @@ final class LoadStore: ObservableObject {
 
     private convenience init() { self.init(engine: LoadEngine()) }
 
-    /// Свой движок — для проверок с отдельным файлом истории.
-    init(engine: LoadEngine) {
+    /// Свой движок и своя вкладка «Фоновое» — для проверок: они не должны ничего останавливать по-настоящему.
+    init(engine: any LoadMeasuring, background: BackgroundStore? = nil) {
         self.engine = engine
-        background.onFinish = { [weak self] r in self?.backgroundFinished(r) }
+        self.background = background ?? BackgroundStore()
+        self.background.onFinish = { [weak self] r in self?.backgroundFinished(r) }
     }
+
+    // MARK: Для экрана
+
+    var measure: LoadMeasure? { snapshot.map(LoadMeasure.init) }
+    var stopPrompt: LoadStopPrompt? { pendingStop?.prompt }
+
+    func dismissNotice() { notice = nil }
 
     // MARK: Модуль включён / выключен
 
@@ -145,12 +166,8 @@ final class LoadStore: ObservableObject {
 
     // MARK: Остановка
 
-    func requestStop(process pid: Int32) {
-        pendingStop = latest?.stopPlan(process: pid)
-    }
-
-    func requestStop(group id: String) {
-        pendingStop = latest?.stopPlan(group: id)
+    func requestStop(_ target: LoadStopTarget) {
+        pendingStop = stopPlan(for: target)
     }
 
     func cancelStop() {
@@ -158,8 +175,8 @@ final class LoadStore: ObservableObject {
         pendingStop = nil
     }
 
-    func confirmStop() {
-        guard let plan = pendingStop, !stopRunning else { return }
+    func confirmStop(_ planID: UUID) {
+        guard let plan = pendingStop, plan.id == planID, !stopRunning else { return }
         stopRunning = true
         Task {
             let result = await engine.execute(plan)
