@@ -123,11 +123,14 @@ final class BrowserCatalog: ObservableObject {
         BrowserStorage.save(keys, key: Self.keysKey, defaults: defaults)
     }
 
-    /// Основной браузер, если он ещё установлен.
-    var fallback: InstalledBrowser? { browsers.first { $0.id == fallbackID } }
+    /// Основной браузер, если он ещё установлен и это настоящий браузер (см. `BrowserRouting`).
+    var fallback: InstalledBrowser? { browsers.first { $0.id == fallbackID && BrowserKnown.isBrowser($0.id) } }
 
-    /// Куда открывать, когда панель не нужна: основной, а если не выбран — первый найденный.
-    var openTarget: InstalledBrowser? { fallback ?? pickerBrowsers.first ?? browsers.first }
+    /// Куда открывать, когда панель не нужна. nil — решать пользователю на панели.
+    var openTarget: InstalledBrowser? {
+        BrowserRouting.fallbackTarget(fallbackID: fallbackID, installed: browsers.map(\.id), shown: pickerBrowsers.map(\.id))
+            .flatMap(browser(id:))
+    }
 
     // MARK: - Запуск
 
@@ -195,7 +198,7 @@ final class BrowserCatalog: ObservableObject {
     /// Основной браузер не выбран, а по умолчанию стоит чужой: он и есть тот, куда вести ссылки.
     private func adoptCurrentDefaultAsFallback() {
         guard fallback == nil, let url = NSWorkspace.shared.urlForApplication(toOpen: probe),
-              let id = Bundle(url: url)?.bundleIdentifier,
+              let id = Bundle(url: url)?.bundleIdentifier, BrowserKnown.isBrowser(id),
               let candidate = browsers.first(where: { $0.id == id }) else { return }
         setFallback(candidate.id)
     }

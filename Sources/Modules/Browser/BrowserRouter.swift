@@ -35,48 +35,57 @@ final class BrowserRouter {
 
         if !forcePanel {
             guard !BrowserHelper.moduleDisabled else {
-                openInFallback(url)
+                openInFallback(url, from: source)
                 return
             }
-            let available = Set(catalog.browsers.map(\.id))
-            let usable = catalog.rules.filter { available.contains($0.browserID) }
-            if let rule = BrowserRuleMatcher.firstMatch(rules: usable, url: url,
-                                                         sourceBundleID: source?.bundleIdentifier),
-               let browser = catalog.browser(id: rule.browserID) {
-                open(url, in: browser, private: rule.isPrivate)
+            switch BrowserRouting.route(rules: catalog.rules, url: url, sourceBundleID: source?.bundleIdentifier,
+                                        installed: Set(catalog.browsers.map(\.id)), shown: catalog.pickerBrowsers.map(\.id)) {
+            case .open(let id, let isPrivate):
+                if let browser = catalog.browser(id: id) { open(url, in: browser, private: isPrivate) }
                 return
+            case .fallback:
+                openInFallback(url, from: source)
+                return
+            case .panel:
+                break
             }
         }
+        guard !catalog.pickerBrowsers.isEmpty else { return }
+        showPanel(url, from: source, browsers: catalog.pickerBrowsers)
+    }
 
-        let choices = catalog.pickerBrowsers
-        // Выбирать не из чего: панель с одной иконкой — лишний клик.
-        if !forcePanel && choices.count < 2 {
-            if let only = choices.first { open(url, in: only, private: false) } else { openInFallback(url) }
-            return
-        }
-        guard !choices.isEmpty else { return }
-        BrowserPicker.shared.show(url: url, source: source, browsers: choices, keys: catalog.effectiveKeys,
-                                  preselected: catalog.fallbackID) { [weak self] browser, isPrivate, remember in
+    private func showPanel(_ url: URL, from source: NSRunningApplication?, browsers: [InstalledBrowser]) {
+        let catalog = BrowserCatalog.shared
+        BrowserPicker.shared.show(url: url, source: source, browsers: browsers, keys: catalog.effectiveKeys,
+                                  preselected: catalog.fallback?.id) { [weak self] browser, isPrivate, remember in
             if remember { self?.remember(url, browser: browser, isPrivate: isPrivate) }
             self?.open(url, in: browser, private: isPrivate)
         }
     }
 
     /// Правило из выбора в панели: «домен → этот браузер». У файла и ссылки без хоста правила нет.
+    /// На незнакомое приложение правило не сработало бы (см. `BrowserRouting`), поэтому его не пишем.
     private func remember(_ url: URL, browser: InstalledBrowser, isPrivate: Bool) {
-        guard let host = BrowserRuleMatcher.host(of: url),
+        guard BrowserKnown.isBrowser(browser.id), let host = BrowserRuleMatcher.host(of: url),
               let domain = BrowserRuleMatcher.normalizeDomain(host) else { return }
         BrowserCatalog.shared.addRule(BrowserRule(kind: .domain, value: domain, browserID: browser.id,
                                                   isPrivate: isPrivate && browser.supportsPrivate))
     }
 
-    /// Основной браузер, а если не выбран — первый найденный (Utilitumus в списке нет).
-    func openInFallback(_ url: URL) {
-        guard let browser = BrowserCatalog.shared.openTarget else {
+    /// Основной браузер, а если не выбран — первый настоящий (Utilitumus в списке нет).
+    /// Основной незнаком или настоящих нет — панель: потерять ссылку нельзя, открыть молча тоже.
+    func openInFallback(_ url: URL, from source: NSRunningApplication?) {
+        let catalog = BrowserCatalog.shared
+        if let browser = catalog.openTarget {
+            open(url, in: browser, private: false)
+            return
+        }
+        let choices = catalog.pickerBrowsers.isEmpty ? catalog.browsers : catalog.pickerBrowsers
+        guard !choices.isEmpty else {
             NSSound.beep()
             return
         }
-        open(url, in: browser, private: false)
+        showPanel(url, from: source, browsers: choices)
     }
 
     func open(_ url: URL, in browser: InstalledBrowser, private isPrivate: Bool) {

@@ -142,11 +142,22 @@ enum BrowserPrivateMode {
 
 /// Какие приложения считаем браузерами, а какие просто умеют открывать http-ссылки.
 enum BrowserKnown {
-    private static let browserPrefixes = [
-        "com.apple.Safari", "com.google.Chrome", "org.mozilla.", "com.brave.Browser", "com.microsoft.edgemac",
-        "company.thebrowser.", "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "ru.yandex.desktop.yandex-browser",
-        "org.chromium.Chromium", "app.zen-browser.zen", "com.kagi.kagimacOS", "com.sigmaos.sigmaos.macos",
-        "org.torproject.torbrowser", "io.gitlab.librewolf-community", "net.waterfox.waterfox",
+    /// Точные bundle id: при сравнении по началу браузером назвался бы и `com.apple.Safari.x`.
+    private static let browserIDs: Set<String> = [
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview",
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev", "com.google.Chrome.canary",
+        "org.mozilla.firefox", "org.mozilla.firefoxbeta", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly",
+        "org.mozilla.librewolf", "org.mozilla.seamonkey",
+        "com.brave.Browser", "com.brave.Browser.beta", "com.brave.Browser.dev", "com.brave.Browser.nightly",
+        "com.microsoft.edgemac", "com.microsoft.edgemac.Beta", "com.microsoft.edgemac.Dev", "com.microsoft.edgemac.Canary",
+        "company.thebrowser.Browser", "company.thebrowser.dia",
+        "com.vivaldi.Vivaldi", "com.vivaldi.Vivaldi.snapshot",
+        "com.operasoftware.Opera", "com.operasoftware.OperaGX", "com.operasoftware.OperaDeveloper",
+        "com.operasoftware.OperaNext", "com.operasoftware.OperaAir",
+        "ru.yandex.desktop.yandex-browser", "ru.yandex.desktop.yandex-browser.beta",
+        "org.chromium.Chromium", "app.zen-browser.zen", "app.zen-browser.zen.twilight", "com.kagi.kagimacOS", "com.kagi.kagimacOS.RC",
+        "com.sigmaos.sigmaos.macos", "org.torproject.torbrowser", "io.gitlab.librewolf-community",
+        "io.gitlab.librewolf-community.librewolf", "net.waterfox.waterfox", "net.waterfox.waterfox.current",
         "com.duckduckgo.macos.browser", "com.pushplaylabs.sidekick", "ai.perplexity.comet",
     ]
     /// Другие «выбиралки браузера»: в панели им не место.
@@ -158,11 +169,47 @@ enum BrowserKnown {
     ]
 
     static func isBrowser(_ bundleID: String) -> Bool {
-        browserPrefixes.contains(where: bundleID.hasPrefix)
+        browserIDs.contains(bundleID)
     }
 
     static func isRouter(_ bundleID: String) -> Bool {
         routerPrefixes.contains(where: bundleID.hasPrefix)
+    }
+}
+
+/// Куда вести ссылку. Правила и основной браузер лежат в настройках, куда может написать любая программа
+/// пользователя, и список показанных браузеров там же. Поэтому молча открываем только в настоящем браузере
+/// (`BrowserKnown`): в незнакомом приложении ссылка откроется, лишь если его выбрать на панели.
+enum BrowserRouting {
+    enum Route: Equatable {
+        case open(id: String, isPrivate: Bool)
+        case panel
+        /// Выбирать не из чего: в основной браузер.
+        case fallback
+    }
+
+    /// `installed` — установленные bundle id, `shown` — показанные в панели по порядку.
+    static func route(rules: [BrowserRule], url: URL?, sourceBundleID: String?, installed: Set<String>, shown: [String]) -> Route {
+        let usable = rules.filter { installed.contains($0.browserID) }
+        if let rule = BrowserRuleMatcher.firstMatch(rules: usable, url: url, sourceBundleID: sourceBundleID) {
+            if BrowserKnown.isBrowser(rule.browserID) { return .open(id: rule.browserID, isPrivate: rule.isPrivate) }
+            return shown.isEmpty ? .fallback : .panel
+        }
+        switch shown.count {
+        case 0: return .fallback
+        // С одной иконкой панель — лишний клик, но незнакомое приложение открываем только по выбору.
+        case 1 where BrowserKnown.isBrowser(shown[0]): return .open(id: shown[0], isPrivate: false)
+        default: return .panel
+        }
+    }
+
+    /// Куда открыть без панели: основной, а если он не выбран или удалён — первый настоящий браузер.
+    /// nil — основной незнаком или настоящих браузеров нет, тогда показываем панель.
+    static func fallbackTarget(fallbackID: String?, installed: [String], shown: [String]) -> String? {
+        if let fallbackID, installed.contains(fallbackID) {
+            return BrowserKnown.isBrowser(fallbackID) ? fallbackID : nil
+        }
+        return shown.first(where: BrowserKnown.isBrowser) ?? installed.first(where: BrowserKnown.isBrowser)
     }
 }
 
