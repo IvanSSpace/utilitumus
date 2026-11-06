@@ -59,41 +59,71 @@ enum LaunchAgents {
     /// проверки — обычный чужой агент, а префикс закрыл бы и его.
     static var selfLabels: Set<String> { Set(["local.utilitumus", Bundle.main.bundleIdentifier ?? ""]).subtracting([""]) }
 
-    // начало метки (в нижнем регистре) → производитель и что перестанет работать
-    private static let catalog: [(prefixes: [String], vendor: String, note: String)] = [
-        (["com.logi.optionsplus.updater"], "Logitech", "перестанут приходить обновления Logi Options+"),
-        (["com.logi.", "com.logitech."], "Logitech",
+    // начало метки (в нижнем регистре) → производитель, где лежат его программы (начало пути без домашней папки,
+    // в нижнем регистре) и что перестанет работать
+    private static let catalog: [(prefixes: [String], programs: [String], vendor: String, note: String)] = [
+        (["com.logi.optionsplus.updater"], logiPrograms, "Logitech", "перестанут приходить обновления Logi Options+"),
+        (["com.logi.", "com.logitech."], logiPrograms, "Logitech",
          "перестанут работать кнопки и жесты Logitech, мышь останется работать"),
-        (["com.google.keystone", "com.google.googleupdater"], "Google",
+        (["com.google.keystone", "com.google.googleupdater"],
+         ["/library/google/", "/library/application support/google/"], "Google",
          "программы Google не будут обновляться в фоне, Chrome обновится при запуске"),
-        (["us.zoom."], "Zoom", "Zoom не будет обновляться в фоне, звонки работают"),
-        (["com.valvesoftware."], "Steam",
+        (["us.zoom."], ["/applications/zoom.us.app/", "/library/privilegedhelpertools/us.zoom."], "Zoom",
+         "Zoom не будет обновляться в фоне, звонки работают"),
+        (["com.valvesoftware."], ["/applications/steam.app/", "/library/application support/steam/"], "Steam",
          "службы Steam: Steam и игры работают, службы поднимутся при запуске"),
-        (["com.adobe."], "Adobe",
+        (["com.adobe."],
+         ["/applications/adobe", "/applications/utilities/adobe", "/library/application support/adobe",
+          "/library/privilegedhelpertools/com.adobe."], "Adobe",
          "службы Creative Cloud: синхронизация и обновления только при открытом Creative Cloud"),
-        (["com.microsoft.update", "com.microsoft.autoupdate"], "Microsoft",
-         "Office не будет обновляться в фоне, только вручную"),
-        (["com.rogueamoeba."], "Rogue Amoeba",
-         "перестанут работать Loopback, Audio Hijack и SoundSource, их звуковые устройства пропадут"),
+        (["com.microsoft.update", "com.microsoft.autoupdate"],
+         ["/library/application support/microsoft/", "/applications/microsoft", "/library/privilegedhelpertools/com.microsoft."],
+         "Microsoft", "Office не будет обновляться в фоне, только вручную"),
+        (["com.rogueamoeba."],
+         ["/library/audio/plug-ins/hal/ark.driver/", "/library/application support/rogue amoeba",
+          "/library/application support/loopback/", "/library/application support/audio hijack",
+          "/library/application support/soundsource", "/library/application support/piezo",
+          "/library/application support/farrago", "/library/application support/fission",
+          "/library/privilegedhelpertools/com.rogueamoeba.", "/applications/loopback.app/", "/applications/audio hijack.app/",
+          "/applications/soundsource.app/", "/applications/piezo.app/", "/applications/farrago.app/", "/applications/fission.app/"],
+         "Rogue Amoeba", "перестанут работать Loopback, Audio Hijack и SoundSource, их звуковые устройства пропадут"),
     ]
+    private static let logiPrograms = ["/applications/logi", "/library/application support/logi"]
     static let unknown = "что перестанет работать, неизвестно; вернуть можно кнопкой"
     /// У служб root кнопок нет — и «вернуть кнопкой» тоже.
     static let unknownRoot = "что перестанет работать — неизвестно"
     static let rootNote = "системная служба (нужен sudo)"
     static let terminalNote = "хост вкладок терминала: закроются все вкладки и сессии Claude"
 
-    static func vendor(of label: String) -> (vendor: String, note: String) {
+    /// Метку выбирает сам автор агента, поэтому производителя показываем, только если и программа лежит у него.
+    static func vendor(of label: String, program: String) -> (vendor: String, note: String) {
         let low = label.lowercased()
-        for c in catalog where c.prefixes.contains(where: { low.hasPrefix($0) }) { return (c.vendor, c.note) }
+        var path = program.lowercased()
+        let home = NSHomeDirectory().lowercased()
+        if path.hasPrefix(home + "/") { path.removeFirst(home.count) }
+        guard !path.contains("/../") else { return ("", unknown) }
+        for c in catalog where c.prefixes.contains(where: { low.hasPrefix($0) }) && c.programs.contains(where: { path.hasPrefix($0) }) {
+            return (c.vendor, c.note)
+        }
         return ("", unknown)
+    }
+
+    /// Служба macOS. Одной метки мало: `com.apple.что-угодно` может назвать себя любой агент. Подходит plist из
+    /// /System/Library/, а задание без plist (службы XPC, mdworker и другие) — только с программой из системы.
+    /// Без plist и без процесса показывать нечего. Пустой `exe` — путь процесса не прочитался.
+    static func isAppleService(label: String, plist: String?, exe: String?) -> Bool {
+        guard label.hasPrefix("com.apple.") else { return false }
+        if let plist { return plist.hasPrefix("/System/Library/") }
+        guard let exe, !exe.isEmpty else { return true }
+        return Kinds.isOSExecutable(exe)
     }
 
     static func botLabels(_ bots: [BotSpec]) -> Set<String> { Set(bots.flatMap(\.launchd)) }
 
     /// Почему панель не трогает задание, или nil: службы macOS, запущенные приложения, боты (у них свои кнопки),
     /// сама панель и всё в системном домене (там нужен root).
-    static func whyRefused(label: String, domain: String, botLabels: Set<String>) -> String? {
-        if label.hasPrefix("com.apple.") { return "служба macOS" }
+    static func whyRefused(label: String, domain: String, botLabels: Set<String>, appleService: Bool) -> String? {
+        if appleService { return "служба macOS" }
         if label.hasPrefix("application.") || label.hasPrefix("[") || label.hasPrefix("0x") {
             return "это запущенное приложение, а не агент"
         }
@@ -295,13 +325,13 @@ final class LaunchState: @unchecked Sendable {
 // MARK: Список агентов
 
 extension LaunchAgents {
-    private static func foreign(_ label: String) -> Bool {
-        !(label.hasPrefix("com.apple.") || label.hasPrefix("application.") || label.hasPrefix("[") || label.hasPrefix("0x"))
+    private static func isAppEntry(_ label: String) -> Bool {
+        label.hasPrefix("application.") || label.hasPrefix("[") || label.hasPrefix("0x")
     }
 
     /// Сторонние задания launchd: с plist в LaunchAgents (автозапуск), без plist — только запущенные или выключенные
     /// кнопкой «убрать» (дремлющие апдейтеры приложений вроде ShipIt память не держат, а без них приложение не
-    /// обновится), и запущенные системные службы (только подсказка sudo). Без com.apple., приложений и ботов.
+    /// обновится), и запущенные системные службы (только подсказка sudo). Без служб macOS, приложений и ботов.
     static func collect(procs: [Int32: LoadProcess], tree: ProcessTree, launchd: [String: Int32?], bots: [BotSpec],
                         fenced: [Int32: String], state: LaunchState = .shared) -> [AgentItem] {
         // Без launchctl list не знаем, что загружено, — лучше ничего не предлагать.
@@ -309,6 +339,10 @@ extension LaunchAgents {
         let skip = botLabels(bots)
         let gui = state.plists(guiDirs), dis = state.disabled(), rootJobs = state.plists(systemDirs)
         func pid(_ label: String) -> Int32? { launchd[label] ?? nil }
+        func apple(_ label: String) -> Bool {
+            isAppleService(label: label, plist: (gui[label] ?? rootJobs[label])?.plist, exe: pid(label).flatMap { procs[$0]?.exe })
+        }
+        func foreign(_ label: String) -> Bool { !isAppEntry(label) && !apple(label) }
 
         var labels = Set(gui.keys.filter(foreign))
         let extra = launchd.keys.filter { l in pid(l).map { procs[$0] != nil } ?? false } + dis.filter(\.value).map(\.key)
@@ -323,9 +357,9 @@ extension LaunchAgents {
             let off = dis[label] ?? job?.disabled ?? false
             // Метка есть и в /Library/LaunchDaemons — это служба root: bootout в gui её не остановит, исполнитель откажет.
             let root = rootJobs[label] != nil
-            let why = whyRefused(label: label, domain: root ? "system" : "gui", botLabels: skip)
+            let why = whyRefused(label: label, domain: root ? "system" : "gui", botLabels: skip, appleService: apple(label))
                 ?? whyTree(procs: procs, tree: sub, fenced: fenced)
-            let v = vendor(of: label)
+            let v = vendor(of: label, program: program)
             // У защищённого — память только своего процесса: дерево хоста терминала — это вкладки и сессии в них,
             // они уже посчитаны в проектах, а остановить их отсюда всё равно нельзя.
             let held = why != nil ? Array(sub.suffix(1)) : sub
@@ -347,7 +381,7 @@ extension LaunchAgents {
             let pids = job.program.hasPrefix("/") ? (byExe[job.program] ?? []).sorted() : []
             if pids.isEmpty || !foreign(label) || skip.contains(label) || labels.contains(label) { continue }
             let sub = pids.flatMap { tree.subtree(of: $0) }
-            let v = vendor(of: label)
+            let v = vendor(of: label, program: job.program)
             items.append(AgentItem(
                 label: label, name: name(program: job.program, label: label), vendor: v.vendor, plist: job.plist, pids: pids,
                 memMB: Int(sub.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()), keepalive: job.keepalive,

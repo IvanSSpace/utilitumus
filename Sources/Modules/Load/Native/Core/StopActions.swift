@@ -39,11 +39,13 @@ enum Protection {
         if p.pid <= 1 { return "системный процесс" }
         if let why = fence[p.pid] { return why }
         if p.user != getuid() { return "процесс другого пользователя" }
-        if systemNames.contains(p.name) || systemNames.contains(p.exeName) { return "системный процесс" }
+        // Только вместе с путём: процесс может назваться Dock, а файл из системного каталога ему не подложить.
+        if systemNames.contains(p.exeName), Kinds.isOSExecutable(p.exe) { return "системный процесс" }
         if Kinds.terminalApp(p) != nil { return "хост вкладок терминала" }
         if p.exe.isEmpty { return "не удалось прочитать путь" }
         let isShell = p.exe.hasPrefix("/bin/") && Kinds.shells.contains(p.exeName)
-        if root, systemDirs.contains(where: { p.exe.hasPrefix($0) }), !p.exe.hasPrefix("/usr/local/"), !isShell {
+        if root, systemDirs.contains(where: { p.exe.hasPrefix($0) }), !p.exe.hasPrefix("/usr/local/"),
+           !p.exe.hasPrefix("/System/Volumes/Data/"), !isShell {
             return "системный файл"
         }
         return nil
@@ -56,7 +58,10 @@ struct StopPlan: Sendable, Identifiable {
     struct Target: Sendable, Identifiable {
         var pid: Int32
         var uniqueID: UInt64
+        /// Подпись для экрана: с аргументами.
         var name: String
+        /// Для журнала: только имя, в аргументах бывают пароли.
+        var processName: String
         var memMB: Double
         /// Цель верхнего уровня: к ней применяется правило «системный файл».
         var isRoot: Bool
@@ -112,7 +117,7 @@ struct StopPlanner {
 
     private func target(_ q: Int32, root: Bool) -> StopPlan.Target {
         let p = procs[q]!
-        return StopPlan.Target(pid: q, uniqueID: p.uniqueID, name: Kinds.label(p), memMB: p.mem, isRoot: root)
+        return StopPlan.Target(pid: q, uniqueID: p.uniqueID, name: Kinds.label(p), processName: p.name, memMB: p.mem, isRoot: root)
     }
 
     /// Остановка процесса и его потомков. nil — сам процесс трогать нельзя.

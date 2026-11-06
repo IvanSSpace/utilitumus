@@ -135,6 +135,9 @@ enum ActionLog {
 
     private static let lock = NSLock()
 
+    /// Как у keyboard.log.
+    static let maxFileBytes = 200_000
+
     /// Журнал личный: каталог 0700, файл 0600 (в нём имена процессов и ботов). Права
     /// ставим и на уже существующие, созданные старой версией с 0644.
     static func preparePrivate(file: URL) {
@@ -161,20 +164,36 @@ enum ActionLog {
         lock.lock()
         defer { lock.unlock() }
         preparePrivate(file: file)
+        rotateIfNeeded(file)
         guard let h = try? FileHandle(forWritingTo: file) else { return }
         defer { try? h.close() }
         _ = try? h.seekToEnd()
         try? h.write(contentsOf: data + Data("\n".utf8))
     }
 
+    /// Больше предела — оставляем вторую половину с ближайшей границы строки, как keyboard.log.
+    static func rotateIfNeeded(_ url: URL, limit: Int = maxFileBytes) {
+        let fm = FileManager.default
+        guard let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > limit,
+              let data = try? Data(contentsOf: url) else { return }
+        var tail = data.suffix(data.count / 2)
+        if let newline = tail.firstIndex(of: 0x0A) { tail = tail[tail.index(after: newline)...] }
+        try? Data(tail).write(to: url, options: .atomic)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// Цели для журнала: без аргументов.
+    static func targets(of plan: StopPlan) -> [[String: Any]] {
+        plan.targets.map { ["pid": Int($0.pid), "name": $0.processName] }
+    }
+
     /// Остановка процессов из «Памяти» и «Сессий»: тот же журнал.
     static func record(stop plan: StopPlan, result: StopResult) {
-        write(kind: "stop-tree", label: plan.title,
-              targets: plan.targets.map { ["pid": Int($0.pid), "name": $0.name] }, ok: result.ok, message: result.message,
+        write(kind: "stop-tree", label: plan.title, targets: targets(of: plan), ok: result.ok, message: result.message,
               id: "stop:\(plan.id.uuidString)")
     }
 
-    /// Последние записи, новые первыми. Читаем только хвост файла: он растёт без ограничений.
+    /// Последние записи, новые первыми. Читаем только хвост файла.
     static func recent(limit: Int = 8) -> [Entry] {
         guard let h = try? FileHandle(forReadingFrom: file) else { return [] }
         defer { try? h.close() }
@@ -324,15 +343,20 @@ final class BackgroundExecutor: @unchecked Sendable {
         let label = item.label
         let bots = BotRegistry.load()
         let state = LaunchState.shared
-        let systemJob = item.domain != "gui" || state.plists(LaunchAgents.systemDirs)[label] != nil
-        if let why = LaunchAgents.whyRefused(label: label, domain: systemJob ? "system" : "gui", botLabels: LaunchAgents.botLabels(bots)) {
-            throw BackgroundActionError(message: "Не трогаю \(label): \(why)")
-        }
+        let rootPlist = state.plists(LaunchAgents.systemDirs)[label]?.plist
+        let systemJob = item.domain != "gui" || rootPlist != nil
         guard let jobs = jobs() else { throw BackgroundActionError(message: "launchctl не ответил — повтори позже") }
         let loaded = jobs.keys.contains(label)
         let pid: Int32? = jobs[label] ?? nil
 
         let procs = scanner.scan(rootMemory: [:], compressed: [:])
+        // Служба macOS или нет — по свежим plist и пути процесса, как при составлении списка.
+        let apple = LaunchAgents.isAppleService(label: label, plist: state.plists(LaunchAgents.guiDirs)[label]?.plist ?? rootPlist,
+                                                exe: pid.flatMap { procs[$0]?.exe })
+        if let why = LaunchAgents.whyRefused(label: label, domain: systemJob ? "system" : "gui", botLabels: LaunchAgents.botLabels(bots),
+                                             appleService: apple) {
+            throw BackgroundActionError(message: "Не трогаю \(label): \(why)")
+        }
         let tree = ProcessTree(procs)
         let sub = pid.flatMap { procs[$0] != nil ? tree.subtree(of: $0) : nil } ?? []
         let fence = Protection.fence(procs: procs, tree: tree, extra: BotRegistry.fence(bots, procs: procs, tree: tree, launchd: jobs))

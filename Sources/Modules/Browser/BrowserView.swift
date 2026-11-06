@@ -324,7 +324,7 @@ struct BrowserView: View {
     }
 
     private func browserRow(_ browser: InstalledBrowser) -> some View {
-        let isMain = catalog.fallbackID == browser.id
+        let isMain = catalog.fallback?.id == browser.id
         let keyCode = catalog.effectiveKeys[browser.id]
         let recording = recorder.recordingID == browser.id
         return BRow(title: browser.name,
@@ -335,15 +335,18 @@ struct BrowserView: View {
         } trailing: {
             HStack(spacing: 10) {
                 keyBadge(browser, keyCode: keyCode, recording: recording)
-                Button {
-                    catalog.setFallback(isMain ? nil : browser.id)
-                } label: {
-                    Image(systemName: isMain ? "star.fill" : "star")
-                        .font(.system(size: 14))
-                        .foregroundStyle(isMain ? Color.yellow : .white.opacity(0.4))
+                // Основным может быть только то, чему можно верить (см. `BrowserRouting`).
+                if catalog.canTarget(browser.id) {
+                    Button {
+                        catalog.setFallback(isMain ? nil : browser.id)
+                    } label: {
+                        Image(systemName: isMain ? "star.fill" : "star")
+                            .font(.system(size: 14))
+                            .foregroundStyle(isMain ? Color.yellow : .white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                    .help(isMain ? "Основной браузер" : "Сделать основным")
                 }
-                .buttonStyle(.plain)
-                .help(isMain ? "Основной браузер" : "Сделать основным")
                 DSToggle("Показывать в панели", isOn: Binding(
                     get: { true },
                     set: { catalog.setHidden(browser.id, !$0) }
@@ -613,7 +616,8 @@ private struct AddRuleSheet: View {
             DSSection("Куда открывать") {
                 DSRow(icon: "safari", title: "Открывать в") {
                     Picker("Открывать в", selection: $browserID) {
-                        ForEach(catalog.browsers) { browser in
+                        // Правило на приложение, которому нельзя верить, открывает панель. Новое такое завести нельзя, старое видно.
+                        ForEach(catalog.browsers.filter { catalog.canTarget($0.id) || $0.id == browserID }) { browser in
                             Text(browser.name).tag(browser.id)
                         }
                     }
@@ -641,7 +645,9 @@ private struct AddRuleSheet: View {
         .environment(\.dsTint, theme.accent(.browser))
         .onAppear {
             if runningApps.isEmpty { runningApps = Self.loadRunningApps() }
-            if browserID.isEmpty { browserID = catalog.fallbackID ?? catalog.pickerBrowsers.first?.id ?? "" }
+            if browserID.isEmpty {
+                browserID = catalog.fallback?.id ?? catalog.pickerBrowsers.first { catalog.canTarget($0.id) }?.id ?? ""
+            }
         }
         .onChange(of: browserID) {
             if browser?.supportsPrivate != true { isPrivate = false }
