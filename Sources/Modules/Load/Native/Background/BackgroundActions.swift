@@ -141,20 +141,6 @@ enum ActionLog {
     /// Как у keyboard.log.
     static let maxFileBytes = 200_000
 
-    /// Журнал личный: каталог 0700, файл 0600 (в нём имена процессов и ботов). Права
-    /// ставим и на уже существующие, созданные старой версией с 0644.
-    static func preparePrivate(file: URL) {
-        let fm = FileManager.default
-        let dir = file.deletingLastPathComponent()
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
-        if fm.fileExists(atPath: file.path) {
-            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
-        } else {
-            fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        }
-    }
-
     /// В журнал — только что за действие, над кем и чем кончилось. Полный argv и вывод
     /// команд (stdout/stderr ботов) не пишем: там бывают токены и пути. Поэтому у ботов
     /// и текст результата общий — подробности остаются только в окне панели.
@@ -166,7 +152,7 @@ enum ActionLog {
         guard let data = try? JSONSerialization.data(withJSONObject: line, options: [.sortedKeys, .withoutEscapingSlashes]) else { return }
         lock.lock()
         defer { lock.unlock() }
-        preparePrivate(file: file)
+        PrivateLog.prepare(file: file)
         rotateIfNeeded(file)
         guard let h = try? FileHandle(forWritingTo: file) else { return }
         defer { try? h.close() }

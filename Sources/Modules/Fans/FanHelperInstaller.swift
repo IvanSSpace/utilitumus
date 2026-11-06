@@ -13,7 +13,7 @@ final class FanHelperInstaller: ObservableObject {
         /// Файлы в порядке, служба не спрошена: она сейчас никому не нужна или ответ ещё не пришёл.
         /// Ни плашки, ни команд.
         case installed
-        /// Прежний setuid-помощник, неполная установка или служба с другой версией либо без ответа после
+        /// Прежний setuid-помощник, неполная установка или служба старше клиента либо без ответа после
         /// повторов. Управления нет, только возврат вентиляторов в «Авто». Плашка «Обновить доступ».
         case outdated
         case ready
@@ -38,6 +38,7 @@ final class FanHelperInstaller: ObservableObject {
     typealias FileInfo = (owner: Int, mode: Int)
     private let files: () -> (binary: FileInfo?, plist: FileInfo?)
     private let probeVersion: @Sendable () -> String?
+    private let clientVersion: String
     /// Номер последнего `refresh`: ответ службы на более ранний уже не считается.
     private var refreshID = 0
     private let retryDelay: TimeInterval
@@ -50,10 +51,12 @@ final class FanHelperInstaller: ObservableObject {
             (FanHelperInstaller.fileInfo(FanHelperInstaller.installedPath), FanHelperInstaller.fileInfo(FanHelperInstaller.plistPath))
         },
         probeVersion: @escaping @Sendable () -> String? = { FanHelperClient.version() },
+        clientVersion: String = FanLink.helperVersion,
         retryDelay: TimeInterval = 3
     ) {
         self.files = files
         self.probeVersion = probeVersion
+        self.clientVersion = clientVersion
         self.retryDelay = retryDelay
         refresh()
     }
@@ -86,13 +89,13 @@ final class FanHelperInstaller: ObservableObject {
         // отрисовать FansView, тот лез в недосозданный shared — падение
         // «dispatch_once: lock recursively». До ответа плашки нет, но и команд нет.
         if status == .notInstalled { status = .installed }
-        let id = refreshID, probe = probeVersion
+        let id = refreshID, probe = probeVersion, client = clientVersion
         Task { [weak self] in
             let version = await Task.detached { probe() }.value
             guard let self, self.refreshID == id else { return }
             self.serviceAnswered = version != nil
             if let version {
-                self.status = version == FanLink.helperVersion ? .ready : .outdated
+                self.status = Self.status(service: version, client: client)
             } else if self.retriesLeft > 0 {
                 self.retriesLeft -= 1
                 try? await Task.sleep(nanoseconds: UInt64(self.retryDelay * 1_000_000_000))
@@ -102,6 +105,14 @@ final class FanHelperInstaller: ObservableObject {
                 self.status = .outdated
             }
         }
+    }
+
+    /// Служба новее клиента — обычное дело: центр и утилита обновляются порознь, а старые команды служба обязана
+    /// принимать (см. `FanHelperXPC`). Считай клиент такую службу устаревшей, он просил бы пароль, чтобы поставить
+    /// старую, а второй клиент потом просил бы его снова. Непонятный ответ — не новее.
+    nonisolated static func status(service: String, client: String) -> Status {
+        guard let found = Int(service), let own = Int(client), found >= own else { return .outdated }
+        return .ready
     }
 
     /// Текст плашки. О ручном режиме только когда так и есть: иначе это лишняя тревога.
@@ -156,11 +167,14 @@ final class FanHelperInstaller: ObservableObject {
     /// Временный каталог создаётся в /Library/PrivilegedHelperTools (пишет только root,
     /// тот же том — mv атомарный) с правами 0700. Плист пишется туда же, из текста скрипта, а не из файла.
     /// `mv` поверх прежнего пути заодно убирает старый setuid-помощник.
-    nonisolated static func installScript(source: String) -> String {
+    /// Понижения нет: стоит служба новее — отказ, файлы не тронуты. Та же версия ставится: так чинятся права файлов.
+    nonisolated static func installScript(source: String, helperVersion: String = FanLink.helperVersion) -> String {
         let dir = "/Library/PrivilegedHelperTools"
-        let verify = KitSigning.trustedLeafHashes.map {
-            "/usr/bin/codesign --verify " + shQuote("-R=" + KitSigning.requirement(identifier: "local.utilitumus.fan", leafHash: $0)) + " \"$T\""
-        }.joined(separator: " || ")
+        func verify(_ path: String) -> String {
+            KitSigning.trustedLeafHashes.map {
+                "/usr/bin/codesign --verify " + shQuote("-R=" + KitSigning.requirement(identifier: "local.utilitumus.fan", leafHash: $0)) + " \"\(path)\""
+            }.joined(separator: " || ")
+        }
         return [
             "set -e",
             "/bin/mkdir -p \(shQuote(dir))",
@@ -171,9 +185,18 @@ final class FanHelperInstaller: ObservableObject {
             "/bin/cp -X \(shQuote(source)) \"$T\"",
             "/usr/sbin/chown root:wheel \"$T\"",
             "/bin/chmod 0755 \"$T\"",
-            "(\(verify)) || { /bin/echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
+            "(\(verify("$T"))) || { /bin/echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
             // Запускать можно только после проверки подписи. Подменённая более старая сборка с нашей подписью не пройдёт.
-            "case \"$(\"$T\" version)\" in \(shQuote(FanLink.helperVersion))) ;; *) /bin/echo 'Версия помощника не совпала с приложением' >&2; exit 1 ;; esac",
+            "case \"$(\"$T\" version)\" in \(shQuote(helperVersion))) ;; *) /bin/echo 'Версия помощника не совпала с приложением' >&2; exit 1 ;; esac",
+            // Установленный файл root запускает тоже только как копию из своего каталога и после проверки подписи.
+            "O=\"$D/installed\"",
+            "if /bin/cp -X \(shQuote(installedPath)) \"$O\" 2>/dev/null; then"
+                + " /usr/sbin/chown root:wheel \"$O\"; /bin/chmod 0755 \"$O\";"
+                + " if (\(verify("$O"))) 2>/dev/null; then"
+                + " V=$(\"$O\" version 2>/dev/null) || V='';"
+                + " case \"$V\" in ''|*[!0-9]*) ;; *) if /bin/test \"$V\" -gt \(shQuote(helperVersion)); then"
+                + " /bin/echo 'Уже стоит более новая версия помощника: обнови приложение' >&2; exit 1; fi ;; esac;"
+                + " fi; fi",
             // Жёсткая ссылка на старый файл сохранила бы его inode с setuid и после mv.
             "/bin/chmod 0755 \(shQuote(installedPath)) 2>/dev/null || /usr/bin/true",
             "/bin/mv -f \"$T\" \(shQuote(installedPath))",

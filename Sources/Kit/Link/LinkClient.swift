@@ -25,6 +25,9 @@ final class LinkClient {
     private let id: String
     private let timeout: TimeInterval
     private var session: Session?
+    private var watchLevel = LinkWatch.none
+    /// Утилита сообщила о смене состояния. Только по соединению, прошедшему `hello`.
+    @MainActor var onStateChanged: (() -> Void)?
 
     init(id: String, timeout: TimeInterval = 2) {
         self.id = id
@@ -62,13 +65,29 @@ final class LinkClient {
         try await command { proxy, done in proxy.openWindow { done(()) } }
     }
 
-    @MainActor func quit() async throws {
-        try await command { proxy, done in proxy.quit { done(()) } }
+    @MainActor func quit(_ reason: LinkQuitReason) async throws {
+        try await command { proxy, done in proxy.quit(reason: reason.rawValue) { done(()) } }
+    }
+
+    @MainActor func performSetupStep(_ id: String) async throws -> LinkReply<LinkStatus> {
+        let data: Data = try await command { proxy, done in proxy.performSetupStep(id, reply: done) }
+        return try JSONDecoder().decode(LinkReply<LinkStatus>.self, from: data)
+    }
+
+    /// Запоминается и повторяется на каждом новом соединении: аренда живёт, пока живо соединение, а центр
+    /// хочет её, пока открыт экран. Само по себе соединение не поднимает: иначе launchd будил бы утилиту зря.
+    @MainActor func setWatch(_ level: LinkWatch) {
+        guard level != watchLevel else { return }
+        watchLevel = level
+        guard let session, session.greeted else { return }
+        Task { @MainActor in
+            try? await self.command { proxy, done in proxy.watch(self.watchLevel.rawValue) { done(()) } }
+        }
     }
 
     static func decodeHello(_ data: Data) throws -> LinkHello {
         let hello = try JSONDecoder().decode(LinkHello.self, from: data)
-        guard hello.protocolVersion == KitLink.protocolVersion else {
+        guard KitLink.isCompatible(hello) else {
             throw LinkError.incompatible(hello.protocolVersion)
         }
         return hello
@@ -91,6 +110,9 @@ final class LinkClient {
     @MainActor private func greet(_ session: Session, _ deadline: DispatchTime) async throws -> LinkHello {
         let data: Data = try await roundTrip(session, deadline) { proxy, done in proxy.hello(reply: done) }
         let hello = try Self.decodeHello(data)
+        if watchLevel != .none {
+            try await roundTrip(session, deadline) { proxy, done in proxy.watch(self.watchLevel.rawValue) { done(()) } }
+        }
         session.greeted = true
         return hello
     }
@@ -111,6 +133,12 @@ final class LinkClient {
         connection.setCodeSigningRequirement(KitLink.requirement(identifier: KitLink.bundleID(id)))
         connection.remoteObjectInterface = NSXPCInterface(with: LinkXPC.self)
         let session = Session(connection: connection)
+        connection.exportedInterface = NSXPCInterface(with: LinkPingXPC.self)
+        connection.exportedObject = LinkPingReceiver { [weak self, weak session] in
+            MainActor.assumeIsolated {
+                if let self, session?.greeted == true { self.onStateChanged?() }
+            }
+        }
         // Сервис умер: иначе следующее сообщение по этому соединению ушло бы новому процессу без `hello`.
         connection.interruptionHandler = { [weak connection] in connection?.invalidate() }
         connection.invalidationHandler = { [weak self, weak session] in
@@ -153,6 +181,40 @@ final class LinkClient {
             } as! LinkXPC
             send(proxy) { pending.finish(.success($0)) }
         }
+    }
+}
+
+/// Слушает `statusChanged` утилиты, пока жив.
+final class LinkStatusObserver: NSObject {
+    private let changed: @MainActor () -> Void
+
+    init(id: String, changed: @escaping @MainActor () -> Void) {
+        self.changed = changed
+        super.init()
+        // `.deliverImmediately`: иначе неактивный центр получит пинок с большой задержкой.
+        DistributedNotificationCenter.default().addObserver(
+            self, selector: #selector(statusDidChange), name: KitLink.statusChanged(id),
+            object: nil, suspensionBehavior: .deliverImmediately)
+    }
+
+    deinit {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc private func statusDidChange() {
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.changed() } }
+    }
+}
+
+private final class LinkPingReceiver: NSObject, LinkPingXPC, @unchecked Sendable {
+    private let received: @Sendable () -> Void
+
+    init(received: @escaping @Sendable () -> Void) {
+        self.received = received
+    }
+
+    func stateChanged() {
+        DispatchQueue.main.async(execute: received)
     }
 }
 

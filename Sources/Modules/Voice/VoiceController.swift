@@ -3,53 +3,6 @@ import AppKit
 import AVFoundation
 import Carbon.HIToolbox
 
-/// Сочетание клавиш: keyCode + модификаторы Carbon (cmdKey, optionKey, controlKey, shiftKey).
-enum VoiceHotKey {
-    static let defaultKeyCode: UInt32 = UInt32(kVK_Space)
-    static let defaultModifiers: UInt32 = UInt32(controlKey | optionKey)
-
-    static func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
-        var result: UInt32 = 0
-        if flags.contains(.command) { result |= UInt32(cmdKey) }
-        if flags.contains(.option) { result |= UInt32(optionKey) }
-        if flags.contains(.control) { result |= UInt32(controlKey) }
-        if flags.contains(.shift) { result |= UInt32(shiftKey) }
-        return result
-    }
-
-    private static let names: [UInt32: String] = [
-        0: "A", 11: "B", 8: "C", 2: "D", 14: "E", 3: "F", 5: "G", 4: "H", 34: "I", 38: "J", 40: "K", 37: "L",
-        46: "M", 45: "N", 31: "O", 35: "P", 12: "Q", 15: "R", 1: "S", 17: "T", 32: "U", 9: "V", 13: "W",
-        7: "X", 16: "Y", 6: "Z",
-        29: "0", 18: "1", 19: "2", 20: "3", 21: "4", 23: "5", 22: "6", 26: "7", 28: "8", 25: "9",
-        27: "-", 24: "=", 33: "[", 30: "]", 41: ";", 39: "'", 43: ",", 47: ".", 44: "/", 42: "\\", 50: "`",
-        49: "Space", 36: "Return", 48: "Tab", 51: "⌫", 117: "⌦", 115: "Home", 119: "End", 116: "PgUp", 121: "PgDn",
-        123: "←", 124: "→", 125: "↓", 126: "↑",
-        122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7", 100: "F8", 101: "F9",
-        109: "F10", 103: "F11", 111: "F12", 105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17",
-        79: "F18", 80: "F19", 90: "F20",
-    ]
-
-    private static let functionKeys: Set<UInt32> = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111,
-                                                   105, 107, 113, 106, 64, 79, 80, 90]
-
-    /// Годится как горячая: известная клавиша и либо модификатор (⌘⌥⌃), либо F-клавиша.
-    static func isAcceptable(keyCode: UInt32, modifiers: UInt32) -> Bool {
-        guard names[keyCode] != nil else { return false }
-        if functionKeys.contains(keyCode) { return true }
-        return modifiers & UInt32(cmdKey | optionKey | controlKey) != 0
-    }
-
-    static func label(keyCode: UInt32, modifiers: UInt32) -> String {
-        var text = ""
-        if modifiers & UInt32(controlKey) != 0 { text += "⌃" }
-        if modifiers & UInt32(optionKey) != 0 { text += "⌥" }
-        if modifiers & UInt32(shiftKey) != 0 { text += "⇧" }
-        if modifiers & UInt32(cmdKey) != 0 { text += "⌘" }
-        return text + (names[keyCode] ?? "?")
-    }
-}
-
 /// Голосовой ввод: горячая клавиша, запись, распознавание, вставка текста.
 /// Звук и текст нигде не логируются и не пишутся на диск.
 @MainActor
@@ -78,11 +31,11 @@ final class VoiceController: ObservableObject {
     @Published private(set) var keyCode: UInt32
     @Published private(set) var modifiers: UInt32
     @Published var mode: Mode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: Key.mode) }
+        didSet { Kit.defaults.set(mode.rawValue, forKey: Key.mode) }
     }
     /// UID микрофона; nil — системный.
     @Published var micUID: String? {
-        didSet { UserDefaults.standard.set(micUID, forKey: Key.mic) }
+        didSet { Kit.defaults.set(micUID, forKey: Key.mic) }
     }
 
     /// Bundle id программ, где голос Utilitumus не включается (у них свой ввод).
@@ -115,7 +68,7 @@ final class VoiceController: ObservableObject {
     private static let escID: UInt32 = 2
 
     private init() {
-        let d = UserDefaults.standard
+        let d = Kit.defaults
         keyCode = d.object(forKey: Key.keyCode) as? UInt32 ?? VoiceHotKey.defaultKeyCode
         modifiers = d.object(forKey: Key.modifiers) as? UInt32 ?? VoiceHotKey.defaultModifiers
         mode = d.string(forKey: Key.mode).flatMap(Mode.init(rawValue:)) ?? .toggle
@@ -161,8 +114,8 @@ final class VoiceController: ObservableObject {
     func setHotKey(keyCode: UInt32, modifiers: UInt32) {
         self.keyCode = keyCode
         self.modifiers = modifiers
-        UserDefaults.standard.set(keyCode, forKey: Key.keyCode)
-        UserDefaults.standard.set(modifiers, forKey: Key.modifiers)
+        Kit.defaults.set(keyCode, forKey: Key.keyCode)
+        Kit.defaults.set(modifiers, forKey: Key.modifiers)
         if isRunning && !hotKeySuspended { registerMain() }
     }
 
@@ -199,7 +152,7 @@ final class VoiceController: ObservableObject {
     }
 
     func addExcluded(_ bundleID: String) {
-        guard bundleID != Bundle.main.bundleIdentifier, !excludedApps.contains(bundleID) else { return }
+        guard !Kit.isOurs(bundleID), !excludedApps.contains(bundleID) else { return }
         excludedApps.append(bundleID)
         persistExcluded()
     }
@@ -210,7 +163,7 @@ final class VoiceController: ObservableObject {
     }
 
     private func persistExcluded() {
-        UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
+        Kit.defaults.set(excludedApps, forKey: Key.excluded)
         updateExclusion()
     }
 

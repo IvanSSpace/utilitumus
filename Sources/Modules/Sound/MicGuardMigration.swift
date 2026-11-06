@@ -14,7 +14,7 @@ enum MicGuardMigration {
 
     static func run() {
         guard let old = UserDefaults(suiteName: "local.micguard") else { return }
-        let current = UserDefaults.standard
+        let current = Kit.defaults
         for key in keys where current.object(forKey: key) == nil {
             if let value = old.object(forKey: key) {
                 current.set(value, forKey: key)

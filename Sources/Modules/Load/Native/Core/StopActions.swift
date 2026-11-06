@@ -1,5 +1,5 @@
+import AppKit
 import Darwin
-import Foundation
 
 /// Что и почему не трогаем, составление плана остановки и сама остановка.
 /// Правила один в один с lambscape (actions.py):
@@ -13,10 +13,16 @@ enum Protection {
     static let systemNames: Set<String> = ["WindowServer", "loginwindow", "Dock", "Finder", "SystemUIServer", "ControlCenter"]
     static let systemDirs = ["/System/", "/usr/", "/sbin/", "/bin/", "/Library/Apple/"]
 
+    /// Запущенные лаунчер, утилиты и помощники. Панель может работать в утилите, и тогда лаунчер ей не предок.
+    static func ownPids() -> Set<Int32> {
+        Set(Kit.ownBundleIDs.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+            .map(\.processIdentifier))
+    }
+
     /// pid → почему не трогаем: панель и её предки, дерево сессии Claude, из которой запущена панель,
-    /// и сессии Claude, которые ведёт приложение. `extra` — процессы ботов из bots.toml со всеми потомками.
+    /// наши приложения и сессии Claude, которые ведёт приложение. `extra` — процессы ботов из bots.toml со всеми потомками.
     static func fence(procs: [Int32: LoadProcess], tree: ProcessTree, selfPid: Int32 = getpid(),
-                      extra: [Int32: String] = [:]) -> [Int32: String] {
+                      ownPids: Set<Int32> = Protection.ownPids(), extra: [Int32: String] = [:]) -> [Int32: String] {
         var out: [Int32: String] = [selfPid: "это сама панель"]
         let ups = tree.ancestors(of: selfPid, in: procs)
         for pid in ups { out[pid] = "предок панели" }
@@ -25,6 +31,7 @@ enum Protection {
                 for q in tree.subtree(of: pid) where out[q] == nil { out[q] = "сессия, из которой запущена панель" }
             }
         }
+        for pid in ownPids where out[pid] == nil { out[pid] = "компонент Utilitumus" }
         for (pid, why) in extra where out[pid] == nil { out[pid] = why }
         // .app панель не останавливает: убить агента Claude.app значит сломать чат, а не освободить память.
         for p in procs.values where Kinds.isClaude(p) {

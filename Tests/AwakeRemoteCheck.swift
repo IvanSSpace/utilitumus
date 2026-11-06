@@ -2,13 +2,10 @@ import AppKit
 import SwiftUI
 
 // Вкладка «Не спать» в лаунчере, работа в утилите. Запуск: Tests/run-awake-remote-check.sh
-// Стенд собирается из всех исходников центра со швом KIT_TEST_DEFAULTS, рисует настоящий `ModuleDetail` через
-// настоящий `PageContainer`, окно за экраном и прозрачное, снимки через cacheDisplay. Утилита настоящая, под launchd.
-// Роли: run <папка> <pid утилиты>, foreign, state, idle <папка>, idle-dashboard <папка>.
+// Каркас — SatelliteCheckKit.swift и SatelliteStandKit.swift, здесь только то, что знает про «Не спать».
 
 let moduleID = "test.awake"
 let assertionName = "Utilitumus: Keep Awake"
-let unknownAction = #"{"explode":{}}"#
 let badDuration = #"{"setDuration":{"_0":12345}}"#
 /// Не одно известное действие: разбор отказывает, сколько бы известного в этом ни было.
 let notOneAction: [(String, String)] = [
@@ -25,38 +22,6 @@ let notOneAction: [(String, String)] = [
 ]
 let repeatedKey = #"{"setDuration":{"_0":3600},"setDuration":{"_0":0}}"#
 
-var failures = 0
-func check(_ ok: Bool, _ name: String) {
-    print((ok ? "ok   " : "FAIL ") + name)
-    if !ok { failures += 1 }
-}
-func finish() -> Never {
-    print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
-    exit(failures == 0 ? 0 : 1)
-}
-
-@MainActor func pause(_ seconds: Double) async {
-    try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-}
-
-/// Как `Tests/LinkCheck.swift`: насколько надолго занят главный поток.
-@MainActor final class TickWatch {
-    private var last = ProcessInfo.processInfo.systemUptime
-    private(set) var maxGap = 0.0
-    private var timer: Timer?
-    init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let now = ProcessInfo.processInfo.systemUptime
-                self.maxGap = max(self.maxGap, now - self.last)
-                self.last = now
-            }
-        }
-    }
-    deinit { timer?.invalidate() }
-}
-
 /// Не на главном потоке: стенд измеряет его простой.
 func holdsAssertion(pid: Int32) async -> Bool {
     await Task.detached {
@@ -71,107 +36,6 @@ func holdsAssertion(pid: Int32) async -> Bool {
         return String(decoding: data, as: UTF8.self).split(separator: "\n")
             .contains { $0.contains(assertionName) && $0.contains("pid \(pid)(") }
     }.value
-}
-
-// MARK: - Окно и снимки
-
-@MainActor enum Stand {
-    static var out = ""
-
-    static let window: NSWindow = {
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 738, height: 660),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.isReleasedWhenClosed = false
-        window.orderBack(nil)
-        return window
-    }()
-
-    /// Корень страницы как в `MainView`: окружение задаётся на странице, через границу хостинга оно не проходит.
-    static func page(_ theme: DSTheme) -> (PageKey, Bool) -> AnyView {
-        { key, active in
-            if key == .dashboard {
-                return AnyView(DashboardPage(open: { _ in }).equatable()
-                    .environment(\.pageActive, active)
-                    .background(ZStack { DSBackground(module: .awake, neutral: false); theme.card })
-                    .dsThemed()
-                    .ignoresSafeArea())
-            }
-            guard case .module(let module) = key else { return AnyView(Color.black) }
-            return AnyView(ModuleDetail(module: module)
-                .environment(\.pageActive, active)
-                .environment(\.dsTint, theme.accent(module))
-                .environment(\.moduleControls, DSModuleControls.forEnvironment)
-                // Подложка как в окне: фон модуля и карточка страницы, иначе снимок полупрозрачный.
-                .background(ZStack { DSBackground(module: module, neutral: false); theme.card })
-                .dsThemed()
-                .ignoresSafeArea())
-        }
-    }
-
-    static func container() -> PageContainer {
-        let container = PageContainer(frame: NSRect(x: 0, y: 0, width: 738, height: 660))
-        window.contentView = container
-        return container
-    }
-
-    /// Новая страница: как первое открытие вкладки.
-    static func open(_ theme: DSTheme, _ key: PageKey = .module(.awake)) async -> NSBitmapImageRep {
-        let container = container()
-        container.show(key, animated: false, make: page(theme))
-        await pause(0.5)
-        return snapshot(container)
-    }
-
-    /// Своё окно: вид с хостингом подогнал бы под себя размер окна страницы.
-    static let menuWindow: NSWindow = {
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: 700, width: 240, height: 40),
-                              styleMask: [.borderless], backing: .buffered, defer: false)
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.isReleasedWhenClosed = false
-        window.orderBack(nil)
-        return window
-    }()
-
-    /// Настоящий пункт меню-бара в обычном окне: само меню рисует система, за экраном его не снять.
-    static func menuItem() async -> NSBitmapImageRep {
-        let host = NSHostingView(rootView: AwakeMenuItem().frame(width: 240, height: 40).dsThemed())
-        host.frame = NSRect(x: 0, y: 0, width: 240, height: 40)
-        menuWindow.contentView = host
-        await pause(0.3)
-        return snapshot(host)
-    }
-
-    static func snapshot(_ view: NSView) -> NSBitmapImageRep {
-        view.layoutSubtreeIfNeeded()
-        let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        return bitmap
-    }
-
-    static func save(_ bitmap: NSBitmapImageRep, _ name: String) {
-        let path = out + "/png/" + name + ".png"
-        try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-    }
-}
-
-/// Сколько пикселей отличается; размер не совпал — все.
-func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
-    guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh, a.bytesPerRow == b.bytesPerRow,
-          a.bitsPerPixel == b.bitsPerPixel, let pa = a.bitmapData, let pb = b.bitmapData else {
-        return max(a.pixelsWide * a.pixelsHigh, b.pixelsWide * b.pixelsHigh)
-    }
-    let pixelBytes = a.bitsPerPixel / 8
-    var count = 0
-    for y in 0..<a.pixelsHigh {
-        for x in 0..<a.pixelsWide {
-            let offset = y * a.bytesPerRow + x * pixelBytes
-            if memcmp(pa + offset, pb + offset, pixelBytes) != 0 { count += 1 }
-        }
-    }
-    return count
 }
 
 // MARK: - Состояния
@@ -208,12 +72,6 @@ let pinnedStates = [
     controller.testPin(isActive: state.isActive, endDate: state.endDate)
 }
 
-@MainActor func until(_ seconds: Double, _ condition: () -> Bool) async -> Bool {
-    let deadline = ProcessInfo.processInfo.systemUptime + seconds
-    while !condition(), ProcessInfo.processInfo.systemUptime < deadline { await pause(0.02) }
-    return condition()
-}
-
 // MARK: - Сценарии
 
 func wirePure() {
@@ -226,39 +84,17 @@ func wirePure() {
     }
     let foreign = #"{"isActive":false,"keepDisplay":false,"duration":12345,"canStart":true}"#
     check((try? JSONDecoder().decode(AwakeState.self, from: Data(foreign.utf8))) == nil, "состояние с чужой длительностью центр не принимает")
-    check((try? JSONDecoder().decode(AwakeAction.self, from: Data(unknownAction.utf8))) == nil, "неизвестное действие не разбирается")
+    check((try? JSONDecoder().decode(AwakeAction.self, from: Data(#"{"explode":{}}"#.utf8))) == nil, "неизвестное действие не разбирается")
     for (name, payload) in notOneAction {
         check((try? JSONDecoder().decode(AwakeAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается: \(payload)")
     }
 }
 
-/// Мусор доходит до утилиты: ответ — ошибка, состояние то же байт в байт.
 @MainActor func garbage() async {
-    let link = LinkClient(id: moduleID)
-    guard let before = try? await link.moduleState() else { return check(false, "мусор: состояние не прочитано") }
-    let cases: [(String, Data)] = [
-        ("мусор", Data("{не json".utf8)),
-        ("пустое", Data()),
-        ("неизвестное действие", Data(unknownAction.utf8)),
+    await checkBadActions(AwakeState.self, id: moduleID, extra: [
         ("длительность 12345", Data(badDuration.utf8)),
         ("повтор ключа", Data(repeatedKey.utf8)),
-    ] + notOneAction.map { ($0.0, Data($0.1.utf8)) } + [
-        ("слишком длинное", Data(#"{"toggle":{}, "x":""#.utf8) + Data(repeating: 0x61, count: 100_000) + Data(#""}"#.utf8)),
-    ]
-    for (name, payload) in cases {
-        do {
-            let data = try await link.moduleAction(payload)
-            let reply = try JSONDecoder().decode(AwakeReply.self, from: data)
-            check(reply.error != nil, "\(name): ошибка («\(reply.error ?? "нет")»)")
-            check(try JSONDecoder().decode(AwakeState.self, from: before) == reply.state, "\(name): в ответе прежнее состояние")
-        } catch {
-            check(false, "\(name): \(error)")
-        }
-        // Значения, не байты: JSONEncoder от раза к разу меняет порядок ключей.
-        let decode = { (data: Data?) in data.flatMap { try? JSONDecoder().decode(AwakeState.self, from: $0) } }
-        let after = try? await link.moduleState()
-        check(decode(after) != nil && decode(after) == decode(before), "\(name): состояние не изменилось")
-    }
+    ] + notOneAction.map { ($0.0, Data($0.1.utf8)) })
 }
 
 @MainActor func button(stand: Int32, utility: Int32) async {
@@ -282,9 +118,9 @@ func wirePure() {
     await model.perform(.setDuration(7200))
     check(model.actionError == nil && model.duration == .hour2, "успешное действие убирает текст ошибки")
     let other = LinkClient(id: moduleID)
-    _ = try? await other.moduleAction(try! JSONEncoder().encode(AwakeAction.setDuration(0)))
+    _ = try? await other.moduleAction(LinkWire.encoded(AwakeAction.setDuration(0)))
     check(await until(2) { model.duration == .forever }, "настройку поменяли снаружи: центр увидел по statusChanged")
-    _ = try? await other.moduleAction(try! JSONEncoder().encode(AwakeAction.setKeepDisplay(true)))
+    _ = try? await other.moduleAction(LinkWire.encoded(AwakeAction.setKeepDisplay(true)))
     check(await until(2) { model.keepDisplay }, "и «экран не гаснет» тоже")
     await model.perform(.setKeepDisplay(false))
 
@@ -382,7 +218,7 @@ func expectedCard(_ pinned: Pinned) -> DashState {
             await pause(0.2)
             let localShot = Stand.snapshot(Stand.window.contentView!)
             Stand.save(localShot, "dash-\(themeName)-\(pinned.name)-local")
-            let localMenu = await Stand.menuItem()
+            let localMenu = await Stand.menuItem(AwakeMenuItem())
 
             // Контроллер в обратном состоянии: экран, читающий его вместо утилиты, снимок не пройдёт.
             AwakeController.shared.testPin(isActive: !pinned.active, endDate: nil)
@@ -392,7 +228,7 @@ func expectedCard(_ pinned: Pinned) -> DashState {
             await pause(0.2)
             let remoteShot = Stand.snapshot(Stand.window.contentView!)
             Stand.save(remoteShot, "dash-\(themeName)-\(pinned.name)-remote")
-            let remoteMenu = await Stand.menuItem()
+            let remoteMenu = await Stand.menuItem(AwakeMenuItem())
 
             let diff = differingPixels(localShot, remoteShot)
             check(diff == 0, "\(name): дашборд совпал, разных пикселей \(diff) из \(localShot.pixelsWide * localShot.pixelsHigh)")
@@ -464,10 +300,10 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     check(await until(2.5) { slot.state == DashState(on: false, text: "выключен") }, "карточка выключенной утилиты «\(slot.state.text)»")
     check(UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake)) == keyBefore && modules.enabled.contains(.awake), "настройка встроенного не тронута")
     Stand.save(await Stand.open(.dusk, .dashboard), "dash-dusk-off-remote")
-    let menuOff = await Stand.menuItem()
+    let menuOff = await Stand.menuItem(AwakeMenuItem())
     modules.setExternal(.awake, false)
     modules.setOn(.awake, false)
-    let menuBuiltInOff = await Stand.menuItem()
+    let menuBuiltInOff = await Stand.menuItem(AwakeMenuItem())
     check(differingPixels(menuOff, menuBuiltInOff) == 0, "выключенный модуль: в меню пункта нет, как у встроенного")
     modules.setOn(.awake, true)
     modules.setExternal(.awake, true)
@@ -489,15 +325,16 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     container.show(.dashboard, animated: false, make: make)
     await pause(0.3)
     let known = Stand.snapshot(container)
-    let knownMenu = await Stand.menuItem()
+    let knownMenu = await Stand.menuItem(AwakeMenuItem())
     let notResponding = DashState(text: "не отвечает", attention: true)
 
     // Реестр услышал: статус пропал, модель перечитала сама, хотя вкладка не открыта.
     kill(utility, SIGSTOP)
     await registry.update()
-    check(await until(3) { !model.responding }, "зависла: реестр не слышит, модель перечитала без вкладки")
+    // Первый сбой чтения терпится, второе чтение идёт сразу: два срока по 2 с.
+    check(await until(5) { !model.responding }, "зависла: реестр не слышит, модель перечитала без вкладки")
     check(model.screen(registry) == .notResponding, "зависла: вердикт тот же, что у вкладки")
-    let hungMenu = await Stand.menuItem()
+    let hungMenu = await Stand.menuItem(AwakeMenuItem())
     check(differingPixels(knownMenu, hungMenu) > 0, "зависла: пункт меню другой")
     Stand.save(hungMenu, "menu-not-responding")
     let page = Stand.container()
@@ -519,7 +356,7 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     await pause(0.2)
     kill(utility, SIGSTOP)
     page.show(.dashboard, animated: false, make: make)
-    check(await until(3) { slot.state == notResponding }, "зависла при закрытом дашборде: при открытии карточка «не отвечает»")
+    check(await until(5) { slot.state == notResponding }, "зависла при закрытом дашборде: при открытии карточка «не отвечает»")
     kill(utility, SIGCONT)
     await pause(0.3)
     await model.read()
@@ -589,8 +426,8 @@ func expectedCard(_ pinned: Pinned) -> DashState {
 
     // Сборка страницы и снимки стенда позади: теперь главный поток только ждёт ответа.
     let waiting = TickWatch()
-    // Срок чтения и опрос реестра выходят: только теперь запасной экран.
-    check(await until(2.5) { !model.responding }, "утилита не отвечает: модель это увидела")
+    // Срок двух чтений и опрос реестра выходят: только теперь запасной экран.
+    check(await until(5) { !model.responding }, "утилита не отвечает: модель это увидела, один сбой чтения стерпев")
     check(await until(2.5) { registry.entries[.awake]?.status == nil }, "и реестр тоже")
     await pause(0.3)
     check(waiting.maxGap <= 0.3, String(format: "ожидание зависшей утилиты и смена экрана: простой главного потока %.3f с, не больше 0,3", waiting.maxGap))
@@ -615,85 +452,20 @@ func expectedCard(_ pinned: Pinned) -> DashState {
 @main
 enum Main {
     static func main() {
-        let args = CommandLine.arguments
-        // Иначе ModuleManager принял бы пустой домен за обновление и выключил модули.
-        UserDefaults.standard.set(true, forKey: ModuleReset.flagKey)
-        UserDefaults.standard.set(true, forKey: ModuleManager.onKey(.awake))
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        Task { @MainActor in
-            switch args[1] {
-            case "run":
-                await run(out: args[2], utility: Int32(args[3])!)
-            case "foreign":
-                do {
-                    _ = try await LinkClient(id: moduleID).moduleAction(JSONEncoder().encode(AwakeAction.toggle))
-                    print("прошло")
-                    exit(0)
-                } catch {
-                    print("отказ: \(error)")
-                    exit(3)
-                }
-            case "state":
-                // С упорядоченными ключами: скрипт сравнивает строки, а JSONEncoder от раза к разу меняет порядок.
-                let data = (try? await LinkClient(id: moduleID).moduleState()) ?? Data()
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = .sortedKeys
-                let state = try? JSONDecoder().decode(AwakeState.self, from: data)
-                print(state.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "")
-                exit(0)
-            case "idle":
-                await idle(out: args[2], key: .module(.awake))
-            case "idle-dashboard":
-                await idle(out: args[2], key: .dashboard)
-            default:
-                fatalError("неизвестная роль")
+        MainActor.assumeIsolated {
+            ModuleCheck.main(.awake, foreignAction: LinkWire.encoded(AwakeAction.toggle)) { utility in
+                let stand = getpid()
+                wirePure()
+                await garbage()
+                await button(stand: stand, utility: utility)
+                await pixels()
+                await hung(utility: utility)
+                await tabs(utility: utility)
+                await cardPixels()
+                await cardActions(stand: stand, utility: utility)
+                await cardHung(utility: utility)
+                check(!(await holdsAssertion(pid: stand)), "за весь прогон у центра assertion не появился")
             }
         }
-        app.run()
-    }
-
-    @MainActor static func environment(out: String) {
-        let link = { @MainActor @Sendable () in LinkClient(id: moduleID) }
-        SatelliteRegistry.standEnvironment = SatelliteEnvironment(
-            paths: SatellitePaths(appsDir: URL(fileURLWithPath: out), agentsDir: URL(fileURLWithPath: out + "/agents")),
-            defaults: Kit.defaults,
-            installer: SatelliteInstaller(paths: SatellitePaths(appsDir: URL(fileURLWithPath: out), agentsDir: URL(fileURLWithPath: out + "/agents")),
-                                          launchctl: { _ in }, download: { $0 }, verify: { _, _ in }),
-            commands: SatelliteCommands(
-                status: { _ in try await link().status() },
-                setEnabled: { _, on in try await link().setEnabled(on) },
-                openWindow: { _ in }),
-            loadCatalog: { Data(#"{"schema":1,"apps":[]}"#.utf8) },
-            hubVersion: "0.6.0",
-            modules: .shared)
-        Kit.defaults.set(true, forKey: ModuleHandover.handedOverKey(Module.awake.rawValue))
-        ModuleManager.shared.setExternal(.awake, true)
-    }
-
-    @MainActor static func run(out: String, utility: Int32) async {
-        Stand.out = out
-        environment(out: out)
-        wirePure()
-        await garbage()
-        await button(stand: getpid(), utility: utility)
-        await pixels()
-        await hung(utility: utility)
-        await tabs(utility: utility)
-        await cardPixels()
-        await cardActions(stand: getpid(), utility: utility)
-        await cardHung(utility: utility)
-        check(!(await holdsAssertion(pid: getpid())), "за весь прогон у центра assertion не появился")
-        finish()
-    }
-
-    /// Простой для замера: экран открыт, ничего не происходит.
-    @MainActor static func idle(out: String, key: PageKey) async {
-        Stand.out = out
-        environment(out: out)
-        await SatelliteRegistry.shared.update()
-        _ = await Stand.open(.dusk, key)
-        print("готов")
-        fflush(stdout)
     }
 }

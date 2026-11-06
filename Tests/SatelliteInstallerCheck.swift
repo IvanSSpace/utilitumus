@@ -132,6 +132,7 @@ final class Stand {
 
     var bundle: URL { paths.appsDir.appendingPathComponent(appName + ".app") }
     var agent: URL { paths.agentsDir.appendingPathComponent(identifier + ".plist") }
+    var quitReasons: [LinkQuitReason] = []
     var calls: [String] { events.map { String($0.prefix { $0 != "@" }) } }
 
     var version: String {
@@ -177,8 +178,9 @@ final class Stand {
             try KitSigning.verifySignature(of: app, identifier: wanted, strict: true)
         },
         link: SatelliteLink(
-            quit: { [unowned self] id in
+            quit: { [unowned self] id, reason in
                 check(id == appID, "quit: id")
+                self.quitReasons.append(reason)
                 self.log("quit")
             },
             hello: { [unowned self] id in
@@ -358,6 +360,7 @@ func updateChecks() async {
         let (s, _) = await standWithV1("update")
         check(await s.install("v2") == nil, "обновление: прошло")
         check(s.events == ["quit@1.0.0", "bootout@2.0.0", "bootstrap@2.0.0", "hello@2.0.0"], "обновление: quit, замена, bootout, bootstrap, hello (\(s.events))")
+        check(s.quitReasons == [.update], "обновление: причина quit — update (\(s.quitReasons))")
         check(s.version == "2.0.0", "обновление: новая версия на месте")
         check((try? KitSigning.verifySignature(of: s.bundle, identifier: identifier, strict: true)) != nil, "обновление: подпись цела после замены")
         check(s.noLitter, "обновление: мусора нет")
@@ -613,6 +616,7 @@ func removeChecks() async {
         check(!fm.fileExists(atPath: s.bundle.path), "remove: бандла нет")
         check(!fm.fileExists(atPath: s.agent.path), "remove: плиста нет")
         check(s.calls == ["quit", "bootout"], "remove: quit, затем bootout (\(s.calls))")
+        check(s.quitReasons == [.uninstall], "remove: причина quit — uninstall (\(s.quitReasons))")
         check(s.events.last == "bootout@1.0.0", "remove: бандл удалён после bootout (\(s.events))")
         check(fm.fileExists(atPath: neighbour.path), "remove: соседний бандл на месте")
     }
