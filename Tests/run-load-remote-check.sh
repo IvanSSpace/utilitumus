@@ -16,6 +16,9 @@ defaults write "$SUITE" "App.$ID.Enabled" -bool true
 start_agent
 PID="$(agent_pid)"
 
+# Первая запись истории приходит с запозданием и меняет состояние сама. Отказ ни при чём: ждём её до сравнения.
+for _ in $(seq 1 100); do [[ "$("$HUB" state)" == *'"history"'* ]] && break; sleep 0.1; done
+
 echo "== чужая подпись"
 check_foreign_rejected
 

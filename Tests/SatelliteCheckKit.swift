@@ -41,6 +41,22 @@ func finish() -> Never {
     deinit { timer?.invalidate() }
 }
 
+/// Убить утилиту насовсем. Одного SIGKILL мало: метка launchd держит сервис, и первое же сообщение центра поднимает
+/// утилиту заново, как в жизни. Поэтому сразу после SIGKILL метку снимают; между двумя вызовами главный поток не отпускается.
+/// Метку и домен даёт скрипт: `SATELLITE_CHECK_LABEL`, `SATELLITE_CHECK_DOMAIN`.
+@MainActor func killUtilityForGood(_ pid: Int32) {
+    kill(pid, SIGKILL)
+    let env = ProcessInfo.processInfo.environment
+    guard let label = env["SATELLITE_CHECK_LABEL"], let domain = env["SATELLITE_CHECK_DOMAIN"] else {
+        return check(false, "killUtilityForGood: скрипт не передал метку launchd")
+    }
+    let bootout = Process()
+    bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    bootout.arguments = ["bootout", "\(domain)/\(label)"]
+    try? bootout.run()
+    bootout.waitUntilExit()
+}
+
 /// Плохие действия, общие для всех модулей. Модуль добавляет свои через `extra`.
 let badActionsForAnyModule: [(String, Data)] = [
     ("мусор", Data("{не json".utf8)),

@@ -29,7 +29,9 @@ func wirePure() {
     for action in actions {
         check((try? JSONDecoder().decode(LoadAction.self, from: LinkWire.encoded(action))) == action, "LoadAction \(action) переживает кодирование")
     }
-    for (name, payload) in notOneAction where !payload.contains("nobody") && !payload.contains("com.nobody") && !payload.contains("project:") && !payload.contains(unknownPlan + "\"}}") {
+    // Эти разбираются: на проводе они целые, отказывает им модуль (garbage() проверяет ответ и состояние).
+    let wellFormed: Set<String> = ["остановка pid 1"]
+    for (name, payload) in notOneAction where !payload.contains("nobody") && !payload.contains("com.nobody") && !payload.contains("project:") && !payload.contains(unknownPlan + "\"}}") && !wellFormed.contains(name) {
         check((try? JSONDecoder().decode(LoadAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается")
     }
 }
@@ -117,7 +119,7 @@ func wirePure() {
     let registry = SatelliteRegistry.shared
     await model.read()
     check(model.responding, "до смерти утилита отвечает")
-    kill(utility, SIGKILL)
+    killUtilityForGood(utility)
     await registry.update()
     check(await until(8) { !model.responding }, "утилита убита: модель это увидела")
     check(model.screen(of: .load, registry) == .notResponding, "утилита убита: вкладка показывает «не отвечает»")

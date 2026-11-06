@@ -26,6 +26,8 @@ satellite_check_setup() {
   # Его читает Kit.defaults в сборке со швом: и центр стенда, и утилита (через плист).
   SUITE="local.utilitumus.test.kit.$MODULE"
   export KIT_TEST_SUITE="$SUITE"
+  # Для killUtilityForGood в SatelliteCheckKit.swift.
+  export SATELLITE_CHECK_LABEL="$LABEL" SATELLITE_CHECK_DOMAIN="$DOMAIN"
   SIGN_NAME="Utilitumus Signing"
   PLIST="$OUT/$LABEL.plist"
   APP="$OUT/$NAME.app"
