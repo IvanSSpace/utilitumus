@@ -145,7 +145,7 @@ for row in "fans Fans" "voice Voice" "browser Browser"; do
   inst "$id" 1.0.0 "$F/$id-v1.zip" || { cat "$OUT/inst.log"; bad "$id: 1.0.0 не поставилась"; continue; }
   echo установленная > "$DEST/Contents/marker"
   AGENT_BEFORE="$(shasum -a 256 "$AGENT")"
-  if [ "$id" = browser ]; then cases="adhoc:Подпись wrong-id:Подпись no-runtime:hardened no-epoch:метки missing:нет"; else cases="adhoc:Подпись wrong-id:Подпись no-runtime:hardened link:нет missing:нет"; fi
+  if [ "$id" = browser ]; then cases="adhoc:Подпись wrong-id:Подпись no-runtime:hardened no-epoch:метки missing:нет"; else cases="adhoc:Подпись wrong-id:Подпись no-runtime:hardened link:ссылка missing:нет"; fi
   [ "$id" = fans ] && cases="$cases no-epoch:метки"
   for item in $cases; do
     mode="${item%%:*}" pattern="${item#*:}"

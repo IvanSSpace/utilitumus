@@ -41,11 +41,11 @@ struct Target {
 let helperCases: [Target] = [
     Target(id: "fans", name: "Fans", helperName: "utilitumus-fan", bad: [
         ("adhoc", "Подпись utilitumus-fan"), ("wrong-id", "Подпись utilitumus-fan"), ("no-runtime", "hardened runtime"),
-        ("link", "нет помощника"), ("missing", "нет помощника"), ("no-epoch", "метки выпуска"),
+        ("link", "В архиве ссылка"), ("missing", "нет помощника"), ("no-epoch", "метки выпуска"),
     ]),
     Target(id: "voice", name: "Voice", helperName: "utilitumus-voice", bad: [
         ("adhoc", "Подпись utilitumus-voice"), ("wrong-id", "Подпись utilitumus-voice"), ("no-runtime", "hardened runtime"),
-        ("link", "нет помощника"), ("missing", "нет помощника"),
+        ("link", "В архиве ссылка"), ("missing", "нет помощника"),
     ]),
     Target(id: "browser", name: "Browser", helperName: "Utilitumus Links.app", bad: [
         ("adhoc", "Подпись Utilitumus Links.app"), ("wrong-id", "Подпись Utilitumus Links.app"), ("no-runtime", "hardened runtime"),

@@ -135,7 +135,7 @@ chmod +x "$FAKE/gh" "$FAKE/launchctl" "$OUT/curl-stub" "$NOCERT/security"
 # Подставной репозиторий с настоящим Kit и заготовкой утилиты: заготовка читает каталог настоящим SatelliteCatalog.
 G=(/usr/bin/git -C "$FX" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test -c user.email=test@example.invalid)
 mkdir -p "$FX/scripts" "$FX/Sources/Apps/Awake" "$FX/Sources/Modules/Awake" "$FX/Catalog" "$FX/Resources"
-cp scripts/build-app.sh scripts/release-app.sh scripts/unlock-signing.sh "$FX/scripts/"
+cp scripts/build-app.sh scripts/release-app.sh scripts/unlock-signing.sh scripts/check-no-seam.sh "$FX/scripts/"
 cp install.sh "$FX/install.sh"
 echo '{}' > "$FX/Sources/Apps/Awake/manifest.json"
 cp -R Sources/Kit "$FX/Sources/Kit"
