@@ -95,7 +95,7 @@ func legacyChecks() {
     check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
     let updater = source("Sources/App/Updater.swift")
     check(updater.contains("FanController.shared.restoreAutoBlocking()"), "обновление отдаёт вентиляторы")
-    if let hook = updater.range(of: "await beforeReplace()"), let replace = updater.range(of: "replaceItemAt") {
+    if let hook = updater.range(of: "await beforeReplace()"), let replace = updater.range(of: "UpdateBundle.commit") {
         check(hook.lowerBound < replace.lowerBound, "вентиляторы отданы раньше подмены бандла")
     } else {
         check(false, "вентиляторы отданы раньше подмены бандла")
