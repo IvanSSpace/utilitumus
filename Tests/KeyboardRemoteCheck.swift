@@ -19,9 +19,11 @@ let notOneAction: [(String, String)] = [
 
 // MARK: - Сценарии
 
+/// Через ту же сверку, что и в утилите (`LinkWire.decodeAction`): повтор ключа обычный разбор пропускает,
+/// сверка с каноническим кодированием его отвергает. Предел тот же, что в `KeyboardController.handle`.
 func wirePure() {
     for (name, payload) in notOneAction {
-        check((try? JSONDecoder().decode(KeyboardAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается: \(payload)")
+        check(LinkWire.decodeAction(KeyboardAction.self, from: Data(payload.utf8), limit: 512) == nil, "\(name) не пройдёт связь: \(payload)")
     }
 }
 
@@ -115,11 +117,49 @@ func wirePure() {
     check(model.actionError == nil && model.responding && model.mode == .lastTwo, "после разморозки ошибок нет, режим возвращён")
 }
 
-/// Утилита умерла: вкладка «не отвечает», без падения.
+/// Пассивная значит остановленная: центр запущен и модуль ещё его, утилита ничего не ведёт и говорит почему.
+/// Фишки в стенде выключены, поэтому здесь нельзя включить tap, даже если бы пассивность не работала.
+@MainActor func passive() async {
+    let defaults = Kit.defaults
+    let client = LinkClient(id: moduleID)
+    let model = RemoteKeyboardModel.shared
+    await model.read()
+    let line = try? await client.status().line
+    check(line != "Ждём передачу от центра", "до пассивности утилита работает («\(line ?? "нет")»)")
+    defaults.set(true, forKey: "Test.HubRunning")
+    defaults.set("0.6.0", forKey: "Test.HubVersion")
+    defaults.set(true, forKey: SatelliteRole.hubModuleOnKey(moduleID))
+    defaults.set(false, forKey: SatelliteRole.handedOverKey(moduleID))
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+    await model.read()
+    let passiveLine = try? await client.status().line
+    check(passiveLine == "Ждём передачу от центра", "пассивная: статус говорит почему («\(passiveLine ?? "нет")»)")
+    check(model.responding && !model.tapActive && !KeyboardFeature.allCases.contains(where: model.isOn), "пассивная: отвечает, фишки выключены, tap нет")
+
+    defaults.set(true, forKey: SatelliteRole.handedOverKey(moduleID))
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+    var back = false
+    for _ in 0..<50 where !back {
+        back = (try? await client.status().line) != "Ждём передачу от центра"
+        if !back { await pause(0.1) }
+    }
+    check(back, "передача: утилита снова ведёт модуль, статус другой")
+    await model.read()
+    check(model.responding && !model.tapActive && !KeyboardFeature.allCases.contains(where: model.isOn), "после передачи: фишки выключены, tap нет")
+    defaults.set(false, forKey: "Test.HubRunning")
+    defaults.synchronize()
+    try? await client.setEnabled(true)
+}
+
+/// Утилита умерла насовсем (без `killUtilityForGood` метка launchd подняла бы её заново): вкладка «не отвечает», без падения.
 @MainActor func died(utility: Int32) async {
     let model = RemoteKeyboardModel.shared
-    kill(utility, SIGKILL)
-    check(await until(6) { !model.responding } || { model.refresh(); return false }(), "утилита убита: модель это увидела")
+    let registry = SatelliteRegistry.shared
+    killUtilityForGood(utility)
+    await registry.update()
+    check(await until(6) { !model.responding }, "утилита убита: модель это увидела")
     await pause(0.2)
     await model.read()
     await model.read()
@@ -135,6 +175,7 @@ enum Main {
                 await garbage()
                 await actions()
                 await pixels()
+                await passive()
                 await hung(utility: utility)
                 await died(utility: utility)
             }
