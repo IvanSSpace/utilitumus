@@ -2,18 +2,6 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// Сборка со швом работает под тестовой меткой launchd и своим id: настоящие имена ей не нужны.
-/// Исключение — `KIT_TEST_REAL_ID`: сквозной проверке нужен плист, который пишет настоящий установщик.
-enum AwakeIdentity {
-    #if KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
-    static let id = "test.awake"
-    static let label = "local.utilitumus.test.awake"
-    #else
-    static let id = Module.awake.rawValue
-    static let label = KitLink.bundleID(id)
-    #endif
-}
-
 /// launchd придерживает перезапуск процесса, прожившего меньше 10 с: столько копия может не отвечать.
 private let forwardRetryWindow: TimeInterval = 12
 
@@ -78,8 +66,6 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
     private var runningApps: NSKeyValueObservation?
     private var hubRunning = false
 
-    var canStart: Bool { mode == .active && enabled }
-
     static func currentMode() -> SatelliteRole.Mode {
         SatelliteRole.decide(
             launchedByLaunchd: ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == AwakeIdentity.label,
@@ -99,8 +85,8 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         #endif
         refresh()
 
-        // Publisher срабатывает до записи значения: читать его можно только следующим шагом.
-        controller.$isActive.dropFirst().removeDuplicates().receive(on: DispatchQueue.main)
+        // Срабатывает до записи значения, и переключение меняет несколько полей: центр читает после всех.
+        controller.objectWillChange.debounce(for: .milliseconds(20), scheduler: DispatchQueue.main)
             .sink { _ in KitLink.postStatusChanged(AwakeIdentity.id) }
             .store(in: &subscriptions)
 
@@ -133,6 +119,7 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         Kit.defaults.synchronize()
         mode = Self.currentMode()
         enabled = SatelliteEnabled.load(id: AwakeIdentity.id, defaults: Kit.defaults)
+        controller.canStart = mode == .active && enabled
         if SatelliteRole.mustRelease(mode: mode, enabled: enabled, hubVersion: SatelliteHub.version) { controller.stop() }
         hubRunning = SatelliteHub.isRunning
         statusItem?.isVisible = !hubRunning
@@ -154,7 +141,7 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
 
     /// Команда «Не спать»: пока модуль ведёт центр или утилита выключена, блокировку не создаёт.
     func commandKeepAwake() {
-        if controller.isActive || canStart { controller.toggle() }
+        controller.toggle()
     }
 
     /// Без остатка времени: центр перечитывает строку редко, и «ещё 2 ч» застывало бы у него на экране.
@@ -174,6 +161,9 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
     func linkStatus() -> LinkStatus {
         LinkStatus(enabled: enabled, line: statusLine(), needsSetup: 0)
     }
+
+    func linkModuleState() -> Data { AwakeWire.encoded(controller.wireState) }
+    func linkModuleAction(_ action: Data) -> Data { AwakeWire.encoded(controller.handle(action)) }
 
     func linkSetEnabled(_ enabled: Bool) { setEnabled(enabled) }
     func linkOpenWindow() { showWindow() }
@@ -301,7 +291,7 @@ struct AwakeWindowRoot: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AwakeView(canStart: satellite.canStart)
+            AwakeView(model: controller)
             Text(satellite.statusLine())
                 .font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.6))
                 .frame(maxWidth: .infinity)

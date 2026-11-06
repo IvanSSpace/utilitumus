@@ -44,6 +44,13 @@ func pureChecks() {
     } catch {
         check((error as? LinkError) == .incompatible(99), "hello с версией 99 — incompatible(99)")
     }
+    check(KitLink.protocolVersion == 2, "версия протокола 2")
+    do {
+        _ = try LinkClient.decodeHello(try! JSONEncoder().encode(LinkHello(id: "awake", version: "1", protocolVersion: 1)))
+        check(false, "hello с версией 1 отвергается")
+    } catch {
+        check((error as? LinkError) == .incompatible(1), "hello с версией 1 — incompatible(1)")
+    }
     check((try? LinkClient.decodeHello(Data("{не json".utf8))) == nil, "битый JSON в hello — ошибка, не падение")
     check((try? LinkClient.decodeStatus(Data("{не json".utf8))) == nil, "битый JSON в status — ошибка, не падение")
 
@@ -89,6 +96,16 @@ func recordedCalls(in dir: String, file name: String = "calls.log") -> [String] 
         record("status", in: dir)
         hangIfAsked("status")
         return LinkStatus(enabled: enabled, line: "\(getpid())", needsSetup: 1)
+    }
+    /// Содержимое для связи непрозрачно: байты не JSON и проходят как есть.
+    func linkModuleState() -> Data {
+        record("moduleState", in: dir)
+        return Data([0, 255, 1])
+    }
+    func linkModuleAction(_ action: Data) -> Data {
+        record("moduleAction", in: dir)
+        hangIfAsked("moduleAction")
+        return Data(action.reversed())
     }
     func linkSetEnabled(_ on: Bool) {
         record("setEnabled(\(on))", in: dir)
@@ -137,6 +154,14 @@ final class FakeService: NSObject, LinkXPC, NSXPCListenerDelegate {
     func status(reply: @escaping @Sendable (Data) -> Void) {
         record("status", in: dir)
         reply(try! JSONEncoder().encode(LinkStatus(enabled: true, line: "подмена", needsSetup: 0)))
+    }
+    func moduleState(reply: @escaping @Sendable (Data) -> Void) {
+        record("moduleState", in: dir)
+        reply(Data())
+    }
+    func moduleAction(_ action: Data, reply: @escaping @Sendable (Data) -> Void) {
+        record("moduleAction", in: dir)
+        reply(Data())
     }
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void) {
         record("setEnabled(\(enabled))", in: dir)
@@ -198,10 +223,13 @@ func onMainThread() -> Bool { Thread.isMainThread }
 @MainActor func hangingCall(dir: String, call: String) async {
     try! call.write(toFile: dir + "/hang", atomically: true, encoding: .utf8)
     let client = LinkClient(id: testID)
+    if call == "moduleAction" { _ = try? await client.hello() }
     let ticks = TickWatch()
     let started = ProcessInfo.processInfo.systemUptime
     var caught: Error?
-    do { _ = try await client.status() } catch { caught = error }
+    do {
+        if call == "moduleAction" { _ = try await client.moduleAction(Data([1])) } else { _ = try await client.status() }
+    } catch { caught = error }
     let elapsed = ProcessInfo.processInfo.systemUptime - started
     check((caught as? LinkError) == .timeout, "завис \(call): клиент получил timeout (\(String(describing: caught)))")
     check(elapsed <= 2.5, String(format: "завис \(call): timeout за %.2f с, не больше 2,5", elapsed))
@@ -237,6 +265,10 @@ func onlyHello(in dir: String, _ label: String) {
             try await client.openWindow()
             check(recordedCalls(in: dir).filter { $0 == "hello" }.count == 1, "повторного рукопожатия на том же соединении нет")
             check(recordedCalls(in: dir).last == "openWindow", "openWindow дошёл до обработчика")
+            let state = try await client.moduleState()
+            check(state == Data([0, 255, 1]), "moduleState: байты модуля проходят как есть")
+            let reply = try await client.moduleAction(Data([1, 2, 3]))
+            check(reply == Data([3, 2, 1]), "moduleAction: действие дошло, ответ вернулся как есть")
             let hello = try await client.hello()
             check(hello == LinkHello(id: testID, version: "1.2.3", protocolVersion: KitLink.protocolVersion), "hello получен: \(hello)")
         } catch {
@@ -249,7 +281,9 @@ func onlyHello(in dir: String, _ label: String) {
 
     case "rogue":
         let client = LinkClient(id: testID)
-        for (name, call) in [("hello", { _ = try await client.hello() }), ("setEnabled", { try await client.setEnabled(true) })] as [(String, () async throws -> Void)] {
+        for (name, call) in [("hello", { _ = try await client.hello() }), ("setEnabled", { try await client.setEnabled(true) }),
+                            ("moduleState", { _ = try await client.moduleState() }),
+                            ("moduleAction", { _ = try await client.moduleAction(Data([1])) })] as [(String, () async throws -> Void)] {
             do {
                 try await call()
                 check(false, "rogue: \(name) не должен пройти")
@@ -328,6 +362,9 @@ func onlyHello(in dir: String, _ label: String) {
 
     case "hang-status":
         await hangingCall(dir: dir, call: "status")
+
+    case "hang-action":
+        await hangingCall(dir: dir, call: "moduleAction")
 
     case "killed":
         // Вызов уже в пути, когда сервер убит: иначе клиенту незачем видеть ошибку, launchd просто поднимет новый.

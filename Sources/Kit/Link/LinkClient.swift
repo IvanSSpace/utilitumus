@@ -46,6 +46,14 @@ final class LinkClient {
         return try Self.decodeStatus(data)
     }
 
+    @MainActor func moduleState() async throws -> Data {
+        try await command { proxy, done in proxy.moduleState(reply: done) }
+    }
+
+    @MainActor func moduleAction(_ action: Data) async throws -> Data {
+        try await command { proxy, done in proxy.moduleAction(action, reply: done) }
+    }
+
     @MainActor func setEnabled(_ enabled: Bool) async throws {
         try await command { proxy, done in proxy.setEnabled(enabled) { done(()) } }
     }

@@ -133,6 +133,8 @@ swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name HubE2E -o "$HUB" "$OU
   Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift \
+  Sources/App/Satellites/RemoteAwakeModel.swift Sources/Modules/Awake/AwakeController.swift \
+  Sources/Modules/Awake/AwakeModel.swift Sources/Modules/Awake/AwakeWire.swift \
   -framework SwiftUI -framework AppKit -framework Carbon \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$HUB" 2>/dev/null
@@ -151,7 +153,7 @@ PID="$(agent_pid)"
 remember "$PID"
 check "launchd держит процесс" kill -0 "$PID"
 same "launchd запустил именно бинарник из стенда" "$(pids_of "$EXE")" "$PID"
-same "hello с версией" "$("$HUB" "$OUT" hello)" "$ID 1.0.0 1"
+same "hello с версией" "$("$HUB" "$OUT" hello)" "$ID 1.0.0 2"
 same "App.awake.Enabled поставлен при установке" "$(suite_key App.awake.Enabled)" "1"
 same "передача записана" "$(suite_key App.awake.HandedOver)" "1"
 
@@ -170,6 +172,10 @@ expect "включённая утилита берёт assertion" holds_assertio
 "$HUB" "$OUT" disable
 expect "setEnabled(false) снимает assertion" no_assertion "$PID"
 "$HUB" "$OUT" enable
+same "модель центра: нажатие включило блокировку" "$("$HUB" "$OUT" model-toggle)" "true"
+expect "модель центра: assertion у процесса утилиты" holds_assertion "$PID"
+same "модель центра: нажатие выключило блокировку" "$("$HUB" "$OUT" model-toggle)" "false"
+expect "модель центра: assertion снят" no_assertion "$PID"
 "$HUB" "$OUT" open
 same "окно за экраном: связь ответила, процесс тот же" "$(agent_pid)" "$PID"
 
@@ -180,6 +186,7 @@ hold_saw() { grep -qF "$1" "$OUT/hold.log"; }
 if wait_until 5 hold_saw "1.0.0|true|true|Mac засыпает как обычно"; then ok "живой центр видит утилиту"; else bad "живой центр не увидел утилиту: $(cat "$OUT/hold.log")"; fi
 keep_awake "$PID"
 expect "assertion при живом центре" holds_assertion "$PID"
+check "у живого центра своего assertion нет" no_assertion "$HOLD_PID"
 if wait_until 5 hold_saw "1.0.0|true|true|Mac не уснёт"; then ok "statusChanged дошёл до центра"; else bad "statusChanged не дошёл: $(cat "$OUT/hold.log")"; fi
 kill -9 "$HOLD_PID"
 wait "$HOLD_PID" 2>/dev/null || true
@@ -190,7 +197,7 @@ check "центр снят: утилита жива" kill -0 "$PID"
 check "центр снят: assertion на месте" holds_assertion "$PID"
 
 echo "== центр запущен снова"
-same "hello успешен" "$("$HUB" "$OUT" hello)" "$ID 1.0.0 1"
+same "hello успешен" "$("$HUB" "$OUT" hello)" "$ID 1.0.0 2"
 same "статус виден новому центру" "$("$HUB" "$OUT" state)" "1.0.0|true|true|Mac не уснёт"
 same "процесс тот же" "$(agent_pid)" "$PID"
 check "assertion на месте" holds_assertion "$PID"
@@ -206,7 +213,7 @@ NEW_PID="$(agent_pid)"
 remember "$NEW_PID"
 if [ -n "$NEW_PID" ] && [ "$NEW_PID" != "$PID" ]; then ok "новый процесс"; else bad "процесс не сменился: $NEW_PID"; fi
 PID="$NEW_PID"
-same "hello с новой версией" "$("$HUB" "$OUT" hello)" "$ID 1.1.0 1"
+same "hello с новой версией" "$("$HUB" "$OUT" hello)" "$ID 1.1.0 2"
 same "версия бандла" "$(app_version)" "1.1.0"
 same "в папке приложений только утилита" "$(ls "$APPS")" "Awake.app"
 same "настройка пережила обновление" "$(suite_key App.awake.Enabled)" "1"
@@ -227,7 +234,7 @@ for forged in adhoc other-id; do
   fi
   same "$forged: бандл и плист те же" "$(fingerprint)" "$BEFORE"
   same "$forged: процесс тот же" "$(agent_pid)" "$PID"
-  same "$forged: hello прежний" "$("$HUB" "$OUT" hello)" "$ID 1.1.0 1"
+  same "$forged: hello прежний" "$("$HUB" "$OUT" hello)" "$ID 1.1.0 2"
   check "$forged: assertion на месте" holds_assertion "$PID"
 done
 

@@ -128,6 +128,8 @@ real_server
 scenario client hang-hello
 real_server
 scenario client hang-status
+real_server
+scenario client hang-action
 
 real_server
 scenario client killed

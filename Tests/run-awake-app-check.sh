@@ -176,7 +176,7 @@ defaults write "$SUITE" Modules.ResetForStore.v1 -bool true
 hub_state false ""
 start_agent
 PID="$(agent_pid)"
-same "hello: id, версия, протокол" "$(hub hello)" "$ID 1.2.3 1"
+same "hello: id, версия, протокол" "$(hub hello)" "$ID 1.2.3 2"
 same "XPC_SERVICE_NAME дал active, запуск launchd" "$(line)" "Mac засыпает как обычно"
 same "App.<id>.Enabled взят из ModuleOn" "$(defaults read "$SUITE" "App.$ID.Enabled")" "1"
 same "Modules.ResetForStore.v1 не тронут" "$(defaults read "$SUITE" Modules.ResetForStore.v1)" "1"
@@ -187,7 +187,7 @@ else
   ok "чужой identifier: отказ ($(head -c 80 "$OUT/foreign.out"))"
 fi
 same "после отказа тот же процесс" "$(agent_pid)" "$PID"
-same "центр работает и после отказа" "$(hub hello)" "$ID 1.2.3 1"
+same "центр работает и после отказа" "$(hub hello)" "$ID 1.2.3 2"
 
 echo "== блокировка"
 expect_still_no_assertion "до команды assertion нет" "$PID"

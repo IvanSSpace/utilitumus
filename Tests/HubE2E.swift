@@ -89,6 +89,16 @@ func stateLine(_ entry: SatelliteRegistry.Entry?) -> String {
         try await requestEnabled(appID, false)
     case "open":
         try await requestWindow(appID)
+    case "model-toggle":
+        // Как кнопка на вкладке: модель центра, команда у утилиты.
+        let model = RemoteAwakeModel(id: appID, canRead: { true })
+        await model.read()
+        let before = model.isActive
+        model.toggle()
+        for _ in 0..<60 where model.isActive == before {
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        print(model.isActive)
     case "hold":
         // Живой центр: пишет каждое изменение, пока его не снимут.
         registry.start()

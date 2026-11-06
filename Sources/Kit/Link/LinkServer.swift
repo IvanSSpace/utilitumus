@@ -56,6 +56,14 @@ private final class LinkExportedObject: NSObject, LinkXPC, @unchecked Sendable {
         onMain { reply(Self.encoded($0.linkStatus())) }
     }
 
+    func moduleState(reply: @escaping @Sendable (Data) -> Void) {
+        onMain { reply($0.linkModuleState()) }
+    }
+
+    func moduleAction(_ action: Data, reply: @escaping @Sendable (Data) -> Void) {
+        onMain { reply($0.linkModuleAction(action)) }
+    }
+
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void) {
         onMain {
             $0.linkSetEnabled(enabled)

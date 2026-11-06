@@ -2,7 +2,7 @@ import Foundation
 import IOKit.pwr_mgt
 
 /// На сколько включать «Не спать».
-enum AwakeDuration: Int, CaseIterable {
+enum AwakeDuration: Int, CaseIterable, Codable {
     case forever = 0, hour1 = 3600, hour2 = 7200, hour4 = 14400
 
     var title: String {
@@ -18,7 +18,7 @@ enum AwakeDuration: Int, CaseIterable {
 /// «Не спать»: держит assertion в IOKit, пока активно. Модуль включён ≠ активно:
 /// включённый модуль только доступен, assertion появляется после кнопки.
 @MainActor
-final class AwakeController: ObservableObject {
+final class AwakeController: AwakeModel {
     static let shared = AwakeController()
 
     @Published private(set) var isActive = false
@@ -34,8 +34,11 @@ final class AwakeController: ObservableObject {
         didSet { Kit.defaults.set(duration.rawValue, forKey: Self.durationKey) }
     }
 
-    private static let displayKey = "AwakeKeepDisplay"
-    private static let durationKey = "AwakeDuration"
+    /// Можно ли включить блокировку. Отдельное приложение запрещает это, пока модуль ведёт центр.
+    @Published var canStart = true
+
+    static let displayKey = "AwakeKeepDisplay"
+    static let durationKey = "AwakeDuration"
     /// Имя в `pmset -g assertions`. Латиница: с кириллицей pmset показывает пустое имя.
     private static let reason = "Utilitumus: Keep Awake" as CFString
 
@@ -54,7 +57,9 @@ final class AwakeController: ObservableObject {
     /// Выключили модуль или вышли из приложения — assertion обязательно снимается.
     func stop() { deactivate() }
 
-    func toggle() { isActive ? deactivate() : activate() }
+    func toggle() {
+        if isActive { deactivate() } else if canStart { activate() }
+    }
 
     func activate() {
         deactivate()
@@ -105,6 +110,14 @@ final class AwakeController: ObservableObject {
         IOPMAssertionRelease(id)
         id = 0
     }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд ставит состояние для снимка: без настоящего assertion и с заданным сроком.
+    func testPin(isActive: Bool, endDate: Date?) {
+        self.isActive = isActive
+        self.endDate = endDate
+    }
+    #endif
 
     /// «1 ч 23 мин» / «12 мин» / «меньше минуты».
     static func remainingText(until end: Date, now: Date = Date()) -> String {

@@ -2,7 +2,7 @@ import Foundation
 
 /// Имена и версия протокола связи центра и утилиты.
 enum KitLink {
-    static let protocolVersion = 1
+    static let protocolVersion = 2
 
     static func bundleID(_ id: String) -> String { "\(Kit.hubBundleID).app.\(id)" }
     static func machService(_ id: String) -> String { bundleID(id) + ".xpc" }
@@ -58,6 +58,10 @@ struct LinkStatus: Codable, Equatable {
 @objc(LinkXPC) protocol LinkXPC {
     func hello(reply: @escaping @Sendable (Data) -> Void)
     func status(reply: @escaping @Sendable (Data) -> Void)
+    /// То, что вкладка центра показывает на экране. Для связи это байты: разбирает только код модуля.
+    func moduleState(reply: @escaping @Sendable (Data) -> Void)
+    /// Действие с вкладки центра. Утилита проверяет его сама и отвечает своим кодом.
+    func moduleAction(_ action: Data, reply: @escaping @Sendable (Data) -> Void)
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void)
     func openWindow(reply: @escaping @Sendable () -> Void)
     func quit(reply: @escaping @Sendable () -> Void)
@@ -67,6 +71,8 @@ struct LinkStatus: Codable, Equatable {
 @MainActor protocol LinkHandler: AnyObject {
     func linkHello() -> LinkHello
     func linkStatus() -> LinkStatus
+    func linkModuleState() -> Data
+    func linkModuleAction(_ action: Data) -> Data
     func linkSetEnabled(_ enabled: Bool)
     func linkOpenWindow()
     func linkQuit()

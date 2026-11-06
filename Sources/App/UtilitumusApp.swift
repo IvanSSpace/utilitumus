@@ -7,7 +7,10 @@ struct ModuleDetail: View {
 
     var body: some View {
         if modules.isExternal(module) {
-            SatellitePage(module: module)
+            switch module {
+            case .awake: RemoteAwakePage()
+            default: SatellitePage(module: module)
+            }
         } else {
             ModuleScreen(module: module) {
                 switch module {
@@ -21,7 +24,7 @@ struct ModuleDetail: View {
                 case .voice: VoiceView()
                 case .clipboard: ClipboardView()
                 case .keyboard: KeyboardView()
-                case .awake: AwakeView()
+                case .awake: AwakeView(model: AwakeController.shared)
                 }
             }
         }
@@ -269,6 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DockMode.start()
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
+        // Чтобы вкладка с первого открытия показывала настоящее состояние, а не сохранённые настройки.
+        RemoteAwakeModel.shared.refresh()
         Updater.shared.check(quiet: true)
         // Без значка в Dock окно при обычном запуске должно появиться впереди.
         if !DockMode.showsInDock, !CommandLine.arguments.contains("--background") {
