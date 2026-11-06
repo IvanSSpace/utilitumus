@@ -21,7 +21,9 @@ matches() { local LC_ALL=C; [[ "$1" =~ $2 ]]; }
 matches "$OUT" '^[A-Za-z0-9/._-]+$' || fail "В пути к папке вывода только латиница, цифры и . _ - /: ${OUT}"
 cd "$(dirname "$0")/.."
 
-AWAKE_VERSION="1.0.0"
+VERSION="1.0.0"
+# Первый пилот: модули без настоящих данных и системных настроек. Буфер (ключ), Вентиляторы (служба), Браузер (ссылки) и Клавиатура (🌐) идут потом, при авторе.
+PILOT_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load"
 MIN_HUB="0.6.0"
 LEAF="$(grep -oE '"[0-9a-f]{40}"' Sources/Kit/KitSigning.swift | head -1 | tr -d '"')"
 HUB_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - Info.plist)"
@@ -35,18 +37,21 @@ signed_by_author() {
 }
 
 mkdir -p "$OUT"
-scripts/build-app.sh awake Awake "$AWAKE_VERSION" "$OUT/app"
-signed_by_author "$OUT/app/Awake.app" local.utilitumus.app.awake
-ZIP="$OUT/Awake.zip"
-rm -f -- "$ZIP"
-ditto -c -k --keepParent "$OUT/app/Awake.app" "$ZIP"
-SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
-SIZE_MB="$(( ($(stat -f %z "$ZIP") + 999999) / 1000000 ))"
+ENTRIES=""
+for pair in $PILOT_APPS; do
+  ID="${pair%%:*}"; NAME="${pair##*:}"
+  scripts/build-app.sh "$ID" "$NAME" "$VERSION" "$OUT/app"
+  signed_by_author "$OUT/app/$NAME.app" "local.utilitumus.app.$ID"
+  ZIP="$OUT/$NAME.zip"
+  rm -f -- "$ZIP"
+  ditto -c -k --keepParent "$OUT/app/$NAME.app" "$ZIP"
+  SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+  SIZE_MB="$(( ($(stat -f %z "$ZIP") + 999999) / 1000000 ))"
+  ENTRIES="${ENTRIES:+$ENTRIES,}{\"id\":\"$ID\",\"version\":\"$VERSION\",\"minHub\":\"$MIN_HUB\",\"url\":\"file://$ZIP\",\"sha256\":\"$SHA\",\"sizeMB\":$SIZE_MB,\"notes\":[\"Первая отдельная версия\"]}"
+done
 
 CATALOG="$OUT/catalog.json"
-cat > "$CATALOG" <<JSON
-{"schema":1,"apps":[{"id":"awake","version":"$AWAKE_VERSION","minHub":"$MIN_HUB","url":"file://$ZIP","sha256":"$SHA","sizeMB":$SIZE_MB}]}
-JSON
+printf '{"schema":1,"apps":[%s]}\n' "$ENTRIES" > "$CATALOG"
 
 SOURCE="$OUT/PilotCatalog.swift"
 cat > "$SOURCE" <<SWIFT
@@ -66,16 +71,17 @@ cat <<TEXT
 Собрано для пилота, ничего не установлено и не выложено.
   Центр $HUB_VERSION: $HUB
   Каталог: $CATALOG
-  Не спать $AWAKE_VERSION: $ZIP, sha256 $SHA
+  Утилиты $VERSION: $PILOT_APPS
 
 Что сделать автору:
   1. Закрыть Utilitumus.
   2. Поставить центр:
        rm -rf /Applications/Utilitumus.app && ditto "$HUB" /Applications/Utilitumus.app
        open /Applications/Utilitumus.app
-  3. Если встроенный «Не спать» включён, в Сторе нажать «Удалить». Настройки останутся.
-  4. В Сторе нажать «＋» на «Не спать». Приложение встанет в /Applications/Utilitumus/Awake.app,
-     агент в ~/Library/LaunchAgents/local.utilitumus.app.awake.plist.
+  3. Если встроенный модуль включён, в Сторе нажать «Удалить». Настройки останутся.
+  4. В Сторе нажать «＋». Приложение встанет в /Applications/Utilitumus/<Имя>.app,
+     агент в ~/Library/LaunchAgents/local.utilitumus.app.<id>.plist.
+Автопереход в пилоте выключен: ставишь сам. 
 Папку $OUT не удалять до конца пилота: центр читает каталог из неё.
 Вернуть как было: «Удалить» в Сторе, затем обычный install.sh без аргументов поставит выпущенный центр.
 TEXT

@@ -65,8 +65,13 @@ enum ModuleMigration {
 extension SatelliteRegistry {
     /// Запуск центра, после `start()`. Вне главного потока: каталог и скачивание не должны его занимать.
     func startMigration() {
+        // В пилоте автор ставит сам: и видит Стор, и не отдаёт утилитам то, что проверяется при нём.
+        #if KIT_PILOT_CATALOG
+        return
+        #else
         let env = ModuleMigrationEnvironment.live(self)
         Task.detached(priority: .utility) { await ModuleMigration.run(env) }
+        #endif
     }
 }
 
