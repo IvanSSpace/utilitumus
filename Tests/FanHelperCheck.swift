@@ -171,9 +171,9 @@ func refreshChecks() {
         other.moduleRunning = true
         other.refresh()
         spin()
-        check(other.status == .outdated, "другая версия: outdated")
+        check(other.status == .outdated, "служба старше клиента: outdated")
 
-        check(other.serviceAnswered, "другая версия: служба жива, ей можно отдать «Авто»")
+        check(other.serviceAnswered, "служба старше клиента: жива, ей можно отдать «Авто»")
 
         // Один сбой — ещё не устаревший помощник: повторы через паузу.
         let silentProbes = Counter()

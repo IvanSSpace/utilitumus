@@ -40,8 +40,10 @@ PLIST
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$APP"
 
 cp Tests/UpdateOrderCheck.swift "$OUT/main.swift"
-swiftc -target "$TARGET" -module-name UpdateOrderCheck -o "$OUT/update-order-check" "$OUT/main.swift" \
-  Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift \
+# Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек,
+# и FanController записал бы туда настройки вентиляторов.
+swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" "$OUT/main.swift" \
+  Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
   Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift -framework AppKit
 
 if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnection'; then
@@ -50,7 +52,12 @@ if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnectio
 fi
 echo "ok   nm: нет вызовов SMC и XPC"
 
-# От настроек остаётся пустой файл домена этого бинарника: cfprefsd не смотрит на подменённую папку.
-trap 'rm -f "$HOME/Library/Preferences/update-order-check.plist"' EXIT
+# От настроек остаётся файл домена этого бинарника и ключ в suite стендов: cfprefsd не смотрит на подменённую папку.
+clean_prefs() {
+  rm -f "$HOME/Library/Preferences/update-order-check.plist"
+  defaults delete local.utilitumus.test.kit FanConfigs 2>/dev/null || true
+}
+clean_prefs
+trap clean_prefs EXIT
 # FanController пишет журнал в домашнюю папку: здесь она своя. Без неё проверка сама откажется работать.
 CFFIXED_USER_HOME="$OUT/home" "$OUT/update-order-check" "$APP" "$OUT/root" "$OUT/home"

@@ -14,11 +14,14 @@ import CoreGraphics
 final class KeyboardController: ObservableObject {
     static let shared = KeyboardController()
 
+    /// Сменился набор фишек. Что от него зависит вне модуля, назначает тот, кто его запускает.
+    static var onFeaturesChanged: @MainActor () -> Void = {}
+
     @Published var trigger: FnTrigger {
-        didSet { UserDefaults.standard.set(trigger.rawValue, forKey: "Keyboard.Trigger"); detector.trigger = trigger }
+        didSet { Kit.defaults.set(trigger.rawValue, forKey: "Keyboard.Trigger"); detector.trigger = trigger }
     }
     @Published var mode: LayoutMode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "Keyboard.Mode"); picker.mode = mode }
+        didSet { Kit.defaults.set(mode.rawValue, forKey: "Keyboard.Mode"); picker.mode = mode }
     }
     @Published private(set) var currentName = "—"
     @Published private(set) var tapActive = false
@@ -41,7 +44,7 @@ final class KeyboardController: ObservableObject {
     @Published var newAppLayout: String? {
         didSet {
             memory.newAppLayout = newAppLayout
-            UserDefaults.standard.set(newAppLayout, forKey: Self.newAppKey)
+            Kit.defaults.set(newAppLayout, forKey: Self.newAppKey)
         }
     }
     /// Приложения, где раскладку не трогаем (в порядке добавления).
@@ -71,7 +74,7 @@ final class KeyboardController: ObservableObject {
     private var healthTimer: Timer?
 
     init() {
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         let trigger = FnTrigger(rawValue: defaults.string(forKey: "Keyboard.Trigger") ?? "") ?? .onRelease
         let mode = LayoutMode(rawValue: defaults.string(forKey: "Keyboard.Mode") ?? "") ?? .lastTwo
         self.trigger = trigger
@@ -134,7 +137,7 @@ final class KeyboardController: ObservableObject {
             note("фишка «\(feature.title)» \(on ? "включена" : "выключена")")
         }
         // Шаги настройки модуля зависят от включённых фишек.
-        AccessState.shared.refresh()
+        Self.onFeaturesChanged()
     }
 
     /// Привести ресурсы в соответствие с включёнными фишками. Идемпотентно.
@@ -221,7 +224,7 @@ final class KeyboardController: ObservableObject {
     /// Вошли в приложение: вернуть его раскладку. `restore: false` — только запомнить текущую (старт фишки).
     private func enterApp(_ app: NSRunningApplication?, restore: Bool = true) {
         // Наше окно раскладку не меняет и смены в нём ни к какому приложению не приписываем.
-        guard let id = app?.bundleIdentifier, id != Bundle.main.bundleIdentifier else {
+        guard let id = app?.bundleIdentifier, !Kit.isOurs(id) else {
             frontApp = nil
             return
         }
@@ -241,7 +244,7 @@ final class KeyboardController: ObservableObject {
 
     private func rememberLayout(_ layout: String, in app: String) {
         guard memory.remember(layout: layout, in: app) else { return }
-        UserDefaults.standard.set(memory.saved, forKey: Self.savedKey)
+        Kit.defaults.set(memory.saved, forKey: Self.savedKey)
     }
 
     func addExcluded(_ id: String) {
@@ -257,7 +260,7 @@ final class KeyboardController: ObservableObject {
 
     private func saveExcluded() {
         memory.excluded = Set(excludedApps)
-        UserDefaults.standard.set(excludedApps, forKey: Self.excludedKey)
+        Kit.defaults.set(excludedApps, forKey: Self.excludedKey)
     }
 
     // MARK: Самовосстановление tap

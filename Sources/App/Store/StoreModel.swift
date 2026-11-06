@@ -309,6 +309,12 @@ final class StoreModel: ObservableObject {
         return module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
     }
 
+    /// Что изменилось в версии, которая ждёт установки. Только у утилиты: у встроенного «обновление» значит нехватку модели.
+    func updateNotes(_ module: Module) -> [String] {
+        guard satellites.hasUpdate(module) else { return [] }
+        return satellites.catalogApp(module)?.notes ?? []
+    }
+
     /// Витрина с подсвеченной на пару секунд категорией.
     func show(category: ModuleCategory) {
         tab = .showcase
