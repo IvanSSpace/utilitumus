@@ -5,7 +5,7 @@ import Foundation
 
 /// Направление прокрутки для устройства. `system` — как настроено в macOS (то,
 /// что сейчас у трекпада); `reversed` — наоборот.
-enum ScrollDirection: String, CaseIterable, Identifiable {
+enum ScrollDirection: String, CaseIterable, Identifiable, Codable {
     case system, reversed
 
     var id: String { rawValue }
@@ -14,7 +14,7 @@ enum ScrollDirection: String, CaseIterable, Identifiable {
 }
 
 /// Настройки модуля. Всё по умолчанию — «как есть»: тогда перехват не нужен вовсе.
-struct MouseSettings: Equatable {
+struct MouseSettings: Equatable, Codable {
     var mouseDirection: ScrollDirection = .system
     var magicMouseDirection: ScrollDirection = .system
     var smoothEnabled = false

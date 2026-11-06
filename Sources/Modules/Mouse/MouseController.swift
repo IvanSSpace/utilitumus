@@ -5,7 +5,7 @@ import ApplicationServices
 /// Модуль «Мышь»: держит tap на прокрутку, пока он нужен. Если все настройки
 /// «как у системы» или нет доступа, tap не существует вовсе.
 @MainActor
-final class MouseController: ObservableObject {
+final class MouseController: MouseModel {
     static let shared = MouseController()
 
     @Published var settings: MouseSettings {
@@ -58,12 +58,27 @@ final class MouseController: ObservableObject {
     }
 
     func requestAccess() {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не показывает системный запрос и не открывает настройки.
+        testAccessRequests += 1
+        #else
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+        #endif
     }
+
+    #if KIT_TEST_DEFAULTS
+    private(set) var testAccessRequests = 0
+
+    /// Стенд ставит состояние для снимка: без настоящего tap и прав.
+    func testPin(axTrusted: Bool, tapActive: Bool) {
+        self.axTrusted = axTrusted
+        self.tapActive = tapActive
+    }
+    #endif
 
     private func reconcile() {
         guard started else { return }
