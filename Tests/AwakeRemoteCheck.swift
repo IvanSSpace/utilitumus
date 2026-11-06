@@ -4,7 +4,7 @@ import SwiftUI
 // Вкладка «Не спать» в лаунчере, работа в утилите. Запуск: Tests/run-awake-remote-check.sh
 // Стенд собирается из всех исходников центра со швом KIT_TEST_DEFAULTS, рисует настоящий `ModuleDetail` через
 // настоящий `PageContainer`, окно за экраном и прозрачное, снимки через cacheDisplay. Утилита настоящая, под launchd.
-// Роли: run <папка> <pid утилиты>, foreign, state, idle <папка>.
+// Роли: run <папка> <pid утилиты>, foreign, state, idle <папка>, idle-dashboard <папка>.
 
 let moduleID = "test.awake"
 let assertionName = "Utilitumus: Keep Awake"
@@ -91,6 +91,13 @@ func holdsAssertion(pid: Int32) async -> Bool {
     /// Корень страницы как в `MainView`: окружение задаётся на странице, через границу хостинга оно не проходит.
     static func page(_ theme: DSTheme) -> (PageKey, Bool) -> AnyView {
         { key, active in
+            if key == .dashboard {
+                return AnyView(DashboardPage(open: { _ in }).equatable()
+                    .environment(\.pageActive, active)
+                    .background(ZStack { DSBackground(module: .awake, neutral: false); theme.card })
+                    .dsThemed()
+                    .ignoresSafeArea())
+            }
             guard case .module(let module) = key else { return AnyView(Color.black) }
             return AnyView(ModuleDetail(module: module)
                 .environment(\.pageActive, active)
@@ -110,11 +117,31 @@ func holdsAssertion(pid: Int32) async -> Bool {
     }
 
     /// Новая страница: как первое открытие вкладки.
-    static func open(_ theme: DSTheme) async -> NSBitmapImageRep {
+    static func open(_ theme: DSTheme, _ key: PageKey = .module(.awake)) async -> NSBitmapImageRep {
         let container = container()
-        container.show(.module(.awake), animated: false, make: page(theme))
+        container.show(key, animated: false, make: page(theme))
         await pause(0.5)
         return snapshot(container)
+    }
+
+    /// Своё окно: вид с хостингом подогнал бы под себя размер окна страницы.
+    static let menuWindow: NSWindow = {
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: 700, width: 240, height: 40),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.isReleasedWhenClosed = false
+        window.orderBack(nil)
+        return window
+    }()
+
+    /// Настоящий пункт меню-бара в обычном окне: само меню рисует система, за экраном его не снять.
+    static func menuItem() async -> NSBitmapImageRep {
+        let host = NSHostingView(rootView: AwakeMenuItem().frame(width: 240, height: 40).dsThemed())
+        host.frame = NSRect(x: 0, y: 0, width: 240, height: 40)
+        menuWindow.contentView = host
+        await pause(0.3)
+        return snapshot(host)
     }
 
     static func snapshot(_ view: NSView) -> NSBitmapImageRep {
@@ -322,6 +349,183 @@ func wirePure() {
     await model.read()
 }
 
+// MARK: - Карточка дашборда и меню-бар
+
+/// Что показывает карточка дашборда в этом состоянии у встроенного модуля.
+func expectedCard(_ pinned: Pinned) -> DashState {
+    guard pinned.active else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
+    let tail = pinned.duration == .forever ? "" : " · ещё 1 ч 0 мин"
+    return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
+}
+
+/// Встроенный модуль и утилита в одном состоянии: дашборд и пункт меню совпадают до пикселя.
+@MainActor func cardPixels() async {
+    let model = RemoteAwakeModel.shared
+    let modules = ModuleManager.shared
+    let registry = SatelliteRegistry.shared
+    let slot = DashboardLive.slot(.awake)
+    var menuShots: [NSBitmapImageRep] = []
+    for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
+        Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
+        var shots: [NSBitmapImageRep] = []
+        for pinned in pinnedStates {
+            await drive(pinned)
+            await model.read()
+            await registry.update()
+            let expected = expectedCard(pinned)
+            let name = "\(themeName) \(pinned.name)"
+
+            modules.setExternal(.awake, false)
+            pinLocal(to: model.state)
+            _ = await Stand.open(theme, .dashboard)
+            check(await until(2.5) { slot.state == expected }, "\(name): карточка встроенного «\(slot.state.text)»")
+            await pause(0.2)
+            let localShot = Stand.snapshot(Stand.window.contentView!)
+            Stand.save(localShot, "dash-\(themeName)-\(pinned.name)-local")
+            let localMenu = await Stand.menuItem()
+
+            // Контроллер в обратном состоянии: экран, читающий его вместо утилиты, снимок не пройдёт.
+            AwakeController.shared.testPin(isActive: !pinned.active, endDate: nil)
+            modules.setExternal(.awake, true)
+            _ = await Stand.open(theme, .dashboard)
+            check(await until(2.5) { slot.state == expected }, "\(name): карточка утилиты «\(slot.state.text)»")
+            await pause(0.2)
+            let remoteShot = Stand.snapshot(Stand.window.contentView!)
+            Stand.save(remoteShot, "dash-\(themeName)-\(pinned.name)-remote")
+            let remoteMenu = await Stand.menuItem()
+
+            let diff = differingPixels(localShot, remoteShot)
+            check(diff == 0, "\(name): дашборд совпал, разных пикселей \(diff) из \(localShot.pixelsWide * localShot.pixelsHigh)")
+            let menuDiff = differingPixels(localMenu, remoteMenu)
+            check(menuDiff == 0, "\(name): пункт меню совпал, разных пикселей \(menuDiff)")
+            shots.append(remoteShot)
+            if themeName == "dusk" { menuShots.append(remoteMenu) }
+        }
+        check(differingPixels(shots[0], shots[1]) > 0 && differingPixels(shots[1], shots[2]) > 0, "\(themeName): три состояния дашборда различаются, снимки не пустые")
+        await drive(pinnedStates[0])
+    }
+    check(differingPixels(menuShots[0], menuShots[1]) > 0, "пункт меню: включён и выключен различаются, снимок не пустой")
+    Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
+    await model.read()
+    AwakeController.shared.testPin(isActive: false, endDate: nil)
+}
+
+/// Кнопка карточки и пункт меню идут в утилиту, встроенный контроллер не трогают.
+@MainActor func cardActions(stand: Int32, utility: Int32) async {
+    let model = RemoteAwakeModel.shared
+    let modules = ModuleManager.shared
+    let registry = SatelliteRegistry.shared
+    let slot = DashboardLive.slot(.awake)
+    let other = LinkClient(id: moduleID)
+    await drive(pinnedStates[0])
+    await model.read()
+    await registry.update()
+    _ = await Stand.open(.dusk, .dashboard)
+
+    DashboardLive.perform(.awake, askStash: {})
+    check(await until(2) { model.isActive }, "кнопка карточки: утилита включилась")
+    check(await holdsAssertion(pid: utility), "кнопка карточки: assertion у процесса утилиты")
+    check(!(await holdsAssertion(pid: stand)) && !AwakeController.shared.isActive, "кнопка карточки: у центра assertion нет, контроллер не тронут")
+    check(await until(2.5) { slot.state.actionTitle == "Можно спать" }, "кнопка карточки: карточка показала ответ утилиты")
+    DashboardLive.perform(.awake, askStash: {})
+    check(await until(2) { !model.isActive }, "кнопка карточки: повторное нажатие выключает")
+
+    let menu = AwakeMenuToggle(model: model)
+    menu.isOn.wrappedValue = false
+    check(!model.isActive && model.actionError == nil, "пункт меню: то же значение ничего не меняет")
+    menu.isOn.wrappedValue = true
+    check(await until(2) { model.isActive }, "пункт меню: утилита включилась")
+    check(await holdsAssertion(pid: utility), "пункт меню: assertion у процесса утилиты")
+    check(!(await holdsAssertion(pid: stand)) && !AwakeController.shared.isActive, "пункт меню: у центра assertion нет, контроллер не тронут")
+    menu.isOn.wrappedValue = false
+    check(await until(2) { !model.isActive }, "пункт меню: выключает")
+
+    // Статус меняет сама утилита: карточка узнаёт без чтения от стенда. Дожидаемся каждого шага: два сигнала подряд сливаются в один.
+    check(await until(2.5) { slot.state.actionTitle == "Не спать" }, "карточка показала выключение")
+    kill(utility, SIGUSR1)
+    check(await until(2.5) { slot.state.actionTitle == "Можно спать" }, "statusChanged: карточка увидела включение")
+    kill(utility, SIGUSR1)
+    check(await until(2.5) { slot.state.actionTitle == "Не спать" }, "statusChanged: и выключение")
+
+    // Встроенный при этом ни при чём: `canStart` у него проверяет кнопка, как на экране модуля.
+    modules.setExternal(.awake, false)
+    AwakeController.shared.canStart = false
+    check(await until(2.5) { slot.state == DashState(text: "можно спать") }, "включить нельзя: у карточки нет действия")
+    AwakeController.shared.canStart = true
+    modules.setExternal(.awake, true)
+    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "после возврата утилите снова её состояние")
+
+    // Выключенная утилита: тумблер карточки идёт в реестр, настройка встроенного остаётся.
+    let keyBefore = UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake))
+    DashboardLive.setOn(.awake, false)
+    check(await until(2.5) { registry.entries[.awake]?.status?.enabled == false }, "«Выключить модуль» на карточке выключает утилиту")
+    let offStatus = try? await other.status()
+    check(offStatus?.enabled == false, "утилита сама говорит, что выключена")
+    check(await until(2.5) { slot.state == DashState(on: false, text: "выключен") }, "карточка выключенной утилиты «\(slot.state.text)»")
+    check(UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake)) == keyBefore && modules.enabled.contains(.awake), "настройка встроенного не тронута")
+    Stand.save(await Stand.open(.dusk, .dashboard), "dash-dusk-off-remote")
+    let menuOff = await Stand.menuItem()
+    modules.setExternal(.awake, false)
+    modules.setOn(.awake, false)
+    let menuBuiltInOff = await Stand.menuItem()
+    check(differingPixels(menuOff, menuBuiltInOff) == 0, "выключенный модуль: в меню пункта нет, как у встроенного")
+    modules.setOn(.awake, true)
+    modules.setExternal(.awake, true)
+    DashboardLive.setOn(.awake, true)
+    check(await until(2.5) { registry.entries[.awake]?.status?.enabled == true }, "«Включить» на карточке включает утилиту")
+    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "карточка снова как у встроенного")
+}
+
+/// Зависшая утилита: как вкладка, карточка и меню говорят «не отвечает». Узнают сами, без открытой вкладки.
+@MainActor func cardHung(utility: Int32) async {
+    let model = RemoteAwakeModel.shared
+    let registry = SatelliteRegistry.shared
+    let slot = DashboardLive.slot(.awake)
+    await drive(pinnedStates[0])
+    await model.read()
+    await registry.update()
+    let make = Stand.page(.dusk)
+    let container = Stand.container()
+    container.show(.dashboard, animated: false, make: make)
+    await pause(0.3)
+    let known = Stand.snapshot(container)
+    let knownMenu = await Stand.menuItem()
+    let notResponding = DashState(text: "не отвечает", attention: true)
+
+    // Реестр услышал: статус пропал, модель перечитала сама, хотя вкладка не открыта.
+    kill(utility, SIGSTOP)
+    await registry.update()
+    check(await until(3) { !model.responding }, "зависла: реестр не слышит, модель перечитала без вкладки")
+    check(model.screen(registry) == .notResponding, "зависла: вердикт тот же, что у вкладки")
+    let hungMenu = await Stand.menuItem()
+    check(differingPixels(knownMenu, hungMenu) > 0, "зависла: пункт меню другой")
+    Stand.save(hungMenu, "menu-not-responding")
+    let page = Stand.container()
+    page.show(.dashboard, animated: false, make: make)
+    check(await until(2.5) { slot.state == notResponding }, "зависла: карточка «\(slot.state.text)»")
+    await pause(0.2)
+    let hungShot = Stand.snapshot(page)
+    Stand.save(hungShot, "dash-dusk-not-responding")
+    check(differingPixels(known, hungShot) > 0, "зависла: на дашборде это видно")
+    kill(utility, SIGCONT)
+    await registry.update()
+    check(await until(3) { model.responding }, "ожила: реестр слышит, модель перечитала без вкладки")
+    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "ожила: карточка как была")
+    await pause(0.2)
+    check(differingPixels(known, Stand.snapshot(page)) == 0, "ожила: дашборд совпал с прежним снимком")
+
+    // Зависла, пока дашборд закрыт: при открытии перечитывается, как вкладка.
+    page.show(.about, animated: false, make: make)
+    await pause(0.2)
+    kill(utility, SIGSTOP)
+    page.show(.dashboard, animated: false, make: make)
+    check(await until(3) { slot.state == notResponding }, "зависла при закрытом дашборде: при открытии карточка «не отвечает»")
+    kill(utility, SIGCONT)
+    await pause(0.3)
+    await model.read()
+    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "ожила после открытия")
+}
+
 @MainActor func hung(utility: Int32) async {
     let model = RemoteAwakeModel.shared
     await model.read()
@@ -439,7 +643,9 @@ enum Main {
                 print(state.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "")
                 exit(0)
             case "idle":
-                await idle(out: args[2])
+                await idle(out: args[2], key: .module(.awake))
+            case "idle-dashboard":
+                await idle(out: args[2], key: .dashboard)
             default:
                 fatalError("неизвестная роль")
             }
@@ -474,16 +680,19 @@ enum Main {
         await pixels()
         await hung(utility: utility)
         await tabs(utility: utility)
+        await cardPixels()
+        await cardActions(stand: getpid(), utility: utility)
+        await cardHung(utility: utility)
         check(!(await holdsAssertion(pid: getpid())), "за весь прогон у центра assertion не появился")
         finish()
     }
 
-    /// Простой для замера: вкладка открыта, ничего не происходит.
-    @MainActor static func idle(out: String) async {
+    /// Простой для замера: экран открыт, ничего не происходит.
+    @MainActor static func idle(out: String, key: PageKey) async {
         Stand.out = out
         environment(out: out)
         await SatelliteRegistry.shared.update()
-        _ = await Stand.open(.dusk)
+        _ = await Stand.open(.dusk, key)
         print("готов")
         fflush(stdout)
     }

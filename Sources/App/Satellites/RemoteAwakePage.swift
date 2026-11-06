@@ -1,7 +1,20 @@
 import SwiftUI
 
+/// Что показать вместо встроенного модуля, пока его ведёт утилита.
+enum RemoteAwakeScreen { case notResponding, off, module }
+
 extension RemoteAwakeModel {
-    static let shared = RemoteAwakeModel(id: AwakeIdentity.id, canRead: { ModuleManager.shared.isExternal(.awake) })
+    static let shared: RemoteAwakeModel = {
+        let model = RemoteAwakeModel(id: AwakeIdentity.id, canRead: { ModuleManager.shared.isExternal(.awake) })
+        model.follow(SatelliteRegistry.shared.$entries.map { $0[.awake]?.status })
+        return model
+    }()
+
+    /// Решение одно на вкладку, карточку дашборда и меню-бар.
+    func screen(_ registry: SatelliteRegistry) -> RemoteAwakeScreen {
+        if !responding { return .notResponding }
+        return registry.entries[.awake]?.status?.enabled == false ? .off : .module
+    }
 }
 
 /// Вкладка «Не спать», когда модуль ведёт утилита: тот же экран, что у встроенного, сразу с последним известным
@@ -14,16 +27,15 @@ struct RemoteAwakePage: View {
     var body: some View {
         content
             .onPageActive { if $0 { model.refresh() } }
-            // Реестр снова слышит утилиту (страница «не отвечает», «Открыть окно»): экран модуля возвращается.
-            .onChange(of: registry.entries[.awake]?.status) { model.refresh() }
     }
 
     @ViewBuilder private var content: some View {
-        if !model.responding {
+        switch model.screen(registry) {
+        case .notResponding:
             SatellitePage(module: .awake)
-        } else if registry.entries[.awake]?.status?.enabled == false {
+        case .off:
             ModuleOffView(module: .awake) { registry.setEnabled(.awake, true) } more: { modules.infoModule = .awake }
-        } else {
+        case .module:
             ModuleScreen(module: .awake) {
                 AwakeView(model: model)
                     .overlay(alignment: .bottom) {
