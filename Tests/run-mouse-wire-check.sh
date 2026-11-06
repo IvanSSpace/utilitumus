@@ -27,7 +27,7 @@ sed -E 's/UserDefaults = (\.standard|Kit\.defaults)/UserDefaults = mouseCheckDef
   || { echo "ПРОВАЛ: настройки модуля не переведены на suite стенда"; exit 1; }
 
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name MouseWireCheck -o "$OUT/check" \
-  "$OUT/src/MouseWireCheck.swift" "$OUT/src/LegacyMouseView.swift" "$OUT/src/MouseScrollLogic.swift" \
+  "$OUT/src/MouseWireCheck.swift" "$OUT/src/LegacyMouseView.swift" "$OUT/src/MouseScrollLogic.swift" Sources/Apps/Mouse/MouseModule.swift \
   $(find Sources/Modules/Mouse -name '*.swift' -not -name MouseScrollLogic.swift) \
   $(find Sources/Kit -name '*.swift') Sources/App/Design/Pages.swift \
   -framework SwiftUI -framework AppKit -framework IOKit

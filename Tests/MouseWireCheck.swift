@@ -56,6 +56,10 @@ func wirePure() {
         ("скорость не число", #"{"setSpeed":{"_0":"nan"}}"#),
         ("скорость больше Double", #"{"setSpeed":{"_0":1e999}}"#),
         ("флаг не того типа", #"{"setSmoothEnabled":{"_0":1}}"#),
+        ("повтор ключа", #"{"setSpeed":{"_0":1.5},"setSpeed":{"_0":3}}"#),
+        ("чужой ключ рядом с setSpeed", #"{"setSpeed":{"_0":1.5},"x":1}"#),
+        ("refreshAccess с полем", #"{"refreshAccess":{"x":1}}"#),
+        ("setSpeed без значения", #"{"setSpeed":{}}"#),
     ] {
         check(refused(json), "по связи не пройдёт: \(name)")
     }
@@ -101,6 +105,67 @@ func wirePure() {
 
     controller.settings = MouseSettings()
     check(controller.wireState == MouseState(settings: MouseSettings(), axTrusted: controller.axTrusted, tapActive: false), "wireState собран из контроллера")
+}
+
+// MARK: - Модуль утилиты
+
+@MainActor func moduleChecks() {
+    let controller = MouseController.shared
+    let module = MouseModule()
+    let suite = mouseCheckDefaults
+
+    // NaN в настройках: после min/max он остался бы NaN, и JSONEncoder не закодировал бы состояние.
+    suite.set(Double.nan, forKey: "Mouse.Speed")
+    suite.set(Double.nan, forKey: "Mouse.Smoothness")
+    let loaded = MouseSettings.load(from: suite)
+    check(loaded.speed == 1.0 && loaded.smoothness == 0.5, "NaN при загрузке: значения по умолчанию, а не NaN")
+    suite.set(Double.infinity, forKey: "Mouse.Speed")
+    check(MouseSettings.load(from: suite).speed == 1.0, "inf при загрузке: значение по умолчанию")
+    suite.set(100.0, forKey: "Mouse.Speed")
+    suite.set(-5.0, forKey: "Mouse.Smoothness")
+    check(MouseSettings.load(from: suite).speed == 3.0 && MouseSettings.load(from: suite).smoothness == 0, "значения вне диапазона при загрузке ограничены")
+    suite.set(Double.nan, forKey: "Mouse.Speed")
+    controller.settings = MouseSettings.load(from: suite)
+    check(!module.state().isEmpty && (try? JSONDecoder().decode(MouseState.self, from: module.state())) != nil, "состояние после NaN в настройках кодируется")
+
+    controller.settings = MouseSettings()
+    check(!module.state().isEmpty, "init модуля ничего не запускает")
+    check(!controller.testIsRunning, "init модуля: опроса нет")
+
+    // Шаг доступа обязателен, только когда настройки требуют tap.
+    check(module.setupSteps.map(\.id) == ["mouse.ax"] && module.setupSteps[0].required == false, "настройки по умолчанию: шаг доступа необязателен")
+    check(!module.attention, "настройки по умолчанию: внимания нет, даже без доступа")
+    check(module.statusLine(passiveReason: nil) == "всё как в системе", "статус по умолчанию: «\(module.statusLine(passiveReason: nil))»")
+    controller.settings = MouseSettings(mouseDirection: .reversed)
+    check(module.setupSteps[0].required, "обратная прокрутка: шаг доступа обязателен")
+    check(module.setupSteps[0].done == AXIsProcessTrusted(), "шаг доступа done — настоящий доступ")
+    check(module.attention == !AXIsProcessTrusted(), "внимание, пока нужен tap, а доступа нет")
+    check(module.statusLine(passiveReason: "работает центр") == "работает центр", "пассивная: причина в статусе")
+    check(module.quickActions.isEmpty, "быстрых действий нет")
+    let requests = controller.testAccessRequests
+    check(module.performSetupStep("mouse.ax") == nil && controller.testAccessRequests == requests + 1, "шаг доступа доходит до запроса (заглушён)")
+
+    // Работа только между start и остановкой; передача настроек не снимает.
+    controller.settings = MouseSettings(smoothEnabled: true, speed: 2.0)
+    module.start()
+    check(controller.testIsRunning, "start: опрос идёт")
+    check(!controller.tapActive, "start в проверке: tap не создан")
+    module.enterPassive()
+    check(!controller.testIsRunning, "пассивная утилита остановлена")
+    check(MouseSettings.load(from: suite) == controller.settings && controller.settings.smoothEnabled, "передача не сняла настройки пользователя")
+    // Пока модуль стоял, настройки менял центр.
+    var changed = controller.settings
+    changed.speed = 1.2
+    changed.save(to: suite)
+    module.start()
+    check(controller.settings.speed == 1.2, "start перечитывает настройки, которые менял центр")
+    module.stopForUpdate()
+    check(!controller.testIsRunning && MouseSettings.load(from: suite).speed == 1.2, "выход ради обновления: остановлен, настройки на месте")
+    module.start()
+    module.stopForUninstall()
+    check(!controller.testIsRunning, "удаление: остановлен")
+    module.stop()
+    controller.settings = MouseSettings()
 }
 
 // MARK: - Экран
@@ -227,6 +292,7 @@ let scenes = [
         NSApplication.shared.setActivationPolicy(.prohibited)
         wirePure()
         handler()
+        moduleChecks()
         await screen(out: CommandLine.arguments[1])
         print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
         exit(failures == 0 ? 0 : 1)

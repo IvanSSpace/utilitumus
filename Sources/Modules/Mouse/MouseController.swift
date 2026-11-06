@@ -34,6 +34,9 @@ final class MouseController: MouseModel {
 
     func start() {
         guard !started else { return }
+        // Пока модуль стоял, настройки мог менять центр.
+        let stored = MouseSettings.load()
+        if stored != settings { settings = stored }
         started = true
         // Доступ дают в Системных настройках, а tap могла выключить система:
         // раз в пару секунд проверяем и то и другое.
@@ -72,6 +75,7 @@ final class MouseController: MouseModel {
 
     #if KIT_TEST_DEFAULTS
     private(set) var testAccessRequests = 0
+    var testIsRunning: Bool { started && poll != nil }
 
     /// Стенд ставит состояние для снимка: без настоящего tap и прав.
     func testPin(axTrusted: Bool, tapActive: Bool) {
@@ -83,7 +87,12 @@ final class MouseController: MouseModel {
     private func reconcile() {
         guard started else { return }
         refreshAccess()
+        #if KIT_TEST_DEFAULTS
+        // Проверки не создают настоящий tap на прокрутку, какие бы права ни были у стенда.
+        let wanted = false
+        #else
         let wanted = settings.needsTap && axTrusted
+        #endif
         if tap.isRunning && (!wanted || !tap.isEnabled) {
             // Не нужен, права отозвали или система выключила и не включила обратно.
             tap.stop()
