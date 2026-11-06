@@ -17,7 +17,9 @@ struct ThemePreview: View {
                 sidebar
                 content(accent: accent)
             }
-            .frame(width: 92, height: 60)
+            // Ширина гибкая: шесть образцов в ряд не должны быть шире листа настроек.
+            .frame(minWidth: 70, maxWidth: 92)
+            .frame(height: 60)
             .background(LinearGradient(colors: bg, startPoint: .topLeading, endPoint: .bottomTrailing))
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 0.7))
