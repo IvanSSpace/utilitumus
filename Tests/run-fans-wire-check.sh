@@ -16,7 +16,7 @@ trap 'defaults delete "$NAME" 2>/dev/null || true; rm -f "$HOME/Library/Preferen
 
 cp Tests/FansWireCheck.swift "$OUT/src/main.swift"
 KIT="Sources/Kit/Components.swift Sources/Kit/KitDefaults.swift Sources/Kit/Module.swift Sources/Kit/ModuleCategory.swift Sources/Kit/ModuleControls.swift Sources/Kit/ModuleInfo.swift Sources/Kit/PageActive.swift Sources/Kit/PrivateLog.swift Sources/Kit/KitIdentity.swift Sources/Kit/Link/LinkProtocol.swift Sources/Kit/KitSigning.swift Sources/Kit/Link/LinkWire.swift Sources/Kit/ScrollThumb.swift Sources/Kit/SegmentedControl.swift Sources/Kit/Theme.swift Sources/App/Design/Pages.swift"
-FANS="Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/GameDetection.swift Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift"
+FANS="Sources/Shared/FanLink.swift Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/GameDetection.swift Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift"
 FLAGS=(-target "$TARGET" -D KIT_TEST_DEFAULTS -framework AppKit -framework SwiftUI)
 
 if [ -z "${FANS_SKIP_BASE:-}" ] || [ ! -f "$OUT/base/normal.rgba" ]; then

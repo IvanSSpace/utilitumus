@@ -82,7 +82,7 @@ final class Stand {
             return copy
         },
         verify: SatelliteInstaller.liveVerify,
-        link: SatelliteLink(quit: { [unowned self] _ in self.quits += 1 }, hello: { _ in }, helloWindow: 1))
+        link: SatelliteLink(quit: { [unowned self] _, _ in self.quits += 1 }, hello: { _ in }, helloWindow: 1))
 
     func install(_ zip: URL, version: String) async -> String? {
         await errorText { try await self.installer.install(catalogApp(zip, id: self.target.id, version: version), name: self.target.name) }

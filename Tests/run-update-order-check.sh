@@ -41,7 +41,7 @@ cp Tests/UpdateOrderCheck.swift "$OUT/main.swift"
 # и FanController записал бы туда настройки вентиляторов.
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" "$OUT/main.swift" \
   Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
-  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift -framework AppKit
+  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift -framework AppKit
 
 if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnection'; then
   echo "ПРОВАЛ: стенд мог бы дойти до настоящего SMC или службы"

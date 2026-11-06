@@ -34,7 +34,7 @@ cp Tests/BrowserLinkHandlerCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name BrowserLinkHandlerCheck -o "$OUT/check" "$OUT/src/main.swift" \
   $(find Sources/Kit Sources/Modules/Browser -name '*.swift') \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleHandover.swift \
-  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift \
+  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Clipboard/ClipboardKeyring.swift Sources/Modules/Clipboard/ClipboardStore.swift Sources/Modules/Clipboard/ClipboardModels.swift \
   -framework SwiftUI -framework AppKit
 
 # Свои настройки проверки: домен local.utilitumus.test.browserlink.

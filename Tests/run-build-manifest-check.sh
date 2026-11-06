@@ -30,7 +30,7 @@ security find-identity -p codesigning | grep -q "\"$SIGN_NAME\"" || { echo "ПР
 
 rm -rf "$OUT"
 mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Sources/Apps" "$FX/Sources/Modules" "$FX/Sources/Modules/Browser"
-cp scripts/build-app.sh scripts/fetch-sherpa.sh "$FX/scripts/"
+cp scripts/build-app.sh scripts/fetch-sherpa.sh scripts/unlock-signing.sh "$FX/scripts/"
 cp install.sh Info.plist "$FX/"
 cp Sources/Kit/KitSigning.swift "$FX/Sources/Kit/"
 cp -R Sources/Shared Sources/FanHelper Sources/VoiceHelper Sources/LinkHelper "$FX/Sources/"

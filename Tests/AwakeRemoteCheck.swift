@@ -258,12 +258,12 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     await registry.update()
     _ = await Stand.open(.dusk, .dashboard)
 
-    DashboardLive.perform(.awake, askStash: {})
+    DashboardLive.perform(.awake, ask: { _ in })
     check(await until(2) { model.isActive }, "кнопка карточки: утилита включилась")
     check(await holdsAssertion(pid: utility), "кнопка карточки: assertion у процесса утилиты")
     check(!(await holdsAssertion(pid: stand)) && !AwakeController.shared.isActive, "кнопка карточки: у центра assertion нет, контроллер не тронут")
     check(await until(2.5) { slot.state.actionTitle == "Можно спать" }, "кнопка карточки: карточка показала ответ утилиты")
-    DashboardLive.perform(.awake, askStash: {})
+    DashboardLive.perform(.awake, ask: { _ in })
     check(await until(2) { !model.isActive }, "кнопка карточки: повторное нажатие выключает")
 
     let menu = AwakeMenuToggle(model: model)
