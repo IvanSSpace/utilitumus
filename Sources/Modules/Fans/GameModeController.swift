@@ -228,6 +228,14 @@ final class GameModeController: ObservableObject {
         if list != running { running = list }
     }
 
+    #if KIT_TEST_DEFAULTS
+    /// Стенд ставит то, что показывает экран: без настоящих программ и переднего плана.
+    func testPin(phase: GameModeMachine.Phase, running: [RunningCandidate]) {
+        self.phase = phase
+        self.running = running
+    }
+    #endif
+
     private func persistGames() {
         if let data = try? JSONEncoder().encode(myGames) {
             Kit.defaults.set(data, forKey: Self.gamesKey)
@@ -259,7 +267,7 @@ final class GameModeController: ObservableObject {
     }
 
     /// Копия: иконка из `NSRunningApplication` общая, менять её размер нельзя.
-    private static func smallIcon(_ image: NSImage) -> NSImage {
+    static func smallIcon(_ image: NSImage) -> NSImage {
         let copy = (image.copy() as? NSImage) ?? image
         copy.size = NSSize(width: 16, height: 16)
         return copy

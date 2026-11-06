@@ -8,6 +8,7 @@ enum FanLink {
     static let service = "local.utilitumus.test.fan.xpc"
     static let connectionOptions: NSXPCConnection.Options = []
     static let idleExit: TimeInterval = 2
+    static let holdTimeout: TimeInterval = 3
     #else
     static let label = "local.utilitumus.fan"
     static let service = "local.utilitumus.fan.xpc"
@@ -15,12 +16,18 @@ enum FanLink {
     static let connectionOptions: NSXPCConnection.Options = .privileged
     /// Дольше 10 с: иначе launchd придержал бы следующий запуск (ThrottleInterval по умолчанию).
     static let idleExit: TimeInterval = 30
+    /// Столько служба терпит без нового удержания, пока вентилятор в ручном режиме. Клиент повторяет втрое чаще
+    /// (`FanGate.holdRefresh`), так что потерянная команда или медленный такт не отдают вентилятор зря.
+    static let holdTimeout: TimeInterval = 15
     #endif
+    /// Пауза между попытками вернуть «Авто», если SMC не принял.
+    static let holdRetry: TimeInterval = 2
 
+    /// 5: сторож удержания (`holdTimeout`), служба сама отдаёт вентиляторы в «Авто». Клиент 4 удержание не повторяет.
     /// Менять при КАЖДОМ изменении поведения службы: по ней приложение решает,
     /// просить ли «Обновить доступ» (пароль). Сборка сама её не трогает.
     /// Только целое число и только вверх: пароль просит клиент новее службы, клиент старше работает с ней как есть.
-    static let helperVersion = "4"
+    static let helperVersion = "5"
 
     /// Identifier подписи самой службы: один и тот же в боевой и в тестовой сборке.
     private static let serviceIdentifier = "local.utilitumus.fan"

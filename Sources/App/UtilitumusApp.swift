@@ -13,6 +13,7 @@ struct ModuleDetail: View {
             case .mouse: RemoteMousePage()
             case .mixer: RemoteMixerPage()
             case .browser: RemoteBrowserPage()
+            case .fans: RemoteFansPage()
             default: SatellitePage(module: module)
             }
         } else {

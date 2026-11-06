@@ -35,7 +35,7 @@ struct FanConfig: Codable, Equatable {
     var toTemp: Double = 80
 }
 
-struct FanReading: Identifiable, Equatable {
+struct FanReading: Identifiable, Equatable, Codable {
     let index: Int
     let actual: Double
     let min: Double
@@ -49,7 +49,7 @@ struct FanReading: Identifiable, Equatable {
     var isSpinningUp: Bool { isManual && actual < target - 300 }
 }
 
-struct SensorReading: Identifiable, Equatable {
+struct SensorReading: Identifiable, Equatable, Codable {
     let key: String
     let value: Double
     var id: String { key }
@@ -70,7 +70,11 @@ final class FanController: ObservableObject {
     @Published private(set) var fans: [FanReading] = []
     @Published private(set) var cpuSensors: [SensorReading] = []
     @Published private(set) var gpuSensors: [SensorReading] = []
-    @Published private(set) var conflictingApp: NSRunningApplication?
+    @Published private(set) var conflictingApp: NSRunningApplication? {
+        didSet { conflictID = UUID().uuidString }
+    }
+    /// Что экран присылает, чтобы закрыть эту программу. Выдан здесь и меняется вместе с программой.
+    private(set) var conflictID = ""
     @Published private(set) var safetyTripped = false
     @Published private(set) var lastError: String?
     /// «Полная мощность»: все вентиляторы на максимум поверх их настроек.
@@ -124,6 +128,9 @@ final class FanController: ObservableObject {
     private var legacyRestoreTried = false
     /// Последняя отправленная помощником цель по вентиляторам: от неё считается гистерезис.
     private var lastSent: [Int: (rpm: Double, at: Date)] = [:]
+    /// Когда вентилятору в последний раз отправили `set`. Служба отдаёт «Авто», если удержание долго не повторяют,
+    /// поэтому ручной режим подтверждается заново, даже когда цель уже стоит.
+    private var lastHold: [Int: Date] = [:]
     /// Сглаженные температуры для кривой «По датчику»; безопасность смотрит на сырые.
     private var cpuSmoother = TempSmoother()
     private var gpuSmoother = TempSmoother()
@@ -242,6 +249,7 @@ final class FanController: ObservableObject {
         screensAsleep = false
         sensorEngaged = []
         lastSent = [:]
+        lastHold = [:]
         cpuSmoother.reset(); gpuSmoother.reset()
         smoothedCPU = nil; smoothedGPU = nil
         pendingApply?.cancel()
@@ -278,6 +286,13 @@ final class FanController: ObservableObject {
         fullPower = false
         GameModeController.shared.cancelCurrent()
         configs = configs.map { var c = $0; c.mode = .auto; return c }
+    }
+
+    /// Закрывает ту программу, которую сейчас показывает экран; устаревший или чужой id — false.
+    func closeConflictingApp(id: String) -> Bool {
+        guard let app = conflictingApp, id == conflictID else { return false }
+        app.terminate()
+        return true
     }
 
     // MARK: - Цикл
@@ -388,19 +403,22 @@ final class FanController: ObservableObject {
             let target = Double(smc.float("F\(i)Tg") ?? 0)
             let command: FanHelperClient.Command
             if let rpm = desired {
-                // Дрожание датчика на пару градусов не стоит записи в SMC.
-                guard !isManual || abs(target - rpm) >= 50 else { continue }
+                let holdDue = lastHold[i].map { Date().timeIntervalSince($0) >= FanGate.holdRefresh } ?? true
+                // Дрожание датчика на пару градусов не стоит записи в SMC. Но удержание повторяем.
+                guard !isManual || abs(target - rpm) >= 50 || holdDue else { continue }
                 // Шум датчика качает цель на десятки об/мин, а команда помощнику дорога:
                 // в «По датчику» шлём не чаще порога/таймера. Остальное — сразу.
                 let urgent = configs[i].mode != .sensor || fullPower || GameModeController.shared.isActive
-                    || safetyTripped || !isManual
+                    || safetyTripped || !isManual || holdDue
                 let last = lastSent[i]
                 guard FanGate.shouldSend(desired: rpm, lastSent: last?.rpm, lastSentAt: last?.at,
                                          now: Date(), urgent: urgent) else { continue }
                 lastSent[i] = (rpm.rounded(), Date())
+                lastHold[i] = Date()
                 command = .set(i, Double(Int(rpm)))
             } else {
                 lastSent[i] = nil
+                lastHold[i] = nil
                 guard isManual else { continue }
                 command = .auto(i)
             }
@@ -472,6 +490,19 @@ final class FanController: ObservableObject {
             return fan.min + (fan.max - fan.min) * t
         }
     }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд ставит то, что показывает экран: без SMC, такта и настоящей чужой программы.
+    func testPin(fans: [FanReading], cpu: [SensorReading], gpu: [SensorReading],
+                 conflict: NSRunningApplication?, safetyTripped: Bool, lastError: String?) {
+        self.fans = fans
+        cpuSensors = cpu
+        gpuSensors = gpu
+        conflictingApp = conflict
+        self.safetyTripped = safetyTripped
+        self.lastError = lastError
+    }
+    #endif
 
     // MARK: - Вспомогательное
 

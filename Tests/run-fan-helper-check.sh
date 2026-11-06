@@ -30,7 +30,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/src"
 cp Tests/FanHelperCheck.swift "$OUT/src/main.swift"
 
-CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift"
+CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift"
 # Метка выпуска: без бандла Info.plist лежит в самом бинарнике.
 MARKED=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist)
 HELPER_SOURCES="Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift"
@@ -165,11 +165,11 @@ for args in "" "auto 0" "set 0 2000" "--service x" "version extra"; do
 done
 [ ! -s "$LOG" ] || fail "запуск без launchd записал в SMC"
 ok "без launchd отказ с кодом 64, записи нет"
-[ "$("$OUT/daemon" version)" = 4 ] || fail "version сборки со швом"
+[ "$("$OUT/daemon" version)" = 5 ] || fail "version сборки со швом"
 [ ! -s "$LOG" ] || fail "version записал в SMC"
 ok "version печатает версию без SMC"
 
-[ "$("$OUT/prod-signed" version)" = 4 ] || fail "version боевой сборки"
+[ "$("$OUT/prod-signed" version)" = 5 ] || fail "version боевой сборки"
 ok "боевая сборка: version"
 for value in "" "$LABEL" "0"; do
   status=0
@@ -437,6 +437,49 @@ kill -9 "$HOLD"
 wait "$HOLD" 2>/dev/null || true
 sleep 3
 expect_state "not running" "клиент убит: служба вышла"
+
+echo "== сторож удержания: ручной режим не переживает клиента"
+# Срок сторожа в сборке со швом 3 с, выход без подключений 2 с.
+agent daemon
+"$OUT/hub" hold-manual 30 >/dev/null &
+HOLD=$!
+sleep 1.5
+expect_state "running" "клиент держит вентилятор в ручном режиме"
+grep -q 'F0Md=1' "$LOG" || fail "вентилятор не взят в ручной режим: $(cat "$LOG")"
+kill -9 "$HOLD"
+wait "$HOLD" 2>/dev/null || true
+sleep 4
+grep -q 'F0Md=0' "$LOG" || fail "клиент убит (SIGKILL), вентилятор остался в ручном режиме: $(cat "$LOG")"
+[ "$(tail -1 "$LOG")" = "F0Md=0" ] || fail "после возврата в Авто записи продолжились: $(cat "$LOG")"
+expect_state "not running" "клиент убит: вентилятор в Авто, служба вышла"
+ok "SIGKILL клиента: служба сама вернула вентилятор 0 в Авто"
+
+# Соединение живое, команд нет: сторож срабатывает по времени, а не по закрытию соединения.
+agent daemon
+"$OUT/hub" hold-manual 12 >/dev/null &
+HOLD=$!
+sleep 6
+grep -q 'F0Md=0' "$LOG" || fail "соединение открыто, команд нет: вентилятор остался в ручном режиме: $(cat "$LOG")"
+expect_state "running" "соединение ещё открыто, а вентилятор уже в Авто"
+ok "тишина 3 с при открытом соединении: вентилятор в Авто"
+kill -9 "$HOLD" 2>/dev/null || true
+wait "$HOLD" 2>/dev/null || true
+sleep 3
+
+# Клиент жив и повторяет удержание: сторож ничего не трогает.
+agent daemon
+"$OUT/hub" keepalive 7 | tail -1 | grep -q "ВСЁ ОК" || fail "удержание: роль не прошла"
+if grep -q 'F0Md=0' "$LOG"; then fail "клиент повторял удержание, а вентилятор отдан: $(cat "$LOG")"; fi
+ok "удержание раз в секунду 7 с (сторож 3 с): вентилятор не отдан"
+sleep 5
+grep -q 'F0Md=0' "$LOG" || fail "после последней команды вентилятор не отдан"
+ok "команды кончились: вентилятор отдан через срок"
+
+# Зависшая запись: сторож пробует не бесконечно, служба выходит.
+agent daemon FAN_TEST_SMC_STUCK
+"$OUT/hub" hold-manual 1 >/dev/null || true
+sleep 12
+expect_state "not running" "SMC не принимает «Авто»: попытки конечны, служба вышла"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do

@@ -22,7 +22,9 @@ let leaf = KitSigning.trustedLeafHashes[0]
 func pureChecks() {
     check(FanLink.service == "local.utilitumus.fan.xpc", "имя службы")
     check(FanLink.label == "local.utilitumus.fan", "метка")
-    check(FanLink.helperVersion == "4", "версия помощника")
+    check(FanLink.helperVersion == "5", "версия помощника")
+    check(FanLink.holdTimeout == 15, "служба терпит без удержания 15 с")
+    check(FanGate.holdRefresh * 2 < FanLink.holdTimeout, "клиент повторяет удержание минимум дважды за срок службы")
     check(FanLink.connectionOptions == .privileged, "клиент ищет службу в системном домене")
     check(FanHelperClient.timeout == 3, "срок клиента 3 с")
 
@@ -77,7 +79,11 @@ func legacyChecks() {
     let installer = source("Sources/Modules/Fans/FanHelperInstaller.swift")
     let restore = controller.components(separatedBy: "func restoreAutoBlocking()").last?.components(separatedBy: "func stop()").first ?? ""
     check(restore.contains("status != .notInstalled"), "выход отдаёт вентиляторы и при устаревшем помощнике")
-    check(view.contains("controller.restoreAutoBlocking(); installer.uninstall()"), "«Забрать доступ» сперва отдаёт вентиляторы")
+    // Экран вызывает модель, а возврат «Авто» перед удалением доступа делает встроенная модель (и разбор действия со связи).
+    let model = source("Sources/Modules/Fans/FansModel.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    let wire = source("Sources/Modules/Fans/FansWire.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    check(view.contains("model.uninstallHelper()") && model.contains("controller.restoreAutoBlocking() installer.uninstall()"), "«Забрать доступ» сперва отдаёт вентиляторы")
+    check(wire.contains("restoreAutoBlocking() installer.uninstall()"), "«Забрать доступ» со связи сперва отдаёт вентиляторы")
     let wake = controller.components(separatedBy: "didWakeNotification").last?.components(separatedBy: "screensDidSleepNotification").first ?? ""
     check(wake.contains("FanHelperInstaller.shared.refresh()"), "после сна статус спрашивается заново")
 
@@ -95,8 +101,8 @@ func legacyChecks() {
     check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
     let updater = source("Sources/App/Updater.swift")
     // Сам порядок и удержание проверяет поведением Tests/run-update-order-check.sh; здесь — что Updater подключён именно к ним.
-    check(updater.contains("beforeReplace: { FanController.shared.holdForUpdate() }"), "обновление отдаёт вентиляторы")
-    check(updater.contains("replaceFailed: { FanController.shared.resumeAfterFailedUpdate() }"), "неудачное обновление возвращает управление")
+    check(updater.contains("beforeReplace: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.holdForUpdate() } }"), "обновление отдаёт вентиляторы, но не поднимает модуль, который ведёт утилита")
+    check(updater.contains("replaceFailed: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.resumeAfterFailedUpdate() } }"), "неудачное обновление возвращает управление")
     check(updater.contains("try await UpdateBundle.install(") && !updater.contains("UpdateBundle.commit"), "обновление идёт через install с шагами вокруг подмены")
 }
 
@@ -350,6 +356,26 @@ func hubRole() {
         check(FanHelperClient.send(command) != nil, "\(name): ошибка")
         check(writes().isEmpty, "\(name): записи нет")
     }
+    // Сторож службы не должен вмешаться в чужие проверки: вентилятор не оставляем в ручном режиме.
+    check(FanHelperClient.send(.auto(0)) == nil, "вентилятор 0 возвращён в Авто")
+}
+
+/// Берёт вентилятор 0 в ручной режим и держит соединение, пока скрипт не убьёт процесс (SIGKILL).
+func holdManualRole(_ seconds: UInt32) {
+    clearWrites()
+    check(FanHelperClient.send(.set(0, 2000)) == nil, "set(0, 2000) успешно")
+    check(writes() == ["F0Md=1", "F0Tg=2000.0"], "вентилятор взят в ручной режим: \(writes())")
+    holdRole(seconds)
+}
+
+/// Повторяет удержание раз в секунду `count` раз: сторож службы (3 с) не должен отдавать вентилятор.
+func keepaliveRole(_ count: Int) {
+    clearWrites()
+    for _ in 0..<count {
+        check(FanHelperClient.send(.set(0, 2000)) == nil, "удержание принято")
+        sleep(1)
+    }
+    check(!writes().contains("F0Md=0"), "пока удержание повторяют, вентилятор не отдан: \(writes())")
 }
 
 /// Без требования к службе и без рукопожатия: сразу команда, как сделал бы чужой процесс.
@@ -562,6 +588,8 @@ case "spoofed": spoofedRole()
 case "silent": silentRole()
 case "stuck": stuckRole()
 case "hold": holdRole(UInt32(args[1]) ?? 1)
+case "hold-manual": holdManualRole(UInt32(args[1]) ?? 1)
+case "keepalive": keepaliveRole(Int(args[1]) ?? 1)
 case "refresh-off": refreshRole(moduleRunning: false)
 case "refresh-on": refreshRole(moduleRunning: true)
 case "quit": quitRole(args[1])
