@@ -44,7 +44,14 @@ struct VoiceView<Model: VoiceScreenModel>: View {
                 voice.refreshPermissions()
             } else {
                 recorder.stop()
+                voice.endTest()
             }
+        }
+        // Режим проверки у внешнего модуля: пока поле в фокусе, распознанное приходит сюда, а не в чужую программу.
+        .onChange(of: testFocused) { if testFocused { voice.beginTest() } else { voice.endTest() } }
+        .onChange(of: voice.test?.serial) {
+            guard let phrase = voice.test?.phrase else { return }
+            testText += (testText.isEmpty || testText.hasSuffix(" ") || testText.hasSuffix("\n") ? "" : " ") + phrase
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             guard pageActive else { return }

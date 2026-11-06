@@ -9,6 +9,7 @@ struct ModuleDetail: View {
         if modules.isExternal(module) {
             switch module {
             case .awake: RemoteAwakePage()
+            case .voice: RemoteVoicePage()
             default: SatellitePage(module: module)
             }
         } else {

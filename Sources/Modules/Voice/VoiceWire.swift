@@ -53,6 +53,34 @@ enum VoiceAction: Codable, Equatable {
     case selectModel(VoiceModel)
     case beginTest
     case endTest
+
+    /// Строго: ровно одно известное действие и ровно его поля. Кодирование остаётся синтезированным.
+    init(from decoder: Decoder) throws {
+        let wire = try LinkActionFields(from: decoder)
+        switch wire.name {
+        case "setMode": self = .setMode(try wire.value())
+        case "setMic":
+            // nil кодируется пустым значением: ключа `_0` в нём нет.
+            if let uid: String = try? wire.value() { self = .setMic(uid) } else { try wire.none(); self = .setMic(nil) }
+        case "addExcluded": self = .addExcluded(try wire.value())
+        case "removeExcluded": self = .removeExcluded(try wire.value())
+        case "setHotKey":
+            try wire.fields("keyCode", "modifiers")
+            self = .setHotKey(keyCode: try wire.field("keyCode"), modifiers: try wire.field("modifiers"))
+        case "resetHotKey": try wire.none(); self = .resetHotKey
+        case "suspendHotKey": try wire.none(); self = .suspendHotKey
+        case "resumeHotKey": try wire.none(); self = .resumeHotKey
+        case "refreshPermissions": try wire.none(); self = .refreshPermissions
+        case "requestAccessibility": try wire.none(); self = .requestAccessibility
+        case "download": self = .download(try wire.value())
+        case "cancelDownload": self = .cancelDownload(try wire.value())
+        case "deleteModel": self = .deleteModel(try wire.value())
+        case "selectModel": self = .selectModel(try wire.value())
+        case "beginTest": try wire.none(); self = .beginTest
+        case "endTest": try wire.none(); self = .endTest
+        default: throw wire.refuse()
+        }
+    }
 }
 
 extension VoiceController {
@@ -66,6 +94,21 @@ extension VoiceController {
                           excludedApps: excludedApps, axTrusted: axTrusted,
                           models: VoiceModel.allCases.map { VoiceModelRow(model: $0, status: Self.wireStatus(store.status($0))) },
                           selected: store.selected, test: liveTest)
+    }
+
+    /// Что экран покажет до первого ответа утилиты: сохранённые настройки и модели на диске. Контроллер не создаётся.
+    static func storedState() -> VoiceState {
+        let d = Kit.defaults
+        let keyCode = d.object(forKey: Key.keyCode) as? UInt32 ?? VoiceHotKey.defaultKeyCode
+        let modifiers = d.object(forKey: Key.modifiers) as? UInt32 ?? VoiceHotKey.defaultModifiers
+        return VoiceState(
+            hotKeyLabel: VoiceHotKey.label(keyCode: keyCode, modifiers: modifiers), hotKeyError: nil,
+            mode: d.string(forKey: Key.mode).flatMap(Mode.init(rawValue:)) ?? .toggle, micUID: d.string(forKey: Key.mic),
+            excludedApps: d.stringArray(forKey: Key.excluded) ?? [],
+            // Подсказка про «Универсальный доступ» не должна мигнуть до ответа.
+            axTrusted: true,
+            models: VoiceModel.allCases.map { VoiceModelRow(model: $0, status: VoiceModelStore.isInstalled($0) ? .installed : .notInstalled) },
+            selected: d.string(forKey: VoiceModelStore.selectedKey).flatMap(VoiceModel.init(rawValue:)) ?? .gigaam, test: nil)
     }
 
     /// Прогресс приходит на каждый блок загрузки; на экран хватает целых процентов, тогда и состояние меняется реже.
@@ -87,6 +130,11 @@ extension VoiceController {
                 return false
             }
         }
+    }
+
+    /// Действие из связи. Самое длинное настоящее (идентификатор программы до 255 байт) короче 512.
+    func handle(_ data: Data) -> Data {
+        LinkWire.handle(data, as: VoiceAction.self, limit: 512, state: { wireState }) { handle($0) }
     }
 
     /// Действие от экрана: сначала проверка, изменения только после неё. Возвращает текст отказа.

@@ -20,7 +20,7 @@ final class VoiceController: ObservableObject {
 
     // MARK: Настройки (UserDefaults "Voice.")
 
-    private enum Key {
+    enum Key {
         static let keyCode = "Voice.HotKeyCode"
         static let modifiers = "Voice.HotKeyModifiers"
         static let mode = "Voice.Mode"
@@ -85,6 +85,8 @@ final class VoiceController: ObservableObject {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        // Один раз за процесс и только пока ничего не качается: хвосты чужой загрузки трогать нельзя.
+        VoiceModelStore.shared.cleanLeftoversOnce()
         installHandler()
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main

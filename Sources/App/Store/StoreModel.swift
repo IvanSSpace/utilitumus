@@ -119,7 +119,8 @@ enum StoreCatalog {
             items.append("Приложение \(SatelliteRegistry.bundleName(m)) из папки «Программы/Utilitumus»")
         }
         if m == .voice {
-            for model in VoiceModel.allCases where VoiceModelStore.shared.status(model) != .notInstalled {
+            // С диска, а не из статусов стора: их мог изменить процесс утилиты.
+            for model in VoiceModel.allCases where VoiceModelStore.isInstalled(model) {
                 items.append("Скачанная модель \(model.title) (\(megabytes(model)) МБ)")
             }
         }
@@ -284,7 +285,17 @@ final class StoreModel: ObservableObject {
         // Состояние берём у менеджера модулей и стора моделей: их изменения перерисовывают стор.
         subs.append(modules.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
         subs.append(voice.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
+        subs.append(RemoteVoiceModel.shared.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
+        if modules.isExternal(.voice) { RemoteVoiceModel.shared.refresh() }
         subs.append(satellites.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
+    }
+
+    // Пока модуль ведёт утилита, модели скачивает она: стор спрашивает и просит её, а не свой `VoiceModelStore`.
+    // Созданный в центре, тот стёр бы ей идущую загрузку и не узнал о готовой.
+    private var voiceExternal: Bool { modules.isExternal(.voice) }
+    private var voiceSelected: VoiceModel { voiceExternal ? RemoteVoiceModel.shared.selected : voice.selected }
+    private func voiceStatus(_ model: VoiceModel) -> VoiceModelStore.Status {
+        voiceExternal ? RemoteVoiceModel.shared.status(model) : voice.status(model)
     }
 
     /// «Установлен» = модуль включён.
@@ -294,7 +305,7 @@ final class StoreModel: ObservableObject {
         // Установщик долю не сообщает: только этап.
         if operations[module] != nil { return .installing(.download, 0) }
         if module == .voice {
-            switch voice.status(voice.selected) {
+            switch voiceStatus(voiceSelected) {
             case .downloading(let p): return .installing(.download, p)
             case .verifying: return .installing(.verify, 0)
             default: break
@@ -306,7 +317,7 @@ final class StoreModel: ObservableObject {
     /// Установленному модулю не хватает ресурсов: у «Голоса» не скачана модель.
     func hasUpdate(_ module: Module) -> Bool {
         if satellites.hasBundle(module) { return satellites.hasUpdate(module) }
-        return module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voice.selected)
+        return module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voiceSelected)
     }
 
     /// Что изменилось в версии, которая ждёт установки. Только у утилиты: у встроенного «обновление» значит нехватку модели.
@@ -488,12 +499,15 @@ final class StoreModel: ObservableObject {
             runInstall(module, app)
             return
         }
-        if module == .voice, !VoiceModelStore.isInstalled(voice.selected) { voice.download(voice.selected) }
+        guard module == .voice, !VoiceModelStore.isInstalled(voiceSelected) else { return }
+        if voiceExternal { RemoteVoiceModel.shared.download(voiceSelected) } else { voice.download(voice.selected) }
     }
 
     func cancel(_ module: Module) {
         operations[module]?.cancel()
-        if module == .voice { voice.cancel(voice.selected) }
+        if module == .voice {
+            if voiceExternal { RemoteVoiceModel.shared.cancel(voiceSelected) } else { voice.cancel(voice.selected) }
+        }
     }
 
     func requestRemoval(_ module: Module) { pendingRemoval = module }
@@ -515,7 +529,8 @@ final class StoreModel: ObservableObject {
         modules.setOn(module, false)
         modules.setHidden(module, false)
         if module == .voice {
-            for model in VoiceModel.allCases where voice.status(model) != .notInstalled { voice.delete(model) }
+            // Утилиты к этому часу уже нет, папки моделей удаляет центр сам.
+            for model in VoiceModel.allCases where VoiceModelStore.isInstalled(model) { voice.delete(model) }
         }
         pendingRemoval = nil
         if justInstalled == module { justInstalled = nil }

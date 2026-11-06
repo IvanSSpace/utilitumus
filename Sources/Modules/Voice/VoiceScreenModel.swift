@@ -24,6 +24,11 @@ protocol VoiceScreenModel: ObservableObject, HotKeyTarget {
     func download(_ model: VoiceModel)
     func cancel(_ model: VoiceModel)
     func delete(_ model: VoiceModel)
+
+    /// Режим проверки (решение Q6): у встроенного экрана его нет, текст он вставляет в поле сам.
+    var test: VoiceTestState? { get }
+    func beginTest()
+    func endTest()
 }
 
 /// Встроенный модуль: контроллер и хранилище моделей как одна модель экрана.
@@ -71,6 +76,10 @@ final class VoiceLocalModel: VoiceScreenModel {
     func download(_ model: VoiceModel) { store.download(model) }
     func cancel(_ model: VoiceModel) { store.cancel(model) }
     func delete(_ model: VoiceModel) { store.delete(model) }
+
+    var test: VoiceTestState? { nil }
+    func beginTest() {}
+    func endTest() {}
 }
 
 extension VoiceView where Model == VoiceLocalModel {
