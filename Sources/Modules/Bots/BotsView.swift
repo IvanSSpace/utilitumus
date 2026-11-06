@@ -112,7 +112,7 @@ struct BotCardView: View {
             } else {
                 HStack(spacing: 14) {
                     fact("память", on ? Fmt.mb(bot.memMB) : "—")
-                    fact("аптайм", on && bot.uptime > 0 ? Fmt.duration(Double(bot.uptime)) : "—")
+                    fact("аптайм", !on ? "—" : bot.uptime > 0 ? Fmt.duration(Double(bot.uptime)) : "< 1 мин")
                     fact("порт", bot.ports.isEmpty ? "—" : bot.ports.joined(separator: ", "))
                     Spacer(minLength: 8)
                     if let link {

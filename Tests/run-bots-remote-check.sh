@@ -22,6 +22,13 @@ else
   bad "в модуле «Боты» есть запуск команд мимо BotRunner или нет Kit.standRefuses"
 fi
 
+# `pure`: только логика и изоляция, без утилиты и launchd. Нужен для поломок проверки.
+if [ "${1:-}" = pure ]; then
+  build_module_hub Tests/BotsRemoteCheck.swift
+  "$HUB" pure && echo "ЛОГИКА «БОТОВ»: ВСЁ ОК" || { echo "ЛОГИКА «БОТОВ»: ПРОВАЛ"; exit 1; }
+  exit 0
+fi
+
 build_utility
 build_module_hub Tests/BotsRemoteCheck.swift
 

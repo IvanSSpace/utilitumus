@@ -282,27 +282,31 @@ func wirePure() {
 
 @MainActor func actions() async {
     let model = RemoteBotsModel.shared
-    let beta = model.state.bots.first { $0.id == "beta" }!
+    // Как в жизни: действие нажимают на открытом экране, он и ведёт аренду, по которой утилита сообщает о смене.
+    model.setScreenOpen(true)
+    defer { model.setScreenOpen(false) }
+    guard let beta = model.state.bots.first(where: { $0.id == "beta" }) else { return check(false, "beta не найден: \(ids(model))") }
     check(model.state.prompt == nil, "до просьбы подтверждения нет")
     // Кнопки, которой в файле нет или которая не подходит состоянию, на просьбу не откликаются.
     for (id, verb) in [("alpha", BotVerb.start), ("beta", .stop), ("beta", .restart), ("cfg", .start), ("nobody", .start)] {
         await model.perform(.request(id: id, verb: verb))
         check(model.actionError != nil && model.state.prompt == nil, "просьба \(id) \(verb.rawValue): отказ «\(model.actionError ?? "нет")», подтверждения нет")
     }
-    model.request(beta, .start)
-    check(await until(3) { model.state.prompt != nil }, "просьба: утилита показала подтверждение")
-    let prompt = model.state.prompt!
+    await model.perform(.request(id: beta.id, verb: .start))
+    check(model.state.prompt != nil, "просьба: утилита показала подтверждение")
+    guard let prompt = model.state.prompt else { return check(false, "подтверждения нет") }
     check(prompt.title == "Включить Бета" && prompt.command.contains("/usr/bin/touch") && prompt.confirmTitle == "Включить" && !prompt.destructive, "подтверждение называет действие и команду из файла")
     check(!fm.fileExists(atPath: marker), "до подтверждения ничего не запущено")
     await model.perform(.confirm(planID: UUID()))
     check(model.actionError != nil && model.state.prompt?.id == prompt.id, "чужой id плана: отказ, настоящий план жив")
-    model.cancel()
-    check(await until(3) { model.state.prompt == nil }, "отмена закрывает подтверждение")
+    await model.perform(.cancel)
+    check(model.state.prompt == nil && model.actionError == nil, "отмена закрывает подтверждение")
     await model.perform(.confirm(planID: prompt.id))
     check(model.actionError != nil, "подтверждение отменённого плана: отказ")
-    model.request(beta, .start)
-    check(await until(3) { model.state.prompt != nil }, "вторая просьба")
-    model.confirm(model.state.prompt!.id)
+    await model.perform(.request(id: "beta", verb: .start))
+    check(model.actionError == nil && model.state.prompt != nil, "вторая просьба: \(model.actionError ?? "ошибки нет")")
+    guard let second = model.state.prompt else { return check(false, "второго подтверждения нет: \(model.actionError ?? "без ошибки"), \(ids(model))") }
+    model.confirm(second.id)
     check(await until(5) { model.state.notice != nil }, "подтверждение: пришёл результат")
     check(model.state.notice?.isError == true && model.state.notice?.text.contains("Стенд не запускает") == true, "стенд отказал в запуске: «\(model.state.notice?.text ?? "нет")»")
     check(!fm.fileExists(atPath: marker), "команда бота не выполнялась: маркера нет")
@@ -393,6 +397,19 @@ func wirePure() {
 @main
 enum Main {
     static func main() {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        // Только чистая логика, без утилиты: для поломок проверки (`run-bots-remote-check.sh pure`).
+        if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "pure" {
+            MainActor.assumeIsolated {
+                try? fm.createDirectory(atPath: markerDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                logicPure()
+                envAndFile()
+                isolationPure()
+                wirePure()
+                try? fm.removeItem(atPath: markerDir)
+                finish()
+            }
+        }
         MainActor.assumeIsolated {
             ModuleCheck.main(.bots, foreignAction: LinkWire.encoded(BotsAction.quick(id: "beta", verb: .start))) { utility in
                 let realFile = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Utilitumus/bots.toml").path
