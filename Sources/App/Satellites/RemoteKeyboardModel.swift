@@ -5,7 +5,7 @@ import Foundation
 /// здесь только последнее известное состояние. Своего контроллера у центра при этом не запускается.
 @MainActor
 final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction>, KeyboardModel {
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         let defaults = Kit.defaults
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один.
         super.init(id: id,
@@ -17,7 +17,7 @@ final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction
                        systemUsage: nil, secureInputApp: nil, logTail: [], logCount: 0, repairResult: nil, layouts: [],
                        newAppLayout: defaults.string(forKey: "Keyboard.AppLayout.NewStart"),
                        excludedApps: defaults.stringArray(forKey: "Keyboard.AppLayout.Excluded") ?? []),
-                   dashboardWatch: .changes, canRead: canRead,
+                   dashboardWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setFeature(let feature, let on):

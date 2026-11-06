@@ -4,13 +4,13 @@ import AppKit
 /// Ползунки шлют настройки целиком и склеиваются до последнего значения.
 @MainActor
 final class RemoteFansModel: RemoteModuleModel<FansState, FansAction>, FansModel {
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         super.init(id: id,
                    initial: FansState(fans: [], configs: [], cpuSensors: [], gpuSensors: [], fullPower: false, safetyTripped: false,
                                       conflict: nil, lastError: nil, helperStatus: .notInstalled, helperError: nil,
                                       gameModeEnabled: false, myGames: [], gameLaunchers: [], addable: [],
                                       gameName: nil, gameLeavingUntil: nil),
-                   baseWatch: .none, canRead: canRead,
+                   baseWatch: .none, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setFullPower(let on): state.fullPower = on

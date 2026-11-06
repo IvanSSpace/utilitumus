@@ -10,7 +10,7 @@ final class RemoteStashModel: RemoteModuleModel<StashState, StashAction>, StashM
     private var stashedIcons: [String: NSImage] = [:]
     private var missingIcons: Set<String> = []
 
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         // До первого ответа — записанное: домен настроек у центра и утилиты один. Читаем, не пишем.
         let defaults = Kit.defaults
         let scenarios = defaults.data(forKey: "StashScenarios").flatMap { try? JSONDecoder().decode([StashScenario].self, from: $0) } ?? []
@@ -19,7 +19,7 @@ final class RemoteStashModel: RemoteModuleModel<StashState, StashAction>, StashM
                    initial: StashState(running: [], stubborn: [],
                                        stashed: stashed.map { StashState.Stashed(bundleID: $0.bundleID, name: $0.name, windowCount: $0.windows.count) },
                                        usage: [:], scenarios: scenarios, busy: nil, report: nil),
-                   baseWatch: .none, dashboardWatch: .changes, canRead: canRead,
+                   baseWatch: .none, dashboardWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        // Закрытие, возврат и замер — забота утилиты: их ход виден по её ответу.
                        switch action {
@@ -88,6 +88,16 @@ final class RemoteStashModel: RemoteModuleModel<StashState, StashAction>, StashM
 
     // Карточка и меню те же, что у встроенного: число отмеченных программ и «Вернуть (N)» не помещаются в строку статуса.
     override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        var card = stashCard()
+        // Отказ утилиты (другой процесс держит закрытие или возврат) виден на карточке, как у «Не спать»; в обычном виде текста нет.
+        if let error = actionError {
+            card.text = error
+            card.attention = true
+        }
+        return card
+    }
+
+    private func stashCard() -> DashState {
         if !state.stashed.isEmpty {
             return DashState(text: "спрятано \(state.stashed.count) · можно вернуть",
                              actionTitle: "Вернуть", actionIcon: "arrow.uturn.backward")

@@ -4,12 +4,12 @@ import SwiftUI
 /// Каждое поле настроек уходит своим действием: утилита проверяет их по одному.
 @MainActor
 final class RemoteMouseModel: RemoteModuleModel<MouseState, MouseAction>, MouseModel {
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один.
         // Доступ и перехват центру неизвестны; «запускаю» тревожит меньше, чем «нет доступа».
         super.init(id: id,
                    initial: MouseState(settings: MouseSettings.load(), axTrusted: true, tapActive: false),
-                   baseWatch: .none, canRead: canRead,
+                   baseWatch: .none, link: link, canRead: canRead,
                    optimistic: { state, action in
                        // Показ сразу, ответ утилиты заменит: отказ откатится сам.
                        switch action {

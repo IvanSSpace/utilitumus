@@ -239,7 +239,15 @@ enum DashboardLive {
         }
     }
 
+    #if KIT_TEST_DEFAULTS
+    /// Карточка встроенного модуля, которую проверка задаёт сама: настоящим контроллерам нужны железо и данные человека.
+    static var testBuiltIn: [Module: DashState] = [:]
+    #endif
+
     fileprivate static func compute(_ module: Module) -> DashState {
+        #if KIT_TEST_DEFAULTS
+        if !ModuleManager.shared.isExternal(module), let fixture = testBuiltIn[module] { return fixture }
+        #endif
         if ModuleManager.shared.isExternal(module) {
             return externalState(status: SatelliteRegistry.shared.entries[module]?.status,
                                  model: RemoteModules.model(module))

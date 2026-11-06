@@ -3,7 +3,7 @@ import Foundation
 /// Модель вкладки «Звук», когда модуль ведёт утилита. Устройствами по умолчанию управляет она, у центра монитора нет.
 @MainActor
 final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundModel {
-    init(id: String, canRead: @escaping () -> Bool) {
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один. Списка устройств пока нет.
         super.init(id: id,
                    initial: SoundState(currentInputName: "—", currentInputIsBluetooth: false, currentOutputName: "—",
@@ -11,7 +11,7 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
                                        primaryInputUID: PrimaryInputStore.shared.primaryUID,
                                        outputChoice: PrimaryOutputStore.shared.choice,
                                        isBluetoothLocked: LockState.shared.isLocked),
-                   dashboardWatch: .changes, canRead: canRead,
+                   dashboardWatch: .changes, link: link, canRead: canRead,
                    // Выбор виден сразу, как у встроенного. Отказ утилиты (нет устройства, Bluetooth под замком) откатит его.
                    optimistic: { state, action in
                        switch action {

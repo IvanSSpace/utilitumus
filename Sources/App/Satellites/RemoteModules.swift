@@ -20,7 +20,15 @@ protocol RemoteModuleSurface: AnyObject {
 /// Строки разделены комментариями, чтобы одновременные правки разных модулей сливались без конфликтов.
 @MainActor
 enum RemoteModules {
+    #if KIT_TEST_DEFAULTS
+    /// Проверка подставляет модели с управляемой связью: настоящая утилита ей не нужна.
+    static var testModels: [Module: any RemoteModuleSurface] = [:]
+    #endif
+
     static func model(_ module: Module) -> (any RemoteModuleSurface)? {
+        #if KIT_TEST_DEFAULTS
+        if let fixture = testModels[module] { return fixture }
+        #endif
         switch module {
         case .awake: return RemoteAwakeModel.shared
         // sound

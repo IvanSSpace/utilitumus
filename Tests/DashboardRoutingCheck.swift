@@ -82,6 +82,27 @@ final class FakeAwake: AwakeModel {
     func toggle() {}
 }
 
+final class WireBox: @unchecked Sendable {
+    var data = Data()
+    var refusal = Data()
+    var watches: [LinkWatch] = []
+}
+
+/// Модель с управляемой связью: отвечает заданным состоянием, утилиты нет.
+@MainActor func fixtureModel<S: Codable & Equatable & Sendable, A: Codable & Sendable, M: RemoteModuleModel<S, A>>(
+    make: (RemoteModuleLink) -> M, edit: (inout S) -> Void) async -> (model: M, wire: WireBox) {
+    let wire = WireBox()
+    let link = RemoteModuleLink(state: { wire.data }, action: { _ in wire.refusal },
+                                setWatch: { wire.watches.append($0) }, onPing: { _ in })
+    let model = make(link)
+    var state = model.state
+    edit(&state)
+    wire.data = LinkWire.encoded(state)
+    wire.refusal = LinkWire.encoded(LinkReply(state: state, error: "Стеш занят в другой программе"))
+    await model.read()
+    return (model, wire)
+}
+
 @MainActor func run() async {
     let appsDir = workRoot.appendingPathComponent("Apps")
     try? FileManager.default.createDirectory(at: appsDir, withIntermediateDirectories: true)
@@ -225,9 +246,7 @@ final class FakeAwake: AwakeModel {
     // только снимается и сверяется на DashState выше.
     struct Case { let module: Module; let status: LinkStatus; var compare = true }
     let cases = [
-        Case(module: .sound, status: LinkStatus(enabled: true, line: "слежу за микрофоном", needsSetup: 0)),
-        Case(module: .load, status: LinkStatus(enabled: true, line: "открой для замера", needsSetup: 0,
-                                               quickActions: [LinkQuickAction(title: "Обновить", action: Data())])),
+        // Звук и Нагрузка теперь идут через модель: их сверка по состоянию утилиты ниже («пиксели из состояния утилиты»).
         Case(module: .mouse, status: LinkStatus(enabled: true, line: "x", needsSetup: 1, setupSteps: [steps[0]]), compare: false),
     ]
     // Чистый лист: ни бандлов, ни передачи, ни включённых модулей.
@@ -264,7 +283,137 @@ final class FakeAwake: AwakeModel {
         await registry.update()
         check(!modules.isExternal(c.module), "\(c.module.rawValue): снято")
     }
-    check(differing(shots[0], shots[1]) > 100 && differing(shots[0], shots[2]) > 100, "три карточки различаются, снимки не пустые")
+    check(shots.count == 1 && differing(shots[0], shots[0]) == 0, "карточка Мыши снята")
+
+    // MARK: Маршрутизация по RemoteModules
+    print("== RemoteModules")
+    for module in Module.allCases {
+        let model = RemoteModules.model(module)
+        if module == .browser {
+            check(model == nil, "browser: модели нет, экран читает общий домен сам")
+            continue
+        }
+        let expectedType = "Remote\(module.rawValue.prefix(1).uppercased() + module.rawValue.dropFirst())Model"
+        check(model.map { String(describing: type(of: $0)) } == expectedType, "\(module.rawValue): модель \(expectedType)")
+        check(model != nil && model === RemoteModules.model(module), "\(module.rawValue): модель одна на всех (shared)")
+    }
+    for m in Module.allCases { modules.setExternal(m, true) }
+    check(RemoteModules.external(modules).map(\.0).count == Module.allCases.count - 1, "external: все ведомые, кроме браузера")
+    for m in Module.allCases { modules.setExternal(m, false) }
+
+    // MARK: Пиксели — карточка из состояния по связи
+    print("== пиксели из состояния утилиты")
+    struct Fixture {
+        let module: Module
+        let model: any RemoteModuleSurface
+        /// То, что даёт встроенный модуль по тем же данным (формулы `DashboardLive`, записанные руками).
+        let builtIn: DashState
+    }
+    var fixtures: [Fixture] = []
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteFansModel(id: "t.fans", link: $0, canRead: { true }) }) { (s: inout FansState) in
+            s.fullPower = true; s.helperStatus = .ready; s.conflict = nil
+        }
+        fixtures.append(Fixture(module: .fans, model: m, builtIn: DashState(text: "Макс", actionTitle: "Авто", actionIcon: "arrow.uturn.backward")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteMixerModel(id: "t.mixer", link: $0, canRead: { true }) }) { (s: inout MixerState) in
+            s.apps = [MixerAppState(id: "a", name: "Музыка", volume: 0.5, muted: false)]
+        }
+        fixtures.append(Fixture(module: .mixer, model: m, builtIn: DashState(text: "играет Музыка · 50 %")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteKeyboardModel(id: "t.keyboard", link: $0, canRead: { true }) }) { (s: inout KeyboardState) in
+            s.features = [KeyboardFeature.fnLanguage.rawValue]; s.tapActive = true; s.systemUsage = 0; s.secureInputApp = nil
+            s.currentName = "Русская"
+        }
+        fixtures.append(Fixture(module: .keyboard, model: m, builtIn: DashState(text: "Русская")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteSoundModel(id: "t.sound", link: $0, canRead: { true }) }) { (s: inout SoundState) in
+            s.currentInputName = "MacBook Pro Microphone"
+        }
+        fixtures.append(Fixture(module: .sound, model: m, builtIn: DashState(text: "MacBook Pro Microphone")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteClipboardModel(id: "t.clipboard", link: $0, canRead: { true }) }) { (s: inout ClipboardState) in
+            s.totalCount = 7; s.storeError = nil
+        }
+        fixtures.append(Fixture(module: .clipboard, model: m, builtIn: DashState(text: "\(m.hotKeyLabel) · 7 записей")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteStashModel(id: "t.stash", link: $0, canRead: { true }) }) { (s: inout StashState) in
+            s.stashed = []; s.busy = nil; s.usage = [:]
+            s.running = [.init(bundleID: "a", name: "A", closing: true), .init(bundleID: "b", name: "B", closing: true)]
+        }
+        fixtures.append(Fixture(module: .stash, model: m, builtIn: DashState(text: "выбрано 2", actionTitle: "Спрятать", actionIcon: "archivebox")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteLoadModel(id: "t.load", canRead: { true }, link: $0) }) { (s: inout LoadState) in s.measure = nil }
+        fixtures.append(Fixture(module: .load, model: m, builtIn: DashState(text: "открой для замера", actionTitle: "Обновить")))
+    }
+    do {
+        let (m, _) = await fixtureModel(make: { RemoteVoiceModel(id: "t.voice", link: $0, canRead: { true }) }) { (s: inout VoiceState) in
+            s.recording = true
+        }
+        fixtures.append(Fixture(module: .voice, model: m, builtIn: DashState(text: "идёт запись…")))
+    }
+    let plainStatus = LinkStatus(enabled: true, line: "строка статуса", needsSetup: 0)
+    for f in fixtures {
+        check(DashboardLive.externalState(status: plainStatus, model: f.model) == f.builtIn,
+              "\(f.module.rawValue): карточка из состояния утилиты равна карточке встроенного")
+    }
+    for f in fixtures {
+        RemoteModules.testModels[f.module] = f.model
+        DashboardLive.testBuiltIn[f.module] = f.builtIn
+        modules.setOn(f.module, true)
+        let builtIn = await snapshot("fixture-builtin-\(f.module.rawValue)", DashboardPage(open: { _ in }))
+        modules.setOn(f.module, false)
+        bundle(SatelliteRegistry.bundleName(f.module), in: appsDir)
+        box.set(f.module.rawValue, plainStatus)
+        Kit.defaults.set(true, forKey: ModuleHandover.handedOverKey(f.module.rawValue))
+        await registry.update()
+        check(modules.isExternal(f.module), "\(f.module.rawValue): утилита ведёт модуль")
+        let external = await snapshot("fixture-external-\(f.module.rawValue)", DashboardPage(open: { _ in }))
+        let diff = differing(builtIn, external)
+        // Причина, если когда-нибудь не ноль, называется здесь: карточка встроенного задана руками, потому что
+        // настоящим контроллерам нужны железо, права и данные человека (история буфера, SMC, микрофон).
+        check(diff == 0, "\(f.module.rawValue): карточка и шапка совпали, разных пикселей \(diff)")
+        Kit.defaults.removeObject(forKey: ModuleHandover.handedOverKey(f.module.rawValue))
+        try? FileManager.default.removeItem(at: appsDir.appendingPathComponent(SatelliteRegistry.bundleName(f.module) + ".app"))
+        await registry.update()
+        RemoteModules.testModels[f.module] = nil
+        DashboardLive.testBuiltIn[f.module] = nil
+    }
+
+    // MARK: Меню и действия карточки
+    print("== меню и действия")
+    for f in fixtures where [Module.fans, .stash, .clipboard].contains(f.module) {
+        check(f.model.menuUsesQuickActions == false, "\(f.module.rawValue): меню рисует модуль, не быстрые действия статуса")
+    }
+    for f in fixtures where [Module.mixer, .keyboard, .sound, .load, .voice].contains(f.module) {
+        check(f.model.menuUsesQuickActions == true, "\(f.module.rawValue): в меню быстрые действия статуса, как раньше")
+    }
+    // Отказ Стеша из-за метки другого процесса виден на карточке, обычный вид без текста.
+    if let stash = fixtures.first(where: { $0.module == .stash })?.model as? RemoteStashModel {
+        check(stash.actionError == nil, "стеш: без отказа текста нет")
+        await stash.restore()
+        check(stash.actionError == "Стеш занят в другой программе", "стеш: отказ из-за метки другого процесса виден: \(stash.actionError ?? "nil")")
+        let shown = DashboardLive.externalState(status: plainStatus, model: stash)
+        check(shown.text == "Стеш занят в другой программе" && shown.attention, "стеш: текст отказа на карточке")
+    }
+    // Слежение за состоянием включено только пока дашборд виден.
+    do {
+        let (m, wire) = await fixtureModel(make: { RemoteMixerModel(id: "t.mixer2", link: $0, canRead: { true }) }) { (_: inout MixerState) in }
+        check(wire.watches == [.none], "микшер: до показа дашборда слежения нет: \(wire.watches)")
+        m.setDashboardVisible(true)
+        m.setDashboardVisible(false)
+        check(wire.watches == [.none, .changes, .none], "микшер: слежение только пока дашборд виден: \(wire.watches)")
+        m.setScreenOpen(true)
+        m.setDashboardVisible(true)
+        m.setDashboardVisible(false)
+        check(wire.watches.last == .screen, "аренда экрана сильнее слежения дашборда: \(wire.watches)")
+    }
 }
 
 await run()
