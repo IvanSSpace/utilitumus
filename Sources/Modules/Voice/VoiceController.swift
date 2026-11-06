@@ -31,11 +31,11 @@ final class VoiceController: ObservableObject {
     @Published private(set) var keyCode: UInt32
     @Published private(set) var modifiers: UInt32
     @Published var mode: Mode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: Key.mode) }
+        didSet { Kit.defaults.set(mode.rawValue, forKey: Key.mode) }
     }
     /// UID микрофона; nil — системный.
     @Published var micUID: String? {
-        didSet { UserDefaults.standard.set(micUID, forKey: Key.mic) }
+        didSet { Kit.defaults.set(micUID, forKey: Key.mic) }
     }
 
     /// Bundle id программ, где голос Utilitumus не включается (у них свой ввод).
@@ -68,7 +68,7 @@ final class VoiceController: ObservableObject {
     private static let escID: UInt32 = 2
 
     private init() {
-        let d = UserDefaults.standard
+        let d = Kit.defaults
         keyCode = d.object(forKey: Key.keyCode) as? UInt32 ?? VoiceHotKey.defaultKeyCode
         modifiers = d.object(forKey: Key.modifiers) as? UInt32 ?? VoiceHotKey.defaultModifiers
         mode = d.string(forKey: Key.mode).flatMap(Mode.init(rawValue:)) ?? .toggle
@@ -114,8 +114,8 @@ final class VoiceController: ObservableObject {
     func setHotKey(keyCode: UInt32, modifiers: UInt32) {
         self.keyCode = keyCode
         self.modifiers = modifiers
-        UserDefaults.standard.set(keyCode, forKey: Key.keyCode)
-        UserDefaults.standard.set(modifiers, forKey: Key.modifiers)
+        Kit.defaults.set(keyCode, forKey: Key.keyCode)
+        Kit.defaults.set(modifiers, forKey: Key.modifiers)
         if isRunning && !hotKeySuspended { registerMain() }
     }
 
@@ -163,7 +163,7 @@ final class VoiceController: ObservableObject {
     }
 
     private func persistExcluded() {
-        UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
+        Kit.defaults.set(excludedApps, forKey: Key.excluded)
         updateExclusion()
     }
 

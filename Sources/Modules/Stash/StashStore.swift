@@ -174,7 +174,7 @@ final class StashStore: ObservableObject {
     private var missingBundleIDs: Set<String> = []
     private var observers: [NSObjectProtocol] = []
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = Kit.defaults) {
         self.defaults = defaults
         excluded = Set(defaults.stringArray(forKey: Self.excludedKey) ?? [])
         scenarios = defaults.data(forKey: Self.scenariosKey)

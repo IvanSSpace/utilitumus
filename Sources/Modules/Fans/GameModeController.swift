@@ -24,7 +24,7 @@ final class GameModeController: ObservableObject {
 
     @Published var isEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
+            Kit.defaults.set(isEnabled, forKey: Self.enabledKey)
             guard isRunning, isEnabled != oldValue else { return }
             if isEnabled {
                 FanController.log("«Максимум в играх» включён")
@@ -51,7 +51,7 @@ final class GameModeController: ObservableObject {
     private var gamePID: pid_t?
 
     private init() {
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         isEnabled = defaults.bool(forKey: Self.enabledKey)
         myGames = defaults.data(forKey: Self.gamesKey)
             .flatMap { try? JSONDecoder().decode([GameEntry].self, from: $0) } ?? []
@@ -198,7 +198,7 @@ final class GameModeController: ObservableObject {
 
     func setLauncherGame(_ key: String, _ isGame: Bool) {
         if isGame { gameLaunchers.insert(key) } else { gameLaunchers.remove(key) }
-        UserDefaults.standard.set(Array(gameLaunchers), forKey: Self.launchersKey)
+        Kit.defaults.set(Array(gameLaunchers), forKey: Self.launchersKey)
     }
 
     /// Программы, которые можно добавить: обычные, ещё не в списке, не сам Utilitumus.
@@ -230,7 +230,7 @@ final class GameModeController: ObservableObject {
 
     private func persistGames() {
         if let data = try? JSONEncoder().encode(myGames) {
-            UserDefaults.standard.set(data, forKey: Self.gamesKey)
+            Kit.defaults.set(data, forKey: Self.gamesKey)
         }
     }
 

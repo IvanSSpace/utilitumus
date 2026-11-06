@@ -18,10 +18,10 @@ final class KeyboardController: ObservableObject {
     static var onFeaturesChanged: @MainActor () -> Void = {}
 
     @Published var trigger: FnTrigger {
-        didSet { UserDefaults.standard.set(trigger.rawValue, forKey: "Keyboard.Trigger"); detector.trigger = trigger }
+        didSet { Kit.defaults.set(trigger.rawValue, forKey: "Keyboard.Trigger"); detector.trigger = trigger }
     }
     @Published var mode: LayoutMode {
-        didSet { UserDefaults.standard.set(mode.rawValue, forKey: "Keyboard.Mode"); picker.mode = mode }
+        didSet { Kit.defaults.set(mode.rawValue, forKey: "Keyboard.Mode"); picker.mode = mode }
     }
     @Published private(set) var currentName = "—"
     @Published private(set) var tapActive = false
@@ -44,7 +44,7 @@ final class KeyboardController: ObservableObject {
     @Published var newAppLayout: String? {
         didSet {
             memory.newAppLayout = newAppLayout
-            UserDefaults.standard.set(newAppLayout, forKey: Self.newAppKey)
+            Kit.defaults.set(newAppLayout, forKey: Self.newAppKey)
         }
     }
     /// Приложения, где раскладку не трогаем (в порядке добавления).
@@ -77,7 +77,7 @@ final class KeyboardController: ObservableObject {
     private var healthTimer: Timer?
 
     init() {
-        let defaults = UserDefaults.standard
+        let defaults = Kit.defaults
         let trigger = FnTrigger(rawValue: defaults.string(forKey: "Keyboard.Trigger") ?? "") ?? .onRelease
         let mode = LayoutMode(rawValue: defaults.string(forKey: "Keyboard.Mode") ?? "") ?? .lastTwo
         self.trigger = trigger
@@ -247,7 +247,7 @@ final class KeyboardController: ObservableObject {
 
     private func rememberLayout(_ layout: String, in app: String) {
         guard memory.remember(layout: layout, in: app) else { return }
-        UserDefaults.standard.set(memory.saved, forKey: Self.savedKey)
+        Kit.defaults.set(memory.saved, forKey: Self.savedKey)
     }
 
     func addExcluded(_ id: String) {
@@ -263,7 +263,7 @@ final class KeyboardController: ObservableObject {
 
     private func saveExcluded() {
         memory.excluded = Set(excludedApps)
-        UserDefaults.standard.set(excludedApps, forKey: Self.excludedKey)
+        Kit.defaults.set(excludedApps, forKey: Self.excludedKey)
     }
 
     /// Название раскладки по id для экрана; удалённую из системы показываем как есть.

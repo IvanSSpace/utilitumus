@@ -49,7 +49,7 @@ final class ClipboardController: ObservableObject {
     nonisolated fileprivate static let signature: OSType = 0x434C4950  // 'CLIP'
 
     private init() {
-        let d = UserDefaults.standard
+        let d = Kit.defaults
         keyCode = d.object(forKey: Key.keyCode) as? UInt32 ?? Self.defaultKeyCode
         modifiers = d.object(forKey: Key.modifiers) as? UInt32 ?? Self.defaultModifiers
         excludedApps = d.stringArray(forKey: Key.excluded) ?? ClipboardPolicy.defaultExcludedApps
@@ -160,8 +160,8 @@ final class ClipboardController: ObservableObject {
     func setHotKey(keyCode: UInt32, modifiers: UInt32) {
         self.keyCode = keyCode
         self.modifiers = modifiers
-        UserDefaults.standard.set(keyCode, forKey: Key.keyCode)
-        UserDefaults.standard.set(modifiers, forKey: Key.modifiers)
+        Kit.defaults.set(keyCode, forKey: Key.keyCode)
+        Kit.defaults.set(modifiers, forKey: Key.modifiers)
         if isRunning && !hotKeySuspended { registerHotKey() }
     }
 
@@ -212,19 +212,19 @@ final class ClipboardController: ObservableObject {
     func addExcluded(_ bundleID: String) {
         guard !Kit.isOurs(bundleID), !excludedApps.contains(bundleID) else { return }
         excludedApps.append(bundleID)
-        UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
+        Kit.defaults.set(excludedApps, forKey: Key.excluded)
     }
 
     func removeExcluded(_ bundleID: String) {
         excludedApps.removeAll { $0 == bundleID }
-        UserDefaults.standard.set(excludedApps, forKey: Key.excluded)
+        Kit.defaults.set(excludedApps, forKey: Key.excluded)
     }
 
     // MARK: История и пространства
 
     func setLimit(_ value: Int) {
         limit = value
-        UserDefaults.standard.set(value, forKey: Key.limit)
+        Kit.defaults.set(value, forKey: Key.limit)
         store?.setLimit(value)
         sync()
     }
