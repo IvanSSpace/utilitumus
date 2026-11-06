@@ -3,6 +3,8 @@
 # ничего не выкладывает (ни gh, ни push, ни тега, настоящий каталог не меняется).
 #   ./scripts/release-all.sh [--dry-run] --note awake="Что изменилось" [--note mouse="..."] ...
 #   ./scripts/release-all.sh --publish --note awake="..." ...     (нужен терминал: версию центра печатают руками)
+#   --only id,id  — собрать, выпустить и записать в каталог только эти утилиты; остальные и их записи в каталоге не трогаются
+#                   (поэтапный выпуск: в каталоге только то, что автор проверил).
 # Заметка нужна каждой утилите, которой есть что выкладывать; заметки центра — Resources/WhatsNew.json.
 # Порядок выкладки: релизы утилит (--latest=false), один коммит каталога, центр с --latest=true последним:
 # старые центры берут /releases/latest, и пока в каталоге нет утилит, центр не должен стать «последним».
@@ -10,17 +12,23 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 fail() { echo "$1" >&2; exit 1; }
-USAGE='Использование: ./scripts/release-all.sh [--dry-run | --publish] --note <id>="Что изменилось" ...'
+USAGE='Использование: ./scripts/release-all.sh [--dry-run | --publish] [--only id,id] --note <id>="Что изменилось" ...'
 
 # Публикация только по явному --publish: опечатка не должна превращаться в настоящий выпуск.
 PUBLISH=""
 EXPLICIT_DRY=""
 NOTE_IDS=()
 NOTE_TEXTS=()
+ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) EXPLICIT_DRY=1; shift ;;
     --publish) PUBLISH=1; shift ;;
+    --only)
+      if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then fail "После --only нужен список id через запятую. ${USAGE}"; fi
+      ONLY=",$2,"
+      shift 2
+      ;;
     --note)
       if [ $# -lt 2 ] || [[ "$2" != *=* ]] || [ -z "${2#*=}" ]; then
         fail "После --note нужно <id>=текст."
@@ -58,11 +66,23 @@ for manifest in Sources/Apps/*/manifest.json; do
   dir="$(dirname "$manifest")"
   name="$(basename "$dir")"
   [ -f "$dir/Info.plist" ] || continue
+  if [ -n "$ONLY" ] && [[ "$ONLY" != *",$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]'),"* ]]; then continue; fi
   IDS+=("$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')")
   NAMES+=("$name")
   VERSIONS+=("$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$dir/Info.plist")")
 done
 [ ${#IDS[@]} -gt 0 ] || fail "В Sources/Apps нет утилит."
+# Опечатка в --only не должна молча выпустить меньше, чем задумано.
+if [ -n "$ONLY" ]; then
+  wanted="${ONLY#,}"; wanted="${wanted%,}"
+  IFS=',' read -r -a WANTED <<<"$wanted"
+  for w in "${WANTED[@]}"; do
+    found=""
+    for id in "${IDS[@]}"; do if [ "$id" = "$w" ]; then found=1; fi; done
+    [ -n "$found" ] || fail "--only: утилиты «${w}» нет в Sources/Apps."
+  done
+  [ ${#IDS[@]} -eq ${#WANTED[@]} ] || fail "--only: id повторяется."
+fi
 catalog_version() {
   python3 -I -c '
 import json, sys
@@ -209,6 +229,9 @@ fi
 # Центр сам делает коммит версии, тег и релиз с --latest=true (scripts/release.sh).
 add scripts/release.sh "$HUB_VERSION"
 
+echo "== Каталог после выпуска (в нём: $(python3 -I -c '
+import json, sys
+print(", ".join("%s %s" % (a["id"], a["version"]) for a in json.load(open(sys.argv[1], encoding="utf-8"))["apps"]) or "пусто")' "$WORK/catalog.json"))"
 echo "== План выкладки"
 for step in "${PLAN[@]}"; do echo "+ $step"; done
 echo "Служба вентиляторов: v5 должна выйти вместе с этим центром ($HUB_TAG). Центр 0.5.3 управляет службой v4 и новую не ставит;"

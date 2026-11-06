@@ -25,7 +25,7 @@ printf '#!/bin/bash\necho "codesign $*" >> "%s/codesign.log"\n[ -z "${FAKE_BAD_S
 chmod +x "$OUT/bin/gh" "$OUT/bin/codesign"
 
 # Подставная сборка: бандл с версией, меткой выпуска и помощниками из манифеста.
-mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Resources" "$FX/Catalog" "$FX/Sources/Apps/Awake" "$FX/Sources/Apps/Fans"
+mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Resources" "$FX/Catalog" "$FX/Sources/Apps/Awake" "$FX/Sources/Apps/Fans" "$FX/Sources/Apps/Load" "$FX/Sources/Apps/Mouse"
 cp scripts/release-all.sh "$FX/scripts/"
 cp Sources/Kit/KitSigning.swift "$FX/Sources/Kit/"
 cp Info.plist "$FX/Info.plist"
@@ -33,13 +33,13 @@ HUB="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist
 EPOCH="$(sed -n 's/.*static let securityEpoch = "\(.*\)".*/\1/p' Sources/Kit/KitSigning.swift)"
 printf '[{"version":"%s","items":[{"icon":"x","text":"Проверка"}]}]\n' "$HUB" > "$FX/Resources/WhatsNew.json"
 printf '{"schema":1,"apps":[]}\n' > "$FX/Catalog/catalog.json"
-for name in Awake Fans; do
+for name in Awake Fans Load Mouse; do
   /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" -c "Add :UtilitumusSecurityEpoch string $EPOCH" \
     "$FX/Sources/Apps/$name/Info.plist" >/dev/null 2>&1 || {
     printf '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>1.0.0</string></dict></plist>' > "$FX/Sources/Apps/$name/Info.plist"
   }
 done
-printf '{}\n' > "$FX/Sources/Apps/Awake/manifest.json"
+for name in Awake Load Mouse; do printf '{}\n' > "$FX/Sources/Apps/$name/manifest.json"; done
 printf '{"helpers":[{"kind":"swift-tool","path":"Contents/MacOS/utilitumus-fan","identifier":"local.utilitumus.fan"}]}\n' > "$FX/Sources/Apps/Fans/manifest.json"
 cat > "$FX/scripts/build-app.sh" <<'FAKE'
 #!/bin/bash
@@ -69,7 +69,7 @@ git -C "$FX" push -q origin main
 BEFORE="$(git -C "$FX" rev-parse HEAD)"
 
 run() { (cd "$FX" && PATH="$OUT/bin:$PATH" TMPDIR="$OUT" "$@" scripts/release-all.sh "${ARGS[@]}" </dev/null 2>&1) || return $?; }
-ARGS=(--note awake="Первая" --note fans="Вторая")
+ARGS=(--only awake,fans --note awake="Первая" --note fans="Вторая")
 status=0; run env > "$OUT/dry.out" || status=$?
 check "dry-run по умолчанию проходит" test "$status" -eq 0
 check "в выводе таблица версий и план" has "$OUT/dry.out" "== План выкладки"
@@ -91,6 +91,9 @@ work="$(grep -F 'рабочая папка: ' "$OUT/dry.out" | head -1)"; work="
 check "каталог в рабочей папке с заметкой" has "$work/catalog.json" "Первая"
 check "у записи minHub и сумма" has "$work/catalog.json" '"sha256"'
 check "проверка подписи вызвана" has "$OUT/codesign.log" "certificate leaf"
+check "--only: Mouse и Load не в плане и не в каталоге" lacks "$OUT/dry.out" "mouse-v"
+check "--only: Load не в плане" lacks "$OUT/dry.out" "load-v"
+check "--only: в каталоге рабочей папки только выбранные" test "$(grep -c '"id"' "$work/catalog.json")" -eq 2
 
 expect_refused() { # описание, шаблон в выводе, переменные окружения...; ARGS заданы заранее
   local what="$1" pattern="$2" output st=0
@@ -98,24 +101,44 @@ expect_refused() { # описание, шаблон в выводе, перем�
   output="$(run env "$@")" || st=$?
   if [ "$st" -ne 0 ] && grep -qF -- "$pattern" <<<"$output"; then pass "$what"; else bad "$what (код $st): $output"; fi
 }
-ARGS=(--note awake="Первая")
+ARGS=(--only awake,fans --note awake="Первая")
 expect_refused "нет заметки: отказ" "Нет заметок для fans"
-ARGS=(--note awake="Первая" --note fans="Вторая")
+ARGS=(--only awake,fans --note awake="Первая" --note fans="Вторая")
 expect_refused "помощник не собран: отказ" "нет помощника" FAKE_NO_HELPER=1
 expect_refused "нет метки выпуска: отказ" "UtilitumusSecurityEpoch" FAKE_NO_EPOCH=1
 expect_refused "подпись не та: отказ" "подпись не" FAKE_BAD_SIGN=1
 ARGS=(--note nosuch="Вторая")
 expect_refused "заметка к несуществующей утилите: отказ" "такой утилиты нет"
-ARGS=(--publish --note awake="Первая" --note fans="Вторая")
+ARGS=(--only awake,fans --publish --note awake="Первая" --note fans="Вторая")
 expect_refused "--publish без терминала: отказ, ничего не выложено" "нужен терминал"
-ARGS=(--publish --dry-run --note awake="Первая" --note fans="Вторая")
+ARGS=(--only awake,fans --publish --dry-run --note awake="Первая" --note fans="Вторая")
 expect_refused "--publish вместе с --dry-run: отказ" "вместе нельзя"
 ARGS=(--typo)
 expect_refused "незнакомый флаг: отказ" "Неизвестный аргумент"
-ARGS=(--note awake="Первая" --note fans="Вторая")
+ARGS=(--only awake,fans --note awake="Первая" --note fans="Вторая")
 echo dirty > "$FX/dirty.txt"
 expect_refused "грязное дерево: отказ" "незакоммиченные"
 rm "$FX/dirty.txt"
+# Поэтапный выпуск: три утилиты, теги, каталог, потом центр. Каталог уже с чужой записью: она остаётся.
+printf '{"schema":1,"apps":[{"id":"stash","version":"1.0.0","minHub":"0.6.0","url":"u","sha256":"s","sizeMB":1,"notes":["x"]}]}\n' > "$FX/Catalog/catalog.json"
+git -C "$FX" -c user.name=t -c user.email=t@t commit -q -am "catalog"
+git -C "$FX" push -q origin main
+BEFORE="$(git -C "$FX" rev-parse HEAD)"
+ARGS=(--only awake,fans,load --note awake="Первая" --note fans="Вторая" --note load="Третья")
+status=0; run env > "$OUT/three.out" || status=$?
+check "--only с тремя утилитами проходит" test "$status" -eq 0
+tags="$(grep -oE '^\+ git tag [a-z]+-v[0-9.]+' "$OUT/three.out" | sed 's/+ git tag //' | tr '\n' ' ')"
+check "в плане ровно три тега по порядку: $tags" test "$tags" = "awake-v1.0.0 fans-v1.0.0 load-v1.0.0 "
+check "в плане нет Mouse" lacks "$OUT/three.out" "mouse"
+check "в каталоге после выпуска: чужая запись и три новые" has "$OUT/three.out" "== Каталог после выпуска (в нём: stash 1.0.0, awake 1.0.0, fans 1.0.0, load 1.0.0)"
+check "последний шаг центр" test "$(grep '^+ ' "$OUT/three.out" | tail -1)" = "+ scripts/release.sh $HUB"
+ARGS=(--only awake,nosuch --note awake="Первая")
+expect_refused "--only с неизвестной утилитой: отказ" "нет в Sources/Apps"
+ARGS=(--only awake,fans)
+expect_refused "--only: заметка нужна каждой выбранной" "Нет заметок для awake"
+ARGS=(--only --note awake="Первая")
+expect_refused "--only без списка: отказ" "После --only нужен список"
+ARGS=(--only awake,fans --note awake="Первая" --note fans="Вторая")
 git -C "$FX" -c user.name=t -c user.email=t@t commit -q --allow-empty -m ahead
 expect_refused "HEAD не совпадает с origin/main: отказ" "не совпадает с GitHub"
 git -C "$FX" reset -q --hard "$BEFORE"
