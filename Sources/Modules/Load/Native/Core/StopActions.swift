@@ -1,6 +1,28 @@
 import AppKit
 import Darwin
 
+/// Подтверждение остановки: только текст и строки. Что и как останавливать, знает план в модуле.
+struct LoadStopPrompt: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var message: String
+    var targets: [AgentTarget]
+    var kept: [StopPlan.Kept]
+    var totalMB: Double
+}
+
+/// Подтверждение действия над агентом или ботом. `command` — только подпись, обратно не принимается.
+struct LoadBackgroundPrompt: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var message: String
+    var command: String
+    var targets: [AgentTarget]
+    var totalMB: Double
+    var confirmTitle: String
+    var destructive: Bool
+}
+
 /// Что и почему не трогаем, составление плана остановки и сама остановка.
 /// Правила один в один с lambscape (actions.py):
 /// - не трогаем pid ≤ 1, саму панель и всех её предков, всё дерево сессии Claude, из которой запущена панель,

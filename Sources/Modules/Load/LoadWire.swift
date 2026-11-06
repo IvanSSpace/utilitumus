@@ -19,28 +19,6 @@ struct LoadLive: Codable, Equatable {
     var selfCPU: Double?
 }
 
-/// Подтверждение остановки: только текст и строки. Что и как останавливать, знает план в модуле.
-struct LoadStopPrompt: Codable, Equatable, Identifiable {
-    var id: UUID
-    var title: String
-    var message: String
-    var targets: [AgentTarget]
-    var kept: [StopPlan.Kept]
-    var totalMB: Double
-}
-
-/// Подтверждение действия над агентом или ботом. `command` — только подпись, обратно не принимается.
-struct LoadBackgroundPrompt: Codable, Equatable, Identifiable {
-    var id: UUID
-    var title: String
-    var message: String
-    var command: String
-    var targets: [AgentTarget]
-    var totalMB: Double
-    var confirmTitle: String
-    var destructive: Bool
-}
-
 /// Вкладка «Фоновое».
 struct LoadBackgroundState: Codable, Equatable {
     var data: BackgroundData
