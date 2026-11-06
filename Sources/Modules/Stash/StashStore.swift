@@ -47,7 +47,7 @@ struct RunningEntry: Identifiable {
 }
 
 /// Сколько программа ест вместе со всеми своими процессами (у Chrome их десятки).
-struct AppUsage: Equatable {
+struct AppUsage: Codable, Equatable, Sendable {
     let memoryMB: Double
     let cpu: Double
     /// Порог «тяжёлой»: от 1 ГБ памяти или от четверти ядра процессора.
@@ -56,19 +56,28 @@ struct AppUsage: Equatable {
 
 /// Сценарий: именованный набор программ, который прячется одним нажатием.
 /// Хранится в UserDefaults; формат менять только совместимо (новые поля — опциональные).
-struct StashScenario: Codable, Equatable, Identifiable {
+struct StashScenario: Codable, Equatable, Sendable, Identifiable {
     var id: UUID
     var name: String
     var bundleIDs: [String]
 }
 
 /// Итог возврата — показывается на экране, чтобы пропавшее с диска не терялось молча.
-struct RestoreReport {
+struct RestoreReport: Codable, Equatable, Sendable {
     var restored = 0
     var windowsPlaced = 0
     var missing: [String] = []
     var failed: [String] = []
     var hadAccess = true
+}
+
+/// Чем стеш находит и запускает чужие программы. Закрывает он их через сами `NSRunningApplication`.
+/// Проверка подставляет своё, поэтому настоящих программ не видит и запустить не может.
+struct StashSystem {
+    var runningApps: @MainActor () -> [NSRunningApplication] = { NSWorkspace.shared.runningApplications }
+    var open: @MainActor (URL, NSWorkspace.OpenConfiguration) async throws -> NSRunningApplication = {
+        try await NSWorkspace.shared.openApplication(at: $0, configuration: $1)
+    }
 }
 
 /// Работа с окнами через Accessibility API. Нужен доступ «Универсальный доступ»,
@@ -146,10 +155,17 @@ final class StashStore: ObservableObject {
 
     /// Сколько ждём штатного закрытия и появления окон после запуска.
     static let waitSeconds = 10.0
+    static let closingText = "Закрываю программы…"
+    static let restoringText = "Возвращаю программы…"
 
     private static let stashKey = "StashedApps"
     private static let excludedKey = "StashExcludedBundleIDs"
     private static let scenariosKey = "StashScenarios"
+    /// Кто сейчас закрывает или возвращает программы: `["pid": Int, "since": секунды]`. Запись `StashedApps` — единственный
+    /// список закрытых программ, и писать её одновременно центр и утилита не должны, что бы ни случилось с ролью.
+    private static let operationKey = "StashOperation"
+    /// Метка старше этого срока не держит: процесс мог упасть, не сняв её. Самая долгая операция — два срока ожидания и запуски.
+    static let operationTimeout: TimeInterval = 300
     /// Finder и сам Utilitumus не показываем и не закрываем никогда.
     private static let protectedIDs: Set<String> = ["com.apple.finder"]
 
@@ -165,6 +181,16 @@ final class StashStore: ObservableObject {
     @Published private(set) var busy: String?
     @Published private(set) var report: RestoreReport?
     @Published private(set) var axTrusted = AXIsProcessTrusted()
+
+    var system = StashSystem()
+    /// Действие из связи принято, а его задача ещё не началась: второе такое же получит отказ.
+    var pendingBusy: String?
+    var usagePending = false
+    /// Экран открыт в центре: только тогда утилита замеряет память. Встроенному модулю окно проверяет `refreshUsage`.
+    var screenLease = true
+    /// Номер процесса и проверка, жив ли чужой: проверке нужны два «процесса» в одном.
+    var processID = Int(getpid())
+    var isAlive: (Int) -> Bool = { kill(pid_t($0), 0) == 0 }
 
     private let defaults: UserDefaults
     /// Значки по bundle id и по пути. Не @Published: чтение из body не должно
@@ -191,6 +217,36 @@ final class StashStore: ObservableObject {
                 defaults.set(data, forKey: Self.stashKey + ".unreadable")
                 defaults.removeObject(forKey: Self.stashKey)
             }
+        }
+    }
+
+    // MARK: Одна операция на запись
+
+    /// Держит ли закрытие или возврат другой процесс, судя по метке в общем домене.
+    var operationElsewhere: Bool {
+        defaults.synchronize()
+        guard let mark = defaults.dictionary(forKey: Self.operationKey), let pid = mark["pid"] as? Int,
+              let since = mark["since"] as? Double else { return false }
+        return pid != processID && Date().timeIntervalSince1970 - since < Self.operationTimeout && isAlive(pid)
+    }
+
+    /// Занять запись под операцию и перечитать её: пока мы не владели, её мог изменить другой процесс.
+    private func claimOperation() -> Bool {
+        guard !operationElsewhere else { return false }
+        defaults.set(["pid": processID, "since": Date().timeIntervalSince1970], forKey: Self.operationKey)
+        defaults.synchronize()
+        if let data = defaults.data(forKey: Self.stashKey), let fresh = try? JSONDecoder().decode([StashedApp].self, from: data) {
+            stashed = fresh
+        } else if defaults.data(forKey: Self.stashKey) == nil {
+            stashed = []
+        }
+        return true
+    }
+
+    private func releaseOperation() {
+        if let mark = defaults.dictionary(forKey: Self.operationKey), mark["pid"] as? Int == processID {
+            defaults.removeObject(forKey: Self.operationKey)
+            defaults.synchronize()
         }
     }
 
@@ -246,7 +302,7 @@ final class StashStore: ObservableObject {
     /// `excluding` — программа, о завершении которой только что сообщили: в списке
     /// `runningApplications` она может задержаться ещё на тик.
     func refresh(excluding gonePID: pid_t? = nil) {
-        running = NSWorkspace.shared.runningApplications
+        running = system.runningApps()
             .filter { $0.processIdentifier != gonePID }
             .compactMap(Self.entry)
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -261,11 +317,6 @@ final class StashStore: ObservableObject {
 
     func isClosing(_ bundleID: String) -> Bool { !excluded.contains(bundleID) }
 
-    /// Самые тяжёлые сверху; пока замеров нет — по имени.
-    var runningByWeight: [RunningEntry] {
-        running.sorted { (usage[$0.bundleID]?.memoryMB ?? 0) > (usage[$1.bundleID]?.memoryMB ?? 0) }
-    }
-
     /// Отметить к закрытию только тяжёлые, остальные — не закрывать.
     func selectOnlyHeavy() {
         for entry in running { setClosing(entry.bundleID, usage[entry.bundleID]?.isHeavy ?? false) }
@@ -277,6 +328,10 @@ final class StashStore: ObservableObject {
     func refreshUsage() async {
         // Окно скрыто или свёрнуто — запускать ps незачем.
         guard Self.windowIsVisible() else { return }
+        await measureUsage()
+    }
+
+    func measureUsage() async {
         let bundles: [String: String] = running.reduce(into: [:]) { acc, entry in
             if let url = entry.app.bundleURL { acc[url.path + "/"] = entry.bundleID }
         }
@@ -344,7 +399,7 @@ final class StashStore: ObservableObject {
         }
     }
 
-    private var selectedBundleIDs: [String] {
+    var selectedBundleIDs: [String] {
         running.filter { isClosing($0.bundleID) }.map(\.bundleID)
     }
 
@@ -439,8 +494,9 @@ final class StashStore: ObservableObject {
     func stash(_ apps: [NSRunningApplication]) async {
         guard busy == nil else { return }
         let targets = apps.filter(Self.isEligible)
-        guard !targets.isEmpty else { return }
-        busy = "Закрываю программы…"
+        guard !targets.isEmpty, claimOperation() else { return }
+        defer { releaseOperation() }
+        busy = Self.closingText
         report = nil
         defer { busy = nil }
 
@@ -476,6 +532,10 @@ final class StashStore: ObservableObject {
         refresh()
     }
 
+    func forceTerminate(_ bundleID: String) {
+        if let entry = stubborn.first(where: { $0.bundleID == bundleID }) { forceTerminate(entry) }
+    }
+
     func forceTerminateAll() {
         for entry in stubborn { forceTerminate(entry) }
     }
@@ -484,8 +544,10 @@ final class StashStore: ObservableObject {
 
     /// Открыть программы из стеша без вывода вперёд и вернуть окна на места.
     func restore() async {
-        guard busy == nil, !stashed.isEmpty else { return }
-        busy = "Возвращаю программы…"
+        guard busy == nil, claimOperation() else { return }
+        defer { releaseOperation() }
+        guard !stashed.isEmpty else { return }
+        busy = Self.restoringText
         defer { busy = nil }
 
         let trusted = AXIsProcessTrusted()
@@ -502,7 +564,7 @@ final class StashStore: ObservableObject {
             // Не красть фокус: вернуть надо всё, а не выбрать одну программу.
             config.activates = false
             do {
-                let app = try await NSWorkspace.shared.openApplication(at: url, configuration: config)
+                let app = try await system.open(url, config)
                 result.restored += 1
                 launched.append((record, app))
             } catch {
