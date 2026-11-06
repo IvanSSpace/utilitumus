@@ -9,6 +9,7 @@ enum FanLink {
     static let connectionOptions: NSXPCConnection.Options = []
     static let idleExit: TimeInterval = 2
     static let holdTimeout: TimeInterval = 3
+    static let exitRetries = 3
     #else
     static let label = "local.utilitumus.fan"
     static let service = "local.utilitumus.fan.xpc"
@@ -19,6 +20,8 @@ enum FanLink {
     /// Столько служба терпит без нового удержания, пока вентилятор в ручном режиме. Клиент повторяет втрое чаще
     /// (`FanGate.holdRefresh`), так что потерянная команда или медленный такт не отдают вентилятор зря.
     static let holdTimeout: TimeInterval = 15
+    /// Сколько раз при выходе по простою служба пробует вернуть «Авто», прежде чем выйти с ошибкой (launchd поднимет её снова).
+    static let exitRetries = 5
     #endif
     /// Пауза между попытками вернуть «Авто», если SMC не принял.
     static let holdRetry: TimeInterval = 2

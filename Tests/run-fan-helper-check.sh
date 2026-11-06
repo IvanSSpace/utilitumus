@@ -475,11 +475,16 @@ sleep 5
 grep -q 'F0Md=0' "$LOG" || fail "после последней команды вентилятор не отдан"
 ok "команды кончились: вентилятор отдан через срок"
 
-# Зависшая запись: сторож пробует не бесконечно, служба выходит.
+# Зависшая запись: сторож пробует не бесконечно, но служба не уходит молча, пока вентилятор ручной.
+rm -f "$OUT/agent.log"
 agent daemon FAN_TEST_SMC_STUCK
 "$OUT/hub" hold-manual 1 >/dev/null || true
-sleep 12
+for _ in $(seq 1 45); do [ "$(state)" = "not running" ] && break; sleep 1; done
 expect_state "not running" "SMC не принимает «Авто»: попытки конечны, служба вышла"
+grep -q 'выход отложен' "$OUT/agent.log" || fail "простой с ручным вентилятором: выход не откладывался: $(cat "$OUT/agent.log")"
+grep -q 'выход с вентилятором в ручном режиме' "$OUT/agent.log" || fail "после попыток нет записи в журнале: $(cat "$OUT/agent.log")"
+launchctl print "$DOMAIN/$LABEL" | grep -q 'last exit code = 1' || fail "выход с ручным вентилятором не с кодом 1"
+ok "вентилятор ручной: выход отложен, попытки записаны в журнал, конец с кодом 1"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do

@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // utilitumus-fan — единственный кусок Utilitumus, работающий от root: писать в SMC может только root.
 // Это служба launchd в системном домене, её запускает launchd по первому подключению. setuid нет,
@@ -6,7 +7,7 @@ import Foundation
 // (FanLink.listenerRequirement): чужой процесс не доходит ни до делегата, ни до команд.
 //
 // Поверхность намеренно узкая — ни путей, ни шелла, ни окружения, только номер вентилятора и обороты
-// (FanHelperXPC). Журнала нет.
+// (FanHelperXPC). Журнал короткий: только отказы возврата «Авто» (stderr и os_log).
 //   utilitumus-fan version   версия помощника, без SMC и без службы
 
 #if FAN_TEST_FAKE_SMC
@@ -48,6 +49,11 @@ typealias HelperSMC = FakeSMC
 #else
 typealias HelperSMC = SMC
 #endif
+
+func serviceLog(_ text: String) {
+    FileHandle.standardError.write(Data(("utilitumus-fan: " + text + "\n").utf8))
+    os_log("%{public}@", log: OSLog(subsystem: FanLink.label, category: "service"), text)
+}
 
 /// SMC применяет запись не мгновенно: сразу после неё ещё читается старое
 /// значение. Ждём до секунды, пока условие не станет правдой.
@@ -109,17 +115,24 @@ final class FanService: NSObject, FanHelperXPC {
     }
 
     /// Каждый вентилятор в ручном режиме — в «Авто», что бы ни стояло в настройках. Сторож не спрашивает, кто взял вентилятор.
-    /// Не вышло — ещё несколько попыток: после них вентилятор остаётся таким, какой есть, и об этом писать некому.
-    func releaseManualFans() {
+    /// Не вышло — ещё несколько попыток. Ответ: `true`, если ручных вентиляторов не осталось; выходить службе можно только тогда.
+    @discardableResult
+    func releaseManualFans() -> Bool {
         watchdogStop()
-        guard let smc, let count = smc.uint8("FNum") else { return }
+        guard let smc, let count = smc.uint8("FNum") else { return true }
         var failed = false
         for fan in 0..<Int(count) where smc.uint8("F\(fan)Md") == 1 {
             if auto(fan) != nil { failed = true }
         }
-        guard failed, releaseRetries < 3 else { releaseRetries = 0; return }
+        guard failed else { releaseRetries = 0; return true }
+        guard releaseRetries < 3 else {
+            releaseRetries = 0
+            serviceLog("не удалось вернуть «Авто» за \(3 + 1) попытки")
+            return false
+        }
         releaseRetries += 1
         watchdogArm(after: FanLink.holdRetry)
+        return false
     }
 
     private func watchdogStop() {
@@ -173,20 +186,30 @@ final class FanListenerDelegate: NSObject, NSXPCListenerDelegate {
     let service = FanService()
     private var connections = 0
     private var idleExit: DispatchWorkItem?
+    private var exitAttempts = 0
 
-    /// Только на главной очереди.
-    func armIdleExit() {
+    /// Только на главной очереди. Пока хоть один вентилятор остался ручным, служба не выходит: ждёт и пробует снова,
+    /// не больше `FanLink.exitRetries` раз. Потом выход с кодом 1, чтобы launchd поднял её и она попробовала ещё (при `exit(0)` он бы не поднял).
+    func armIdleExit(after delay: TimeInterval = FanLink.idleExit) {
+        idleExit?.cancel()
         let work = DispatchWorkItem {
-            self.service.releaseManualFans()
-            exit(0)
+            if self.service.releaseManualFans() { exit(0) }
+            self.exitAttempts += 1
+            if self.exitAttempts > FanLink.exitRetries {
+                serviceLog("выход с вентилятором в ручном режиме после \(self.exitAttempts) проверок")
+                exit(1)
+            }
+            serviceLog("вентилятор ещё в ручном режиме: выход отложен, проверка \(self.exitAttempts) из \(FanLink.exitRetries)")
+            self.armIdleExit(after: FanLink.holdRetry)
         }
         idleExit = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + FanLink.idleExit, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         DispatchQueue.main.async {
             self.connections += 1
+            self.exitAttempts = 0
             self.idleExit?.cancel()
         }
         connection.exportedInterface = NSXPCInterface(with: FanHelperXPC.self)
@@ -194,7 +217,7 @@ final class FanListenerDelegate: NSObject, NSXPCListenerDelegate {
         connection.invalidationHandler = {
             DispatchQueue.main.async {
                 self.connections -= 1
-                if self.connections == 0 { self.armIdleExit() }
+                if self.connections == 0 { self.exitAttempts = 0; self.armIdleExit() }
             }
         }
         connection.resume()
