@@ -55,6 +55,8 @@ final class ClipboardPanelModel: ObservableObject {
     /// nil — вкладка «История».
     @Published var tab: UUID?
     @Published var selected = 0
+    /// Истории нет из-за ошибки хранилища: вместо «История пуста» говорим об этом.
+    @Published var storeError: String?
 
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
     var onPaste: (ClipItem) -> Void = { _ in }
@@ -210,6 +212,7 @@ struct ClipboardPanelView: View {
     }
 
     private var emptyText: String {
+        if let error = model.storeError { return error }
         if !model.query.isEmpty { return "Ничего не нашлось" }
         if let tab = model.tab, let space = model.spaces.first(where: { $0.id == tab }) {
             return "В «\(space.name)» пусто. Правый клик по карточке → «В пространство»"
@@ -248,7 +251,7 @@ private struct ClipCard: View {
     let selected: Bool
     @ObservedObject var model: ClipboardPanelModel
 
-    static let width: CGFloat = 206
+    static let width = ClipboardPreview.cardWidth
 
     private var tint: Color {
         switch item.kind {
@@ -306,9 +309,9 @@ private struct ClipCard: View {
     @ViewBuilder private var preview: some View {
         switch item.kind {
         case .text:
-            Text(String((item.text ?? "").prefix(400)))
-                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9))
-                .lineLimit(9).multilineTextAlignment(.leading)
+            Text(ClipboardPreview.shownText(item.text ?? ""))
+                .font(.system(size: ClipboardPreview.fontSize)).foregroundStyle(.white.opacity(0.9))
+                .lineLimit(ClipboardPreview.maxLines).multilineTextAlignment(.leading)
         case .link:
             VStack(alignment: .leading, spacing: 8) {
                 Image(systemName: "link").font(.system(size: 15, weight: .semibold))
@@ -355,7 +358,7 @@ private struct ClipCard: View {
 
     private var caption: String {
         switch item.kind {
-        case .text: return "\((item.text ?? "").count) симв."
+        case .text: return ClipboardPreview.caption(for: item.text ?? "")
         case .link: return item.host ?? "ссылка"
         case .image:
             if let w = item.imageWidth, let h = item.imageHeight { return "\(w)×\(h)" }
@@ -413,6 +416,7 @@ final class ClipboardPanelHost {
         self.model = model
         model.allItems = controller.items
         model.spaces = controller.spaces
+        model.storeError = controller.storeError
         model.reset()
 
         let panel = self.panel ?? makePanel(model)
@@ -477,6 +481,8 @@ final class ClipboardPanelHost {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.appearance = NSAppearance(named: .darkAqua)
+        // Панель показывает содержимое буфера открытым текстом: при показе экрана её не видно.
+        panel.sharingType = .none
 
         let glass = NSVisualEffectView()
         glass.material = .hudWindow

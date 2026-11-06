@@ -1,14 +1,28 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CryptoKit
 
 /// Окно программы в стеше: кадр в глобальных координатах экрана (AX, начало сверху слева).
 struct StashedWindow: Codable, Equatable {
+    /// Хэш заголовка: заголовок нужен только для сопоставления окон, а темы писем и названия документов
+    /// незачем держать открытым текстом. В записях старых версий здесь сам заголовок.
     var title: String
     var x: Double
     var y: Double
     var width: Double
     var height: Double
+
+    /// Что сохранять вместо заголовка. Пустой заголовок остаётся пустым: по нему окна не сопоставляются.
+    static func storedTitle(_ title: String?) -> String {
+        guard let title, !title.isEmpty else { return "" }
+        return SHA256.hash(data: Data(title.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func matches(title current: String?) -> Bool {
+        guard !title.isEmpty, let current, !current.isEmpty else { return false }
+        return title == current || title == Self.storedTitle(current)
+    }
 }
 
 /// Запись стеша: чем была программа и где стояли её окна.
@@ -87,7 +101,7 @@ private enum AXWindows {
         var size = CGSize.zero
         guard AXValueGetValue(posRef as! AXValue, .cgPoint, &point),
               AXValueGetValue(sizeRef as! AXValue, .cgSize, &size) else { return nil }
-        return StashedWindow(title: string(window, kAXTitleAttribute) ?? "",
+        return StashedWindow(title: StashedWindow.storedTitle(string(window, kAXTitleAttribute)),
                              x: point.x, y: point.y, width: size.width, height: size.height)
     }
 
@@ -113,7 +127,7 @@ private enum AXWindows {
         var pairs: [(StashedWindow, AXUIElement)] = []
         var unmatched: [StashedWindow] = []
         for s in saved {
-            if !s.title.isEmpty, let i = free.firstIndex(where: { string($0.element, kAXTitleAttribute) == s.title }) {
+            if let i = free.firstIndex(where: { s.matches(title: string($0.element, kAXTitleAttribute)) }) {
                 pairs.append((s, free.remove(at: i).element))
             } else {
                 unmatched.append(s)

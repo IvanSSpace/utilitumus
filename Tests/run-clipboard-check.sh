@@ -10,5 +10,6 @@ swiftc -o "$OUT/check" "$OUT/main.swift" \
   Sources/Modules/Clipboard/ClipboardModels.swift \
   Sources/Modules/Clipboard/ClipboardStore.swift \
   Sources/Modules/Clipboard/ClipboardPasteboard.swift \
+  Sources/Modules/Clipboard/ClipboardPreview.swift \
   -framework AppKit -framework CryptoKit -framework Security
 "$OUT/check"

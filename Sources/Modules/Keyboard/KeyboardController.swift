@@ -234,7 +234,8 @@ final class KeyboardController: ObservableObject {
         if restore, let wanted = memory.layout(for: id, enabled: list.map(\.id)),
            wanted != current?.id, let target = list.first(where: { $0.id == wanted }) {
             InputSources.select(target)
-            note("\(app?.localizedName ?? id) → \(target.name)")
+            // Имя программы в журнал не идёт: иначе он становится историей пользования.
+            note("раскладка приложения восстановлена → \(target.name)")
         } else if let current {
             // Нечего возвращать: приложение начинает с текущей раскладки, её и запоминаем.
             rememberLayout(current.id, in: id)
@@ -407,7 +408,7 @@ final class KeyboardController: ObservableObject {
         let owner = fnRunning ? SecureInput.owner() : nil
         if owner != secureInputApp {
             secureInputApp = owner
-            note(owner.map { "защищённый ввод в \($0): Fn не слышно" } ?? "защищённый ввод снят")
+            note(owner == nil ? "защищённый ввод снят" : "защищённый ввод включён: Fn не слышно")
         }
     }
 

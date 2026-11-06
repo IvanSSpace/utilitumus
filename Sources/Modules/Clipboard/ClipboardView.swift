@@ -75,6 +75,9 @@ struct ClipboardView: View {
                 if let error = controller.storeError {
                     DSRow(icon: "key.slash", title: error)
                 }
+                if let notice = controller.storeNotice {
+                    DSRow(icon: "exclamationmark.triangle.fill", title: notice)
+                }
                 DSRow(icon: "clock.arrow.circlepath", title: "Размер истории") {
                     DSSegmented(ClipboardPolicy.limits, selection: Binding(
                         get: { controller.limit }, set: { controller.setLimit($0) })) { "\($0)" }
@@ -204,7 +207,7 @@ struct ClipboardView: View {
     private var securityLine: some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield.fill").foregroundStyle(.white.opacity(0.5))
-            Text("Пароли из менеджеров паролей не сохраняются, всё зашифровано и хранится только на этом Mac")
+            Text("Скрытое менеджерами паролей и всё из исключений не сохраняется; остальное зашифровано, только на этом Mac")
                 .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
             Spacer()
             if !controller.axTrusted {

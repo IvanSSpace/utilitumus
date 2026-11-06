@@ -27,7 +27,12 @@ final class ClipboardController: ObservableObject {
     @Published private(set) var hotKeyError: String?
     /// Не вышло получить ключ из Keychain: историю не ведём.
     @Published private(set) var storeError: String?
+    /// История работает, но прежний индекс не открылся и отложен в файл.
+    @Published private(set) var storeNotice: String?
     @Published private(set) var axTrusted = AXIsProcessTrusted()
+
+    /// Последовательная: снимки приходят в том порядке, в каком буфер менялся.
+    private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
 
     private(set) var store: ClipboardStore?
     private var isRunning = false
@@ -35,6 +40,8 @@ final class ClipboardController: ObservableObject {
     private var lastChange = 0
     /// changeCount после нашей собственной записи (вставка из панели): такую запись не запоминаем.
     private var ownChange = -1
+    private var frontHistory = ClipFrontHistory()
+    private var activationObserver: NSObjectProtocol?
 
     private var handlerRef: EventHandlerRef?
     private var hotKeyRef: EventHotKeyRef?
@@ -59,6 +66,14 @@ final class ClipboardController: ObservableObject {
         isRunning = true
         openStore()
         lastChange = NSPasteboard.general.changeCount  // что лежало до включения — не берём
+        frontHistory = ClipFrontHistory(current: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let id = app?.bundleIdentifier
+            MainActor.assumeIsolated { ClipboardController.shared.frontHistory.activated(id) }
+        }
         // Опрос changeCount — одно целое число; чтение содержимого только когда оно поменялось.
         let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
             MainActor.assumeIsolated { ClipboardController.shared.poll() }
@@ -75,6 +90,8 @@ final class ClipboardController: ObservableObject {
         isRunning = false
         timer?.invalidate()
         timer = nil
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        activationObserver = nil
         unregisterHotKey()
         if let handlerRef { RemoveEventHandler(handlerRef) }
         handlerRef = nil
@@ -83,12 +100,18 @@ final class ClipboardController: ObservableObject {
 
     private func openStore() {
         guard store == nil else { return }
-        guard let key = ClipboardKeychain().key() else {
-            storeError = "Не удалось получить ключ из Связки ключей — история не ведётся"
+        guard let key = try? ClipboardKeychain().key() else {
+            storeError = "Не удалось получить ключ из Связки ключей — история не ведётся, старая не тронута"
+            return
+        }
+        let opened = ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit)
+        guard opened.isAvailable else {
+            storeError = "Не удалось открыть файл истории — история не ведётся, файл не тронут"
             return
         }
         storeError = nil
-        attach(ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit))
+        storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
+        attach(opened)
     }
 
     /// Подключить хранилище. Отдельно от `openStore`, чтобы стенд мог подставить своё, не трогая Keychain и диск.
@@ -109,13 +132,26 @@ final class ClipboardController: ObservableObject {
         let count = pasteboard.changeCount
         guard count != lastChange else { return }
         lastChange = count
-        guard count != ownChange, let store else { return }
+        guard count != ownChange, store != nil else { return }
         let front = NSWorkspace.shared.frontmostApplication
-        // Пароли из менеджеров не берём, даже если они забыли поставить скрытый тип.
-        if let id = front?.bundleIdentifier, excludedApps.contains(id) { return }
-        var snap = ClipboardPasteboard.snapshot(of: pasteboard)
-        snap.sourceBundleID = front?.bundleIdentifier
-        snap.sourceName = front?.localizedName
+        // Из программ-исключений не берём, даже если запись пришла без скрытого типа и программа уже ушла с переднего плана.
+        let sources = frontHistory.sources() + [front?.bundleIdentifier].compactMap { $0 }
+        if sources.contains(where: excludedApps.contains) { return }
+        let sourceID = front?.bundleIdentifier
+        let sourceName = front?.localizedName
+        // Большое содержимое не должно останавливать главный поток: на нём живёт перехват прокрутки «Мыши».
+        Self.readQueue.async {
+            guard var snap = ClipboardPasteboard.snapshot(of: NSPasteboard.general, change: count) else { return }
+            snap.sourceBundleID = sourceID
+            snap.sourceName = sourceName
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { ClipboardController.shared.finishRead(snap) }
+            }
+        }
+    }
+
+    private func finishRead(_ snap: ClipSnapshot) {
+        guard isRunning, let store else { return }
         if store.ingest(snap) { sync() }
     }
 
