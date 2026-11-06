@@ -43,8 +43,14 @@ SOURCES="Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift $(find Sourc
 # Модули с разными именами, как у центра и утилит: протокол не должен зависеть от имени модуля.
 mkdir -p "$OUT/src"
 cp Tests/LinkCheck.swift "$OUT/src/main.swift"
-swiftc -O -target "$TARGET" -module-name LinkCheckClient -o "$OUT/client-build" "$OUT/src/main.swift" $SOURCES
-swiftc -O -target "$TARGET" -module-name LinkCheckServer -o "$OUT/server-build" "$OUT/src/main.swift" $SOURCES
+# Метка выпуска: без бандла Info.plist лежит в самом бинарнике.
+MARKED=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist)
+swiftc -O -target "$TARGET" -module-name LinkCheckClient -o "$OUT/client-build" "$OUT/src/main.swift" $SOURCES "${MARKED[@]}"
+swiftc -O -target "$TARGET" -module-name LinkCheckServer -o "$OUT/server-build" "$OUT/src/main.swift" $SOURCES "${MARKED[@]}"
+# Без метки: другое имя ключа той же длины, остальное в файле то же.
+unmark() { perl -0777 -pe 's#<key>UtilitumusSecurityEpoch</key>#<key>UtilitumusSecurityEpocX</key>#' "$OUT/$1-build" > "$OUT/$1-unmarked-build"; chmod +x "$OUT/$1-unmarked-build"; }
+unmark client
+unmark server
 
 echo "== чистая логика"
 "$OUT/client-build"
@@ -72,6 +78,11 @@ signed server fake-ours     "$SIGN_NAME" "$SERVER_ID"
 signed client client        "$SIGN_NAME" "$PEER_ID"
 signed client rogue-adhoc   -            "$PEER_ID"
 signed client rogue-foreign "$SIGN_NAME" "$FOREIGN_ID"
+signed client-unmarked rogue-unmarked "$SIGN_NAME" "$PEER_ID"
+signed server-unmarked fake-unmarked  "$SIGN_NAME" "$SERVER_ID"
+# Как старый выпуск: наш сертификат, нужный identifier, без метки и без hardened runtime.
+cp "$OUT/client-unmarked-build" "$OUT/rogue-old"
+codesign --force --sign "$SIGN_NAME" --identifier "$PEER_ID" "$OUT/rogue-old" 2>/dev/null
 
 # agent <программа и её аргументы>: снимает прошлый агент, ставит этот, журнал вызовов с нуля.
 agent() {
@@ -107,6 +118,8 @@ scenario client basic
 : > "$OUT/calls.log"
 scenario rogue-adhoc rogue
 scenario rogue-foreign rogue
+scenario rogue-unmarked rogue
+scenario rogue-old rogue
 echo "== настоящий клиент после rogue"
 : > "$OUT/calls.log"
 scenario client basic
@@ -135,6 +148,8 @@ esac
 fake fake-adhoc ok
 scenario client rejected
 fake fake-foreign ok
+scenario client rejected
+fake fake-unmarked ok
 scenario client rejected
 fake fake-adhoc ok
 scenario client rejected-race

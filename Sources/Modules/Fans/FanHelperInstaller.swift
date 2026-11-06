@@ -13,8 +13,8 @@ final class FanHelperInstaller: ObservableObject {
         /// Файлы в порядке, служба не спрошена: она сейчас никому не нужна или ответ ещё не пришёл.
         /// Ни плашки, ни команд.
         case installed
-        /// Прежний setuid-помощник, неполная установка или служба с другой версией либо без ответа.
-        /// Команды не идут, плашка «Обновить доступ».
+        /// Прежний setuid-помощник, неполная установка или служба с другой версией либо без ответа после
+        /// повторов. Управления нет, только возврат вентиляторов в «Авто». Плашка «Обновить доступ».
         case outdated
         case ready
     }
@@ -32,34 +32,49 @@ final class FanHelperInstaller: ObservableObject {
     var moduleRunning = false
     /// Экран модуля открыт: службу спрашиваем ради плашки. Выставляет `FansView`.
     var screenOpen = false
+    /// Служба ответила хоть какой-то версией при последней проверке: ей можно отдать «Авто», даже если устарела.
+    private(set) var serviceAnswered = false
 
     typealias FileInfo = (owner: Int, mode: Int)
     private let files: () -> (binary: FileInfo?, plist: FileInfo?)
     private let probeVersion: @Sendable () -> String?
     /// Номер последнего `refresh`: ответ службы на более ранний уже не считается.
     private var refreshID = 0
+    private let retryDelay: TimeInterval
+    /// Сколько раз ещё спросить службу после сбоя: один сбой — не повод просить пароль.
+    private var retriesLeft = 0
+    private static let probeRetries = 2
 
     init(
         files: @escaping () -> (binary: FileInfo?, plist: FileInfo?) = {
             (FanHelperInstaller.fileInfo(FanHelperInstaller.installedPath), FanHelperInstaller.fileInfo(FanHelperInstaller.plistPath))
         },
-        probeVersion: @escaping @Sendable () -> String? = { FanHelperClient.version() }
+        probeVersion: @escaping @Sendable () -> String? = { FanHelperClient.version() },
+        retryDelay: TimeInterval = 3
     ) {
         self.files = files
         self.probeVersion = probeVersion
+        self.retryDelay = retryDelay
         refresh()
     }
 
     /// Подключение запускает root-службу, поэтому XPC только когда она нужна: модуль запущен, экран
     /// открыт или установка только что прошла. Иначе статус по одним файлам.
     func refresh(afterInstall: Bool = false) {
+        retriesLeft = Self.probeRetries
+        check(afterInstall: afterInstall)
+    }
+
+    private func check(afterInstall: Bool) {
         refreshID += 1
         let found = files()
         if let settled = Self.statusFromFiles(binary: found.binary, plist: found.plist) {
+            serviceAnswered = false
             status = settled
             return
         }
         guard afterInstall || moduleRunning || screenOpen else {
+            serviceAnswered = false
             status = .installed
             return
         }
@@ -73,11 +88,30 @@ final class FanHelperInstaller: ObservableObject {
         if status == .notInstalled { status = .installed }
         let id = refreshID, probe = probeVersion
         Task { [weak self] in
-            let ready = await Task.detached { probe() == FanLink.helperVersion }.value
+            let version = await Task.detached { probe() }.value
             guard let self, self.refreshID == id else { return }
-            self.status = ready ? .ready : .outdated
+            self.serviceAnswered = version != nil
+            if let version {
+                self.status = version == FanLink.helperVersion ? .ready : .outdated
+            } else if self.retriesLeft > 0 {
+                self.retriesLeft -= 1
+                try? await Task.sleep(nanoseconds: UInt64(self.retryDelay * 1_000_000_000))
+                guard self.refreshID == id else { return }
+                self.check(afterInstall: afterInstall)
+            } else {
+                self.status = .outdated
+            }
         }
     }
+
+    /// Текст плашки. О ручном режиме только когда так и есть: иначе это лишняя тревога.
+    nonisolated static func outdatedDetail(fanStuckManual: Bool) -> String {
+        let base = "Помощник устарел. macOS один раз спросит пароль администратора."
+        return fanStuckManual ? base + " Вентилятор может оставаться в ручном режиме, пока доступ не обновлён." : base
+    }
+
+    /// Прежний setuid-файл ещё на месте. Убрать вместе с поддержкой setuid.
+    var hasLegacySetuid: Bool { LegacyFanHelper.isSetuidRoot(files().binary) }
 
     /// Что видно по файлам; nil — файлы в порядке, решает версия службы по XPC.
     /// Прежний setuid-помощник сюда попадает как `outdated`: запускать его незачем.
@@ -133,10 +167,15 @@ final class FanHelperInstaller: ObservableObject {
             "D=$(/usr/bin/mktemp -d \(shQuote(dir + "/.install.XXXXXX")))",
             "trap '/bin/rm -rf \"$D\"' EXIT",
             "T=\"$D/helper\"",
-            "/bin/cp \(shQuote(source)) \"$T\"",
+            // -X: чужие расширенные атрибуты до файла root не доходят.
+            "/bin/cp -X \(shQuote(source)) \"$T\"",
             "/usr/sbin/chown root:wheel \"$T\"",
             "/bin/chmod 0755 \"$T\"",
             "(\(verify)) || { echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
+            // Запускать можно только после проверки подписи. Подменённая более старая сборка с нашей подписью не пройдёт.
+            "[ \"$(\"$T\" version)\" = \(shQuote(FanLink.helperVersion)) ] || { echo 'Версия помощника не совпала с приложением' >&2; exit 1; }",
+            // Жёсткая ссылка на старый файл сохранила бы его inode с setuid и после mv.
+            "/bin/chmod 0755 \(shQuote(installedPath)) 2>/dev/null || true",
             "/bin/mv -f \"$T\" \(shQuote(installedPath))",
             "P=\"$D/plist\"",
             "/usr/bin/printf '%s' \(shQuote(plistXML)) > \"$P\"",
@@ -171,6 +210,8 @@ final class FanHelperInstaller: ObservableObject {
 
     private func run(admin shell: String) {
         lastError = nil
+        // Окружение приложения может дойти до оболочки root: с такими переменными она выполнила бы чужой код.
+        for name in ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "BASH_ENV", "IFS"] { unsetenv(name) }
         let source = "do shell script \(Self.appleScriptQuote(shell)) with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)

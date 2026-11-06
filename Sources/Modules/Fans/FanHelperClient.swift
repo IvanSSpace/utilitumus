@@ -24,12 +24,14 @@ enum FanHelperClient {
         case timeout
         case rejected
         case connection(Int)
+        case cancelled
 
         var errorDescription: String? {
             switch self {
             case .timeout: return "Служба вентиляторов не ответила"
             case .rejected: return "Подпись службы вентиляторов не совпала"
             case .connection(let code): return "Нет связи со службой вентиляторов (\(code))"
+            case .cancelled: return "Команда отменена: вентиляторы отданы системе"
             }
         }
     }
@@ -48,6 +50,7 @@ enum FanHelperClient {
     /// Текст ошибки; nil — успех.
     static func send(_ command: Command, until deadline: DispatchTime = .now() + timeout) -> String? {
         guard DispatchTime.now() < deadline else { return Failure.timeout.localizedDescription }
+        if case .set = command, setsStopped.value { return Failure.cancelled.localizedDescription }
         let connection = open()
         defer { connection.invalidate() }
         do {
@@ -58,10 +61,12 @@ enum FanHelperClient {
         }
     }
 
-    /// Для выхода: через `queue`, чтобы идти после уже отправленных, и не дольше `budget` на всё, включая
-    /// ожидание очереди. После рукопожатия команды уходят сразу все, не дожидаясь ответов: служба выполняет
-    /// их по одной и по секунде на зависший вентилятор, так что по очереди второй мог бы не успеть уйти.
-    /// Ушедшие служба доделает, даже если клиента уже нет. После срока новые не уходят.
+    /// Для выхода: через `queue`, чтобы идти после уже отправленных, и не дольше `budget` на всё. Если очередь
+    /// занята дольше половины срока, команды уходят мимо неё, а `set`, стоящие в ней, отменяются: иначе они
+    /// перебили бы «Авто». Отмена снимается, когда очередь дойдёт до нашего места: всё, что поставят после, идёт как обычно.
+    /// После рукопожатия команды уходят сразу все, не дожидаясь ответов: служба выполняет их по одной и
+    /// по секунде на зависший вентилятор, так что по очереди второй мог бы не успеть уйти. Ушедшие служба
+    /// доделает, даже если клиента уже нет.
     static func sendAll(
         _ commands: [Command],
         on queue: DispatchQueue,
@@ -72,12 +77,9 @@ enum FanHelperClient {
         guard !commands.isEmpty else { return }
         let deadline = DispatchTime.now() + budget
         let done = DispatchSemaphore(value: 0)
-        queue.async {
+        let claimed = Latch()
+        let deliverAll: @Sendable () -> Void = {
             defer { done.signal() }
-            guard DispatchTime.now() < deadline else {
-                commands.forEach { finished($0, Failure.timeout.localizedDescription) }
-                return
-            }
             let connection = open()
             defer { connection.invalidate() }
             do {
@@ -94,8 +96,22 @@ enum FanHelperClient {
                 }
             }
         }
+        queue.async {
+            if claimed.take() { deliverAll() } else { setsStopped.value = false }
+        }
+        guard done.wait(timeout: .now() + budget / 2) == .timedOut else { return }
+        // Флаг раньше захвата: иначе очередь могла бы снять его раньше, чем он поставлен, и set остались бы отменены навсегда.
+        setsStopped.value = true
+        if claimed.take() {
+            DispatchQueue(label: "utilitumus.fans.quit").async(execute: deliverAll)
+        } else {
+            // Очередь успела: команды уже идут оттуда, служба просто отвечает долго.
+            setsStopped.value = false
+        }
         _ = done.wait(timeout: deadline)
     }
+
+    private static let setsStopped = Latch()
 
     private static func open() -> NSXPCConnection {
         let connection = NSXPCConnection(machServiceName: FanLink.service, options: FanLink.connectionOptions)
@@ -129,6 +145,24 @@ enum FanHelperClient {
         } as! FanHelperXPC
         send(proxy) { waiter.finish(.success($0)) }
         return waiter
+    }
+
+    private final class Latch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var state = false
+
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return state }
+            set { lock.lock(); state = newValue; lock.unlock() }
+        }
+
+        /// true только первому.
+        func take() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            defer { state = true }
+            return !state
+        }
     }
 
     /// Засчитывается первое: ответ и ошибка приходят с разных потоков.

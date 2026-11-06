@@ -90,7 +90,8 @@ func enabledChecks() {
 
 func requirementChecks() {
     let both = KitLink.requirement(identifiers: ["hub", "self"], hashes: ["aa"])
-    check(both == #"(identifier "hub" and certificate leaf = H"aa") or (identifier "self" and certificate leaf = H"aa")"#, "требование: центр или свой identifier")
+    let marker = #"info["UtilitumusSecurityEpoch"] = "1""#
+    check(both == "(identifier \"hub\" and certificate leaf = H\"aa\" and \(marker)) or (identifier \"self\" and certificate leaf = H\"aa\" and \(marker))", "требование: центр или свой identifier, оба с меткой")
     check(KitLink.requirement(identifiers: ["x"], hashes: ["aa"]) == KitLink.requirement(identifier: "x", hashes: ["aa"]), "один identifier — то же требование")
 }
 

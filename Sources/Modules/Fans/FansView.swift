@@ -567,7 +567,7 @@ struct FansView: View {
         // «Нужен доступ» теперь на экране «Осталось дать доступ»; здесь только устаревший помощник и ошибка.
         if installer.status == .outdated {
             Banner(icon: "lock.shield", color: .orange, text: "Доступ нужно обновить",
-                   detail: "Помощник устарел. macOS один раз спросит пароль администратора.") {
+                   detail: FanHelperInstaller.outdatedDetail(fanStuckManual: controller.fans.contains(where: \.isManual))) {
                 DSButton("Обновить доступ…", icon: "key.fill") { installer.install() }
             }
         }
@@ -693,7 +693,7 @@ struct FansView: View {
                     .font(.system(size: 11)).foregroundStyle(dim)
                 Spacer()
                 if installer.status != .notInstalled {
-                    DSButton("Забрать доступ…", style: .plain, small: true) { installer.uninstall() }
+                    DSButton("Забрать доступ…", style: .plain, small: true) { controller.restoreAutoBlocking(); installer.uninstall() }
                 }
             }
         }

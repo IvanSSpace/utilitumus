@@ -27,10 +27,11 @@ enum FanLink {
     private static let clientIdentifiers = ["local.utilitumus", "local.utilitumus.app.fans"]
 
     static let listenerRequirement = clientIdentifiers.flatMap { identifier in
-        KitSigning.trustedLeafHashes.map { "(" + KitSigning.requirement(identifier: identifier, leafHash: $0) + ")" }
+        KitSigning.trustedLeafHashes.map { "(" + KitSigning.peerRequirement(identifier: identifier, leafHash: $0) + ")" }
     }.joined(separator: " or ")
 
-    /// Что клиент требует от службы. Сейчас хэш один: скобки появляются, только когда их несколько.
+    /// Что клиент требует от службы. Без метки выпуска: у службы нет бандла, а чужой процесс не зарегистрирует
+    /// имя в системном домене без root. Сейчас хэш один: скобки появляются, только когда их несколько.
     static let serviceRequirement: String = {
         let each = KitSigning.trustedLeafHashes.map { KitSigning.requirement(identifier: serviceIdentifier, leafHash: $0) }
         return each.count == 1 ? each[0] : each.map { "(\($0))" }.joined(separator: " or ")

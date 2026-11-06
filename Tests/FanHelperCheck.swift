@@ -26,7 +26,8 @@ func pureChecks() {
     check(FanLink.connectionOptions == .privileged, "клиент ищет службу в системном домене")
     check(FanHelperClient.timeout == 3, "срок клиента 3 с")
 
-    let listener = "(identifier \"local.utilitumus\" and certificate leaf = H\"\(leaf)\") or (identifier \"local.utilitumus.app.fans\" and certificate leaf = H\"\(leaf)\")"
+    let marker = "info[\"UtilitumusSecurityEpoch\"] = \"1\""
+    let listener = "(identifier \"local.utilitumus\" and certificate leaf = H\"\(leaf)\" and \(marker)) or (identifier \"local.utilitumus.app.fans\" and certificate leaf = H\"\(leaf)\" and \(marker))"
     check(FanLink.listenerRequirement == listener, "требование слушателя дословно")
     check(FanLink.serviceRequirement == "identifier \"local.utilitumus.fan\" and certificate leaf = H\"\(leaf)\"", "требование к службе дословно")
     for text in [FanLink.listenerRequirement, FanLink.serviceRequirement] {
@@ -35,10 +36,60 @@ func pureChecks() {
     }
 
     check(FanHelperClient.quitBudget == 1.5, "выход ждёт не больше 1,5 с")
+    check(KitLink.requirement(identifier: "x", hashes: ["aa"]) == "(identifier \"x\" and certificate leaf = H\"aa\" and \(marker))", "KitLink: то же требование с меткой")
+    epochChecks()
+    legacyChecks()
     statusChecks()
     refreshChecks()
     plistChecks()
     scriptChecks()
+}
+
+/// Метка стоит в Info.plist центра и каждой утилиты, значение одно на всех: новую утилиту без неё не собрать незаметно.
+func epochChecks() {
+    let apps = (try? FileManager.default.contentsOfDirectory(atPath: "Sources/Apps")) ?? []
+    check(!apps.isEmpty, "утилиты найдены")
+    for path in ["Info.plist", "Tests/EmbeddedInfo.plist"] + apps.map({ "Sources/Apps/\($0)/Info.plist" }) {
+        let data = FileManager.default.contents(atPath: path) ?? Data()
+        let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+        check(plist?[KitSigning.securityEpochKey] as? String == KitSigning.securityEpoch, "метка в \(path)")
+    }
+    // Требование без метки на месте: Updater сверяет им и старые сборки, и бинарник помощника.
+    check(!KitSigning.requirement(identifier: "x", leafHash: "aa").contains("info["), "проверка файлов подписи без метки")
+    check(!FanLink.serviceRequirement.contains("info["), "у службы без бандла требование без метки")
+}
+
+func legacyChecks() {
+    typealias L = LegacyFanHelper
+    check(L.isSetuidRoot((0, 0o4750)) && L.isSetuidRoot((0, 0o4755)), "прежний помощник: root и setuid")
+    check(!L.isSetuidRoot((0, 0o755)), "без setuid — не прежний")
+    check(!L.isSetuidRoot((501, 0o4755)), "setuid не от root — не запускаем")
+    check(!L.isSetuidRoot(nil), "файла нет — не запускаем")
+
+    typealias I = FanHelperInstaller
+    let plain = I.outdatedDetail(fanStuckManual: false), stuck = I.outdatedDetail(fanStuckManual: true)
+    check(!plain.contains("ручном"), "плашка без застрявшего вентилятора о нём молчит")
+    check(stuck.contains("ручном режиме") && stuck.hasPrefix(plain), "плашка говорит о ручном режиме, только когда так и есть")
+
+    func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
+    let controller = source("Sources/Modules/Fans/FanController.swift")
+    let view = source("Sources/Modules/Fans/FansView.swift")
+    let installer = source("Sources/Modules/Fans/FanHelperInstaller.swift")
+    let restore = controller.components(separatedBy: "func restoreAutoBlocking()").last?.components(separatedBy: "func stop()").first ?? ""
+    check(restore.contains("status != .notInstalled"), "выход отдаёт вентиляторы и при устаревшем помощнике")
+    check(view.contains("controller.restoreAutoBlocking(); installer.uninstall()"), "«Забрать доступ» сперва отдаёт вентиляторы")
+    let wake = controller.components(separatedBy: "didWakeNotification").last?.components(separatedBy: "screensDidSleepNotification").first ?? ""
+    check(wake.contains("FanHelperInstaller.shared.refresh()"), "после сна статус спрашивается заново")
+
+    let runAdmin = installer.components(separatedBy: "func run(admin").last ?? ""
+    for name in ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "BASH_ENV", "IFS"] {
+        check(installer.contains("\"\(name)\""), "окружение: убирается \(name)")
+    }
+    if let unset = runAdmin.range(of: "unsetenv"), let script = runAdmin.range(of: "NSAppleScript(source") {
+        check(unset.lowerBound < script.lowerBound, "окружение чистится до вызова оболочки root")
+    } else {
+        check(false, "окружение чистится до вызова оболочки root")
+    }
 }
 
 func statusChecks() {
@@ -114,11 +165,52 @@ func refreshChecks() {
         spin()
         check(other.status == .outdated, "другая версия: outdated")
 
-        let silent = installer(version: nil)
+        check(other.serviceAnswered, "другая версия: служба жива, ей можно отдать «Авто»")
+
+        // Один сбой — ещё не устаревший помощник: повторы через паузу.
+        let silentProbes = Counter()
+        let silent = FanHelperInstaller(files: { good }, probeVersion: { silentProbes.bump(); return nil }, retryDelay: 0.05)
         silent.moduleRunning = true
         silent.refresh()
+        spin(0.02)
+        check(silent.status == .installed, "первый сбой: плашки ещё нет")
+        spin(0.4)
+        check(silentProbes.count == 3, "два повтора после сбоя: \(silentProbes.count)")
+        check(silent.status == .outdated && !silent.serviceAnswered, "служба так и не ответила: outdated, живой не считается")
+
+        let flakyProbes = Counter()
+        let flaky = FanHelperInstaller(files: { good }, probeVersion: {
+            flakyProbes.bump()
+            return flakyProbes.count == 1 ? nil : FanLink.helperVersion
+        }, retryDelay: 0.05)
+        flaky.moduleRunning = true
+        flaky.refresh()
+        spin(0.4)
+        check(flaky.status == .ready && flakyProbes.count == 2, "сбой один раз, потом ответ: ready без плашки")
+
+        let readyProbes = Counter()
+        let wasReady = FanHelperInstaller(files: { good }, probeVersion: {
+            readyProbes.bump()
+            return readyProbes.count == 2 ? nil : FanLink.helperVersion
+        }, retryDelay: 0.3)
+        wasReady.moduleRunning = true
+        wasReady.refresh()
         spin()
-        check(silent.status == .outdated, "служба не ответила: outdated")
+        wasReady.refresh()
+        spin(0.1)
+        check(wasReady.status == .ready, "сбой при ready: статус держится, пока идут повторы")
+        spin(0.5)
+        check(wasReady.status == .ready && readyProbes.count == 3, "повтор подтвердил ready")
+
+        // Модуль выключили, пока ждём повтора: службу больше не поднимаем.
+        let offProbes = Counter()
+        let turnedOff = FanHelperInstaller(files: { good }, probeVersion: { offProbes.bump(); return nil }, retryDelay: 0.1)
+        turnedOff.moduleRunning = true
+        turnedOff.refresh()
+        spin(0.03)
+        turnedOff.moduleRunning = false
+        spin(0.4)
+        check(offProbes.count == 1, "модуль выключен во время паузы: повтора нет: \(offProbes.count)")
 
         let before = probes.count
         let setuid = FanHelperInstaller(files: { ((0, 0o4750), nil) }, probeVersion: { probes.bump(); return nil })
@@ -172,8 +264,9 @@ func scriptChecks() {
         guard let x = at(a, in: text), let y = at(b, in: text) else { return false }
         return x < y
     }
-    let steps = ["/usr/bin/mktemp -d", "/bin/cp ", "/usr/sbin/chown root:wheel", "/bin/chmod 0755",
-                 "/usr/bin/codesign --verify", "/bin/mv -f", "/bin/chmod 0644", "/bin/launchctl bootout",
+    let steps = ["/usr/bin/mktemp -d", "/bin/cp -X ", "/usr/sbin/chown root:wheel", "/bin/chmod 0755",
+                 "/usr/bin/codesign --verify", "\"$T\" version", "/bin/chmod 0755 '/Library/PrivilegedHelperTools/local.utilitumus.fan' 2>/dev/null || true",
+                 "/bin/mv -f", "/bin/chmod 0644", "/bin/launchctl bootout",
                  "/bin/launchctl bootstrap system"]
     for (a, b) in zip(steps, steps.dropFirst()) {
         check(before(a, b, in: install), "установка: «\(a)» раньше «\(b)»")
@@ -331,8 +424,13 @@ func quitRole(_ scenario: String) {
     let queue = DispatchQueue(label: "test.helper")
     let results = NSLock()
     var replies: [String?] = []
+    var queuedSet: String?? = nil
     if scenario == "busy" {
         queue.async { sleep(3) }
+        queue.async {
+            let error = FanHelperClient.send(.set(0, 2000), until: .now() + 3)
+            results.lock(); queuedSet = .some(error); results.unlock()
+        }
     }
     let started = Date()
     FanHelperClient.sendAll([.auto(0), .auto(1)], on: queue) { _, error in
@@ -351,12 +449,17 @@ func quitRole(_ scenario: String) {
         // Второй ждёт, пока служба отпустит первый: его запись проверяет скрипт, когда клиента уже нет.
         check(writes().first == "F0Md=0", "первый вентилятор получил команду: \(writes())")
     case "busy":
-        check(elapsed > 1.3 && elapsed < 1.8, "очередь занята: всего около 1,5 с: \(elapsed)")
-        spin(2.5)
-        check(writes().isEmpty, "после срока команды не уходят: \(writes())")
+        check(elapsed > 0.6 && elapsed < 1.2, "очередь занята: через половину срока «Авто» уходит мимо неё: \(elapsed)")
+        check(writes() == ["F0Md=0", "F1Md=0"], "оба вентилятора в Авто, очередь ещё занята: \(writes())")
+        spin(3)
+        check(writes() == ["F0Md=0", "F1Md=0"], "команда set из очереди не перебила «Авто»: \(writes())")
         results.lock()
-        check(replies.count == 2 && replies.allSatisfy { $0 == FanHelperClient.Failure.timeout.localizedDescription }, "опоздавшие команды отмечены сроком: \(replies)")
+        check(queuedSet == .some(FanHelperClient.Failure.cancelled.localizedDescription), "команда set отменена: \(String(describing: queuedSet))")
+        check(replies.count == 2 && replies.allSatisfy { $0 == nil }, "ответы на «Авто»: \(replies)")
         results.unlock()
+        var next: String?
+        queue.sync { next = FanHelperClient.send(.set(0, 2000)) }
+        check(next == nil && writes().last == "F0Tg=2000.0", "после этого новые set снова идут: \(writes())")
     default:
         fatalError("неизвестный сценарий")
     }
@@ -369,6 +472,9 @@ switch args.first {
 case nil: pureChecks()
 case "print-install": print(FanHelperInstaller.installScript(source: args[1])); exit(0)
 case "print-uninstall": print(FanHelperInstaller.uninstallScript); exit(0)
+case "legacy":
+    if let error = LegacyFanHelper.restoreAuto(fans: args[2...].compactMap { Int($0) }, path: args[1]) { print(error); exit(1) }
+    exit(0)
 case "hub": hubRole()
 case "rogue": rogueRole()
 case "spoofed": spoofedRole()

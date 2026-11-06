@@ -117,6 +117,8 @@ final class FanController: ObservableObject {
     /// Между start() и stop(). Отложенные tick/apply после stop() ничего не делают,
     /// иначе они снова взяли бы вентиляторы под ручное управление.
     private var isRunning = false
+    /// Прежний setuid-помощник уже просили вернуть «Авто» за этот запуск модуля.
+    private var legacyRestoreTried = false
     /// Последняя отправленная помощником цель по вентиляторам: от неё считается гистерезис.
     private var lastSent: [Int: (rpm: Double, at: Date)] = [:]
     /// Сглаженные температуры для кривой «По датчику»; безопасность смотрит на сырые.
@@ -178,6 +180,7 @@ final class FanController: ObservableObject {
         observe(NSWorkspace.didWakeNotification) { me in
             Self.log("пробуждение")
             me.asleep = false
+            FanHelperInstaller.shared.refresh()
             me.tick()
         }
         observe(NSWorkspace.screensDidSleepNotification) { me in
@@ -202,7 +205,7 @@ final class FanController: ObservableObject {
     /// Синхронно — иначе процесс завершится раньше, чем команды уйдут, но не дольше `quitBudget` на все вентиляторы.
     func restoreAutoBlocking() {
         if pendingPersist != nil { persist() }
-        guard FanHelperInstaller.shared.status == .ready, conflictingApp == nil, let smc else { return }
+        guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
         let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
         FanHelperClient.sendAll(manual.map { .auto($0) }, on: Self.helperQueue) { Self.logHelper($0, $1) }
@@ -219,6 +222,7 @@ final class FanController: ObservableObject {
         restoreAutoBlocking()
         FanHelperInstaller.shared.moduleRunning = false
         isRunning = false
+        legacyRestoreTried = false
         timer?.invalidate()
         timer = nil
         powerObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
@@ -346,7 +350,11 @@ final class FanController: ObservableObject {
     /// приложения — такое расхождение само больше не исправилось бы.
     private func apply() {
         // Пока вентиляторами рулит другая программа — не воюем с ней.
-        guard isRunning, FanHelperInstaller.shared.status == .ready, conflictingApp == nil, let smc else { return }
+        guard isRunning, conflictingApp == nil, let smc else { return }
+        guard FanHelperInstaller.shared.status == .ready else {
+            if FanHelperInstaller.shared.status == .outdated { releaseStuckFans(smc) }
+            return
+        }
         for fan in fans where fan.index < configs.count && !inFlight.contains(fan.index) {
             let i = fan.index
             let desired = desiredRPM(for: fan, config: configs[i])
@@ -371,19 +379,46 @@ final class FanController: ObservableObject {
                 command = .auto(i)
             }
             Self.log("fan\(i) Md=\(smc.uint8("F\(i)Md").map(String.init) ?? "?") Tg=\(Int(target)) Ac=\(Int(fan.actual)) хотим=\(desired.map { String(Int($0)) } ?? "авто") fullPower=\(fullPower)")
-            inFlight.insert(i)
-            Self.helperQueue.async {
-                let error = Self.runHelper(command)
-                Task { @MainActor in
-                    let me = FanController.shared
-                    me.inFlight.remove(i)
-                    me.lastError = error
-                    // Перечитать SMC сразу: экран не ждёт такта (до 2 с казалось,
-                    // что вентилятор не включился), а если настройку успели
-                    // поменять, пока шла команда, — tick тут же сверит заново.
-                    if error == nil { me.tick() }
-                }
+            send(command, fan: i)
+        }
+    }
+
+    private func send(_ command: FanHelperClient.Command, fan i: Int) {
+        inFlight.insert(i)
+        Self.helperQueue.async {
+            let error = Self.runHelper(command)
+            Task { @MainActor in
+                let me = FanController.shared
+                me.inFlight.remove(i)
+                me.lastError = error
+                // Перечитать SMC сразу: экран не ждёт такта (до 2 с казалось,
+                // что вентилятор не включился), а если настройку успели
+                // поменять, пока шла команда, — tick тут же сверит заново.
+                if error == nil { me.tick() }
             }
+        }
+    }
+
+    /// Помощник устарел, управлять нельзя, но застрявший ручной режим надо вернуть: приложение могло упасть
+    /// с вентилятором в ручном режиме, и больше его никто не отпустит.
+    private func releaseStuckFans(_ smc: SMC) {
+        if FanHelperInstaller.shared.hasLegacySetuid {
+            // Один раз за запуск: прежний помощник — лишний процесс с root, и это только починка после сбоя.
+            guard !legacyRestoreTried, !fans.isEmpty else { return }
+            legacyRestoreTried = true
+            let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
+            guard !manual.isEmpty else { return }
+            let path = FanHelperInstaller.installedPath
+            Self.helperQueue.async {
+                let error = LegacyFanHelper.restoreAuto(fans: manual, path: path)
+                Self.log("прежний помощник auto \(manual) → \(error ?? "ok")")
+                Task { @MainActor in FanController.shared.tick() }
+            }
+            return
+        }
+        guard FanHelperInstaller.shared.serviceAnswered else { return }
+        for fan in fans where !inFlight.contains(fan.index) && smc.uint8("F\(fan.index)Md") == 1 {
+            send(.auto(fan.index), fan: fan.index)
         }
     }
 

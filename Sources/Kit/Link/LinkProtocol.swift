@@ -8,10 +8,10 @@ enum KitLink {
     static func machService(_ id: String) -> String { bundleID(id) + ".xpc" }
     static func statusChanged(_ id: String) -> Notification.Name { Notification.Name(bundleID(id) + ".statusChanged") }
 
-    /// Требование к собеседнику: точный identifier и любой из доверенных листовых сертификатов.
+    /// Требование к собеседнику: точный identifier, любой из доверенных листовых сертификатов и метка выпуска.
     /// Строка одна, потому что на соединение есть только один вызов setCodeSigningRequirement.
     static func requirement(identifier: String, hashes: [String] = KitSigning.trustedLeafHashes) -> String {
-        hashes.map { "(" + KitSigning.requirement(identifier: identifier, leafHash: $0) + ")" }.joined(separator: " or ")
+        hashes.map { "(" + KitSigning.peerRequirement(identifier: identifier, leafHash: $0) + ")" }.joined(separator: " or ")
     }
 
     /// Любой из собеседников: утилита принимает центр и свою же копию, запущенную из Finder.

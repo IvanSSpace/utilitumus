@@ -20,6 +20,8 @@
 	<string>public.app-category.utilities</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>UtilitumusSecurityEpoch</key>
+	<string>1</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

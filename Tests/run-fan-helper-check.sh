@@ -30,11 +30,47 @@ rm -rf "$OUT"
 mkdir -p "$OUT/src"
 cp Tests/FanHelperCheck.swift "$OUT/src/main.swift"
 
-CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift"
+CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift"
+# Метка выпуска: без бандла Info.plist лежит в самом бинарнике.
+MARKED=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist)
 HELPER_SOURCES="Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift"
 
 swiftc -O -target "$TARGET" -module-name FanCheckPure -o "$OUT/pure" $CHECK_SOURCES -framework AppKit
-swiftc -O -target "$TARGET" -D FAN_TEST_FAKE_SMC -module-name FanCheckClient -o "$OUT/client-build" $CHECK_SOURCES -framework AppKit
+swiftc -O -target "$TARGET" -D FAN_TEST_FAKE_SMC -module-name FanCheckClient -o "$OUT/client-build" $CHECK_SOURCES -framework AppKit "${MARKED[@]}"
+# Как старый выпуск: тот же код, но в подписи нет метки.
+swiftc -O -target "$TARGET" -D FAN_TEST_FAKE_SMC -module-name FanCheckClient -o "$OUT/client-unmarked" $CHECK_SOURCES -framework AppKit
+perl -0777 -pe 's#(<key>UtilitumusSecurityEpoch</key><string>)1#${1}0#' "$OUT/client-build" > "$OUT/client-epoch0"
+chmod +x "$OUT/client-epoch0"
+if cmp -s "$OUT/client-build" "$OUT/client-epoch0"; then fail "метка эпохи не подменилась"; fi
+# Подмена: дёргается при запуске через `auto`, на `version` отвечает прежней версией.
+cat > "$OUT/src/stub.c" <<'STUB'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "version") == 0) { puts("3"); return 0; }
+  char path[2048];
+  snprintf(path, sizeof path, "%s/legacy.log", getenv("FAN_TEST_DIR"));
+  FILE *log = fopen(path, "a");
+  if (!log) return 1;
+  for (int i = 1; i < argc; i++) fprintf(log, i + 1 < argc ? "%s " : "%s\n", argv[i]);
+  fclose(log);
+  return 0;
+}
+STUB
+clang -target "$TARGET" -o "$OUT/stub-build" "$OUT/src/stub.c"
+# Внедряется через DYLD_INSERT_LIBRARIES и оставляет след: так ли загрузился код в чужой процесс.
+cat > "$OUT/src/inject.c" <<'INJECT'
+#include <stdio.h>
+#include <stdlib.h>
+__attribute__((constructor)) static void mark(void) {
+  char path[2048];
+  snprintf(path, sizeof path, "%s/injected.log", getenv("FAN_TEST_DIR"));
+  FILE *log = fopen(path, "a");
+  if (log) { fputs("x\n", log); fclose(log); }
+}
+INJECT
+clang -target "$TARGET" -dynamiclib -o "$OUT/inject.dylib" "$OUT/src/inject.c"
 swiftc -O -target "$TARGET" -D FAN_TEST_FAKE_SMC -module-name FanHelperFake -o "$OUT/daemon-build" $HELPER_SOURCES
 # Как в build.sh: без шва, с настоящим SMC. Запускается только `version` и отказ без launchd.
 swiftc -O -wmo -target "$TARGET" -module-name FanHelperProd -o "$OUT/prod" Sources/Shared/SMC.swift $HELPER_SOURCES -framework IOKit
@@ -60,10 +96,22 @@ ok "в root-процессе нет SwiftUI и AppKit"
 if grep -n 'FAN_TEST_FAKE_SMC' build.sh; then fail "шов в build.sh"; fi
 ok "в build.sh нет шва"
 
-# Дочерний процесс наследует разрешения приложения: непроверенный бинарник из бандла запускать нельзя.
-# Приложение и не запускает помощника: статус и команды идут по XPC, копию проверяет root-скрипт установки.
-if grep -nE 'Process\(\)|NSTask|posix_spawn' Sources/Modules/Fans/*.swift; then fail "модуль Вентиляторы запускает процесс"; fi
-ok "модуль Вентиляторы не запускает процессов, в том числе копию помощника из бандла"
+# Дочерний процесс наследует разрешения приложения: непроверенный бинарник запускать нельзя.
+# Статус и команды идут по XPC, копию проверяет root-скрипт установки. Исключение одно: прежний
+# setuid-помощник, и только после проверки подписи. Убрать вместе с поддержкой setuid.
+LEGACY=Sources/Modules/Fans/LegacyFanHelper.swift
+if grep -nE 'Process\(\)|NSTask|posix_spawn' Sources/Modules/Fans/*.swift | grep -v "^$LEGACY:"; then fail "модуль Вентиляторы запускает процесс"; fi
+ok "модуль Вентиляторы не запускает процессов, кроме прежнего setuid-помощника"
+[ "$(grep -cE 'Process\(\)' "$LEGACY")" = 1 ] || fail "в $LEGACY ждём один запуск"
+verify_line="$(grep -n 'KitSigning.verifySignature' "$LEGACY" | cut -d: -f1)"
+process_line="$(grep -n 'Process()' "$LEGACY" | cut -d: -f1)"
+[ -n "$verify_line" ] && [ "$verify_line" -lt "$process_line" ] || fail "проверка подписи не раньше запуска"
+grep -q 'identifier: "local.utilitumus.fan"' "$LEGACY" || fail "проверка не того identifier"
+ok "прежний помощник: сначала подпись, потом запуск"
+# Без hardened runtime метка ничего не значила бы: в такой бинарник внедряют код.
+grep -q 'codesign --force --options runtime --entitlements Utilitumus.entitlements' build.sh || fail "центр без hardened runtime"
+grep -q 'codesign --force --options runtime --sign "$SIGN_ID" --identifier "local.utilitumus.app.$ID"' scripts/build-app.sh || fail "утилита без hardened runtime"
+ok "метка ставится только на hardened-сборки"
 if [ "$(grep -c 'bundledPath' Sources/Modules/Fans/FanHelperInstaller.swift)" != 2 ]; then fail "копия из бандла используется не только как источник установки"; fi
 ok "копия из бандла нужна только скрипту установки"
 
@@ -93,6 +141,15 @@ signed client-build rogue-foreign   "$SIGN_NAME" local.utilitumus.rogue
 signed client-build rogue-prefix    "$SIGN_NAME" local.utilitumus.app.fans.evil
 signed client-build rogue-satellite "$SIGN_NAME" local.utilitumus.app.awake
 signed prod         prod-signed     "$SIGN_NAME" local.utilitumus.fan
+signed client-unmarked rogue-unmarked      "$SIGN_NAME" local.utilitumus
+signed client-unmarked rogue-unmarked-fans "$SIGN_NAME" local.utilitumus.app.fans
+signed client-epoch0   rogue-epoch0        "$SIGN_NAME" local.utilitumus
+signed stub-build   stub-old        "$SIGN_NAME" local.utilitumus.fan
+signed stub-build   stub-adhoc      -            local.utilitumus.fan
+signed stub-build   stub-foreign    "$SIGN_NAME" local.utilitumus.fan.evil
+# Как выпуски v0.2.0–v0.4.4: наш сертификат, боевой identifier, без метки и без hardened runtime.
+cp "$OUT/client-unmarked" "$OUT/old-release"
+codesign --force --sign "$SIGN_NAME" --identifier local.utilitumus "$OUT/old-release" 2>/dev/null
 
 echo "== запуск без launchd"
 LOG="$OUT/smc-writes.log"
@@ -123,6 +180,8 @@ echo "== скрипт установки на подставных путях"
 # Настоящие cp, mv, chmod, mktemp, codesign; chown и launchctl заменены записью в журнал, пути в стенде.
 # Стенд не под /Library, поэтому остаток настоящего пути виден по grep ниже.
 SB="$OUT/sb"
+# Со старшим разрядом: один %Lp показал бы у setuid-файла те же 755.
+mode() { stat -f '%Mp%Lp' "$1"; }
 make_stub() {
   printf '#!/bin/sh\necho "%s $*" >> "%s/calls.log"\n%s\n' "$1" "$SB" "${2:-exit 0}" > "$SB/$1"
   chmod +x "$SB/$1"
@@ -141,6 +200,7 @@ reset_sandbox() {
   : > "$SB/calls.log"
   echo старый > "$SB/tools/local.utilitumus.fan"
   chmod 4755 "$SB/tools/local.utilitumus.fan"
+  ln "$SB/tools/local.utilitumus.fan" "$SB/hardlink"
 }
 run_install() {
   local text
@@ -149,11 +209,15 @@ run_install() {
   /bin/sh -c "$text" >/dev/null 2>"$OUT/install.err"
 }
 
+xattr -w com.utilitumus.test 1 "$OUT/prod-signed"
 reset_sandbox
 run_install prod-signed || { cat "$OUT/install.err"; fail "установка верно подписанного бинарника"; }
 cmp -s "$OUT/prod-signed" "$SB/tools/local.utilitumus.fan" || fail "установлен не тот файл"
-[ "$(stat -f '%Lp' "$SB/tools/local.utilitumus.fan")" = 755 ] || fail "права бинарника не 755"
-[ "$(stat -f '%Lp' "$SB/daemons/local.utilitumus.fan.plist")" = 644 ] || fail "права плиста не 644"
+[ "$(mode "$SB/tools/local.utilitumus.fan")" = 0755 ] || fail "права бинарника не 755"
+# Только наш атрибут: com.apple.provenance система ставит сама.
+if xattr "$SB/tools/local.utilitumus.fan" | grep -q com.utilitumus.test; then fail "расширенные атрибуты дошли до копии"; fi
+[ "$(mode "$SB/hardlink")" = 0755 ] || fail "жёсткая ссылка на старый файл осталась с setuid"
+[ "$(mode "$SB/daemons/local.utilitumus.fan.plist")" = 0644 ] || fail "права плиста не 644"
 plutil -lint "$SB/daemons/local.utilitumus.fan.plist" >/dev/null || fail "плист не разбирается"
 grep -q "launchctl bootout system/local.utilitumus.fan" "$SB/calls.log" || fail "нет bootout"
 grep -q "launchctl bootstrap system $SB/daemons/local.utilitumus.fan.plist" "$SB/calls.log" || fail "нет bootstrap"
@@ -162,15 +226,29 @@ grep -q "chown root:wheel .*/plist" "$SB/calls.log" || fail "нет chown пли
 [ -z "$(find "$SB/tools" -name '.install.*')" ] || fail "временный каталог остался"
 ok "установка: бинарник 755 на месте старого setuid, плист 644, служба снята и поставлена"
 
-for bad in spoof-adhoc spoof-foreign rogue-foreign; do
+for bad in spoof-adhoc spoof-foreign rogue-foreign stub-old; do
   reset_sandbox
   if run_install "$bad"; then fail "установка $bad прошла"; fi
   [ "$(cat "$SB/tools/local.utilitumus.fan")" = старый ] || fail "$bad заменил бинарник"
+  [ "$(mode "$SB/tools/local.utilitumus.fan")" = 4755 ] || fail "$bad поменял права до проверки"
   [ ! -e "$SB/daemons/local.utilitumus.fan.plist" ] || fail "$bad поставил плист"
   if grep -q launchctl "$SB/calls.log"; then fail "$bad дошёл до launchctl"; fi
   [ -z "$(find "$SB/tools" -name '.install.*')" ] || fail "временный каталог остался после отказа"
 done
-ok "чужая подпись: остановка до mv, файлы не тронуты, launchctl не вызван"
+ok "чужая подпись и прежняя версия с нашей подписью: остановка до mv, файлы не тронуты, launchctl не вызван"
+
+echo "== прежний setuid-помощник"
+: > "$OUT/legacy.log"
+"$OUT/pure" legacy "$OUT/stub-old" 0 1 || fail "помощник с верной подписью не запустился"
+[ "$(cat "$OUT/legacy.log")" = "auto 0
+auto 1" ] || fail "прежний помощник получил не то: $(cat "$OUT/legacy.log")"
+ok "верная подпись: auto каждому вентилятору"
+for bad in stub-adhoc stub-foreign; do
+  : > "$OUT/legacy.log"
+  if "$OUT/pure" legacy "$OUT/$bad" 0 1 > /dev/null; then fail "$bad принят"; fi
+  [ ! -s "$OUT/legacy.log" ] || fail "$bad запущен без проверки"
+done
+ok "чужая подпись: файл не запускается"
 
 # bootout падает, служба не загружена: установка идёт дальше. bootstrap не сразу отпускает метку.
 reset_sandbox
@@ -235,6 +313,24 @@ for rogue in rogue-adhoc rogue-adhoc-fan rogue-foreign rogue-prefix rogue-satell
   role "$rogue" rogue
 done
 [ ! -s "$LOG" ] || fail "чужие клиенты изменили поддельный SMC"
+
+echo "== метка выпуска"
+# Боевой identifier и наш сертификат, но без метки или с другой эпохой: отказ.
+for rogue in rogue-unmarked rogue-unmarked-fans rogue-epoch0 old-release; do
+  role "$rogue" rogue
+done
+[ ! -s "$LOG" ] || fail "клиент без метки изменил поддельный SMC"
+# Сама атака: код внедрён в старый выпуск и работает, а слушатель всё равно отказывает.
+rm -f "$OUT/injected.log"
+env DYLD_INSERT_LIBRARIES="$OUT/inject.dylib" "$OUT/old-release" rogue
+[ -s "$OUT/injected.log" ] || fail "код не внедрился в старый выпуск: проверка слепа"
+[ ! -s "$LOG" ] || fail "внедрённый код изменил поддельный SMC"
+ok "код внедрён в старый выпуск, слушатель отказал"
+# В сборку с меткой код внедрить нельзя: hardened runtime.
+rm -f "$OUT/injected.log"
+env DYLD_INSERT_LIBRARIES="$OUT/inject.dylib" "$OUT/hub" hub > /dev/null 2>&1 || fail "сборка с меткой не работает"
+[ ! -e "$OUT/injected.log" ] || fail "код внедрился в сборку с меткой"
+ok "в сборку с меткой код не внедряется"
 echo "== настоящий клиент после чужих"
 role hub hub
 
