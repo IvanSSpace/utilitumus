@@ -155,7 +155,7 @@ extension VoiceController {
             micUID = uid
         case let .addExcluded(id):
             guard Self.isBundleID(id) else { return "Это не идентификатор программы" }
-            guard id != Bundle.main.bundleIdentifier, id != Kit.hubBundleID else { return "Utilitumus исключить нельзя" }
+            guard !Kit.isOurs(id) else { return "Utilitumus исключить нельзя" }
             guard excludedApps.contains(id) || excludedApps.count < Self.maxExcluded else { return "Список исключений полон" }
             addExcluded(id)
         case let .removeExcluded(id):

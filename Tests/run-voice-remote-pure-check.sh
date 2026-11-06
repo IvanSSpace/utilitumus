@@ -3,7 +3,7 @@
 # Дом подменён, настройки в тестовом suite. Проверка с настоящей подписанной утилитой и пикселями — отдельно.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT="${VOICE_REMOTE_DIR:-${TMPDIR:-/tmp}/voice-remote-pure}"; OUT="${OUT//\/\//\/}"
+T="${TMPDIR:-/tmp}"; OUT="${VOICE_REMOTE_DIR:-${T%/}/voice-remote-pure}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 rm -rf "$OUT"; mkdir -p "$OUT/home"
 trap 'defaults delete local.utilitumus.test.kit.voice-pure 2>/dev/null || true; rm -f "$HOME/Library/Preferences/local.utilitumus.test.kit.voice-pure.plist"' EXIT

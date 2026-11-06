@@ -4,7 +4,7 @@
 # VOICE_WIRE_BASE — коммит для снимков «до»; VOICE_WIRE_NO_BASE=1 — без них, если гит недоступен.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT="${VOICE_WIRE_DIR:-${TMPDIR:-/tmp}/voice-wire-check}"; OUT="${OUT//\/\//\/}"
+T="${TMPDIR:-/tmp}"; OUT="${VOICE_WIRE_DIR:-${T%/}/voice-wire-check}"
 BASE="${VOICE_WIRE_BASE:-509cdb3}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 CONTROLLER=Sources/Modules/Voice/VoiceController.swift
@@ -17,6 +17,8 @@ cleanup() {
     defaults delete "$name" 2>/dev/null || true
     rm -f "$HOME/Library/Preferences/$name.plist"
   done
+  # Модели стенда (шов KIT_TEST_DEFAULTS) лежат во временной папке, а не в доме.
+  rm -rf "${TMPDIR:-/tmp}/utilitumus-test-models/${KIT_TEST_SUITE:-local.utilitumus.test.kit}"
 }
 trap cleanup EXIT
 BEFORE="$(real_snapshot)"

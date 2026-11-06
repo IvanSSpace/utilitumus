@@ -40,7 +40,7 @@ let notOneAction: [(String, String)] = [
 
 @MainActor func death(utility: Int32) async {
     let model = RemoteVoiceModel.shared
-    kill(utility, SIGKILL)
+    killUtilityForGood(utility)
     check(await until(8) { !model.responding }, "утилита убита: модель показала запасной экран")
     let ticks = TickWatch()
     await model.read()
