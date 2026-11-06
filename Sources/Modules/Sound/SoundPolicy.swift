@@ -1,7 +1,7 @@
 import Foundation
 import CoreAudio
 
-enum Transport: String, Codable {
+enum Transport: String, Codable, Sendable {
     case builtIn
     case usb
     case bluetooth
@@ -31,7 +31,7 @@ protocol SoundDevice {
 extension AudioDeviceInfo: SoundDevice {}
 
 /// Выбор основного выхода. `.system` — не вмешиваться, решает macOS.
-enum OutputChoice: Equatable {
+enum OutputChoice: Codable, Equatable, Sendable {
     case system
     case builtIn
     case device(String)
