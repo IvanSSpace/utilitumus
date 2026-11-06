@@ -2,17 +2,19 @@ import SwiftUI
 import AppKit
 
 /// Экран модуля «Буфер». Всё помещается в окно без прокрутки: списки длиннее прокручиваются внутри.
-struct ClipboardView: View {
-    @ObservedObject private var controller = ClipboardController.shared
+struct ClipboardView<Model: ClipboardModel>: View {
+    @ObservedObject var model: Model
     @StateObject private var recorder = HotKeyRecorder()
     @State private var newName = ""
     @State private var confirmClear = false
     @State private var spaceToDelete: ClipSpace?
 
+    init(model: Model) { self.model = model }
+
     var body: some View {
         DSPage(module: .clipboard, subtitle: "История буфера и цветные пространства",
                primary: DSAction("Открыть панель", icon: "rectangle.bottomthird.inset.filled") {
-                   controller.togglePanel()
+                   model.togglePanel()
                }) {
             HStack(alignment: .top, spacing: 18) {
                 VStack(alignment: .leading, spacing: 16) {
@@ -29,10 +31,10 @@ struct ClipboardView: View {
             securityLine
         }
         .onPageActive { active in
-            if active { controller.refreshPermissions() } else { recorder.stop() }
+            if active { model.refreshPermissions() } else { recorder.stop() }
         }
         .alert("Очистить историю?", isPresented: $confirmClear) {
-            Button("Очистить", role: .destructive) { controller.clearHistory() }
+            Button("Очистить", role: .destructive) { model.clearHistory() }
             Button("Отмена", role: .cancel) {}
         } message: {
             Text("Удалятся все записи, кроме лежащих в пространствах.")
@@ -40,7 +42,7 @@ struct ClipboardView: View {
         .alert("Удалить пространство?", isPresented: Binding(get: { spaceToDelete != nil },
                                                              set: { if !$0 { spaceToDelete = nil } })) {
             Button("Удалить", role: .destructive) {
-                if let space = spaceToDelete { controller.deleteSpace(space.id) }
+                if let space = spaceToDelete { model.deleteSpace(space.id) }
                 spaceToDelete = nil
             }
             Button("Отмена", role: .cancel) { spaceToDelete = nil }
@@ -57,35 +59,35 @@ struct ClipboardView: View {
 
     private var controlSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DSSection("Управление", trailing: "\(controller.items.count) записей") {
+            DSSection("Управление", trailing: "\(model.totalCount) записей") {
                 DSRow(icon: "command", title: "Клавиша панели") {
                     if recorder.isRecording {
                         DSChip("Нажми сочетание…", color: .white)
                     } else {
-                        DSKeyCaps(controller.hotKeyLabel).fixedSize()
+                        DSKeyCaps(model.hotKeyLabel).fixedSize()
                     }
                     DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
-                        if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
+                        if recorder.isRecording { recorder.stop() } else { recorder.start(model) }
                     }
                     .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌘⇧V")
                 }
-                if let error = controller.hotKeyError {
+                if let error = model.hotKeyError {
                     DSRow(icon: "exclamationmark.triangle.fill", title: error)
                 }
-                if let error = controller.storeError {
+                if let error = model.storeError {
                     DSRow(icon: "key.slash", title: error)
                 }
-                if let notice = controller.storeNotice {
+                if let notice = model.storeNotice {
                     DSRow(icon: "exclamationmark.triangle.fill", title: notice)
                 }
                 DSRow(icon: "clock.arrow.circlepath", title: "Размер истории") {
                     DSSegmented(ClipboardPolicy.limits, selection: Binding(
-                        get: { controller.limit }, set: { controller.setLimit($0) })) { "\($0)" }
+                        get: { model.limit }, set: { model.setLimit($0) })) { "\($0)" }
                 }
                 DSRow(icon: "trash", title: "Очистить историю",
                       subtitle: "Пространства останутся") {
                     DSButton("Очистить…", small: true) { confirmClear = true }
-                        .disabled(controller.historyCount == 0)
+                        .disabled(model.historyCount == 0)
                 }
             }
             if recorder.isRecording { caption("Esc — отмена, Delete — вернуть ⌘⇧V") }
@@ -96,14 +98,14 @@ struct ClipboardView: View {
 
     private var spacesSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            DSSection("Пространства", trailing: controller.spaces.isEmpty ? nil : "\(controller.spaces.count)") {
+            DSSection("Пространства", trailing: model.spaces.isEmpty ? nil : "\(model.spaces.count)") {
                 DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(controller.spaces) { space in
-                            SpaceRow(space: space,
-                                     count: controller.items.filter { $0.spaceID == space.id }.count,
-                                     isFirst: space.id == controller.spaces.first?.id,
-                                     isLast: space.id == controller.spaces.last?.id,
+                        ForEach(model.spaces) { space in
+                            SpaceRow(model: model, space: space,
+                                     count: model.count(inSpace: space.id),
+                                     isFirst: space.id == model.spaces.first?.id,
+                                     isLast: space.id == model.spaces.last?.id,
                                      onDelete: { spaceToDelete = space })
                         }
                     }
@@ -125,7 +127,7 @@ struct ClipboardView: View {
     private func createSpace() {
         let name = newName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        controller.addSpace(name: name, colorID: ClipPalette.nextID(after: controller.spaces.count))
+        model.addSpace(name: name, colorID: ClipPalette.nextID(after: model.spaces.count))
         newName = ""
     }
 
@@ -136,7 +138,7 @@ struct ClipboardView: View {
             DSSection("Не запоминать из приложений") {
                 DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(controller.excludedApps, id: \.self) { id in
+                        ForEach(model.excludedApps, id: \.self) { id in
                             HStack(spacing: 10) {
                                 Group {
                                     if let icon = VoiceExcludedApps.icon(id) {
@@ -149,7 +151,7 @@ struct ClipboardView: View {
                                 Text(VoiceExcludedApps.name(id)).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
                                     .lineLimit(1)
                                 Spacer(minLength: 8)
-                                DSButton("Убрать", style: .plain, small: true) { controller.removeExcluded(id) }
+                                DSButton("Убрать", style: .plain, small: true) { model.removeExcluded(id) }
                             }
                             .padding(.horizontal, 14).padding(.vertical, 5)
                         }
@@ -157,10 +159,10 @@ struct ClipboardView: View {
                 }
                 .frame(maxHeight: 150)
                 .fixedSize(horizontal: false, vertical: true)
-                DSRow(title: controller.excludedApps.isEmpty ? "Список пуст" : "Ещё") {
+                DSRow(title: model.excludedApps.isEmpty ? "Список пуст" : "Ещё") {
                     DSButton("Добавить…", icon: "plus", small: true) {
                         if let id = VoiceExcludedApps.pick(message: "Выбери программу, из которой буфер не запоминать") {
-                            controller.addExcluded(id)
+                            model.addExcluded(id)
                         }
                     }
                     .fixedSize()
@@ -173,32 +175,23 @@ struct ClipboardView: View {
 
     private var recentSection: some View {
         DSSection("Последние записи") {
-            if controller.items.isEmpty {
+            if model.recent.isEmpty {
                 DSRow(title: "Пока пусто")
             }
-            ForEach(controller.items.prefix(5)) { item in
+            ForEach(Array(model.recent.enumerated()), id: \.offset) { _, item in
                 HStack(spacing: 8) {
                     if let icon = ClipSourceIcon.image(item.sourceBundleID) {
                         Image(nsImage: icon).resizable().frame(width: 18, height: 18)
                     } else {
                         Image(systemName: "app.dashed").frame(width: 18, height: 18).foregroundStyle(.white.opacity(0.4))
                     }
-                    Text(recentTitle(item)).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
+                    Text(item.title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.9)).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(clipAgo(item.date)).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.4))
                         .lineLimit(1).fixedSize()
                 }
                 .padding(.horizontal, 14).padding(.vertical, 7)
             }
-        }
-    }
-
-    private func recentTitle(_ item: ClipItem) -> String {
-        switch item.kind {
-        case .text: return (item.text ?? "").replacingOccurrences(of: "\n", with: " ")
-        case .link: return item.host ?? item.text ?? ""
-        case .image: return "Картинка \(item.imageWidth.map { "\($0)×\(item.imageHeight ?? 0)" } ?? "")"
-        case .file: return (item.filePaths?.first.map { ($0 as NSString).lastPathComponent }) ?? "Файл"
         }
     }
 
@@ -210,8 +203,8 @@ struct ClipboardView: View {
             Text("Скрытое менеджерами паролей и всё из исключений не сохраняется; остальное зашифровано, только на этом Mac")
                 .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
             Spacer()
-            if !controller.axTrusted {
-                DSButton("Разрешить вставку…", small: true) { controller.requestAccessibility() }
+            if !model.axTrusted {
+                DSButton("Разрешить вставку…", small: true) { model.requestAccessibility() }
             }
         }
         .padding(.horizontal, 6)
@@ -219,13 +212,13 @@ struct ClipboardView: View {
 }
 
 /// Строка пространства: цвет, имя (правится на месте), число записей, порядок, удаление.
-private struct SpaceRow: View {
+private struct SpaceRow<Model: ClipboardModel>: View {
+    @ObservedObject var model: Model
     let space: ClipSpace
     let count: Int
     let isFirst: Bool
     let isLast: Bool
     let onDelete: () -> Void
-    @ObservedObject private var controller = ClipboardController.shared
     @State private var name = ""
     @State private var picking = false
     @FocusState private var focused: Bool
@@ -238,8 +231,8 @@ private struct SpaceRow: View {
                 .focused($focused)
                 .onSubmit(commit)
             Text("\(count)").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4))
-            iconButton("chevron.up", help: "Выше", disabled: isFirst) { controller.moveSpace(space.id, by: -1) }
-            iconButton("chevron.down", help: "Ниже", disabled: isLast) { controller.moveSpace(space.id, by: 1) }
+            iconButton("chevron.up", help: "Выше", disabled: isFirst) { model.moveSpace(space.id, by: -1) }
+            iconButton("chevron.down", help: "Ниже", disabled: isLast) { model.moveSpace(space.id, by: 1) }
             iconButton("trash", help: "Удалить пространство", disabled: false, action: onDelete)
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
@@ -251,7 +244,7 @@ private struct SpaceRow: View {
 
     private func commit() {
         let clean = name.trimmingCharacters(in: .whitespaces)
-        if clean.isEmpty { name = space.name } else if clean != space.name { controller.renameSpace(space.id, to: clean) }
+        if clean.isEmpty { name = space.name } else if clean != space.name { model.renameSpace(space.id, to: clean) }
     }
 
     private var colorMenu: some View {
@@ -266,7 +259,7 @@ private struct SpaceRow: View {
             HStack(spacing: 8) {
                 ForEach(ClipPalette.all, id: \.id) { entry in
                     Button {
-                        controller.setColor(space.id, entry.id)
+                        model.setColor(space.id, entry.id)
                         picking = false
                     } label: {
                         Circle().fill(entry.color).frame(width: 20, height: 20)
@@ -289,4 +282,9 @@ private struct SpaceRow: View {
         }
         .buttonStyle(.plain).disabled(disabled).help(help).accessibilityLabel(help)
     }
+}
+
+extension ClipboardView where Model == ClipboardController {
+    /// Встроенный модуль.
+    init() { self.init(model: .shared) }
 }
