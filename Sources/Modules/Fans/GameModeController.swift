@@ -228,6 +228,14 @@ final class GameModeController: ObservableObject {
         if list != running { running = list }
     }
 
+    #if KIT_TEST_DEFAULTS
+    /// Стенд ставит то, что показывает экран: без настоящих программ и переднего плана.
+    func testPin(phase: GameModeMachine.Phase, running: [RunningCandidate]) {
+        self.phase = phase
+        self.running = running
+    }
+    #endif
+
     private func persistGames() {
         if let data = try? JSONEncoder().encode(myGames) {
             UserDefaults.standard.set(data, forKey: Self.gamesKey)

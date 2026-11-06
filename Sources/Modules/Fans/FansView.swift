@@ -403,8 +403,8 @@ private struct ChipFlow: Layout {
 }
 
 /// «Максимум в играх»: переключатель, свои игры плашками и лаунчеры-игры во всплывающем окне.
-private struct GameModeCard: View {
-    @ObservedObject var game: GameModeController
+private struct GameModeCard<Model: FansModel>: View {
+    @ObservedObject var game: Model
     @State private var launchersOpen = false
     @Environment(\.dsTint) private var tint
 
@@ -426,16 +426,16 @@ private struct GameModeCard: View {
                         .font(.system(size: 11.5)).foregroundStyle(dim).lineLimit(1)
                 }
                 Spacer(minLength: 10)
-                if game.isEnabled {
+                if game.gameModeEnabled {
                     addMenu
                     launchersLink
                 }
-                DSToggle("Максимум в играх", isOn: $game.isEnabled)
+                DSToggle("Максимум в играх", isOn: $game.gameModeEnabled)
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
 
             // Вторая строка нужна только когда есть свои игры.
-            if game.isEnabled && !game.myGames.isEmpty {
+            if game.gameModeEnabled && !game.myGames.isEmpty {
                 Separator()
                 ChipFlow(spacing: 6) {
                     ForEach(game.myGames) { entry in
@@ -521,19 +521,17 @@ private struct GameModeCard: View {
 
 /// Экран модуля «Вентиляторы» — аналог Macs Fan Control.
 /// Всё плотно, чтобы в обычном состоянии (два вентилятора, игры включены) страница не прокручивалась.
-struct FansView: View {
-    @ObservedObject var controller = FanController.shared
-    @ObservedObject var installer = FanHelperInstaller.shared
-    @ObservedObject var game = GameModeController.shared
+struct FansView<Model: FansModel>: View {
+    @ObservedObject var model: Model
 
-    private var canControl: Bool { installer.status == .ready && controller.conflictingApp == nil }
-    private var gameName: String? { game.isActive ? game.phase.gameName : nil }
-    private var overridden: Bool { controller.fullPower || gameName != nil }
+    private var canControl: Bool { model.helperStatus == .ready && model.conflict == nil }
+    private var gameName: String? { model.gameName }
+    private var overridden: Bool { model.fullPower || gameName != nil }
 
     /// У всех вентиляторов «По датчику» с одинаковыми настройками — они правятся одним блоком.
     private var sharedSensor: Bool {
-        let cs = controller.configs
-        guard controller.fans.count > 1, let first = cs.first, first.mode == .sensor else { return false }
+        let cs = model.configs
+        guard model.fans.count > 1, let first = cs.first, first.mode == .sensor else { return false }
         return cs.allSatisfy { $0.mode == .sensor && $0.sensor == first.sensor
             && $0.fromTemp == first.fromTemp && $0.toTemp == first.toTemp }
     }
@@ -541,49 +539,46 @@ struct FansView: View {
     private var primary: DSAction? {
         // Без доступа или при конфликте кнопка ничего бы не сделала — не показываем.
         guard canControl else { return nil }
-        return controller.fullPower
-            ? DSAction("Выключить полную мощность", icon: "bolt.slash.fill") { controller.fullPower = false }
-            : DSAction("Полная мощность", icon: "bolt.fill") { controller.fullPower = true }
+        return model.fullPower
+            ? DSAction("Выключить полную мощность", icon: "bolt.slash.fill") { model.fullPower = false }
+            : DSAction("Полная мощность", icon: "bolt.fill") { model.fullPower = true }
     }
 
     var body: some View {
-        DSPage(module: .fans, subtitle: controller.cpuMax.map { "Процессор \(celsius($0))" }, primary: primary) {
+        DSPage(module: .fans, subtitle: model.cpuMax.map { "Процессор \(celsius($0))" }, primary: primary) {
             // Один дочерний блок: между блоками страницы 20 pt, а тут хватает 10.
             VStack(alignment: .leading, spacing: 10) {
                 banners
                 fansSection
-                TemperatureCard(cpu: controller.cpuSensors, gpu: controller.gpuSensors)
-                GameModeCard(game: game)
+                TemperatureCard(cpu: model.cpuSensors, gpu: model.gpuSensors)
+                GameModeCard(game: model)
                 footer
             }
         }
-        .onPageActive {
-            installer.screenOpen = $0
-            if $0 { installer.refresh() }
-        }
+        .onPageActive { model.setScreenOpen($0) }
     }
 
     @ViewBuilder private var banners: some View {
         // «Нужен доступ» теперь на экране «Осталось дать доступ»; здесь только устаревший помощник и ошибка.
-        if installer.status == .outdated {
+        if model.helperStatus == .outdated {
             Banner(icon: "lock.shield", color: .orange, text: "Доступ нужно обновить",
-                   detail: FanHelperInstaller.outdatedDetail(fanStuckManual: controller.fans.contains(where: \.isManual))) {
-                DSButton("Обновить доступ…", icon: "key.fill") { installer.install() }
+                   detail: FanHelperInstaller.outdatedDetail(fanStuckManual: model.fans.contains(where: \.isManual))) {
+                DSButton("Обновить доступ…", icon: "key.fill") { model.installHelper() }
             }
         }
-        if let error = installer.lastError {
+        if let error = model.helperError {
             Text(error).font(.system(size: 11.5)).foregroundStyle(.red).padding(.horizontal, 6)
         }
 
-        if let app = controller.conflictingApp {
+        if let app = model.conflict {
             Banner(icon: "exclamationmark.triangle.fill", color: .orange,
-                   text: "\(app.localizedName ?? "Другая программа") управляет вентиляторами",
+                   text: "\(app.name ?? "Другая программа") управляет вентиляторами",
                    detail: "Пока она открыта, Utilitumus не вмешивается.") {
-                DSButton("Закрыть её") { app.terminate() }
+                DSButton("Закрыть её") { model.closeConflictingApp(id: app.id) }
             }
         }
 
-        if controller.safetyTripped && !controller.fullPower && !game.isActive {
+        if model.safetyTripped && !model.fullPower && gameName == nil {
             Banner(icon: "flame.fill", color: .red,
                    text: "Процессор горячее \(Int(FanController.safetyTrip)) °C",
                    detail: "Вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.") {
@@ -591,11 +586,11 @@ struct FansView: View {
             }
         }
 
-        if controller.fullPower {
+        if model.fullPower {
             Banner(icon: "bolt.fill", color: .green, text: "Полная мощность включена",
                    detail: "Все вентиляторы на максимум, будет шумно.") { EmptyView() }
         } else if canControl, let name = gameName {
-            if case .leaving = game.phase {
+            if model.gameLeavingUntil != nil {
                 // Секунды считаем от срока, а не от счётчика: экран перерисуется раз в секунду сам.
                 // Тикает только пока идёт обратный отсчёт; в игре текст статичный.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -620,24 +615,24 @@ struct FansView: View {
                 if let rangeText {
                     Text(rangeText).font(.system(size: 11.5, weight: .medium)).foregroundStyle(dim)
                 }
-                DSButton("Всё авто", icon: "arrow.uturn.backward", small: true) { controller.setAllAuto() }
+                DSButton("Всё авто", icon: "arrow.uturn.backward", small: true) { model.setAllAuto() }
                     .help("Вернуть все вентиляторы в «Авто»: оборотами управляет macOS")
                     .disabled(!canControl)
             }
             .padding(.leading, 6)
 
             FlatCard {
-                if controller.fans.isEmpty {
+                if model.fans.isEmpty {
                     Text("Вентиляторы не найдены").font(DS.rowSubtitle).foregroundStyle(dim)
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 10, alignment: .top)],
                               alignment: .leading, spacing: 10) {
-                        ForEach(controller.fans) { fan in
-                            if fan.index < controller.configs.count {
-                                FanCard(fan: fan, config: $controller.configs[fan.index], enabled: canControl,
-                                        fullPower: controller.fullPower,
-                                        cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax,
+                        ForEach(model.fans) { fan in
+                            if fan.index < model.configs.count {
+                                FanCard(fan: fan, config: $model.configs[fan.index], enabled: canControl,
+                                        fullPower: model.fullPower,
+                                        cpuTemp: model.cpuMax, gpuTemp: model.gpuMax,
                                         gameName: gameName, sharedSensor: sharedSensor)
                             }
                         }
@@ -646,7 +641,7 @@ struct FansView: View {
 
                     if sharedSensor && !overridden {
                         Separator()
-                        SensorSettings(config: sharedConfig, cpuTemp: controller.cpuMax, gpuTemp: controller.gpuMax)
+                        SensorSettings(config: sharedConfig, cpuTemp: model.cpuMax, gpuTemp: model.gpuMax)
                             .padding(.horizontal, 14).padding(.vertical, 8)
                             .disabled(!canControl)
                             .opacity(canControl ? 1 : 0.5)
@@ -659,9 +654,9 @@ struct FansView: View {
     /// Общие настройки «По датчику»: читаются у первого вентилятора, пишутся всем сразу одним присваиванием.
     private var sharedConfig: Binding<FanConfig> {
         Binding(
-            get: { controller.configs.first ?? FanConfig() },
+            get: { model.configs.first ?? FanConfig() },
             set: { new in
-                controller.configs = controller.configs.map {
+                model.configs = model.configs.map {
                     var c = $0
                     c.sensor = new.sensor; c.fromTemp = new.fromTemp; c.toTemp = new.toTemp
                     return c
@@ -671,12 +666,12 @@ struct FansView: View {
     }
 
     private var rangeText: String? {
-        guard let lo = controller.fans.map(\.min).min(), let hi = controller.fans.map(\.max).max() else { return nil }
+        guard let lo = model.fans.map(\.min).min(), let hi = model.fans.map(\.max).max() else { return nil }
         return "\(Int(lo.rounded())) – \(rpm(hi))"
     }
 
     private func statusText(name: String, now: Date) -> String {
-        if case .leaving(_, let until) = game.phase {
+        if let until = model.gameLeavingUntil {
             let left = max(Int(until.timeIntervalSince(now).rounded(.up)), 0)
             return "Максимум: играл в \(name), вернётся через \(left) с"
         }
@@ -685,18 +680,23 @@ struct FansView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let error = controller.lastError {
+            if let error = model.lastError {
                 Text(error).font(.system(size: 11.5)).foregroundStyle(.red)
             }
             HStack {
                 Text("При выходе из Utilitumus вентиляторы возвращаются в «Авто».")
                     .font(.system(size: 11)).foregroundStyle(dim)
                 Spacer()
-                if installer.status != .notInstalled {
-                    DSButton("Забрать доступ…", style: .plain, small: true) { controller.restoreAutoBlocking(); installer.uninstall() }
+                if model.helperStatus != .notInstalled {
+                    DSButton("Забрать доступ…", style: .plain, small: true) { model.uninstallHelper() }
                 }
             }
         }
         .padding(.horizontal, 6)
     }
+}
+
+extension FansView where Model == BuiltInFansModel {
+    /// Встроенный модуль: экран рисуется из настоящих контроллеров этого же процесса.
+    init() { self.init(model: BuiltInFansModel.shared) }
 }

@@ -35,7 +35,7 @@ struct FanConfig: Codable, Equatable {
     var toTemp: Double = 80
 }
 
-struct FanReading: Identifiable, Equatable {
+struct FanReading: Identifiable, Equatable, Codable {
     let index: Int
     let actual: Double
     let min: Double
@@ -49,7 +49,7 @@ struct FanReading: Identifiable, Equatable {
     var isSpinningUp: Bool { isManual && actual < target - 300 }
 }
 
-struct SensorReading: Identifiable, Equatable {
+struct SensorReading: Identifiable, Equatable, Codable {
     let key: String
     let value: Double
     var id: String { key }
@@ -70,7 +70,11 @@ final class FanController: ObservableObject {
     @Published private(set) var fans: [FanReading] = []
     @Published private(set) var cpuSensors: [SensorReading] = []
     @Published private(set) var gpuSensors: [SensorReading] = []
-    @Published private(set) var conflictingApp: NSRunningApplication?
+    @Published private(set) var conflictingApp: NSRunningApplication? {
+        didSet { conflictID = UUID().uuidString }
+    }
+    /// Что экран присылает, чтобы закрыть эту программу. Выдан здесь и меняется вместе с программой.
+    private(set) var conflictID = ""
     @Published private(set) var safetyTripped = false
     @Published private(set) var lastError: String?
     /// «Полная мощность»: все вентиляторы на максимум поверх их настроек.
@@ -280,6 +284,13 @@ final class FanController: ObservableObject {
         configs = configs.map { var c = $0; c.mode = .auto; return c }
     }
 
+    /// Закрывает ту программу, которую сейчас показывает экран; устаревший или чужой id — false.
+    func closeConflictingApp(id: String) -> Bool {
+        guard let app = conflictingApp, id == conflictID else { return false }
+        app.terminate()
+        return true
+    }
+
     // MARK: - Цикл
 
     /// Снимок SMC за один такт. Читается на фоновой очереди: десятки ключей —
@@ -472,6 +483,19 @@ final class FanController: ObservableObject {
             return fan.min + (fan.max - fan.min) * t
         }
     }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд ставит то, что показывает экран: без SMC, такта и настоящей чужой программы.
+    func testPin(fans: [FanReading], cpu: [SensorReading], gpu: [SensorReading],
+                 conflict: NSRunningApplication?, safetyTripped: Bool, lastError: String?) {
+        self.fans = fans
+        cpuSensors = cpu
+        gpuSensors = gpu
+        conflictingApp = conflict
+        self.safetyTripped = safetyTripped
+        self.lastError = lastError
+    }
+    #endif
 
     // MARK: - Вспомогательное
 
