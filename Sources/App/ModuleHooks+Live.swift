@@ -10,7 +10,8 @@ extension SatelliteEnvironment {
             paths: .live,
             defaults: Kit.defaults,
             installer: SatelliteInstaller(paths: .live, launchctl: SatelliteInstaller.liveLaunchctl,
-                                          download: SatelliteInstaller.liveDownload, verify: SatelliteInstaller.liveVerify),
+                                          download: SatelliteInstaller.liveDownload, verify: SatelliteInstaller.liveVerify,
+                                          hooks: ["browser": .browser(.live)]),
             commands: .live,
             loadCatalog: {
                 let request = URLRequest(url: SatelliteCatalog.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)

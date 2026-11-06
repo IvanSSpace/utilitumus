@@ -9,6 +9,7 @@ struct ModuleDetail: View {
         if modules.isExternal(module) {
             switch module {
             case .awake: RemoteAwakePage()
+            case .browser: RemoteBrowserPage()
             default: SatellitePage(module: module)
             }
         } else {
@@ -290,9 +291,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.windows.forEach { $0.close() }
             }
         }
-        // Помощник ссылок лежит внутри приложения: регистрируем, чтобы macOS знала его как браузер
-        // (после обновления путь тот же, но регистрация освежается).
-        LSRegisterURL(BrowserHelper.appURL as CFURL, true)
+        // Помощник ссылок лежит внутри приложения и внутри утилиты: регистрируем обе копии, чтобы macOS знала их как
+        // браузер. Только регистрация, обработчиком их делает человек.
+        let links = BrowserLinkHandler.live
+        for copy in BrowserHelper.knownCopies() { links.register(copy) }
+        links.noteDefault()
+        BrowserOrphanOffer.present(links)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

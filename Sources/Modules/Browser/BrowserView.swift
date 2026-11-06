@@ -220,6 +220,7 @@ struct BrowserView: View {
 
     private func refreshDefault() {
         defaultID = NSWorkspace.shared.urlForApplication(toOpen: probe).flatMap { Bundle(url: $0)?.bundleIdentifier }
+        BrowserLinkHandler.live.noteDefault()
     }
 
     /// Тестовая ссылка идёт тем же путём, что и настоящая: через помощника.
