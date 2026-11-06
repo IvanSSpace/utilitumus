@@ -88,5 +88,37 @@ check("обход через .. без подписи", vendor("com.logi.x", "/A
 check("нет программы — нет подписи", vendor("com.logi.x", "") == "")
 check("без подписи — общая заметка", LaunchAgents.vendor(of: "com.logi.x", program: "/tmp/x").note == LaunchAgents.unknown)
 
-//L4
+// MARK: Журнал действий
+
+let work = URL(fileURLWithPath: CommandLine.arguments[1])
+let secrets = ["hunter2", "-psecret", "bob:pw"]
+let sshpass = process(name: "sshpass", exe: "/Users/u/bin/sshpass", args: ["sshpass", "-p", "hunter2", "ssh", "bob:pw", "-psecret"], pid: 700)
+check("подпись для экрана по-прежнему с аргументами", Kinds.label(sshpass).contains("ssh"))
+if let plan = StopPlanner(procs: [sshpass.pid: sshpass], fence: [:]).plan(process: sshpass.pid) {
+    let data = try! JSONSerialization.data(withJSONObject: ActionLog.targets(of: plan))
+    let text = String(decoding: data, as: UTF8.self)
+    check("в журнал идут только pid и имя", ActionLog.targets(of: plan).first?["name"] as? String == "sshpass", text)
+    check("аргументов в журнале нет", !secrets.contains { text.contains($0) }, text)
+    check("заголовок записи без аргументов", !secrets.contains { plan.title.contains($0) }, plan.title)
+} else {
+    check("план остановки составлен", false)
+}
+
+let log = work.appendingPathComponent("actions.log")
+let line = "{\"строка\":\"" + String(repeating: "x", count: 90) + "\"}\n"
+try! Data(String(repeating: line, count: 3000).utf8).write(to: log)
+try! FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: log.path)
+let before = try! Data(contentsOf: log)
+ActionLog.rotateIfNeeded(log, limit: before.count)
+check("ровно на пределе файл не трогаем", try! Data(contentsOf: log) == before)
+ActionLog.rotateIfNeeded(log, limit: before.count - 1)
+let after = try! Data(contentsOf: log)
+check("больше предела: остаётся половина", after.count <= before.count / 2 && after.count > before.count / 3, "\(after.count)")
+check("остаётся хвост и целыми строками", after.first == UInt8(ascii: "{") && after.last == 0x0A
+      && String(decoding: after, as: UTF8.self).split(separator: "\n").allSatisfy { $0.hasSuffix("\"}") })
+let mode = (try! FileManager.default.attributesOfItem(atPath: log.path))[.posixPermissions] as? Int
+check("права журнала остаются 0600", mode == 0o600, String(mode ?? -1, radix: 8))
+ActionLog.rotateIfNeeded(work.appendingPathComponent("нет-файла"))
+check("нет файла: не падаем и не создаём", !FileManager.default.fileExists(atPath: work.appendingPathComponent("нет-файла").path))
+
 exit(failed ? 1 : 0)

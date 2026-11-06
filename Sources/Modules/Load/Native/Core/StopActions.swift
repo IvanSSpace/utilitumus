@@ -58,7 +58,10 @@ struct StopPlan: Sendable, Identifiable {
     struct Target: Sendable, Identifiable {
         var pid: Int32
         var uniqueID: UInt64
+        /// Подпись для экрана: с аргументами.
         var name: String
+        /// Для журнала: только имя, в аргументах бывают пароли.
+        var processName: String
         var memMB: Double
         /// Цель верхнего уровня: к ней применяется правило «системный файл».
         var isRoot: Bool
@@ -114,7 +117,7 @@ struct StopPlanner {
 
     private func target(_ q: Int32, root: Bool) -> StopPlan.Target {
         let p = procs[q]!
-        return StopPlan.Target(pid: q, uniqueID: p.uniqueID, name: Kinds.label(p), memMB: p.mem, isRoot: root)
+        return StopPlan.Target(pid: q, uniqueID: p.uniqueID, name: Kinds.label(p), processName: p.name, memMB: p.mem, isRoot: root)
     }
 
     /// Остановка процесса и его потомков. nil — сам процесс трогать нельзя.
