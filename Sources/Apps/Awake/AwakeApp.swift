@@ -119,7 +119,10 @@ final class AwakeSatellite: ObservableObject, LinkHandler {
         Kit.defaults.synchronize()
         mode = Self.currentMode()
         enabled = SatelliteEnabled.load(id: AwakeIdentity.id, defaults: Kit.defaults)
+        let couldStart = controller.canStart
         controller.canStart = mode == .active && enabled
+        // Модуль снова у утилиты: пока он был у центра, настройки менялись там.
+        if controller.canStart, !couldStart { controller.start() }
         if SatelliteRole.mustRelease(mode: mode, enabled: enabled, hubVersion: SatelliteHub.version) { controller.stop() }
         hubRunning = SatelliteHub.isRunning
         statusItem?.isVisible = !hubRunning

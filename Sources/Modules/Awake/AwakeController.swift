@@ -52,8 +52,18 @@ final class AwakeController: AwakeModel {
         duration = AwakeDuration(rawValue: defaults.integer(forKey: Self.durationKey)) ?? .forever
     }
 
-    /// Хук модуля: включили модуль — ничего не держим, пока не нажата кнопка.
-    func start() {}
+    /// Хук модуля: включили модуль — ничего не держим, пока не нажата кнопка. Настройки читаем заново: пока модуль
+    /// стоял, их могла поменять утилита или центр (домен настроек один), а `didSet` записал бы в него старые.
+    func start() {
+        let defaults = Kit.defaults
+        // Запись другого процесса: без этого может прийти значение из кэша.
+        defaults.synchronize()
+        let display = defaults.bool(forKey: Self.displayKey)
+        let saved = AwakeDuration(rawValue: defaults.integer(forKey: Self.durationKey)) ?? .forever
+        // Только изменившееся: иначе `didSet` записал бы отсутствующий ключ и разбудил бы всех подписчиков.
+        if keepDisplay != display { keepDisplay = display }
+        if duration != saved { duration = saved }
+    }
     /// Выключили модуль или вышли из приложения — assertion обязательно снимается.
     func stop() { deactivate() }
 
