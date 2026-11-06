@@ -165,11 +165,11 @@ for args in "" "auto 0" "set 0 2000" "--service x" "version extra"; do
 done
 [ ! -s "$LOG" ] || fail "запуск без launchd записал в SMC"
 ok "без launchd отказ с кодом 64, записи нет"
-[ "$("$OUT/daemon" version)" = 5 ] || fail "version сборки со швом"
+[ "$("$OUT/daemon" version)" = 6 ] || fail "version сборки со швом"
 [ ! -s "$LOG" ] || fail "version записал в SMC"
 ok "version печатает версию без SMC"
 
-[ "$("$OUT/prod-signed" version)" = 5 ] || fail "version боевой сборки"
+[ "$("$OUT/prod-signed" version)" = 6 ] || fail "version боевой сборки"
 ok "боевая сборка: version"
 for value in "" "$LABEL" "0"; do
   status=0
@@ -320,8 +320,10 @@ agent() {
     echo "<key>MachServices</key><dict><key>$SERVICE</key><true/></dict>"
     echo "<key>ThrottleInterval</key><integer>0</integer>"
     echo "<key>EnvironmentVariables</key><dict><key>FAN_TEST_DIR</key><string>$OUT</string>"
-    if [ -n "${2:-}" ]; then echo "<key>$2</key><string>1</string>"; fi
+    for name in ${2:-}; do echo "<key>$name</key><string>1</string>"; done
     echo '</dict>'
+    # Как в боевом плисте (FanHelperInstaller.plistXML): перезапуск только после сбоя.
+    if [ -n "${AGENT_KEEPALIVE:-}" ]; then echo '<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>'; fi
     echo "<key>StandardErrorPath</key><string>$OUT/agent.log</string>"
     echo '</dict></plist>'
   } > "$PLIST"
@@ -376,7 +378,7 @@ agent daemon FAN_TEST_SILENT
 role hub silent
 [ ! -s "$LOG" ] || fail "молчащая служба получила запись"
 
-agent daemon FAN_TEST_SMC_STUCK
+agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
 role hub stuck
 
 echo "== статус не поднимает службу без нужды"
@@ -395,7 +397,7 @@ agent daemon
 role hub "quit ok"
 agent daemon FAN_TEST_SILENT
 role hub "quit silent"
-agent daemon FAN_TEST_SMC_STUCK
+agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
 role hub "quit stuck"
 sleep 6
 [ "$(cat "$LOG")" = "F0Md=0
@@ -475,11 +477,87 @@ sleep 5
 grep -q 'F0Md=0' "$LOG" || fail "после последней команды вентилятор не отдан"
 ok "команды кончились: вентилятор отдан через срок"
 
-# Зависшая запись: сторож пробует не бесконечно, служба выходит.
-agent daemon FAN_TEST_SMC_STUCK
+echo "== перегрев: служба сама возвращает «Авто» и не берёт удержание"
+# Пороги те же, что у клиента: служба берёт их из FanLink, клиент тоже.
+/usr/bin/grep -q 'safetyTrip = FanLink.thermalTrip' Sources/Modules/Fans/FanController.swift || fail "клиент не берёт порог из FanLink"
+/usr/bin/grep -q 'safetyRelease = FanLink.thermalRelease' Sources/Modules/Fans/FanController.swift || fail "клиент не берёт порог возврата из FanLink"
+rm -f "$OUT/temp-cpu" "$OUT/temp-gpu"
+agent daemon
+echo 50 > "$OUT/temp-cpu"
+"$OUT/hub" hold-manual 8 >/dev/null &
+HOLD=$!
+sleep 0.5
+grep -q 'F0Md=1' "$LOG" || fail "перегрев: вентилятор не взят: $(cat "$LOG")"
+echo 96 > "$OUT/temp-gpu"
+sleep 2
+grep -q 'F0Md=0' "$LOG" || fail "датчик графики 96 °C при живом клиенте: служба не вернула «Авто»: $(cat "$LOG")"
+ok "горячий датчик (графика) при живом клиенте: служба вернула «Авто» сама, до срока сторожа"
+kill -9 "$HOLD" 2>/dev/null || true
+wait "$HOLD" 2>/dev/null || true
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "перегрев: удержание принято"
+echo 90 > "$OUT/temp-gpu"; sleep 1.2
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "90 °C после перегрева: гистерезис не держится"
+echo 70 > "$OUT/temp-gpu"; sleep 1.2
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "остыл до 70 °C: удержание не принято"
+ok "перегрев: отказ, гистерезис на 90 °C, после остывания удержание снова принимается"
+rm -f "$OUT/temp-cpu" "$OUT/temp-gpu"; sleep 3.5
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "датчики не читаются: удержание не принято"
+echo 99 > "$OUT/temp-cpu"; sleep 1.2
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "процессор 99 °C: удержание принято"
+rm -f "$OUT/temp-cpu"; sleep 1.2
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "датчики пропали при перегреве: служба осталась заблокированной"
+ok "датчики не читаются: не перегрев, обычная работа не блокируется"
+sleep 4
+
+# Зависшая запись: сторож пробует не бесконечно, но служба не уходит молча, пока вентилятор ручной.
+rm -f "$OUT/agent.log"
+agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
 "$OUT/hub" hold-manual 1 >/dev/null || true
-sleep 12
+for _ in $(seq 1 45); do [ "$(state)" = "not running" ] && break; sleep 1; done
 expect_state "not running" "SMC не принимает «Авто»: попытки конечны, служба вышла"
+grep -q 'выход отложен' "$OUT/agent.log" || fail "простой с ручным вентилятором: выход не откладывался: $(cat "$OUT/agent.log")"
+grep -q 'выход с вентилятором в ручном режиме' "$OUT/agent.log" || fail "после попыток нет записи в журнале: $(cat "$OUT/agent.log")"
+launchctl print "$DOMAIN/$LABEL" | grep -q 'last exit code = 1' || fail "выход с ручным вентилятором не с кодом 1"
+ok "вентилятор ручной: выход отложен, попытки записаны в журнал, конец с кодом 1"
+
+echo "== перезапуск после сбоя: вентилятор, оставшийся ручным, возвращается без клиента"
+# Клиент не нужен, подпись тоже: служба стартует сама из-за KeepAlive. В поддельном SMC вентиляторы ручные при каждом запуске.
+pid_of() { launchctl print "$DOMAIN/$LABEL" | grep -m1 'pid = ' | sed 's/.*pid = //'; }
+AGENT_KEEPALIVE=1 agent daemon FAN_TEST_SMC_MANUAL
+PID=""
+for _ in $(seq 1 30); do PID="$(pid_of || true)"; [ -n "$PID" ] && break; sleep 0.1; done
+[ -n "$PID" ] || fail "с KeepAlive служба не запустилась"
+# Сразу после spawn процесс ещё не стал нашим: kill отказывает, пока не дойдёт exec.
+sleep 0.4
+LINES0="$(wc -l < "$LOG")"
+KILLED=""
+for _ in $(seq 1 20); do kill -9 "$PID" 2>/dev/null && { KILLED=1; break; }; sleep 0.05; done
+[ -n "$KILLED" ] || fail "служба не убита: $PID"
+RUNS=1
+for _ in $(seq 1 30); do RUNS="$(runs)"; [ "$RUNS" -ge 2 ] && break; sleep 0.1; done
+[ "$RUNS" -ge 2 ] || fail "после SIGKILL launchd не поднял службу: runs = $RUNS"
+# Выход по простою через 2 с тоже возвращает «Авто», поэтому смотрим раньше: это запись именно при запуске.
+sleep 0.7
+LINES1="$(wc -l < "$LOG")"
+[ "$LINES1" -ge $((LINES0 + 2)) ] || fail "при запуске ручные вентиляторы не возвращены в Авто: было $LINES0, стало $LINES1: $(cat "$LOG")"
+expect_state "running" "после перезапуска служба ещё работает: запись сделана при запуске, не при выходе"
+sleep 3
+ok "SIGKILL службы: launchd поднял её, при запуске оба вентилятора в Авто без клиента"
+expect_state "not running" "чистый выход по простою (код 0): служба остаётся остановленной"
+RUNS="$(runs)"
+sleep 4
+[ "$(runs)" = "$RUNS" ] || fail "после чистого выхода launchd снова запускал службу: runs $RUNS -> $(runs)"
+ok "чистый выход не вызывает перезапуска"
+
+# SMC не принимает «Авто»: при запуске служба пробует, по простою не выходит молча, кончает кодом 1, launchd поднимает её снова.
+rm -f "$OUT/agent.log"
+AGENT_KEEPALIVE=1 agent daemon FAN_TEST_SMC_STUCK
+for _ in $(seq 1 180); do [ "$(runs)" -ge 2 ] && break; sleep 0.5; done
+[ "$(runs)" -ge 2 ] || fail "ручной вентилятор не отпускается: launchd не поднял службу после выхода с ошибкой"
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+/usr/bin/grep -q 'выход отложен' "$OUT/agent.log" || fail "простой с ручным вентилятором: выход не откладывался: $(cat "$OUT/agent.log")"
+/usr/bin/grep -q 'выход с вентилятором в ручном режиме' "$OUT/agent.log" || fail "после попыток нет записи в журнале: $(cat "$OUT/agent.log")"
+ok "вентилятор ручной и не отпускается: выход отложен, попытки в журнале, конец с ошибкой и перезапуск launchd"
 
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do

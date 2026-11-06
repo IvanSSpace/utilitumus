@@ -152,12 +152,15 @@ final class FanHelperInstaller: ObservableObject {
         run(admin: Self.uninstallScript) { $0.refresh() }
     }
 
-    /// В одну строку: идёт внутрь строки AppleScript. Без `RunAtLoad` и `KeepAlive`: launchd поднимает службу по подключению.
+    /// В одну строку: идёт внутрь строки AppleScript. Без `RunAtLoad`: launchd поднимает службу по подключению.
+    /// `KeepAlive` только на сбой: после падения или выхода с кодом не 0 launchd запускает службу снова, и при запуске она
+    /// возвращает вентиляторы в «Авто». Выход по простою с кодом 0 её не поднимает. Менять плист — значит поднимать `FanLink.helperVersion`.
     nonisolated static var plistXML: String {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict>"
             + "<key>Label</key><string>\(FanLink.label)</string>"
             + "<key>ProgramArguments</key><array><string>\(installedPath)</string></array>"
             + "<key>MachServices</key><dict><key>\(FanLink.service)</key><true/></dict>"
+            + "<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>"
             + "</dict></plist>"
     }
 
