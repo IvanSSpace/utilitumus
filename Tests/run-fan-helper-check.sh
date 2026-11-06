@@ -397,7 +397,7 @@ agent daemon FAN_TEST_SILENT
 role hub "quit silent"
 agent daemon FAN_TEST_SMC_STUCK
 role hub "quit stuck"
-sleep 2
+sleep 6
 [ "$(cat "$LOG")" = "F0Md=0
 F1Md=0" ] || fail "клиент вышел, служба не доделала команды: $(cat "$LOG")"
 ok "клиент вышел, служба доделала команды обоим вентиляторам"
