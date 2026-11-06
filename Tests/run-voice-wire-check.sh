@@ -4,7 +4,7 @@
 # VOICE_WIRE_BASE — коммит для снимков «до»; VOICE_WIRE_NO_BASE=1 — без них, если гит недоступен.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-OUT="${VOICE_WIRE_DIR:-${TMPDIR:-/tmp}/voice-wire-check}"
+OUT="${VOICE_WIRE_DIR:-${TMPDIR:-/tmp}/voice-wire-check}"; OUT="${OUT//\/\//\/}"
 BASE="${VOICE_WIRE_BASE:-509cdb3}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 CONTROLLER=Sources/Modules/Voice/VoiceController.swift
