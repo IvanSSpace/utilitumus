@@ -85,8 +85,8 @@ enum BotsAction: Codable, Equatable {
     case cancel
     case confirm(planID: UUID)
     case dismissNotice
-    /// Быстрое действие дашборда и меню: человека уже спросил центр.
-    case quick(id: String, verb: BotVerb)
+    /// Быстрое действие дашборда и меню: человека уже спросил центр. `sum` — отпечаток команды, которую он видел.
+    case quick(id: String, verb: BotVerb, sum: String)
     /// Поиск ботов на этом Mac. Идёт только по этой просьбе.
     case find
     /// Добавить найденного бота: только его id, запись строит утилита.
@@ -108,8 +108,8 @@ enum BotsAction: Codable, Equatable {
             try wire.fields("id", "verb")
             self = .request(id: try wire.field("id"), verb: try wire.field("verb"))
         case "quick":
-            try wire.fields("id", "verb")
-            self = .quick(id: try wire.field("id"), verb: try wire.field("verb"))
+            try wire.fields("id", "verb", "sum")
+            self = .quick(id: try wire.field("id"), verb: try wire.field("verb"), sum: try wire.field("sum"))
         case "confirm":
             try wire.fields("planID")
             self = .confirm(planID: try wire.field("planID"))
