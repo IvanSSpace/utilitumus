@@ -88,7 +88,7 @@ build_module_hub() {
   swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name "${NAME}ModuleCheck" -o "$OUT/hub-build" \
     "$OUT/src/$(basename "$check")" "$OUT/src/SatelliteCheckKit.swift" "$OUT/src/SatelliteStandKit.swift" "$OUT/src/UtilitumusApp.swift" \
     $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
-    -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit \
+    -framework SwiftUI -framework AppKit -framework Charts -framework CoreAudio -framework AudioToolbox -framework IOKit \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
   sign_hub
 }

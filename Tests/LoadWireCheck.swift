@@ -252,7 +252,7 @@ func realFileStamp(_ url: URL?) -> String {
 @MainActor func logic() async {
     // Страховка: если что-то всё же дойдёт до launchctl, это будет не настоящий launchctl.
     Exec.launchctl = "/usr/bin/false"
-    let realFiles = [LoadHistory.defaultURL, ActionLog.file]
+    let realFiles = [LoadHistory.realURL, ActionLog.file]
     let stamps = realFiles.map(realFileStamp)
 
     let engine = FakeEngine(fixtureSnapshot())
@@ -737,7 +737,7 @@ func throughWire(_ state: LoadState) -> LoadState { try! JSONDecoder().decode(Lo
 
 /// Настоящий движок на этом Mac: только чтение процессов и launchctl list. История — копия файла, настоящий не пишется.
 @MainActor func measureReal(history: String) async {
-    let realFiles = [LoadHistory.defaultURL, ActionLog.file]
+    let realFiles = [LoadHistory.realURL, ActionLog.file]
     let stamps = realFiles.map(realFileStamp)
     let engine = LoadEngine(historyURL: URL(fileURLWithPath: history))
     let store = LoadStore(engine: engine)

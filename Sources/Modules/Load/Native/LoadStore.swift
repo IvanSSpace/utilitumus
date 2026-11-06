@@ -216,3 +216,24 @@ final class LoadStore: LoadModel {
         }
     }
 }
+
+#if KIT_TEST_DEFAULTS
+extension LoadStore {
+    /// Стенд: встроенный экран в том же состоянии, что показывает утилита. Замеры не запускаются.
+    func testPin(_ state: LoadState, palette pinned: LoadPalette) {
+        if let m = state.measure {
+            let s = LoadSnapshot(timestamp: m.timestamp, host: m.host, memory: m.memory, procs: [:], tree: ProcessTree([:]), assigned: [:],
+                                 groups: m.groups, map: m.map, advice: m.advice, sessions: m.sessions, disk: m.disk, fence: [:],
+                                 launchd: [:], roots: [], selfPid: 0, selfMemMB: state.live.selfMemMB, selfCPU: state.live.selfCPU,
+                                 measureMillis: state.live.measureMillis)
+            latest = s
+            snapshot = s
+        }
+        live.update(from: state.live)
+        palette = pinned
+        history = state.history
+        notice = state.notice
+        background.testPin(state.background)
+    }
+}
+#endif

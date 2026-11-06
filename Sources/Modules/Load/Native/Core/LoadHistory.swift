@@ -57,9 +57,19 @@ final class LoadHistory {
         load()
     }
 
-    static var defaultURL: URL? {
+    /// Настоящий файл. Проверки сверяют, что его не трогали.
+    static var realURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("Utilitumus/load-history.json")
+    }
+
+    /// Сборка со швом пишет в свою временную папку: стенд с настоящей утилитой не должен трогать настоящую историю.
+    static var defaultURL: URL? {
+        #if KIT_TEST_DEFAULTS
+        return FileManager.default.temporaryDirectory.appendingPathComponent("utilitumus-test-load/load-history.json")
+        #else
+        return realURL
+        #endif
     }
 
     /// Единственный писатель файла: замок flock на соседнем файле держит тот, кто пишет. Центр и утилита

@@ -126,3 +126,12 @@ final class BackgroundStore: LoadBackgroundModel {
         }
     }
 }
+
+#if KIT_TEST_DEFAULTS
+extension BackgroundStore {
+    func testPin(_ state: LoadBackgroundState) {
+        data = state.data
+        journal = state.journal
+    }
+}
+#endif
