@@ -147,16 +147,19 @@ png() {
   if wait_until "PNG $1" test -s "$1"; then ok "окно за экраном отрисовано: $1"; fi
 }
 
-# fake_hub_start <версия> [adhoc]: версию утилита может узнать только из Info.plist запущенного бандла.
-# Центр признаётся по подписи автора, поэтому подставной подписывается; с `adhoc` — подделка без нашего сертификата.
+# fake_hub_start <версия> [adhoc|боевой]: версию утилита может узнать только из Info.plist запущенного бандла.
+# Центр признаётся по подписи автора и метке выпуска. Утилита собрана со швом и ждёт метку стенда, как у центра стенда,
+# поэтому подставной несёт её. С `adhoc` — подделка без нашего сертификата, с `боевой` — подпись наша, но метка боевая.
 fake_hub_start() {
+  local epoch="test.1"
+  if [ "${2:-}" = боевой ]; then epoch=1; fi
   cat > "$FAKE_HUB/Contents/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>$FAKE_HUB_ID</string>
 <key>CFBundleExecutable</key><string>FakeHub</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$1</string>
-<key>UtilitumusSecurityEpoch</key><string>1</string>
+<key>UtilitumusSecurityEpoch</key><string>$epoch</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST_EOF
@@ -341,6 +344,11 @@ sleep 2
 expect_icon "подделка запущена: значок виден" "виден"
 expect_line "подделка запущена: утилита активна, не пассивна" "Mac не уснёт"
 if holds_assertion "$PID"; then ok "подделка не сняла блокировку"; else bad "подделка выключила утилиту"; fi
+fake_hub_stop TERM
+fake_hub_start 0.6.0 боевой
+sleep 2
+expect_icon "боевая метка в сборке стенда: значок виден" "виден"
+expect_line "боевая метка: утилита активна, не пассивна" "Mac не уснёт"
 fake_hub_stop TERM
 fake_hub_start 0.6.0
 expect_icon "настоящая подпись: значок скрыт" "скрыт"
