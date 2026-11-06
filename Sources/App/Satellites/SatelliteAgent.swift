@@ -8,7 +8,7 @@ struct SatelliteAgent {
             "ProgramArguments": [executable.path],
             "RunAtLoad": true,
             "KeepAlive": false,
-            "MachServices": [KitLink.machService(id): true],
+            "MachServices": [KitLink.machService(id): true, KitLink.selfService(id): true],
         ]
         // Только строки, массивы и булевы значения: сериализация здесь упасть не может.
         return try! PropertyListSerialization.data(fromPropertyList: agent, format: .xml, options: 0)

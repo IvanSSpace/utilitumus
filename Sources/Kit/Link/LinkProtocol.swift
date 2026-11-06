@@ -9,7 +9,10 @@ enum KitLink {
     static let oldestProtocolVersion = 3
 
     static func bundleID(_ id: String) -> String { "\(Kit.hubBundleID).app.\(id)" }
+    /// Служба центра: единственная, что принимает действия, экраны и выход. Требование — только подпись центра.
     static func machService(_ id: String) -> String { bundleID(id) + ".xpc" }
+    /// Служба для копии самой утилиты, запущенной из Finder: умеет только «покажи окно», действий не принимает.
+    static func selfService(_ id: String) -> String { bundleID(id) + ".self.xpc" }
     static func statusChanged(_ id: String) -> Notification.Name { Notification.Name(bundleID(id) + ".statusChanged") }
 
     /// Требование к собеседнику: точный identifier, любой из доверенных листовых сертификатов и метка выпуска.
@@ -220,6 +223,11 @@ enum LinkQuitReason: Int, Sendable {
     func openWindow(reply: @escaping @Sendable () -> Void)
     /// `LinkQuitReason`.
     func quit(reason: Int, reply: @escaping @Sendable () -> Void)
+}
+
+/// Всё, что умеет служба для копии утилиты (`KitLink.selfService`). Остальных вызовов в её интерфейсе нет.
+@objc(LinkSelfXPC) protocol LinkSelfXPC {
+    func openWindow(reply: @escaping @Sendable () -> Void)
 }
 
 /// Обратное направление того же соединения. Проверенный канал вместо уведомления: о смене состояния

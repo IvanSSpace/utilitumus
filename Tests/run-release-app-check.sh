@@ -390,7 +390,7 @@ sys.exit(agent != {
     "ProgramArguments": [sys.argv[2] + "/Utilitumus/Awake.app/Contents/MacOS/Awake"],
     "RunAtLoad": True,
     "KeepAlive": False,
-    "MachServices": {"local.utilitumus.app.awake.xpc": True},
+    "MachServices": {"local.utilitumus.app.awake.xpc": True, "local.utilitumus.app.awake.self.xpc": True},
 })' "$OUT/agent.plist" "$OUT/inst"
 check "--dry-run не вызвал launchctl" test ! -s "$LAUNCHCTL_LOG"
 check "--dry-run не создал папку установки" test ! -e "$OUT/inst"

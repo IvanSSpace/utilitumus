@@ -13,6 +13,7 @@ LABEL="local.utilitumus.test.awake"
 ID="test.awake"
 IDENTIFIER="local.utilitumus.app.$ID"
 SERVICE="$IDENTIFIER.xpc"
+SELF_SERVICE="$IDENTIFIER.self.xpc"
 SUITE="local.utilitumus.test.kit"
 SIGN_NAME="Utilitumus Signing"
 ASSERTION="Utilitumus: Keep Awake"
@@ -83,7 +84,7 @@ start_agent() {
 <key>ProgramArguments</key><array><string>$EXE</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><false/>
-<key>MachServices</key><dict><key>$SERVICE</key><true/></dict>
+<key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>
 <key>StandardErrorPath</key><string>$LOG</string>
 </dict></plist>
 PLIST_EOF

@@ -122,18 +122,12 @@ func wirePure() {
     let link = LinkClient(id: moduleID)
     switch role {
     case "own-copy":
-        // Процесс с identifier самой утилиты: слушатель его пускает, но ключ принимает только центр.
-        do {
-            let before = try await link.moduleState()
-            let answer = try await link.moduleAction(keyMessage)
-            let received = try JSONDecoder().decode(ClipboardKeyReply.self, from: answer).received
-            let after = try await link.moduleState()
-            print("received=\(received) stateSame=\(before == after)")
-            exit(0)
-        } catch {
-            print("ошибка: \(error)")
-            exit(3)
-        }
+        // Процесс с identifier самой утилиты: служба центра его не пускает, ни состояния, ни ключа он получить не может.
+        var stateRefused = false, actionRefused = false
+        do { _ = try await link.moduleState() } catch { stateRefused = true }
+        do { _ = try await link.moduleAction(keyMessage) } catch { actionRefused = true }
+        print("stateRefused=\(stateRefused) actionRefused=\(actionRefused)")
+        exit(stateRefused && actionRefused ? 0 : 3)
     case "passive":
         do {
             let status = try await link.status()

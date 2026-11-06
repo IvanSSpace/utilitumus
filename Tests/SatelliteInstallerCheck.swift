@@ -102,7 +102,7 @@ func agentChecks() {
     check(plist["ProgramArguments"] as? [String] == [exe.path], "плист: ProgramArguments")
     check(plist["RunAtLoad"] as? Bool == true, "плист: RunAtLoad")
     check(plist["KeepAlive"] as? Bool == false, "плист: KeepAlive")
-    check(plist["MachServices"] as? [String: Bool] == ["local.utilitumus.app.awake.xpc": true], "плист: MachServices")
+    check(plist["MachServices"] as? [String: Bool] == ["local.utilitumus.app.awake.xpc": true, "local.utilitumus.app.awake.self.xpc": true], "плист: MachServices (служба центра и служба копии)")
 }
 
 // MARK: - Стенд установщика

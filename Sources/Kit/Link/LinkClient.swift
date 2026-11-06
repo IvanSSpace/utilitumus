@@ -235,3 +235,25 @@ private final class PendingReply<T: Sendable>: @unchecked Sendable {
         waiting?.resume(with: result)
     }
 }
+
+/// Копия утилиты, запущенная из Finder, просит работающую показать окно. Свой сервис и свой интерфейс:
+/// через него ничего, кроме этой просьбы, не сделать.
+enum LinkSelfClient {
+    @MainActor static func openWindow(id: String, timeout: TimeInterval = 2) async throws {
+        let connection = NSXPCConnection(machServiceName: KitLink.selfService(id), options: [])
+        connection.setCodeSigningRequirement(KitLink.requirement(identifier: KitLink.bundleID(id)))
+        connection.remoteObjectInterface = NSXPCInterface(with: LinkSelfXPC.self)
+        connection.resume()
+        defer { connection.invalidate() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let pending = PendingReply(continuation)
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { pending.finish(.failure(LinkError.timeout)) }
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
+                let nsError = error as NSError
+                let rejected = nsError.domain == NSCocoaErrorDomain && nsError.code == NSXPCConnectionCodeSigningRequirementFailure
+                pending.finish(.failure(rejected ? LinkError.rejected : error))
+            } as! LinkSelfXPC
+            proxy.openWindow { pending.finish(.success(())) }
+        }
+    }
+}

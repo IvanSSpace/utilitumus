@@ -195,6 +195,8 @@ install_app() {
 	<dict>
 		<key>$LABEL.xpc</key>
 		<true/>
+		<key>$LABEL.self.xpc</key>
+		<true/>
 	</dict>
 	<key>ProgramArguments</key>
 	<array>

@@ -22,6 +22,7 @@ let testID = "test.link"
 func pureChecks() {
     check(KitLink.bundleID("awake") == "local.utilitumus.app.awake", "bundleID")
     check(KitLink.machService("awake") == "local.utilitumus.app.awake.xpc", "machService")
+    check(KitLink.selfService("awake") == "local.utilitumus.app.awake.self.xpc", "selfService")
 
     let long = String(repeating: "я", count: 200)
     check(LinkStatus(enabled: true, line: long, needsSetup: 0).line.count == 80, "init обрезает строку статуса до 80")
@@ -76,10 +77,57 @@ func pureChecks() {
     check((try? LinkClient.decodeStatus(Data("{не json".utf8))) == nil, "битый JSON в status — ошибка, не падение")
 
     let one = KitLink.requirement(identifier: "local.utilitumus")
-    let marker = #"info["UtilitumusSecurityEpoch"] = "1""#
+    let marker = #"info["UtilitumusSecurityEpoch"] >= "1""#
     check(one == "(identifier \"local.utilitumus\" and certificate leaf = H\"\(KitSigning.trustedLeafHashes[0])\" and \(marker))", "требование: точный identifier, leaf и метка выпуска")
     let two = KitLink.requirement(identifier: "x.y", hashes: ["aa", "bb"])
     check(two == "(identifier \"x.y\" and certificate leaf = H\"aa\" and \(marker)) or (identifier \"x.y\" and certificate leaf = H\"bb\" and \(marker))", "несколько хэшей — через or")
+    // Два слушателя утилиты: центр и копия из Finder различаются службой, а не процессом по pid.
+    let specs = LinkServer.specs(id: "awake")
+    let hubSpec = specs.first { $0.role == .hub }, copySpec = specs.first { $0.role == .selfCopy }
+    check(specs.count == 2 && hubSpec != nil && copySpec != nil, "слушателей два: центр и копия утилиты")
+    check(hubSpec?.service == KitLink.machService("awake") && copySpec?.service == KitLink.selfService("awake") && hubSpec?.service != copySpec?.service, "службы разные")
+    check(hubSpec?.requirement == KitLink.requirement(identifier: "local.utilitumus"), "служба центра: требование только к центру")
+    check(hubSpec?.requirement.contains("local.utilitumus.app.awake") == false, "служба центра: копия утилиты (её identifier) не проходит требование")
+    check(copySpec?.requirement == KitLink.requirement(identifier: "local.utilitumus.app.awake"), "служба копии: требование только к самой утилите")
+    check(copySpec?.requirement.contains(#"identifier "local.utilitumus""#) == false, "служба копии: центр не проходит требование")
+    for spec in specs {
+        var requirement: SecRequirement?
+        check(SecRequirementCreateWithString(spec.requirement as CFString, [], &requirement) == errSecSuccess, "требование \(spec.role) разбирается системой")
+        // Чужой собеседник: этот процесс не подписан нашим сертификатом, поэтому не должен пройти ни одно требование.
+        var me: SecCode?
+        var passes = false
+        if SecCodeCopySelf([], &me) == errSecSuccess, let me, let requirement { passes = SecCodeCheckValidity(me, [], requirement) == errSecSuccess }
+        check(!passes, "чужой процесс не проходит требование \(spec.role)")
+    }
+    func methods(_ proto: Protocol) -> Set<String> {
+        var count: UInt32 = 0
+        guard let list = protocol_copyMethodDescriptionList(proto, true, true, &count) else { return [] }
+        defer { free(list) }
+        return Set((0..<Int(count)).map { NSStringFromSelector(list[$0].name!) })
+    }
+    check(methods(LinkSelfXPC.self) == ["openWindowWithReply:"], "интерфейс копии утилиты: только «покажи окно» (\(methods(LinkSelfXPC.self)))")
+    let hubMethods = methods(LinkXPC.self)
+    check(["moduleAction:reply:", "watch:reply:", "quitWithReason:reply:", "setEnabled:reply:", "performSetupStep:reply:"].allSatisfy(hubMethods.contains),
+          "интерфейс центра: действия, подписка и выход здесь")
+    check(hubMethods.contains("openWindowWithReply:"), "интерфейс центра: окно тоже")
+    check(!methods(LinkSelfXPC.self).contains("quitWithReason:reply:") && !methods(LinkSelfXPC.self).contains("moduleAction:reply:") && !methods(LinkSelfXPC.self).contains("watch:reply:"),
+          "интерфейс копии: ни действий, ни экрана, ни выхода")
+
+    // Сравнение метки числовое: «225» >= «9» истинно, как у checkEpoch и install.sh. Проверка на системном бандле,
+    // чьё значение в Info.plist известно.
+    let calculator = URL(fileURLWithPath: "/System/Applications/Calculator.app")
+    if let number = (NSDictionary(contentsOf: calculator.appendingPathComponent("Contents/Info.plist"))?["CFBundleVersion"] as? String).flatMap(Int.init), number >= 10 {
+        func holds(_ text: String) -> Bool {
+            var code: SecStaticCode?, req: SecRequirement?
+            guard SecStaticCodeCreateWithPath(calculator as CFURL, [], &code) == errSecSuccess, let code,
+                  SecRequirementCreateWithString(text as CFString, [], &req) == errSecSuccess, let req else { return false }
+            return SecStaticCodeCheckValidity(code, [], req) == errSecSuccess
+        }
+        check(holds(#"info["CFBundleVersion"] >= "9""#), "сравнение метки числовое: \(number) >= 9")
+        check(!holds(#"info["CFBundleVersion"] >= "\(number + 1)""#), "сравнение метки: \(number) >= \(number + 1) ложно")
+    }
+    check(KitSigning.peerRequirement(identifier: "x", leafHash: "aa").hasSuffix(#"info["UtilitumusSecurityEpoch"] >= "1""#), "требование собеседника: метка своей или новее")
+
     var parsed: SecRequirement?
     check(SecRequirementCreateWithString(KitLink.requirement(identifier: "x.y", hashes: [String(repeating: "a", count: 40), String(repeating: "b", count: 40)]) as CFString, [], &parsed) == errSecSuccess, "требование с двумя хэшами разбирается системой")
 }
@@ -147,7 +195,7 @@ func recordedCalls(in dir: String, file name: String = "calls.log") -> [String] 
 }
 
 func runServer(dir: String, peer: String) -> Never {
-    let server = MainActor.assumeIsolated { LinkServer(id: testID, handler: TestHandler(dir: dir), peerIdentifiers: [peer]) }
+    let server = MainActor.assumeIsolated { LinkServer(id: testID, handler: TestHandler(dir: dir), hubIdentifier: peer) }
     server.resume()
     RunLoop.main.run()
     exit(0)
@@ -329,6 +377,43 @@ func onlyHello(in dir: String, _ label: String) {
             }
         }
         check(recordedCalls(in: dir).isEmpty, "rogue: обработчик сервера не вызывался (\(recordedCalls(in: dir)))")
+
+    case "selfcopy":
+        // Процесс с identifier самой утилиты (Finder). Служба центра его не пускает совсем; своя служба пускает
+        // и умеет одно: окно. Раньше его определяли по pid уже после соединения.
+        let client = LinkClient(id: testID)
+        for (name, call) in [("hello", { _ = try await client.hello() }), ("setEnabled", { try await client.setEnabled(true) }),
+                            ("moduleState", { _ = try await client.moduleState() }),
+                            ("moduleAction", { _ = try await client.moduleAction(Data([1])) }),
+                            ("watch", { client.setWatch(.screen); _ = try await client.status() }),
+                            ("quit", { try await client.quit(.uninstall) }),
+                            ("openWindow", { try await client.openWindow() })] as [(String, () async throws -> Void)] {
+            do {
+                try await call()
+                check(false, "копия утилиты: \(name) на службе центра не должен пройти")
+            } catch {
+                check((error as? LinkError) != .timeout, "копия утилиты: \(name) на службе центра отвергнут сразу (\(error))")
+            }
+        }
+        check(recordedCalls(in: dir).isEmpty, "копия утилиты: служба центра ничего не получила (\(recordedCalls(in: dir)))")
+        do {
+            try await LinkSelfClient.openWindow(id: testID)
+            check(true, "копия утилиты: окно через свою службу")
+        } catch {
+            check(false, "копия утилиты: окно через свою службу (\(error))")
+        }
+        await pause(0.2)
+        check(recordedCalls(in: dir) == ["openWindow"], "копия утилиты: на сервере только openWindow (\(recordedCalls(in: dir)))")
+
+    case "hub-on-self":
+        // Центр на службу копии не ходит: её требование — только сама утилита.
+        do {
+            try await LinkSelfClient.openWindow(id: testID)
+            check(false, "центр на службе копии не должен пройти")
+        } catch {
+            check((error as? LinkError) != .timeout, "центр на службе копии отвергнут сразу (\(error))")
+        }
+        check(recordedCalls(in: dir).isEmpty, "центр на службе копии: обработчик не вызывался (\(recordedCalls(in: dir)))")
 
     case "rejected":
         let client = LinkClient(id: testID)

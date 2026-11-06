@@ -23,7 +23,7 @@ forbid_timers Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satelli
 
 build_utility
 build_module_hub Tests/ClipboardRemoteCheck.swift
-# Копия самой утилиты (так запускает её Finder): слушатель её пускает, ключ она передать не должна.
+# Копия самой утилиты (так запускает её Finder): служба центра её не пускает вовсе.
 cp "$OUT/hub-build" "$OWNCOPY"
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$IDENTIFIER" "$OWNCOPY" 2>/dev/null
 
@@ -49,7 +49,7 @@ echo "== чужая подпись и копия утилиты"
 check_foreign_rejected
 BEFORE="$("$HUB" state)"
 COPY="$("$OWNCOPY" own-copy "$OUT" || true)"
-same "копия утилиты: ключ не принят, состояние то же" "$COPY" "received=false stateSame=true"
+same "копия утилиты: служба центра закрыта, ни состояния, ни ключа" "$COPY" "stateRefused=true actionRefused=true"
 same "после копии утилита всё ещё ждёт ключ" "$("$HUB" state)" "$BEFORE"
 
 echo "== вкладка"
