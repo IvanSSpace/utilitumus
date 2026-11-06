@@ -38,6 +38,8 @@ echo "== активная утилита ждёт ключ"
 satellite_reset_suite
 defaults write "$SUITE" Test.HubRunning -bool false
 defaults write "$SUITE" "App.$ID.Enabled" -bool true
+# Доступ к управлению компьютером у утилиты под launchd и у стенда в терминале разный: для пикселей он задан один на обоих.
+defaults write "$SUITE" Test.AXTrusted -bool false
 # Выдуманный ключ прежней записи: в память стенда, не в Связку ключей.
 defaults write "$SUITE" Test.ClipboardLegacyKey -string "$(head -c 32 /dev/urandom | base64)"
 start_agent

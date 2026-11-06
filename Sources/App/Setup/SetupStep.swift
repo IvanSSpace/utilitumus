@@ -115,7 +115,7 @@ extension SetupStep {
     @MainActor static func accessibility(id: String, why: String, required: Bool = true,
                                          request: @escaping @MainActor () -> Void) -> SetupStep {
         SetupStep(id: id, title: "Универсальный доступ", why: why, kind: .permission, icon: "lock.shield.fill",
-                  required: required, isDone: { AXIsProcessTrusted() }, perform: request)
+                  required: required, isDone: { Kit.accessTrusted() }, perform: request)
     }
 
     /// Браузер по умолчанию — наш помощник ссылок.
