@@ -47,8 +47,10 @@ cat > "$OUT/src/stub.c" <<'STUB'
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "version") == 0) { puts("3"); return 0; }
+  if (getenv("FAN_TEST_STUB_SLOW")) sleep(3);
   char path[2048];
   snprintf(path, sizeof path, "%s/legacy.log", getenv("FAN_TEST_DIR"));
   FILE *log = fopen(path, "a");
@@ -240,9 +242,15 @@ ok "чужая подпись и прежняя версия с нашей по�
 echo "== прежний setuid-помощник"
 : > "$OUT/legacy.log"
 "$OUT/pure" legacy "$OUT/stub-old" 0 1 || fail "помощник с верной подписью не запустился"
-[ "$(cat "$OUT/legacy.log")" = "auto 0
+[ "$(sort "$OUT/legacy.log")" = "auto 0
 auto 1" ] || fail "прежний помощник получил не то: $(cat "$OUT/legacy.log")"
 ok "верная подпись: auto каждому вентилятору"
+: > "$OUT/legacy.log"
+env FAN_TEST_STUB_SLOW=1 "$OUT/pure" legacy-bounded "$OUT/stub-old"
+sleep 3
+[ "$(sort "$OUT/legacy.log")" = "auto 0
+auto 1" ] || fail "клиент вышел, прежний помощник не доделал: $(cat "$OUT/legacy.log")"
+ok "помощник завис на 3 с: выход не ждёт, запущенные доделывают обоим вентиляторам"
 for bad in stub-adhoc stub-foreign; do
   : > "$OUT/legacy.log"
   if "$OUT/pure" legacy "$OUT/$bad" 0 1 > /dev/null; then fail "$bad принят"; fi
@@ -275,7 +283,31 @@ case "$text" in *"/Library/"*|*"/bin/launchctl"*) fail "в скрипте уда
 grep -q "launchctl bootout system/local.utilitumus.fan" "$SB/calls.log" || fail "удаление не сняло службу"
 [ ! -e "$SB/daemons/local.utilitumus.fan.plist" ] || fail "удаление оставило плист"
 [ ! -e "$SB/tools/local.utilitumus.fan" ] || fail "удаление оставило бинарник"
-ok "удаление снимает службу, плист и бинарник"
+[ "$(mode "$SB/hardlink")" = 0755 ] || fail "удаление: жёсткая ссылка осталась с setuid"
+ok "удаление снимает службу, плист и бинарник, жёсткая ссылка без setuid"
+
+echo "== отравленное окружение оболочки"
+printf '/usr/bin/touch "%s/pwn-env"\n' "$OUT" > "$OUT/poison.sh"
+chmod +x "$OUT/poison.sh"
+clean_pwn() { rm -f "$OUT"/pwn-* "$OUT/ran"; }
+# Контроль: без защиты отрава срабатывает. Иначе проверка ниже ничего бы не значила.
+clean_pwn
+"$OUT/pure" poison raw "$OUT"
+[ -e "$OUT/pwn-func" ] || fail "контроль: BASH_FUNC_ не сработал, проверка слепа"
+[ -e "$OUT/pwn-ps4" ] || fail "контроль: PS4 не сработал, проверка слепа"
+ok "контроль: без защиты отрава исполняется (функция и PS4)"
+# Одного env -i мало: внешняя оболочка читает окружение раньше него.
+clean_pwn
+"$OUT/pure" poison env-only "$OUT"
+[ -e "$OUT/pwn-ps4" ] || fail "контроль: PS4 не сработал во внешней оболочке"
+ok "контроль: при одном env -i PS4 срабатывает во внешней оболочке, поэтому окружение чистится и в процессе"
+clean_pwn
+"$OUT/pure" poison full "$OUT"
+[ -e "$OUT/ran" ] || fail "скрипт-пустышка не выполнился"
+for pwn in pwn-func pwn-ps4 pwn-env; do
+  [ ! -e "$OUT/$pwn" ] || fail "отрава сработала: $pwn"
+done
+ok "чистка окружения и env -i: скрипт выполнен, отрава нет"
 
 # agent <программа> [переменная окружения]: снимает прошлый агент, ставит этот, журнал с нуля.
 agent() {
@@ -371,6 +403,8 @@ F1Md=0" ] || fail "клиент вышел, служба не доделала �
 ok "клиент вышел, служба доделала команды обоим вентиляторам"
 agent daemon
 role hub "quit busy"
+agent daemon FAN_TEST_SLOW_HELLO
+role hub cancel-after-handshake
 
 echo "== выход без подключений"
 agent daemon

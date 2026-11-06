@@ -79,7 +79,8 @@ final class Updater: ObservableObject {
         Task {
             do {
                 try await Self.downloadAndReplace(from: url, expectedVersion: version,
-                                                  target: Bundle.main.bundleURL)
+                                                  target: Bundle.main.bundleURL,
+                                                  beforeReplace: { FanController.shared.restoreAutoBlocking() })
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)
@@ -124,7 +125,10 @@ final class Updater: ObservableObject {
     /// Скачивает zip, распаковывает, проверяет, что внутри именно Utilitumus
     /// нужной версии с целой подписью, и подменяет `target`. Старая версия
     /// удаляется только после успешной подмены.
-    nonisolated static func downloadAndReplace(from url: URL, expectedVersion: String, target: URL) async throws {
+    nonisolated static func downloadAndReplace(
+        from url: URL, expectedVersion: String, target: URL,
+        beforeReplace: @escaping @MainActor @Sendable () -> Void
+    ) async throws {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("utilitumus-update-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -167,6 +171,8 @@ final class Updater: ObservableObject {
         let staged = target.deletingLastPathComponent().appendingPathComponent("Utilitumus.app.new")
         try? fm.removeItem(at: staged)
         try fm.copyItem(at: app, to: staged)
+        // После подмены бандла на диске служба может не принять этот процесс по подписи: «Авто» при выходе не дойдёт.
+        await beforeReplace()
         _ = try fm.replaceItemAt(target, withItemAt: staged)
     }
 

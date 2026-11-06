@@ -207,6 +207,13 @@ final class FanController: ObservableObject {
         if pendingPersist != nil { persist() }
         guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
         let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
+        // Службы при setuid-установке нет, XPC ничего бы не дал. Убрать вместе с поддержкой setuid.
+        if FanHelperInstaller.shared.status == .outdated, FanHelperInstaller.shared.hasLegacySetuid {
+            LegacyFanHelper.restoreAutoWithin(fans: manual, path: FanHelperInstaller.installedPath, on: Self.helperQueue) { error in
+                Self.log("прежний помощник auto \(manual) → \(error ?? "ok")")
+            }
+            return
+        }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
         FanHelperClient.sendAll(manual.map { .auto($0) }, on: Self.helperQueue) { Self.logHelper($0, $1) }
     }

@@ -55,18 +55,17 @@ enum FanHelperClient {
         defer { connection.invalidate() }
         do {
             _ = try handshake(connection, deadline)
+            // Пока шло рукопожатие, выход мог отменить такие команды.
+            if case .set = command, setsStopped.value { return Failure.cancelled.localizedDescription }
             return try deliver(command, connection).wait(until: deadline)
         } catch {
             return error.localizedDescription
         }
     }
 
-    /// Для выхода: через `queue`, чтобы идти после уже отправленных, и не дольше `budget` на всё. Если очередь
-    /// занята дольше половины срока, команды уходят мимо неё, а `set`, стоящие в ней, отменяются: иначе они
-    /// перебили бы «Авто». Отмена снимается, когда очередь дойдёт до нашего места: всё, что поставят после, идёт как обычно.
-    /// После рукопожатия команды уходят сразу все, не дожидаясь ответов: служба выполняет их по одной и
-    /// по секунде на зависший вентилятор, так что по очереди второй мог бы не успеть уйти. Ушедшие служба
-    /// доделает, даже если клиента уже нет.
+    /// Для выхода: через `queue`, чтобы идти после уже отправленных. После рукопожатия команды уходят сразу все,
+    /// не дожидаясь ответов: служба выполняет их по одной и по секунде на зависший вентилятор, так что по очереди
+    /// второй мог бы не успеть уйти. Ушедшие служба доделает, даже если клиента уже нет.
     static func sendAll(
         _ commands: [Command],
         on queue: DispatchQueue,
@@ -76,10 +75,7 @@ enum FanHelperClient {
         // Пустой список — обычный случай: подключение подняло бы root-службу без дела.
         guard !commands.isEmpty else { return }
         let deadline = DispatchTime.now() + budget
-        let done = DispatchSemaphore(value: 0)
-        let claimed = Latch()
-        let deliverAll: @Sendable () -> Void = {
-            defer { done.signal() }
+        runBounded(on: queue, within: budget) {
             let connection = open()
             defer { connection.invalidate() }
             do {
@@ -96,16 +92,29 @@ enum FanHelperClient {
                 }
             }
         }
+    }
+
+    /// Работа через `queue`, но ждём не дольше `budget`. Если очередь занята дольше половины срока, работа идёт
+    /// мимо неё, а `set`, стоящие в ней, отменяются: иначе они перебили бы «Авто». Отмена снимается, когда очередь
+    /// дойдёт до нашего места: всё, что поставят после, идёт как обычно.
+    static func runBounded(on queue: DispatchQueue, within budget: TimeInterval = quitBudget, work: @escaping @Sendable () -> Void) {
+        let deadline = DispatchTime.now() + budget
+        let done = DispatchSemaphore(value: 0)
+        let claimed = Latch()
+        let finishing: @Sendable () -> Void = {
+            work()
+            done.signal()
+        }
         queue.async {
-            if claimed.take() { deliverAll() } else { setsStopped.value = false }
+            if claimed.take() { finishing() } else { setsStopped.value = false }
         }
         guard done.wait(timeout: .now() + budget / 2) == .timedOut else { return }
         // Флаг раньше захвата: иначе очередь могла бы снять его раньше, чем он поставлен, и set остались бы отменены навсегда.
         setsStopped.value = true
         if claimed.take() {
-            DispatchQueue(label: "utilitumus.fans.quit").async(execute: deliverAll)
+            DispatchQueue(label: "utilitumus.fans.quit").async(execute: finishing)
         } else {
-            // Очередь успела: команды уже идут оттуда, служба просто отвечает долго.
+            // Очередь успела: работа уже идёт оттуда, она просто долгая.
             setsStopped.value = false
         }
         _ = done.wait(timeout: deadline)

@@ -171,32 +171,47 @@ final class FanHelperInstaller: ObservableObject {
             "/bin/cp -X \(shQuote(source)) \"$T\"",
             "/usr/sbin/chown root:wheel \"$T\"",
             "/bin/chmod 0755 \"$T\"",
-            "(\(verify)) || { echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
+            "(\(verify)) || { /bin/echo 'Подпись помощника не совпала с подписью автора' >&2; exit 1; }",
             // Запускать можно только после проверки подписи. Подменённая более старая сборка с нашей подписью не пройдёт.
-            "[ \"$(\"$T\" version)\" = \(shQuote(FanLink.helperVersion)) ] || { echo 'Версия помощника не совпала с приложением' >&2; exit 1; }",
+            "case \"$(\"$T\" version)\" in \(shQuote(FanLink.helperVersion))) ;; *) /bin/echo 'Версия помощника не совпала с приложением' >&2; exit 1 ;; esac",
             // Жёсткая ссылка на старый файл сохранила бы его inode с setuid и после mv.
-            "/bin/chmod 0755 \(shQuote(installedPath)) 2>/dev/null || true",
+            "/bin/chmod 0755 \(shQuote(installedPath)) 2>/dev/null || /usr/bin/true",
             "/bin/mv -f \"$T\" \(shQuote(installedPath))",
             "P=\"$D/plist\"",
             "/usr/bin/printf '%s' \(shQuote(plistXML)) > \"$P\"",
             "/usr/sbin/chown root:wheel \"$P\"",
             "/bin/chmod 0644 \"$P\"",
             "/bin/mv -f \"$P\" \(shQuote(plistPath))",
-            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || true",
+            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || /usr/bin/true",
             // launchd отпускает метку не сразу после bootout.
-            "for i in 1 2 3 4 5 6 7 8 9 10; do /bin/launchctl bootstrap system \(shQuote(plistPath)) && break; [ \"$i\" = 10 ] && exit 1; /bin/sleep 0.3; done",
+            "for i in 1 2 3 4 5 6 7 8 9 10; do /bin/launchctl bootstrap system \(shQuote(plistPath)) && break; case \"$i\" in 10) exit 1 ;; esac; /bin/sleep 0.3; done",
         ].joined(separator: "; ")
     }
 
     nonisolated static var uninstallScript: String {
         [
-            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || true",
+            "/bin/launchctl bootout \(serviceTarget) 2>/dev/null || /usr/bin/true",
             "/bin/rm -f \(shQuote(plistPath))",
+            // Жёсткая ссылка на старый файл сохранила бы его inode с setuid и после rm.
+            "/bin/chmod 0755 \(shQuote(installedPath)) 2>/dev/null || /usr/bin/true",
             "/bin/rm -f \(shQuote(installedPath))",
         ].joined(separator: "; ")
     }
 
     private nonisolated static var serviceTarget: String { "system/\(FanLink.label)" }
+
+    /// Окружение приложения доходит до внешней оболочки `do shell script`, а `/bin/sh` — это bash 3.2: он исполняет
+    /// `PS4` при `SHELLOPTS=xtrace` и берёт функции из `BASH_FUNC_<имя>%%`, в том числе `[` и `echo`. Эта оболочка
+    /// читает окружение раньше, чем сработает `env -i`, поэтому чистить надо и в самом процессе.
+    nonisolated static func scrubRootShellEnvironment() {
+        let functions = ProcessInfo.processInfo.environment.keys.filter { $0.hasPrefix("BASH_FUNC_") }
+        for name in ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "BASH_ENV", "IFS"] + functions { unsetenv(name) }
+    }
+
+    /// Скрипт идёт в оболочку с пустым окружением. Внутри только абсолютные пути и ключевые слова: `PATH` там нет.
+    nonisolated static func adminCommand(_ script: String) -> String {
+        "/usr/bin/env -i /bin/sh -c " + shQuote(script)
+    }
 
     /// Строка в одинарных кавычках для sh: внутренняя `'` → `'\''`.
     private nonisolated static func shQuote(_ s: String) -> String {
@@ -210,9 +225,8 @@ final class FanHelperInstaller: ObservableObject {
 
     private func run(admin shell: String) {
         lastError = nil
-        // Окружение приложения может дойти до оболочки root: с такими переменными она выполнила бы чужой код.
-        for name in ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "BASH_ENV", "IFS"] { unsetenv(name) }
-        let source = "do shell script \(Self.appleScriptQuote(shell)) with administrator privileges"
+        Self.scrubRootShellEnvironment()
+        let source = "do shell script \(Self.appleScriptQuote(Self.adminCommand(shell))) with administrator privileges"
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)
         // -128 — пользователь нажал «Отменить», это не ошибка.

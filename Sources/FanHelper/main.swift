@@ -66,6 +66,10 @@ final class FanService: NSObject, FanHelperXPC {
     func version(reply: @escaping (String) -> Void) {
         #if FAN_TEST_FAKE_SMC
         if ProcessInfo.processInfo.environment["FAN_TEST_SILENT"] != nil { return }
+        if ProcessInfo.processInfo.environment["FAN_TEST_SLOW_HELLO"] != nil {
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { reply(FanLink.helperVersion) }
+            return
+        }
         #endif
         reply(FanLink.helperVersion)
     }
