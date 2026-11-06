@@ -10,6 +10,8 @@ protocol RemoteModuleSurface: AnyObject {
     func refresh()
     func dashboardState(base: DashState, status: LinkStatus?) -> DashState
     func performDashboardAction() -> Bool
+    func performDashboardAction(ask: (DashConfirmation) -> Void) -> Bool
+    func setDashboardVisible(_ visible: Bool)
     var menuUsesQuickActions: Bool { get }
 }
 
@@ -22,25 +24,26 @@ enum RemoteModules {
         switch module {
         case .awake: return RemoteAwakeModel.shared
         // sound
-        case .sound: return nil
+        case .sound: return RemoteSoundModel.shared
         // mouse
-        case .mouse: return nil
+        case .mouse: return RemoteMouseModel.shared
         // mixer
-        case .mixer: return nil
+        case .mixer: return RemoteMixerModel.shared
         // stash
-        case .stash: return nil
+        case .stash: return RemoteStashModel.shared
         // keyboard
-        case .keyboard: return nil
+        case .keyboard: return RemoteKeyboardModel.shared
         // browser
+        // Модели нет: экран читает общий домен настроек сам (`RemoteBrowserPage`), карточка идёт из статуса утилиты.
         case .browser: return nil
         // load
-        case .load: return nil
+        case .load: return RemoteLoadModel.shared
         // voice
-        case .voice: return nil
+        case .voice: return RemoteVoiceModel.shared
         // clipboard
-        case .clipboard: return nil
+        case .clipboard: return RemoteClipboardModel.shared
         // fans
-        case .fans: return nil
+        case .fans: return RemoteFansModel.shared
         }
     }
 

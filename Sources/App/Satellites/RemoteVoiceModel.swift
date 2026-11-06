@@ -72,4 +72,14 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
         // Режим уже выключен: лишнее действие не нужно, и утилиту ради него не будят.
         if state.test != nil { send(.endTest) }
     }
+
+    // Карточка та же, что у встроенного: «идёт запись…» приходит флагом в состоянии, строка статуса от записи не меняется.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        if state.recording { return DashState(text: "идёт запись…") }
+        let model = state.selected.title.components(separatedBy: " — ")[0]
+        if self.status(state.selected) != .installed {
+            return DashState(text: "\(hotKeyLabel) · модель не скачана", attention: true)
+        }
+        return DashState(text: "\(hotKeyLabel) · \(model)")
+    }
 }

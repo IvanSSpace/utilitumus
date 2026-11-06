@@ -310,7 +310,14 @@ final class SetupFlow: ObservableObject {
     /// «Сделать всё автоматически»: все наши шаги, потом панель первого недостающего обязательного разрешения.
     func doAll(_ module: Module) {
         let steps = module.setupSteps
-        if module == .keyboard, module.utilitySetupSteps == nil, KeyboardController.shared.isOn(.fnLanguage) {
+        if module == .keyboard, ModuleManager.shared.isExternal(.keyboard) {
+            // Тот же один проход, что у встроенного: два шага по отдельности дёрнули бы настройки дважды.
+            let together = [KeyboardSetupID.globe, KeyboardSetupID.dictation]
+            if steps.contains(where: { together.contains($0.id) && $0.isAutomatic && !$0.isDone() }) {
+                RemoteKeyboardModel.shared.send(.disableAllSystemActions)
+            }
+            for step in steps where !together.contains(step.id) && step.isAutomatic && !step.isDone() { step.perform() }
+        } else if module == .keyboard, module.utilitySetupSteps == nil, KeyboardController.shared.isOn(.fnLanguage) {
             // 🌐 и диктовка — одной записью и одним применением: по шагу на каждое дёргало систему
             // дважды, и macOS показывала окно «Включить диктовку?».
             KeyboardController.shared.disableAllSystemActions()

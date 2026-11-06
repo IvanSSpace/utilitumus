@@ -68,4 +68,34 @@ final class RemoteFansModel: RemoteModuleModel<FansState, FansAction>, FansModel
         guard !key.hasPrefix("exe:"), let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key) else { return nil }
         return GameModeController.smallIcon(NSWorkspace.shared.icon(forFile: url.path))
     }
+
+    // MARK: Дашборд
+
+    // Карточка и меню те же, что у встроенного: градусы, обороты и режим не помещаются в строку статуса.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        if safetyTripped { return DashState(text: "перегрев · вентиляторами управляет система", attention: true) }
+        var parts: [String] = []
+        if let t = cpuMax { parts.append("\(Int(t.rounded()))°") }
+        if fullPower {
+            parts.append("Макс")
+        } else {
+            let modes = Set(configs.map(\.mode))
+            parts.append(modes.count > 1 ? "Разные режимы" : (modes.first ?? .auto).title)
+        }
+        if let rpm = fans.map(\.actual).max() { parts.append("\(Int(rpm.rounded())) об/мин") }
+        var state = DashState(text: parts.joined(separator: " · "))
+        // Без доступа помощника кнопка ничего бы не сделала.
+        if helperStatus == .ready && conflict == nil {
+            state.actionTitle = fullPower ? "Авто" : "Максимум"
+            state.actionIcon = fullPower ? "arrow.uturn.backward" : "wind"
+        }
+        return state
+    }
+
+    override func performDashboardAction() -> Bool {
+        if helperStatus == .ready && conflict == nil { fullPower.toggle() }
+        return true
+    }
+
+    override var menuUsesQuickActions: Bool { false }
 }

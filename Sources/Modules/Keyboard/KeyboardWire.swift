@@ -24,6 +24,12 @@ struct KeyboardState: Codable, Equatable, Sendable {
 }
 
 /// Что экран и чек-лист настройки могут попросить. Больше утилита ничего не примет.
+/// Шаги чек-листа, которые снимают системные настройки. Центр знает их id, чтобы выполнить оба одним действием.
+enum KeyboardSetupID {
+    static let globe = "keyboard.globe"
+    static let dictation = "keyboard.dictation"
+}
+
 enum KeyboardAction: Codable, Equatable, Sendable {
     case setFeature(feature: KeyboardFeature, on: Bool)
     case setTrigger(FnTrigger)

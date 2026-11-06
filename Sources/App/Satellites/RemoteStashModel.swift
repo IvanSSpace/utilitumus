@@ -19,7 +19,7 @@ final class RemoteStashModel: RemoteModuleModel<StashState, StashAction>, StashM
                    initial: StashState(running: [], stubborn: [],
                                        stashed: stashed.map { StashState.Stashed(bundleID: $0.bundleID, name: $0.name, windowCount: $0.windows.count) },
                                        usage: [:], scenarios: scenarios, busy: nil, report: nil),
-                   baseWatch: .none, canRead: canRead,
+                   baseWatch: .none, dashboardWatch: .changes, canRead: canRead,
                    optimistic: { state, action in
                        // Закрытие, возврат и замер — забота утилиты: их ход виден по её ответу.
                        switch action {
@@ -83,6 +83,38 @@ final class RemoteStashModel: RemoteModuleModel<StashState, StashAction>, StashM
         stashedIcons[id] = icon
         return icon
     }
+
+    // MARK: Дашборд
+
+    // Карточка и меню те же, что у встроенного: число отмеченных программ и «Вернуть (N)» не помещаются в строку статуса.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        if !state.stashed.isEmpty {
+            return DashState(text: "спрятано \(state.stashed.count) · можно вернуть",
+                             actionTitle: "Вернуть", actionIcon: "arrow.uturn.backward")
+        }
+        if let busy { return DashState(text: busy) }
+        let selected = selectedBundleIDs
+        guard !selected.isEmpty else { return DashState(text: "нет программ для закрытия") }
+        let freed = selected.reduce(0.0) { $0 + (usage[$1]?.memoryMB ?? 0) }
+        let tail = freed > 0 ? " · ≈ \(memoryText(freed))" : ""
+        return DashState(text: "выбрано \(selected.count)\(tail)", actionTitle: "Спрятать", actionIcon: "archivebox")
+    }
+
+    override func performDashboardAction(ask: (DashConfirmation) -> Void) -> Bool {
+        if !state.stashed.isEmpty {
+            Task { await restore() }
+        } else {
+            // Закрытие программ — только через подтверждение, как на экране Стеша.
+            ask(DashConfirmation(
+                title: "Закрыть \(programs(selectedBundleIDs.count))?",
+                message: selectedNames.joined(separator: ", ") + "\n\nНесохранённое программы спросят сами.",
+                button: "Закрыть и спрятать",
+                run: { [weak self] in Task { await self?.stashSelected() } }))
+        }
+        return true
+    }
+
+    override var menuUsesQuickActions: Bool { false }
 
     // MARK: Действия
 

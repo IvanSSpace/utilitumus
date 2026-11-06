@@ -236,7 +236,7 @@ func caseName(_ action: VoiceAction) -> String {
     let statuses: [VoiceModelStore.Status] = [.notInstalled, .downloading(progress: 0.25), .verifying, .installed, .failed("ошибка")]
     let state = VoiceState(hotKeyLabel: "⌃⌥Space", hotKeyError: "занято", mode: .hold, micUID: "uid", excludedApps: ["com.example.a"],
                            axTrusted: false, models: statuses.map { VoiceModelRow(model: .gigaam, status: $0) }, selected: .parakeet,
-                           test: VoiceTestState(phrase: "текст", serial: 3))
+                           test: VoiceTestState(phrase: "текст", serial: 3), recording: true)
     check(roundTrips(state), "состояние со всеми полями и статусами: JSON туда и обратно")
     var bare = state
     bare.hotKeyError = nil

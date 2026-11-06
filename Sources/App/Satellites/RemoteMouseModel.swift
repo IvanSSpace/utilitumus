@@ -39,6 +39,16 @@ final class RemoteMouseModel: RemoteModuleModel<MouseState, MouseAction>, MouseM
     var tapActive: Bool { state.tapActive }
     func refreshAccess() { send(.refreshAccess) }
 
+    // Карточка та же, что у встроенного: настройки из состояния.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        let s = settings
+        guard s.needsTap else { return DashState(text: "всё как в системе") }
+        var parts: [String] = []
+        if s.mouseDirection == .reversed || s.magicMouseDirection == .reversed { parts.append("прокрутка обратная") }
+        if s.smoothEnabled { parts.append("плавность \(Int((s.smoothness * 100).rounded())) %") }
+        return DashState(text: parts.joined(separator: " · "))
+    }
+
     var settings: MouseSettings {
         get { state.settings }
         set {

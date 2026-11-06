@@ -11,7 +11,7 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
                                        primaryInputUID: PrimaryInputStore.shared.primaryUID,
                                        outputChoice: PrimaryOutputStore.shared.choice,
                                        isBluetoothLocked: LockState.shared.isLocked),
-                   canRead: canRead,
+                   dashboardWatch: .changes, canRead: canRead,
                    // Выбор виден сразу, как у встроенного. Отказ утилиты (нет устройства, Bluetooth под замком) откатит его.
                    optimistic: { state, action in
                        switch action {
@@ -49,4 +49,9 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
     func selectInput(uid: String) { send(.selectInput(uid)) }
     func selectOutput(uid: String) { send(.selectOutput(uid)) }
     func selectSystemOutput() { send(.selectSystemOutput) }
+
+    // Карточка та же, что у встроенного: имя микрофона берётся из состояния, оно меняется со сменой устройства.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        DashState(text: currentInputName == "—" ? "слежу за микрофоном" : currentInputName)
+    }
 }

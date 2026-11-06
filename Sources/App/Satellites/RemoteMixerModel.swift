@@ -8,7 +8,7 @@ final class RemoteMixerModel: RemoteModuleModel<MixerState, MixerAction>, MixerM
     init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         super.init(id: id,
                    initial: MixerState(apps: [], idleApps: [], presetApps: [], otherApps: [], permissionProblem: false, lastError: nil),
-                   link: link, canRead: canRead,
+                   dashboardWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        func edit(_ id: String, _ change: (inout MixerAppState) -> Void) {
                            for list in [\MixerState.apps, \.idleApps, \.presetApps, \.otherApps] {
@@ -46,4 +46,13 @@ final class RemoteMixerModel: RemoteModuleModel<MixerState, MixerAction>, MixerM
     func reset(_ id: String) { send(.reset(id: id)) }
     func commitVolumes() { send(.commitVolumes) }
     func setScreenVisible(_ value: Bool) {}
+
+    // Карточка та же, что у встроенного: играющие программы и громкость не помещаются в строку статуса.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        let apps = state.apps
+        guard let first = apps.first else { return DashState(text: "сейчас ничего не играет") }
+        let volume = first.volume < 0.995 ? " · \(Int((first.volume * 100).rounded())) %" : ""
+        if apps.count == 1 { return DashState(text: "играет \(first.name)\(volume)") }
+        return DashState(text: "играют \(first.name) и ещё \(apps.count - 1)")
+    }
 }

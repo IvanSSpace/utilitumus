@@ -77,8 +77,8 @@ final class KeyboardModule: SatelliteModule {
     }
 
     static let inputStep = "keyboard.input"
-    static let globeStep = "keyboard.globe"
-    static let dictationStep = "keyboard.dictation"
+    static let globeStep = KeyboardSetupID.globe
+    static let dictationStep = KeyboardSetupID.dictation
 
     func performSetupStep(_ id: String) -> String? {
         switch id {

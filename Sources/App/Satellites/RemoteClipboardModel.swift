@@ -28,7 +28,7 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
                                                                           modifiers: ClipboardController.defaultModifiers),
                                            hotKeyError: nil, storeError: nil, storeNotice: nil,
                                            limit: ClipboardPolicy.defaultLimit, excludedApps: [], axTrusted: false),
-                   link: link, canRead: canRead,
+                   dashboardWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setLimit(let value): state.limit = value
@@ -70,6 +70,16 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
         case .failed(let reason): return reason
         }
     }
+
+    // MARK: Дашборд
+
+    // Карточка и меню те же, что у встроенного: число записей, без кнопки и без пункта меню.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        if storeError != nil { return DashState(text: "нет ключа шифрования", attention: true) }
+        return DashState(text: "\(hotKeyLabel) · \(totalCount) записей")
+    }
+
+    override var menuUsesQuickActions: Bool { false }
 
     // MARK: ClipboardModel
 

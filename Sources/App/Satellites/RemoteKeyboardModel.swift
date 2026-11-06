@@ -17,7 +17,7 @@ final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction
                        systemUsage: nil, secureInputApp: nil, logTail: [], logCount: 0, repairResult: nil, layouts: [],
                        newAppLayout: defaults.string(forKey: "Keyboard.AppLayout.NewStart"),
                        excludedApps: defaults.stringArray(forKey: "Keyboard.AppLayout.Excluded") ?? []),
-                   canRead: canRead,
+                   dashboardWatch: .changes, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setFeature(let feature, let on):
@@ -67,4 +67,19 @@ final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction
     func copyLog() { send(.copyLog) }
     func refreshAccess() { send(.refreshAccess) }
     func refreshSystem() { send(.refreshSystem) }
+
+    // Карточка та же, что у встроенного: текущий язык и защищённый ввод не помещаются в строку статуса.
+    override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {
+        let fn = isOn(.fnLanguage), perApp = isOn(.perAppLayout)
+        guard fn || perApp else { return DashState(text: "нет включённых фишек", attention: true) }
+        if fn {
+            guard tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
+            if let app = secureInputApp {
+                return DashState(text: "Сейчас Fn не слышно: защищённый ввод в \(app)", attention: true)
+            }
+            if (systemUsage ?? 0) != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
+        }
+        if fn && perApp { return DashState(text: "\(KeyboardFeature.fnLanguage.shortName) · \(KeyboardFeature.perAppLayout.shortName)") }
+        return DashState(text: fn ? currentName : "\(KeyboardFeature.perAppLayout.shortName) · \(currentName)")
+    }
 }
