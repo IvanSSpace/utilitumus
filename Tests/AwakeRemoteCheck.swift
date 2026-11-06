@@ -10,6 +10,20 @@ let moduleID = "test.awake"
 let assertionName = "Utilitumus: Keep Awake"
 let unknownAction = #"{"explode":{}}"#
 let badDuration = #"{"setDuration":{"_0":12345}}"#
+/// Не одно известное действие: разбор отказывает, сколько бы известного в этом ни было.
+let notOneAction: [(String, String)] = [
+    ("чужой ключ рядом", #"{"toggle":{},"x":1}"#),
+    ("чужой ключ рядом со значением", #"{"setDuration":{"_0":3600},"x":1}"#),
+    ("два действия", #"{"toggle":{},"setKeepDisplay":{"_0":true}}"#),
+    ("чужой ключ внутри toggle", #"{"toggle":{"x":1}}"#),
+    ("чужой ключ внутри действия", #"{"setKeepDisplay":{"_0":true,"x":1}}"#),
+    ("действие без значения", #"{"setDuration":{}}"#),
+    ("значение не того типа", #"{"setKeepDisplay":{"_0":1}}"#),
+    ("toggle не объект", #"{"toggle":1}"#),
+    ("пустой объект", "{}"),
+    ("массив", #"[{"toggle":{}}]"#),
+]
+let repeatedKey = #"{"setDuration":{"_0":3600},"setDuration":{"_0":0}}"#
 
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
@@ -186,6 +200,9 @@ func wirePure() {
     let foreign = #"{"isActive":false,"keepDisplay":false,"duration":12345,"canStart":true}"#
     check((try? JSONDecoder().decode(AwakeState.self, from: Data(foreign.utf8))) == nil, "состояние с чужой длительностью центр не принимает")
     check((try? JSONDecoder().decode(AwakeAction.self, from: Data(unknownAction.utf8))) == nil, "неизвестное действие не разбирается")
+    for (name, payload) in notOneAction {
+        check((try? JSONDecoder().decode(AwakeAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается: \(payload)")
+    }
 }
 
 /// Мусор доходит до утилиты: ответ — ошибка, состояние то же байт в байт.
@@ -197,6 +214,8 @@ func wirePure() {
         ("пустое", Data()),
         ("неизвестное действие", Data(unknownAction.utf8)),
         ("длительность 12345", Data(badDuration.utf8)),
+        ("повтор ключа", Data(repeatedKey.utf8)),
+    ] + notOneAction.map { ($0.0, Data($0.1.utf8)) } + [
         ("слишком длинное", Data(#"{"toggle":{}, "x":""#.utf8) + Data(repeating: 0x61, count: 100_000) + Data(#""}"#.utf8)),
     ]
     for (name, payload) in cases {
@@ -208,8 +227,10 @@ func wirePure() {
         } catch {
             check(false, "\(name): \(error)")
         }
+        // Значения, не байты: JSONEncoder от раза к разу меняет порядок ключей.
+        let decode = { (data: Data?) in data.flatMap { try? JSONDecoder().decode(AwakeState.self, from: $0) } }
         let after = try? await link.moduleState()
-        check(after == before, "\(name): состояние не изменилось")
+        check(decode(after) != nil && decode(after) == decode(before), "\(name): состояние не изменилось")
     }
 }
 
@@ -410,8 +431,12 @@ enum Main {
                     exit(3)
                 }
             case "state":
+                // С упорядоченными ключами: скрипт сравнивает строки, а JSONEncoder от раза к разу меняет порядок.
                 let data = (try? await LinkClient(id: moduleID).moduleState()) ?? Data()
-                print(String(decoding: data, as: UTF8.self))
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                let state = try? JSONDecoder().decode(AwakeState.self, from: data)
+                print(state.flatMap { try? encoder.encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? "")
                 exit(0)
             case "idle":
                 await idle(out: args[2])
