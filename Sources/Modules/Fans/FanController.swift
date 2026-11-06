@@ -517,7 +517,7 @@ final class FanController: ObservableObject {
             try? FileManager.default.removeItem(at: url)
         }
         // Каталог 0700, файл 0600 — журнал не должны читать другие пользователи мака.
-        ActionLog.preparePrivate(file: url)
+        PrivateLog.prepare(file: url)
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(data); try? handle.close()
         }
