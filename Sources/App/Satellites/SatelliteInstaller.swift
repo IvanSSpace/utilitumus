@@ -75,7 +75,7 @@ final class SatelliteInstaller {
     }
 
     static let liveVerify: (URL, String) throws -> Void = {
-        try KitSigning.verifySignature(of: $0, identifier: $1, strict: true)
+        try KitSigning.verifyApp($0, identifier: $1)
     }
 
     init(

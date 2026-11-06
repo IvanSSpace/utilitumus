@@ -34,7 +34,7 @@ enum SatelliteSelfUpdate {
         try KitSigning.rejectWritableModes(in: staged)
 
         let identifier = KitLink.bundleID(app.id)
-        try KitSigning.verifySignature(of: staged, identifier: identifier, strict: true)
+        try KitSigning.verifyApp(staged, identifier: identifier)
         let info = NSDictionary(contentsOf: staged.appendingPathComponent("Contents/Info.plist"))
         guard info?["CFBundleIdentifier"] as? String == identifier, info?["CFBundleShortVersionString"] as? String == app.version else {
             throw KitSigning.Failure("В архиве обновления не та версия")

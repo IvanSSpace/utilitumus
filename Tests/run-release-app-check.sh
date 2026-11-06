@@ -140,6 +140,8 @@ chmod +x "$FAKE/gh" "$FAKE/launchctl" "$OUT/curl-stub" "$NOCERT/security"
 G=(/usr/bin/git -C "$FX" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test -c user.email=test@example.invalid)
 mkdir -p "$FX/scripts" "$FX/Sources/Apps/Awake" "$FX/Sources/Modules/Awake" "$FX/Catalog" "$FX/Resources"
 cp scripts/build-app.sh scripts/release-app.sh "$FX/scripts/"
+cp install.sh "$FX/install.sh"
+echo '{}' > "$FX/Sources/Apps/Awake/manifest.json"
 cp -R Sources/Kit "$FX/Sources/Kit"
 cp Info.plist "$FX/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$FX/Resources/"
@@ -162,6 +164,7 @@ cat > "$FX/Sources/Apps/Awake/Info.plist" <<'EOF'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.0.0</string>
 <key>LSUIElement</key><true/>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 </dict></plist>
 EOF
 cat > "$FX/Catalog/catalog.json" <<'EOF'
@@ -208,6 +211,9 @@ refused "версия с мусором" "верси" "$BA" awake Awake 1.2.x "$
 refused "версия, которая не влезает в число" "верси" "$BA" awake Awake 1.9999999999999999999 "$OUT/x"
 refused "нет исходников" "Sources/Apps/Nope" "$BA" nope Nope 1.2.3 "$OUT/x"
 refused "мало аргументов" "build-app.sh" "$BA" awake Awake
+mv "$FX/Sources/Apps/Awake/manifest.json" "$OUT/manifest.keep"
+refused "нет манифеста" "manifest.json" "$BA" awake Awake 1.2.3 "$OUT/x"
+mv "$OUT/manifest.keep" "$FX/Sources/Apps/Awake/manifest.json"
 check "после отказов папка вывода не создана" test ! -e "$OUT/x"
 
 # Относительный путь — от вызывающего, чужое в папке вывода цело, umask вызывающего не важен.
