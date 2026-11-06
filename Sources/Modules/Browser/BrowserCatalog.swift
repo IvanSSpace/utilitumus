@@ -43,13 +43,53 @@ enum BrowserHelper {
         Bundle.main.bundleIdentifier == defaultsDomain ? .standard : (UserDefaults(suiteName: defaultsDomain) ?? .standard)
     }
 
-    /// Включённость модуля пишет ModuleManager Utilitumus (`ModuleOn.browser`); нет ключа — выключен.
-    static var moduleDisabled: Bool { !defaults.bool(forKey: "ModuleOn.browser") }
+    /// Ключи те же, что у `ModuleManager.onKey`, `ModuleHandover.handedOverKey` и `SatelliteEnabled.key`. Помощник
+    /// собирается без Kit и центра, поэтому строками; совпадение с ними держит Tests/BrowserLinkHandlerCheck.swift.
+    static let moduleOnKey = "ModuleOn.browser"
+    static let fallbackKey = "Browser.Fallback"
+    static let handedOverKey = "App.browser.HandedOver"
+    static let enabledKey = "App.browser.Enabled"
 
-    /// Помощник внутри Utilitumus.app (из самого помощника — он сам).
-    static var appURL: URL {
-        if Bundle.main.bundleIdentifier == bundleID { return Bundle.main.bundleURL }
-        return Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/Utilitumus Links.app")
+    /// Выключен ли модуль. Ссылку может принять любая зарегистрированная копия (помощник центра или утилиты),
+    /// и все читают одно и то же. Модуль у утилиты — решает её выключатель; пока он у центра — тумблер центра;
+    /// центра не было (утилиту поставили отдельно) — выключатель утилиты, если она его уже записала.
+    /// Ни одного ключа — выключен.
+    static var moduleDisabled: Bool { moduleDisabled(in: defaults) }
+
+    static func moduleDisabled(in defaults: UserDefaults) -> Bool {
+        let enabled = defaults.object(forKey: enabledKey) as? Bool
+        if defaults.bool(forKey: handedOverKey) {
+            // Утилита ещё не записала свой ключ: она возьмёт его у центра (`SatelliteEnabled.load`), по умолчанию включён.
+            return !(enabled ?? defaults.object(forKey: moduleOnKey) as? Bool ?? true)
+        }
+        if let on = defaults.object(forKey: moduleOnKey) as? Bool { return !on }
+        return !(enabled ?? false)
+    }
+
+    static let helperName = "Utilitumus Links.app"
+    static let utilitiesDir = URL(fileURLWithPath: "/Applications/Utilitumus", isDirectory: true)
+
+    /// Копия помощника, на которую центр и утилита ссылаются одинаково (проверка «Сделать основным», тест-ссылка,
+    /// регистрация). Сам помощник — он сам. Иначе копия утилиты, если стоит, а если нет — копия внутри центра:
+    /// путь от `Bundle.main` у центра и у утилиты вёл бы к разным копиям.
+    static var appURL: URL { appURL(mainBundleURL: Bundle.main.bundleURL, mainBundleID: Bundle.main.bundleIdentifier) }
+
+    static func appURL(mainBundleURL: URL, mainBundleID: String?, utilitiesDir: URL = utilitiesDir,
+                       exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> URL {
+        if mainBundleID == bundleID { return mainBundleURL }
+        let utility = utilitiesDir.appendingPathComponent("Browser.app/Contents/Helpers/\(helperName)")
+        if exists(utility) { return utility }
+        return mainBundleURL.appendingPathComponent("Contents/Helpers/\(helperName)")
+    }
+
+    /// Все копии, которые этот процесс знает и должен зарегистрировать: вложенная копия сама в LaunchServices не попадает.
+    static func knownCopies(mainBundleURL: URL = Bundle.main.bundleURL, mainBundleID: String? = Bundle.main.bundleIdentifier,
+                            utilitiesDir: URL = utilitiesDir,
+                            exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }) -> [URL] {
+        if mainBundleID == bundleID { return [mainBundleURL] }
+        let own = mainBundleURL.appendingPathComponent("Contents/Helpers/\(helperName)")
+        let utility = utilitiesDir.appendingPathComponent("Browser.app/Contents/Helpers/\(helperName)")
+        return [utility, own].filter(exists)
     }
 }
 
@@ -63,7 +103,7 @@ final class BrowserCatalog: ObservableObject {
     static let rulesKey = "Browser.Rules"
     static let orderKey = "Browser.Order"
     static let hiddenKey = "Browser.Hidden"
-    static let fallbackKey = "Browser.Fallback"
+    static let fallbackKey = BrowserHelper.fallbackKey
     static let keysKey = "Browser.Keys"
 
     /// Все найденные браузеры в порядке пользователя, включая скрытые.

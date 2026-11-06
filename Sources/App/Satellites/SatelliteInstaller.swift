@@ -10,6 +10,19 @@ struct SatellitePaths {
         agentsDir: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents"))
 }
 
+/// Что нужно знать системе о конкретной утилите, кроме самого бандла. Для «Браузера» это обработчик ссылок, остальным не нужно.
+/// По id утилиты; без записи установщик не трогает ничего, кроме бандла и агента.
+struct SatelliteHooks {
+    /// Бандл уже на месте и агент загружен: сообщить системе о вложенном.
+    var afterInstall: (URL) -> Void = { _ in }
+    /// Перед заменой бандла при обновлении, утилита уже остановлена.
+    var beforeReplace: (URL) -> Void = { _ in }
+    /// До остановки утилиты и удаления. Ошибка отменяет удаление целиком.
+    var beforeRemove: (URL) async throws -> Void = { _ in }
+    /// Утилита остановлена, бандл ещё на месте.
+    var afterQuit: (URL) -> Void = { _ in }
+}
+
 enum SatelliteInstallError: LocalizedError, Equatable {
     case checksum
     case archive(String)
@@ -60,6 +73,7 @@ final class SatelliteInstaller {
     private let download: (URL) async throws -> URL
     private let verify: (URL, String) throws -> Void
     private let link: SatelliteLink
+    private let hooks: [String: SatelliteHooks]
     private let fm = FileManager.default
 
     static let liveLaunchctl: ([String]) throws -> Void = { try KitSigning.run("/bin/launchctl", $0) }
@@ -83,13 +97,15 @@ final class SatelliteInstaller {
         launchctl: @escaping ([String]) throws -> Void,
         download: @escaping (URL) async throws -> URL,
         verify: @escaping (URL, String) throws -> Void,
-        link: SatelliteLink = .live
+        link: SatelliteLink = .live,
+        hooks: [String: SatelliteHooks] = [:]
     ) {
         self.paths = paths
         self.launchctl = launchctl
         self.download = download
         self.verify = verify
         self.link = link
+        self.hooks = hooks
     }
 
     func install(_ app: CatalogApp, name: String) async throws {
@@ -122,6 +138,7 @@ final class SatelliteInstaller {
         if hadBundle { try fm.copyItem(at: bundle, to: oldBundle) }
 
         if updating { await link.quit(app.id, .update) }
+        if updating { hooks[app.id]?.beforeReplace(bundle) }
         var replaced = false
         do {
             try fm.createDirectory(at: paths.appsDir, withIntermediateDirectories: true)
@@ -138,6 +155,7 @@ final class SatelliteInstaller {
             bootout(app.id)
             try await bootstrap(agent)
             if updating { try await waitForHello(app.id) }
+            hooks[app.id]?.afterInstall(bundle)
         } catch {
             let undo = Undo(
                 id: app.id, bundle: bundle, agent: agent,
@@ -154,12 +172,16 @@ final class SatelliteInstaller {
     }
 
     /// Настройки утилиты остаются: они в общем домене и пригодятся при повторной установке.
+    /// `beforeRemove` может отказать (у «Браузера» — не удалось вернуть браузер по умолчанию): тогда утилита остаётся
+    /// как есть, ничего не остановлено и не удалено.
     func remove(id: String, name: String) async throws {
         try Self.check(id: id)
         try Self.check(name: name)
-        await link.quit(id, .uninstall)
-        try removeStaleAgent(id: id)
         let bundle = bundleURL(name)
+        try await hooks[id]?.beforeRemove(bundle)
+        await link.quit(id, .uninstall)
+        hooks[id]?.afterQuit(bundle)
+        try removeStaleAgent(id: id)
         if fm.fileExists(atPath: bundle.path) { try fm.removeItem(at: bundle) }
     }
 
