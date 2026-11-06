@@ -335,6 +335,14 @@ func realFileStamp(_ url: URL?) -> String {
     refuse(.requestStop(.shellChild(shell: id(900015), child: id(900001))), "потомок чужого шелла")
     refuse(.requestStop(.orphan(id(900014))), "сирота без кнопки")
     refuse(.requestStop(.orphan(id(900001))), "процесс не сирота")
+    // Сверка с экраном отказывает сама, не полагаясь на план ниже по цепочке.
+    if let shown = store.measure {
+        check(!shown.offers(.session(id(900013)))
+              && !shown.offers(.process(id(900008))), "сверка с экраном: текущая сессия и строка без кнопки не предлагаются")
+        check(shown.offers(.process(id(900001))) && shown.offers(.session(id(900002))), "сверка с экраном: обычные строки предлагаются")
+    } else {
+        check(false, "у модели есть замер")
+    }
     refuse(.confirmStop(planID: UUID()), "подтверждение без плана")
     refuse(.confirmBackground(planID: UUID()), "подтверждение фонового без плана")
     refuse(.requestAgent(label: "com.other.agent", verb: .stop), "чужая метка агента")
