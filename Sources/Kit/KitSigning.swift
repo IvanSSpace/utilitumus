@@ -29,9 +29,11 @@ enum KitSigning {
     static let securityEpochKey = "UtilitumusSecurityEpoch"
     static let securityEpoch = "1"
 
-    /// Требование к процессу-собеседнику по XPC: центру и утилите. Значение метки должно совпадать с их Info.plist.
+    /// Требование к процессу-собеседнику по XPC: центру и утилите. Метка своей или новее, как у `checkEpoch` и `epoch_ok`
+    /// в install.sh: иначе центр с меткой 1 поставил бы утилиту с меткой 2 и не смог бы с ней говорить. `>=` сравнивает
+    /// как числа (проверено на `codesign -R`: «225» >= «9»), а не как строки.
     static func peerRequirement(identifier: String, leafHash: String) -> String {
-        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] = \"\(securityEpoch)\""
+        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] >= \"\(securityEpoch)\""
     }
 
     /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —
