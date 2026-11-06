@@ -207,7 +207,7 @@ struct ClipboardView: View {
     private var securityLine: some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield.fill").foregroundStyle(.white.opacity(0.5))
-            Text("Записи, скрытые менеджером паролей, и программы из исключений не сохраняются; всё зашифровано, только на этом Mac")
+            Text("Скрытое менеджерами паролей и всё из исключений не сохраняется; остальное зашифровано, только на этом Mac")
                 .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
             Spacer()
             if !controller.axTrusted {
