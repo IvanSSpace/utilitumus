@@ -23,6 +23,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: DS.blockSpacing) {
                         ThemeSection()
                         DockSection()
+                        MenuIconsSection()
                         PageModeSection()
                     }
                 }

@@ -220,6 +220,8 @@ enum LinkQuitReason: Int, Sendable {
     /// `LinkWatch`. Действует, пока живо это соединение.
     func watch(_ level: Int, reply: @escaping @Sendable () -> Void)
     func setEnabled(_ enabled: Bool, reply: @escaping @Sendable () -> Void)
+    /// Свой значок модуля в строке меню (`MenuBarIcon`): сразу, без перезапуска. Только служба центра.
+    func setMenuIcon(_ on: Bool, reply: @escaping @Sendable () -> Void)
     func openWindow(reply: @escaping @Sendable () -> Void)
     /// `LinkQuitReason`.
     func quit(reason: Int, reply: @escaping @Sendable () -> Void)
@@ -244,10 +246,16 @@ enum LinkQuitReason: Int, Sendable {
     func linkModuleAction(_ action: Data) -> Data
     func linkPerformSetupStep(_ id: String) -> Data
     func linkSetEnabled(_ enabled: Bool)
+    func linkSetMenuIcon(_ on: Bool)
     func linkOpenWindow()
     func linkQuit(_ reason: LinkQuitReason)
     /// Открыт ли экран хотя бы у одного соединения. Приходит только при смене.
     func linkScreenOpen(_ open: Bool)
     /// Подписчик пропал. Новый должен узнать, что пора перечитать: его собственный канал ещё не поднят.
     func linkWatcherLost()
+}
+
+extension LinkHandler {
+    /// Утилиты без значка в меню-баре это не касается.
+    func linkSetMenuIcon(_ on: Bool) {}
 }

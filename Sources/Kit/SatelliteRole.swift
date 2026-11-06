@@ -71,6 +71,15 @@ enum SatelliteHub {
         return verified?.version
     }
 
+    /// Бандл проверенного центра: куда вести просьбу «открой модуль». В сборке со швом центра для открытия нет.
+    static var bundleURL: URL? {
+        #if KIT_TEST_DEFAULTS
+        return nil
+        #else
+        return verified?.bundle
+        #endif
+    }
+
     private static var verified: Verified? {
         #if KIT_TEST_DEFAULTS
         let id = Kit.defaults.string(forKey: "Test.HubBundleID") ?? ""

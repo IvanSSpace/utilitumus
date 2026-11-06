@@ -56,7 +56,9 @@ final class SatelliteHost: ObservableObject, LinkHandler {
 
     private var server: LinkServer?
     private var window: NSWindow?
-    private var statusItem: NSStatusItem?
+    private var statusItem: MenuBarIconItem?
+    /// Что показывает переключатель «Значок в строке меню»: явное «да» (пока ключа нет, он выключен).
+    @Published private(set) var menuIconOn = false
     private var subscriptions: Set<AnyCancellable> = []
     private var observers: [NSObjectProtocol] = []
     private var runningApps: NSKeyValueObservation?
@@ -92,11 +94,19 @@ final class SatelliteHost: ObservableObject, LinkHandler {
 
     func run() {
         #if !KIT_TEST_DEFAULTS
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: module.module.icon, accessibilityDescription: title)
-        item.button?.target = self
-        item.button?.action = #selector(statusItemClicked)
-        statusItem = item
+        statusItem = MenuBarIconItem(
+            module: module.module,
+            content: { [weak self] in
+                guard let self else { return .init(status: "", actions: []) }
+                return .init(status: self.statusLine(), actions: self.mode == .active && self.enabled ? self.module.quickActions : [])
+            },
+            perform: { [weak self] quick in _ = self?.module.handle(quick.action) },
+            open: { [weak self] in
+                guard let self else { return }
+                MenuBarIcon.requestOpen(self.module.module, hub: SatelliteHub.bundleURL)
+            },
+            hide: { [weak self] in self?.linkSetMenuIcon(false) },
+            click: { [weak self] in self?.showWindow() })
         #endif
         refresh()
 
@@ -136,11 +146,26 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         enabled = SatelliteEnabled.load(id: id, defaults: Kit.defaults)
         applyRole()
         hubRunning = SatelliteHub.isRunning
-        statusItem?.isVisible = !hubRunning
-        #if KIT_TEST_DEFAULTS
-        fputs("\(title): значок \(hubRunning ? "скрыт" : "виден")\n", stderr)
-        #endif
+        applyMenuIcon()
         announceStatus()
+    }
+
+    /// Значок по сохранённой настройке: без неё он есть, пока центра нет, как и было. Читается при запуске и при смене роли.
+    private func applyMenuIcon() {
+        let setting = MenuBarIcon.setting(module.module)
+        let shows = MenuBarIcon.utilityShows(setting: setting, hubRunning: hubRunning, active: mode == .active)
+        menuIconOn = MenuBarIcon.switchOn(setting)
+        statusItem?.isVisible = shows
+        statusItem?.setUsesMenu(MenuBarIcon.utilityUsesMenu(hubRunning: hubRunning))
+        #if KIT_TEST_DEFAULTS
+        fputs("\(title): значок \(shows ? "виден" : "скрыт")\n", stderr)
+        #endif
+    }
+
+    /// Из окна утилиты и из «Скрыть значок»: записать и применить сразу.
+    func setMenuIcon(_ on: Bool) {
+        MenuBarIcon.set(on, module.module)
+        applyMenuIcon()
     }
 
     /// Пассивная значит остановленная: рядом со встроенным модулем утилита не работает.
@@ -242,6 +267,8 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     }
 
     func linkSetEnabled(_ enabled: Bool) { setEnabled(enabled) }
+    /// Только служба центра: у копии из Finder такого вызова в интерфейсе нет.
+    func linkSetMenuIcon(_ on: Bool) { setMenuIcon(on) }
     func linkOpenWindow() { showWindow() }
 
     func linkQuit(_ reason: LinkQuitReason) {
@@ -255,8 +282,6 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     }
 
     // MARK: - Окно
-
-    @objc private func statusItemClicked() { showWindow() }
 
     private func showWindow() {
         CustomPaletteStore.shared.reload()
@@ -447,15 +472,18 @@ private struct SatelliteBackground: View {
     }
 }
 
-/// Переключатель `App.<id>.Enabled`.
+/// Переключатели `App.<id>.Enabled` и `MenuBarIcon.<id>`.
 private struct SatelliteControls: View {
     @ObservedObject var host: SatelliteHost
     var body: some View {
-        HStack(spacing: 7) {
-            Text(host.enabled ? "Включён" : "Выключен")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(host.enabled ? 0.85 : 0.5))
-            DSToggle("Модуль включён", isOn: Binding(get: { host.enabled }, set: { host.setEnabled($0) }))
+        HStack(spacing: 10) {
+            DSMenuIconSwitch(isOn: Binding(get: { host.menuIconOn }, set: { host.setMenuIcon($0) }))
+            HStack(spacing: 7) {
+                Text(host.enabled ? "Включён" : "Выключен")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(host.enabled ? 0.85 : 0.5))
+                DSToggle("Модуль включён", isOn: Binding(get: { host.enabled }, set: { host.setEnabled($0) }))
+            }
         }
     }
 }
