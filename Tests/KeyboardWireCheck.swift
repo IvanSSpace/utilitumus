@@ -114,6 +114,12 @@ let allActions: [KeyboardAction] = [
                 #"{"addExcluded":{}}"#, #"{"setMode":{"_0":"cycle"},"setMode":{"_0":"lastTwo"}}"#] {
         check(canonicalAction(bad) == nil, "разбор отказывает: \(bad)")
     }
+    // Сам разбор, без сверки с кодированием: вторая сетка не должна прикрывать первую.
+    for bad in [#"{"repair":{},"x":1}"#, #"{"repair":{"x":1}}"#, #"{"repair":{},"copyLog":{}}"#, #"{"setTrigger":{"_0":"onPress","x":1}}"#,
+                #"{"setFeature":{"feature":"fnLanguage","on":true,"x":1}}"#, #"{"setNewAppLayout":{"_0":"a","x":1}}"#,
+                #"{"setNewAppLayout":{"x":1}}"#, #"{"addExcluded":{"_0":"a","x":1}}"#, #"{"setMode":{"_0":1}}"#] {
+        check((try? JSONDecoder().decode(KeyboardAction.self, from: Data(bad.utf8))) == nil, "сам разбор отказывает: \(bad)")
+    }
     check(canonicalAction(#"{"repair":{}}"#) == .repair, "разбор принимает настоящее действие")
 }
 
