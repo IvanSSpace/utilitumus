@@ -10,7 +10,7 @@ private extension Module {
         case .keyboard, .mouse, .load: return "заработала"
         case .fans: return "заработали"
         case .awake: return "заработало"
-        case .sound, .stash, .mixer, .browser, .voice, .clipboard: return "заработал"
+        case .sound, .stash, .mixer, .browser, .voice, .clipboard, .bots: return "заработал"
         }
     }
 }

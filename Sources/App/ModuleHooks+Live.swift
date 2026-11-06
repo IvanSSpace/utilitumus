@@ -73,6 +73,9 @@ extension ModuleHooks {
         case .awake:
             return ModuleHooks(start: { AwakeController.shared.start() },
                                stop: { AwakeController.shared.stop() })
+        case .bots:
+            // Фоном боты не опрашиваются: замеры идут, только пока открыт экран.
+            return ModuleHooks(start: { BotsStore.shared.refresh() }, stop: { BotsStore.shared.shutDown() })
         case .stash:
             // Фоном стеш не работает: подписки он ставит сам, когда открыт экран.
             return ModuleHooks(start: {}, stop: { StashStore.shared.stop() })

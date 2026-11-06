@@ -5,6 +5,7 @@ enum Module: String, CaseIterable, Identifiable {
     case sound, load, stash, fans, mixer, mouse, browser, voice, clipboard
     case keyboard
     case awake
+    case bots
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .clipboard: return "Буфер"
         case .keyboard: return "Клавиатура"
         case .awake: return "Не спать"
+        case .bots: return "Боты"
         }
     }
 
@@ -37,6 +39,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .clipboard: return "doc.on.clipboard.fill"
         case .keyboard: return "keyboard"
         case .awake: return "cup.and.saucer.fill"
+        case .bots: return "paperplane.fill"
         }
     }
 
@@ -55,6 +58,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .clipboard: return .mint
         case .keyboard: return .cyan
         case .awake: return .brown
+        case .bots: return .yellow
         }
     }
 
@@ -72,6 +76,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .clipboard: return "История буфера обмена и цветные пространства для ссылок и текстов. Панель по горячей клавише, всё зашифровано на этом Mac"
         case .keyboard: return "Фишки для клавиатуры: мгновенная смена языка по Fn, раскладка для каждого приложения"
         case .awake: return "Mac не засыпает, пока ты работаешь: на час, на несколько или пока не выключишь"
+        case .bots: return "Боты на этом Mac одним списком: кто работает, сколько памяти, включить, выключить, перезапустить"
         }
     }
 }

@@ -91,7 +91,7 @@ enum StoreCatalog {
         case .clipboard: return [StoreNeed(permission: .accessibility, why: "Чтобы выбранная запись вставлялась сама")]
         case .voice: return [StoreNeed(permission: .microphone, why: "Чтобы слышать тебя; звук остаётся на этом Mac"),
                              StoreNeed(permission: .accessibility, why: "Чтобы текст вставлялся сам, иначе останется нажать ⌘V")]
-        case .sound, .load, .browser, .awake: return []
+        case .sound, .load, .browser, .awake, .bots: return []
         }
     }
 
@@ -109,6 +109,7 @@ enum StoreCatalog {
         case .clipboard: return "История буфера обмена"
         case .keyboard: return "Фишки для клавиатуры и языка"
         case .awake: return "Mac не засыпает за работой"
+        case .bots: return "Боты одним списком"
         }
     }
 
@@ -148,8 +149,6 @@ struct StoreSoon: Identifiable {
     static let all = [
         StoreSoon(id: "battery", title: "Батарея 80%", tagline: "Стоп зарядки на 80%",
                   icon: "battery.75percent", categoryID: "background"),
-        StoreSoon(id: "agents", title: "Агент-центр", tagline: "Агенты в одном окне",
-                  icon: "person.3.fill", categoryID: "ai"),
     ]
 }
 

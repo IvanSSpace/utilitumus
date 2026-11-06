@@ -19,6 +19,7 @@ struct ModuleDetail: View {
             case .stash: RemoteStashPage()
             case .load: RemoteLoadPage()
             case .clipboard: RemoteClipboardPage()
+            case .bots: RemoteBotsPage()
             default: SatellitePage(module: module)
             }
         } else {
@@ -35,6 +36,7 @@ struct ModuleDetail: View {
                 case .clipboard: ClipboardView()
                 case .keyboard: KeyboardView()
                 case .awake: AwakeView(model: AwakeController.shared)
+                case .bots: BotsView(model: BotsStore.shared)
                 }
             }
         }

@@ -170,6 +170,7 @@ enum DashboardLive {
         case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
+        case .bots: return BotsStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
         }
     }
@@ -204,7 +205,7 @@ enum DashboardLive {
             LoadStore.shared.refreshNow()
         case .awake:
             AwakeController.shared.toggle()
-        case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard:
+        case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard, .bots:
             break
         }
     }
@@ -244,6 +245,7 @@ enum DashboardLive {
         case .awake: return awake(AwakeController.shared)
         case .mixer: return mixer()
         case .load: return load()
+        case .bots: return bots()
         case .keyboard: return keyboard()
         }
     }
@@ -387,6 +389,11 @@ enum DashboardLive {
         return DashState(text: "играют \(first.name) и ещё \(apps.count - 1)")
     }
 
+    private static func bots() -> DashState {
+        let state = BotsStore.shared.state
+        return DashState(text: BotsText.summary(state), attention: state.file.kind == .unsafe)
+    }
+
     private static func load() -> DashState {
         guard let memory = LoadStore.shared.snapshot?.memory else {
             return DashState(text: "открой для замера", actionTitle: "Обновить")
@@ -438,7 +445,7 @@ struct DashboardPage: View, Equatable {
                 section(ModuleCategory.all[0], columns: 2)
                 HStack(alignment: .top, spacing: 14) {
                     section(ModuleCategory.all[1], columns: 1)
-                    section(ModuleCategory.all[2], columns: 1, soon: true)
+                    section(ModuleCategory.all[2], columns: 1)
                 }
             }
             Spacer(minLength: 0)
@@ -482,9 +489,9 @@ struct DashboardPage: View, Equatable {
     // MARK: Секции
 
     @ViewBuilder
-    private func section(_ category: ModuleCategory, columns: Int, soon: Bool = false) -> some View {
+    private func section(_ category: ModuleCategory, columns: Int) -> some View {
         let items = shown.filter { $0.category == category }
-        if !items.isEmpty || soon {
+        if !items.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Image(systemName: category.icon).font(.system(size: 11, weight: .semibold))
@@ -507,7 +514,6 @@ struct DashboardPage: View, Equatable {
                         }
                     }
                 }
-                if soon { DashSoonCard() }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
@@ -598,30 +604,5 @@ private struct DashButton: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-    }
-}
-
-/// «Агент-центр · скоро» — серая заглушка в «С ИИ».
-private struct DashSoonCard: View {
-    var body: some View {
-        HStack(spacing: 11) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(.white.opacity(0.06)).frame(width: 34, height: 34)
-                .overlay(Image(systemName: "person.3.sequence.fill").font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.3)))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Агент-центр").font(.system(size: 13.5, weight: .semibold))
-                Text("общий пульт агентов").font(.system(size: 12))
-            }
-            Spacer(minLength: 4)
-            Text("скоро").font(.system(size: 11, weight: .medium))
-                .padding(.horizontal, 9).padding(.vertical, 3)
-                .background(Capsule().fill(.white.opacity(0.07)))
-        }
-        .foregroundStyle(.white.opacity(0.3))
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity).frame(height: dashCardHeight)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.025)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .stroke(.white.opacity(0.06), style: StrokeStyle(lineWidth: 0.7, dash: [4, 3])))
     }
 }
