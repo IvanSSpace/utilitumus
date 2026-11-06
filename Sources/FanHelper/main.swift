@@ -25,7 +25,15 @@ final class FakeSMC {
     }
 
     func uint8(_ key: String) -> UInt8? { bytes[key] }
-    func float(_ key: String) -> Float? { floats[key] }
+    /// Датчики читаются из файлов стенда при каждом чтении: температуру меняет скрипт. Нет файла — датчика нет.
+    func float(_ key: String) -> Float? {
+        let file = key == "Tp01" ? "temp-cpu" : key == "Tg05" ? "temp-gpu" : nil
+        if let file {
+            let text = try? String(contentsOfFile: (environment["FAN_TEST_DIR"] ?? ".") + "/" + file, encoding: .utf8)
+            return text.flatMap { Float($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        return floats[key]
+    }
 
     func setUInt8(_ key: String, _ value: UInt8) -> Bool {
         record("\(key)=\(value)")
@@ -76,6 +84,11 @@ final class FanService: NSObject, FanHelperXPC {
     /// последнего удержания. Только на главной очереди.
     private var holdWatchdog: DispatchWorkItem?
     private var releaseRetries = 0
+    /// Защита от перегрева (FanLink.thermalTrip). Температуру смотрим только пока есть удержание, не чаще `thermalPoll`.
+    private var thermal = ThermalGuard()
+    private var sensorKeys: [String] = []
+    private var thermalCheckedAt = Date.distantPast
+    private var thermalWork: DispatchWorkItem?
 
     /// При каждом запуске живого удержания нет, а вентилятор мог остаться ручным: служба упала, и сторож упал вместе с ней.
     /// Клиент подтвердит удержание сам при следующем повторе. Главная очередь.
@@ -131,6 +144,8 @@ final class FanService: NSObject, FanHelperXPC {
     @discardableResult
     func releaseManualFans() -> Bool {
         watchdogStop()
+        thermalWork?.cancel()
+        thermalWork = nil
         guard let smc, let count = smc.uint8("FNum") else { return true }
         var failed = false
         for fan in 0..<Int(count) where smc.uint8("F\(fan)Md") == 1 {
@@ -145,6 +160,41 @@ final class FanService: NSObject, FanHelperXPC {
         releaseRetries += 1
         watchdogArm(after: FanLink.holdRetry)
         return false
+    }
+
+    private func hottestSensor(_ smc: HelperSMC) -> Double? {
+        if sensorKeys.isEmpty {
+            let suffixes = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+            sensorKeys = (FanLink.cpuSensorPrefixes + FanLink.gpuSensorPrefixes).flatMap { p in suffixes.map { "\(p)\($0)" } }
+                .filter { key in smc.float(key).map(FanLink.isPlausibleTemperature) ?? false }
+        }
+        return ThermalGuard.hottest(sensorKeys.map { smc.float($0) })
+    }
+
+    /// `true` — перегрев. Без `force` показания не старше `thermalPoll` берутся из памяти. При переходе в перегрев вентиляторы отдаются системе.
+    private func thermalTripped(force: Bool) -> Bool {
+        guard let smc else { return false }
+        let now = Date()
+        if !force, now.timeIntervalSince(thermalCheckedAt) < FanLink.thermalPoll { return thermal.tripped }
+        thermalCheckedAt = now
+        let was = thermal.tripped
+        let hot = thermal.update(hottest: hottestSensor(smc))
+        if hot && !was {
+            serviceLog("перегрев: вентиляторы возвращены системе, удержание не принимается, пока не остынет")
+            releaseManualFans()
+        }
+        return hot
+    }
+
+    private func thermalWatchArm() {
+        guard thermalWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.thermalWork = nil
+            if !self.thermalTripped(force: true), self.holdWatchdog != nil { self.thermalWatchArm() }
+        }
+        thermalWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + FanLink.thermalPoll, execute: work)
     }
 
     private func watchdogStop() {
@@ -169,11 +219,13 @@ final class FanService: NSObject, FanHelperXPC {
               let minRPM = smc.float("F\(fan)Mn"), let maxRPM = smc.float("F\(fan)Mx") else {
             return "некорректные обороты"
         }
+        if thermalTripped(force: false) { return "перегрев: вентиляторы у системы, удержание не принято" }
         // Зажим до перевода во Float: очень большое конечное Double дало бы бесконечность.
         let rpm = Float(min(max(requested, Double(minRPM)), Double(maxRPM)))
         // Сторож заводится до записи: режим мог встать, а цель нет.
         releaseRetries = 0
         watchdogArm(after: FanLink.holdTimeout)
+        thermalWatchArm()
         guard smc.setUInt8("F\(fan)Md", 1), smc.setFloat("F\(fan)Tg", rpm) else {
             return "SMC отклонил запись (нужен root?)"
         }

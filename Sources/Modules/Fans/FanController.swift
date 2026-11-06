@@ -64,8 +64,8 @@ final class FanController: ObservableObject {
 
     /// Выше этой температуры процессора все вентиляторы отдаются системе,
     /// что бы ни стояло в настройках. Возврат — когда остынет ниже `safetyRelease`.
-    static let safetyTrip = 95.0
-    static let safetyRelease = 85.0
+    static let safetyTrip = FanLink.thermalTrip
+    static let safetyRelease = FanLink.thermalRelease
 
     @Published private(set) var fans: [FanReading] = []
     @Published private(set) var cpuSensors: [SensorReading] = []
@@ -170,8 +170,8 @@ final class FanController: ObservableObject {
             prefixes.flatMap { p in suffixes.map { "\(p)\($0)" } }
                 .filter { key in smc.float(key).map(Self.isPlausible) ?? false }
         }
-        cpuKeys = discover(["Tp0", "Tp1"])
-        gpuKeys = discover(["Tg0", "Tg1"])
+        cpuKeys = discover(FanLink.cpuSensorPrefixes)
+        gpuKeys = discover(FanLink.gpuSensorPrefixes)
 
         let center = NSWorkspace.shared.notificationCenter
         func observe(_ name: Notification.Name, _ handler: @escaping @MainActor (FanController) -> Void) {
@@ -506,7 +506,7 @@ final class FanController: ObservableObject {
 
     // MARK: - Вспомогательное
 
-    private nonisolated static func isPlausible(_ t: Float) -> Bool { t > 0 && t < 150 }
+    private nonisolated static func isPlausible(_ t: Float) -> Bool { FanLink.isPlausibleTemperature(t) }
 
     /// Запись в UserDefaults — не на каждое движение слайдера, а когда он затих.
     private func schedulePersist() {

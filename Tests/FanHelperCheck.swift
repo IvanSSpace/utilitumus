@@ -39,12 +39,32 @@ func pureChecks() {
 
     check(FanHelperClient.quitBudget == 1.5, "выход ждёт не больше 1,5 с")
     check(KitLink.requirement(identifier: "x", hashes: ["aa"]) == "(identifier \"x\" and certificate leaf = H\"aa\" and \(marker))", "KitLink: то же требование с меткой")
+    thermalChecks()
     epochChecks()
     legacyChecks()
     statusChecks()
     refreshChecks()
     plistChecks()
     scriptChecks()
+}
+
+/// Перегрев в службе: чистая логика. Пороги те же, что у клиента (проверка текста в скрипте запуска).
+func thermalChecks() {
+    check(FanLink.thermalTrip == 95 && FanLink.thermalRelease == 85, "пороги перегрева 95/85")
+    var guardState = ThermalGuard()
+    check(!guardState.update(hottest: nil), "датчики не читаются: не перегрев")
+    check(!guardState.update(hottest: 94.9), "94,9 °C: ещё не перегрев")
+    check(guardState.update(hottest: 95), "95 °C: перегрев")
+    check(guardState.update(hottest: 90), "90 °C после перегрева: держится (гистерезис)")
+    check(guardState.update(hottest: 85), "85 °C: держится, возврат ниже 85")
+    check(!guardState.update(hottest: 84.9), "84,9 °C: перегрев снят")
+    check(!guardState.update(hottest: 90), "90 °C после остывания: не перегрев, порог 95")
+    check(guardState.update(hottest: 120), "120 °C: перегрев")
+    check(!guardState.update(hottest: nil), "датчики пропали при перегреве: не считаем горячим, не блокируем")
+    check(ThermalGuard.hottest([60, 96, nil]) == 96, "самый горячий из датчиков")
+    check(ThermalGuard.hottest([nil, nil]) == nil, "нет показаний — нет температуры")
+    check(ThermalGuard.hottest([0, -5, 200, .nan, .infinity]) == nil, "неправдоподобные показания отброшены")
+    check(ThermalGuard.hottest([0, 70, 200]) == 70, "неправдоподобное не мешает правдоподобному")
 }
 
 /// Метка стоит в Info.plist центра и каждой утилиты, значение одно на всех: новую утилиту без неё не собрать незаметно.
@@ -361,6 +381,19 @@ func hubRole() {
     check(FanHelperClient.send(.auto(0)) == nil, "вентилятор 0 возвращён в Авто")
 }
 
+/// Удержание вентилятора 0 при заданной температуре: принято (`ok`) или отклонено (`refused`).
+func thermalSetRole(_ expected: String) {
+    clearWrites()
+    let error = FanHelperClient.send(.set(0, 2000))
+    if expected == "ok" {
+        check(error == nil, "удержание принято: \(error ?? "nil")")
+        check(writes().contains("F0Md=1"), "вентилятор взят в ручной режим: \(writes())")
+    } else {
+        check(error != nil, "удержание отклонено")
+        check(!writes().contains("F0Md=1"), "при перегреве в SMC ручной режим не писался: \(writes())")
+    }
+}
+
 /// Берёт вентилятор 0 в ручной режим и держит соединение, пока скрипт не убьёт процесс (SIGKILL).
 func holdManualRole(_ seconds: UInt32) {
     clearWrites()
@@ -590,6 +623,7 @@ case "silent": silentRole()
 case "stuck": stuckRole()
 case "hold": holdRole(UInt32(args[1]) ?? 1)
 case "hold-manual": holdManualRole(UInt32(args[1]) ?? 1)
+case "thermal-set": thermalSetRole(args[1])
 case "keepalive": keepaliveRole(Int(args[1]) ?? 1)
 case "refresh-off": refreshRole(moduleRunning: false)
 case "refresh-on": refreshRole(moduleRunning: true)

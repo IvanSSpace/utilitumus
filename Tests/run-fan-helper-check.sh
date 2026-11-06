@@ -477,6 +477,38 @@ sleep 5
 grep -q 'F0Md=0' "$LOG" || fail "после последней команды вентилятор не отдан"
 ok "команды кончились: вентилятор отдан через срок"
 
+echo "== перегрев: служба сама возвращает «Авто» и не берёт удержание"
+# Пороги те же, что у клиента: служба берёт их из FanLink, клиент тоже.
+/usr/bin/grep -q 'safetyTrip = FanLink.thermalTrip' Sources/Modules/Fans/FanController.swift || fail "клиент не берёт порог из FanLink"
+/usr/bin/grep -q 'safetyRelease = FanLink.thermalRelease' Sources/Modules/Fans/FanController.swift || fail "клиент не берёт порог возврата из FanLink"
+rm -f "$OUT/temp-cpu" "$OUT/temp-gpu"
+agent daemon
+echo 50 > "$OUT/temp-cpu"
+"$OUT/hub" hold-manual 8 >/dev/null &
+HOLD=$!
+sleep 0.5
+grep -q 'F0Md=1' "$LOG" || fail "перегрев: вентилятор не взят: $(cat "$LOG")"
+echo 96 > "$OUT/temp-gpu"
+sleep 2
+grep -q 'F0Md=0' "$LOG" || fail "датчик графики 96 °C при живом клиенте: служба не вернула «Авто»: $(cat "$LOG")"
+ok "горячий датчик (графика) при живом клиенте: служба вернула «Авто» сама, до срока сторожа"
+kill -9 "$HOLD" 2>/dev/null || true
+wait "$HOLD" 2>/dev/null || true
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "перегрев: удержание принято"
+echo 90 > "$OUT/temp-gpu"; sleep 1.2
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "90 °C после перегрева: гистерезис не держится"
+echo 70 > "$OUT/temp-gpu"; sleep 1.2
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "остыл до 70 °C: удержание не принято"
+ok "перегрев: отказ, гистерезис на 90 °C, после остывания удержание снова принимается"
+rm -f "$OUT/temp-cpu" "$OUT/temp-gpu"; sleep 3.5
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "датчики не читаются: удержание не принято"
+echo 99 > "$OUT/temp-cpu"; sleep 1.2
+"$OUT/hub" thermal-set refused | tail -1 | grep -q "ВСЁ ОК" || fail "процессор 99 °C: удержание принято"
+rm -f "$OUT/temp-cpu"; sleep 1.2
+"$OUT/hub" thermal-set ok | tail -1 | grep -q "ВСЁ ОК" || fail "датчики пропали при перегреве: служба осталась заблокированной"
+ok "датчики не читаются: не перегрев, обычная работа не блокируется"
+sleep 4
+
 # Зависшая запись: сторож пробует не бесконечно, но служба не уходит молча, пока вентилятор ручной.
 rm -f "$OUT/agent.log"
 agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
