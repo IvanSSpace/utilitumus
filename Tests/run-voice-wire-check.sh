@@ -26,9 +26,12 @@ BODY="$(awk '/private func insert\(_ text: String\)/,/^    }$/' "$CONTROLLER")"
 [ "$(sed -n 2p <<<"$BODY" | tr -d ' ')" = "ifcaptureTestText(text){" ] || fail "вставка не начинается с режима проверки"
 [ "$(sed -n 2,5p <<<"$BODY" | grep -c 'return')" = 1 ] || fail "в режиме проверки вставка не заканчивается сразу"
 echo "ok   вставка сначала отдаёт текст режиму проверки и в нём ничего не вставляет"
-# Встроенный модуль режим не включает: только действие от экрана внешнего модуля.
+# Встроенный модуль режим не включает: его модель экрана ничего не делает, включает только действие по связи.
 USES="$(grep -rlE 'beginTest\(|\.beginTest' Sources | sort | tr '\n' ' ')"
-[ "$USES" = "Sources/Modules/Voice/VoiceController.swift Sources/Modules/Voice/VoiceWire.swift " ] || fail "режим проверки включается ещё где-то: $USES"
+EXPECTED="Sources/App/Satellites/RemoteVoiceModel.swift Sources/Modules/Voice/VoiceController.swift Sources/Modules/Voice/VoiceScreenModel.swift Sources/Modules/Voice/VoiceView.swift Sources/Modules/Voice/VoiceWire.swift "
+[ "$USES" = "$EXPECTED" ] || fail "режим проверки включается ещё где-то: $USES"
+grep -qE 'func beginTest\(\) \{\}' Sources/Modules/Voice/VoiceScreenModel.swift || fail "встроенная модель экрана включает режим проверки"
+grep -q 'controller.beginTest' Sources/Modules/Voice/VoiceScreenModel.swift && fail "встроенная модель зовёт контроллер"
 echo "ok   встроенный модуль режим проверки не включает"
 
 rm -rf "$OUT/src" "$OUT/shots-after" "$OUT/home-run" "$OUT/home-after"

@@ -5,8 +5,8 @@ import Foundation
 /// `.changes`: стору нужен ход загрузки и при закрытом экране.
 @MainActor
 final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceScreenModel {
-    init(id: String, canRead: @escaping () -> Bool) {
-        super.init(id: id, initial: VoiceController.storedState(), baseWatch: .changes, canRead: canRead,
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
+        super.init(id: id, initial: VoiceController.storedState(), baseWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setMode(let mode): state.mode = mode

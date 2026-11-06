@@ -11,10 +11,20 @@ final class VoiceModule: SatelliteModule {
     private var controller: VoiceController { .shared }
     private var store: VoiceModelStore { .shared }
 
-    func start() { controller.start() }
+    func start() {
+        #if KIT_TEST_DEFAULTS
+        // Стенд не занимает настоящую горячую клавишу и не трогает микрофон: проверке нужно только знать, что модуль запущен.
+        fputs("голос: старт\n", stderr)
+        #else
+        controller.start()
+        #endif
+    }
 
     /// Загрузка модели не переживает остановку: после передачи модулем владеет центр, и два писателя в одну папку не нужны.
     func stop() {
+        #if KIT_TEST_DEFAULTS
+        fputs("голос: стоп\n", stderr)
+        #endif
         controller.stop()
         store.cancelAll()
     }

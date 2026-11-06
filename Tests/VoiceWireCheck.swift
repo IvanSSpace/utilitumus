@@ -182,6 +182,9 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     func download(_ model: VoiceModel) {}
     func cancel(_ model: VoiceModel) {}
     func delete(_ model: VoiceModel) {}
+    var test: VoiceTestState? { nil }
+    func beginTest() {}
+    func endTest() {}
 }
 
 // MARK: - Связь
@@ -439,9 +442,44 @@ func caseName(_ action: VoiceAction) -> String {
     check(fake.selected == .parakeet, "выбранная модель пропала, а другая есть: экран переключает через модель")
 }
 
+/// Тот же экран на состоянии, прошедшем через связь (кодирование, разбор, `RemoteVoiceModel`), что и на встроенной модели.
+@MainActor func remoteScreen() async {
+    let controller = VoiceController.shared
+    controller.mode = .toggle
+    controller.micUID = nil
+    for excluded in controller.excludedApps { controller.removeExcluded(excluded) }
+    controller.resetHotKey()
+    let link = RemoteModuleLink(
+        state: { LinkWire.encoded(VoiceController.shared.wireState) },
+        action: { _ in Data() }, setWatch: { _ in }, onPing: { _ in })
+    let remote = RemoteVoiceModel(id: "test.voice-wire", link: link, canRead: { true })
+    func variant(_ name: String, _ change: () -> Void) async {
+        change()
+        await remote.read()
+        check(remote.state == controller.wireState, "\(name): состояние из связи равно состоянию контроллера")
+        for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
+            let local = Stand.show(VoiceView(), theme)
+            await pause()
+            let localShot = Stand.snapshot(local)
+            let host = Stand.show(VoiceView(voice: remote), theme)
+            await pause()
+            let diff = differingPixels(Stand.snapshot(host), localShot)
+            check(diff == 0, "\(name) \(themeName): экран на состоянии из связи совпал со встроенным, разных пикселей \(diff)")
+        }
+    }
+    await variant("по умолчанию") {}
+    await variant("режим «пока держу»") { controller.mode = .hold }
+    await variant("другая клавиша") { controller.setHotKey(keyCode: 96, modifiers: 256) }
+    await variant("исключения") { controller.addExcluded("com.apple.finder") }
+    controller.mode = .toggle
+    controller.resetHotKey()
+    controller.removeExcluded("com.apple.finder")
+}
+
 @MainActor func run() async {
     wire()
     await screen()
+    await remoteScreen()
     await validations()
     testMode()
     finish()
