@@ -65,6 +65,7 @@ struct Harness: View {
         window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: width, height: height),
                           styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.acceptsMouseMovedEvents = true
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = host
         window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
@@ -110,10 +111,12 @@ struct Harness: View {
         window.sendEvent(e)
     }
 
+    /// В `dir` — только панель (кадры последовательностей); без `dir` — всё окно.
     func snapshot(_ name: String, to dir: URL? = nil) {
         host.layoutSubtreeIfNeeded()
-        let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
-        host.cacheDisplay(in: host.bounds, to: rep)
+        let area = dir == nil ? host.bounds : NSRect(x: 0, y: 0, width: 250, height: height)
+        let rep = host.bitmapImageRepForCachingDisplay(in: area)!
+        host.cacheDisplay(in: area, to: rep)
         try! rep.representation(using: .png, properties: [:])!.write(to: (dir ?? pngDir).appendingPathComponent(name + ".png"))
     }
 
@@ -168,7 +171,21 @@ struct Trace {
     var maxOutside: CGFloat = 0
     var maxLag: CGFloat = 0
     var sawCopy = false
+    /// Сколько раз копия сменила вид (плитка, строка, скрытая строка) за проход.
+    var kindSwitches = 0
+    /// Посадка: на сколько pt последний кадр копии не совпал с настоящей строкой, которая встала на её место (nil — не мерили).
+    var landJump: CGFloat?
+    /// Кадров посадки, в которых копия и настоящий вид были видны вместе (двойное изображение).
+    var doubleImage = 0
 }
+
+/// Вид копии по высоте: плитка 40, строка 46, скрытая строка 28.
+func copyKind(_ r: CGRect) -> Int {
+    [28.0, 40.0, 46.0].enumerated().min { abs($0.element - r.height) < abs($1.element - r.height) }!.offset
+}
+
+/// Для этих проходов кадры сохраняются в папку последовательностей.
+let keyScenarios: Set<String> = ["rows-down", "tiles", "list-to-grid", "list-to-grid5", "grid-to-list", "tenth", "esc", "scrolled"]
 
 func points(_ a: CGPoint, _ b: CGPoint, step: CGFloat = 4) -> [CGPoint] {
     let n = max(Int((hypot(b.x - a.x, b.y - a.y) / step).rounded(.up)), 1)
@@ -179,8 +196,10 @@ func points(_ a: CGPoint, _ b: CGPoint, step: CGFloat = 4) -> [CGPoint] {
 /// Каждый шаг меряет, где поднятая копия относительно курсора: курсор обязан быть внутри копии,
 /// а у копии той же формы, что была взята, центр держится на расстоянии захвата от курсора.
 @MainActor func drag(_ rig: Rig, _ name: String, from start: CGPoint, via route: [CGPoint], grabbed: Module? = nil,
-                     hold: Double = 0.6, midCheck: (() -> Void)? = nil, release: Bool = true, frames saved: Bool = true) async -> Trace {
+                     then: (() -> CGPoint)? = nil, hold: Double = 0.6, midCheck: (() -> Void)? = nil, release: Bool = true,
+                     frames saved: Bool = false) async -> Trace {
     var trace = Trace()
+    let saved = saved || keyScenarios.contains(name)
     let source = grabbed.flatMap { rig.rest[$0] }
     let grab = source.map { CGPoint(x: start.x - $0.midX, y: start.y - $0.midY) } ?? .zero
     let sourceWidth = source?.width ?? 0
@@ -189,8 +208,12 @@ func points(_ a: CGPoint, _ b: CGPoint, step: CGFloat = 4) -> [CGPoint] {
     var last = start
     var lastWidth: CGFloat = 0
     var morphUntil = Date.distantPast
+    var lastKind = -1
     var n = 0
-    for target in route {
+    var legs = route
+    var second = then
+    while !legs.isEmpty {
+        let target = legs.removeFirst()
         for p in points(last, target) {
             rig.dragged(p)
             last = p
@@ -206,13 +229,20 @@ func points(_ a: CGPoint, _ b: CGPoint, step: CGFloat = 4) -> [CGPoint] {
             trace.maxOutside = max(trace.maxOutside, hypot(dx, dy))
             if abs(copy.width - lastWidth) > 1 { morphUntil = Date().addingTimeInterval(0.45) }
             lastWidth = copy.width
+            if copyKind(copy) != lastKind { if lastKind >= 0 { trace.kindSwitches += 1 }; lastKind = copyKind(copy) }
             // Копия той же формы (тот же вид, что у взятого): центр = курсор минус захват. Другой вид: центр на курсоре.
-            let sameKind = abs(copy.width / 1.04 - sourceWidth) < 6 && abs(copy.height / 1.04 - (source?.height ?? 0)) < 6
+            let sameKind = abs(copy.width - sourceWidth) < 6 && abs(copy.height - (source?.height ?? 0)) < 6
             let expected = sameKind ? CGPoint(x: p.x - grab.x, y: p.y - grab.y) : p
             if Date() > morphUntil, source != nil {
                 trace.maxLag = max(trace.maxLag, hypot(copy.midX - expected.x, copy.midY - expected.y))
             }
             if saved, n % 3 == 0 { rig.snapshot("\(name)-\(String(format: "%03d", n))", to: seqDir) }
+        }
+        // Раскладка под курсором успела перестроиться: второй отрезок считаем по тому, что нарисовано теперь.
+        if legs.isEmpty, let next = second {
+            second = nil
+            await pause(0.5)
+            legs.append(next())
         }
     }
     await pause(hold)
@@ -220,9 +250,16 @@ func points(_ a: CGPoint, _ b: CGPoint, step: CGFloat = 4) -> [CGPoint] {
     if saved { rig.snapshot("\(name)-held", to: seqDir) }
     if release {
         rig.up(last)
-        for i in 1...5 {
-            await pause(0.1)
-            if saved { rig.snapshot("\(name)-drop\(i)", to: seqDir) }
+        // Посадка: смотрим каждый кадр, пока копия не исчезнет, и сверяем её последний кадр с настоящей строкой.
+        var lastCopy: CGRect?
+        var gone = false
+        for i in 1...60 {
+            await pause(0.008)
+            if let copy = SidebarProbe.copy { lastCopy = copy } else if !gone, let lastCopy, let module = grabbed, let real = SidebarProbe.frames[module] {
+                gone = true
+                trace.landJump = hypot(lastCopy.minX - real.minX, lastCopy.minY - real.minY)
+            }
+            if saved, i % 8 == 0 { rig.snapshot("\(name)-drop\(i / 8)", to: seqDir) }
         }
         await pause(0.4)
     }
@@ -320,6 +357,7 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     check(trace.sawCopy, "строка вниз: перетаскивание началось")
     check(trace.maxOutside < 1 && trace.missing == 0, "строка вниз: курсор всё время внутри копии (отрыв \(Int(trace.maxOutside)) pt, пропаж \(trace.missing))")
     check(trace.maxLag < 6, "строка вниз: копия идёт 1:1 за курсором (отставание до \(Int(trace.maxLag)) pt)")
+    check((trace.landJump ?? 99) < 2, "строка вниз: посадка без скачка (\(trace.landJump.map { String(format: "%.1f", $0) } ?? "не замерена") pt)")
     var expected = list.filter { $0 != m }; expected.insert(m, at: 5)
     check(lay().list == expected, "строка вниз: легла на пятое место")
     check(SidebarProbe.copy == nil, "строка вниз: копия убрана, ничего не застряло")
@@ -366,9 +404,10 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     var trace = await drag(rig, "list-to-grid", from: s, via: [center(grid4[1])], grabbed: m, midCheck: {
         check(tilesMatch(rig, slots: [tiles[0], nil, tiles[1], tiles[2]]), "список -> сетка: плитки перестроились на четыре столбца, место открыто")
         check(listGap(others: list.filter { $0 != m }, gap: 100), "список -> сетка: список сомкнулся")
-        if let copy = SidebarProbe.copy { check(abs(copy.width / 1.04 - grid4[0].width) < 3, "список -> сетка: копия стала плиткой") }
+        if let copy = SidebarProbe.copy { check(abs(copy.width - grid4[0].width) < 3, "список -> сетка: копия стала плиткой") }
     })
     check(lay().pinned == [tiles[0], m, tiles[1], tiles[2]], "список -> сетка: встала вторым номером")
+    check(trace.kindSwitches <= 1, "список -> сетка: копия сменила вид один раз, без мерцания (\(trace.kindSwitches))")
     check(trace.maxOutside < 1, "список -> сетка: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
     check(SidebarProbe.copy == nil, "список -> сетка: копия убрана")
     rig.close()
@@ -381,7 +420,8 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     m = list[0]
     s = center(rig.rest[m]!)
     let grid5 = rig.gridFrames(5)
-    trace = await drag(rig, "list-to-grid5", from: s, via: [center(grid5[4])], grabbed: m, midCheck: {
+    trace = await drag(rig, "list-to-grid5", from: s, via: [CGPoint(x: grid5[4].midX, y: rig.restGrid.midY - 6)], grabbed: m,
+                       then: { center(grid5[4]) }, midCheck: {
         check(tilesMatch(rig, slots: [tiles[0], tiles[1], tiles[2], tiles[3], nil]), "четыре -> пять: три столбца, две строки, место в конце")
         check(abs(SidebarProbe.grid.height - SidebarMetrics.pinnedHeight(count: 5)) < 1.5, "четыре -> пять: сетка стала выше на строку")
         check(listGap(others: list.filter { $0 != m }, gap: 100), "четыре -> пять: список сомкнулся и сдвинулся под сетку")
@@ -401,10 +441,11 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     trace = await drag(rig, "grid-to-list", from: s, via: [CGPoint(x: s.x, y: s.y + 30), aim], grabbed: m, midCheck: {
         check(tilesMatch(rig, slots: Array(tiles.prefix(4))), "сетка -> список: сетка сомкнулась на четыре плитки в одну строку")
         check(listGap(others: list, gap: 2), "сетка -> список: пустое место открылось под курсором")
-        if let copy = SidebarProbe.copy { check(abs(copy.width / 1.04 - rig.width) < 4, "сетка -> список: копия стала строкой") }
+        if let copy = SidebarProbe.copy { check(abs(copy.width - rig.width) < 4, "сетка -> список: копия стала строкой") }
     })
     var expected = list; expected.insert(m, at: 2)
     check(lay().list == expected && lay().pinned == Array(tiles.prefix(4)), "сетка -> список: встала третьей строкой")
+    check(trace.kindSwitches <= 1, "сетка -> список: копия сменила вид один раз, без мерцания (\(trace.kindSwitches))")
     check(trace.maxOutside < 1, "сетка -> список: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
     rig.close()
 
@@ -429,55 +470,60 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
 @MainActor func hiddenSection() async {
     print("== «Скрытые»")
     let hide = Array(all.suffix(2))
-    // Список -> «Скрытые», раздел свёрнут и пуст.
+    // Окно повыше: заголовок «Скрытые» виден без прокрутки.
+    let tall: CGFloat = 820
+    // Список -> «Скрытые», раздел свёрнут и пуст. Список смыкается под курсором, заголовок уезжает вверх.
     await prepare(pinned: Array(all.prefix(3)))
-    var rig = await Rig(height: 680)
+    var rig = await Rig(height: tall)
     var list = lay().list
     var m = list[3]
     var s = center(rig.rest[m]!)
     var header = rig.restHeader
-    var trace = await drag(rig, "list-to-hidden", from: s, via: [center(header)], grabbed: m, midCheck: {
+    check(header.maxY < rig.viewport.maxY, "заголовок «Скрытые» виден в окне (\(Int(header.maxY)) против \(Int(rig.viewport.maxY)))")
+    var trace = await drag(rig, "list-to-hidden", from: s, via: [center(header)], grabbed: m,
+                           midCheck: {
         check(SidebarProbe.line != nil, "в пустые свёрнутые «Скрытые»: видна линия вставки")
         if let line = SidebarProbe.line {
             let header = SidebarProbe.header
             check(abs(line.midY - header.maxY) < 8 && line.minX < header.minX + 20, "линия стоит под заголовком «Скрытые», слева")
         }
-    })
+    }, frames: true)
     check(lay().hidden == [m] && ModuleManager.shared.isHidden(m), "в пустые свёрнутые «Скрытые»: модуль скрыт")
     check(SidebarProbe.copy == nil && SidebarProbe.line == nil, "после отпускания копия и линия убраны")
-    check(trace.maxOutside < 1, "в «Скрытые»: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
+    check(trace.maxOutside < 1 && trace.missing == 0, "в «Скрытые»: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
+    check(trace.kindSwitches <= 1, "в «Скрытые»: копия сменила вид один раз, без мерцания (\(trace.kindSwitches))")
     rig.close()
 
     // Список -> «Скрытые», раскрыты, два модуля; между ними.
     await prepare(pinned: Array(all.prefix(3)), hidden: hide, expanded: true)
-    rig = await Rig(height: 680)
+    rig = await Rig(height: tall)
     list = lay().list
     var hidden = lay().hidden
     m = list[1]
     s = center(rig.rest[m]!)
     header = rig.restHeader
-    var aim = rig.hiddenSlot(1, header: header)
-    trace = await drag(rig, "list-to-hidden-open", from: s, via: [aim], grabbed: m, midCheck: {
+    trace = await drag(rig, "list-to-hidden-open", from: s, via: [center(header)], grabbed: m,
+                       then: { rig.hiddenSlot(1, header: SidebarProbe.header) }, midCheck: {
         check(SidebarProbe.line != nil, "в раскрытые «Скрытые»: видна линия вставки")
         if let line = SidebarProbe.line {
-            let boundary = header.maxY + SidebarMetrics.rowGap + SidebarMetrics.hiddenRowHeight + 1
+            let boundary = SidebarProbe.header.maxY + SidebarMetrics.rowGap + SidebarMetrics.hiddenRowHeight + 1
             check(abs(line.midY - boundary) < 6, "линия стоит между первым и вторым скрытым (\(Int(line.midY)) против \(Int(boundary)))")
         }
-    })
+    }, frames: true)
     check(lay().hidden == [hidden[0], m, hidden[1]], "в раскрытые «Скрытые»: встал между ними")
     rig.close()
 
     // «Скрытые» -> список.
     await prepare(pinned: Array(all.prefix(3)), hidden: hide, expanded: true)
-    rig = await Rig(height: 680)
+    rig = await Rig(height: tall)
     list = lay().list
     hidden = lay().hidden
     m = hidden[1]
     s = center(rig.rest[m]!)
-    aim = rig.rowSlot(3, top: rig.rest[list[0]]!.minY)
+    var aim = rig.rowSlot(3, top: rig.rest[list[0]]!.minY)
     trace = await drag(rig, "hidden-to-list", from: s, via: [CGPoint(x: s.x, y: s.y - 40), aim], grabbed: m, midCheck: {
         check(listGap(others: list, gap: 3), "скрытые -> список: пустое место на четвёртом месте")
-    })
+    }, frames: true)
     var expected = list; expected.insert(m, at: 3)
     check(lay().list == expected && lay().hidden == [hidden[0]] && !ModuleManager.shared.isHidden(m), "скрытые -> список: модуль в списке и больше не скрыт")
     check(trace.maxOutside < 1 && trace.maxLag < 6, "скрытые -> список: копия 1:1 (отрыв \(Int(trace.maxOutside)), отставание \(Int(trace.maxLag)))")
@@ -485,9 +531,9 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
 
     // «Скрытые» -> сетка.
     await prepare(pinned: Array(all.prefix(3)), hidden: hide, expanded: true)
-    rig = await Rig(height: 680)
+    rig = await Rig(height: tall)
     hidden = lay().hidden
-    var tiles = lay().pinned
+    let tiles = lay().pinned
     m = hidden[0]
     s = center(rig.rest[m]!)
     let grid4 = rig.gridFrames(4)
@@ -497,18 +543,21 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     check(lay().pinned == tiles + [m] && !ModuleManager.shared.isHidden(m), "скрытые -> сетка: плитка в конце, модуль не скрыт")
     rig.close()
 
-    // Сетка -> «Скрытые» (свёрнуты).
+    // Сетка -> «Скрытые» (свёрнуты, там уже есть два).
     await prepare(pinned: Array(all.prefix(3)), hidden: hide, expanded: false)
-    rig = await Rig(height: 680)
-    tiles = lay().pinned
-    m = tiles[1]
+    rig = await Rig(height: tall)
+    let pins = lay().pinned
+    m = pins[1]
     s = center(rig.rest[m]!)
     header = rig.restHeader
-    trace = await drag(rig, "grid-to-hidden", from: s, via: [CGPoint(x: s.x, y: s.y + 60), CGPoint(x: header.midX, y: header.midY + 4)], grabbed: m, midCheck: {
+    // Над списком открывается пустое место, и заголовок уезжает вниз: целимся в то место, где он стоит теперь.
+    trace = await drag(rig, "grid-to-hidden", from: s, via: [CGPoint(x: header.midX, y: header.minY - 20)], grabbed: m,
+                       then: { center(SidebarProbe.header) }, midCheck: {
         check(SidebarProbe.line != nil, "сетка -> «Скрытые»: видна линия вставки")
-    })
+    }, frames: true)
     check(lay().hidden.contains(m) && !lay().pinned.contains(m), "сетка -> «Скрытые»: модуль скрыт и откреплён")
     check(trace.maxOutside < 1, "сетка -> «Скрытые»: курсор внутри копии (отрыв \(Int(trace.maxOutside)))")
+    check(trace.kindSwitches <= 2, "сетка -> «Скрытые»: копия не мерцает (\(trace.kindSwitches) смен вида)")
     rig.close()
 }
 
@@ -625,12 +674,11 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
     icons.start()
     SidebarModel.shared.start()
     DashboardLive.testBuiltIn = [:]
-    await clicks()
-    await reorder()
-    await between()
-    await hiddenSection()
-    await cancelling()
-    await scrolled()
+    // SIDEBAR_DRAG_ONLY=clicks,hidden — только эти сценарии (отладка).
+    let only = ProcessInfo.processInfo.environment["SIDEBAR_DRAG_ONLY"].map { Set($0.split(separator: ",").map(String.init)) }
+    let scenarios: [(String, () async -> Void)] = [("clicks", clicks), ("reorder", reorder), ("between", between),
+                                                   ("hidden", hiddenSection), ("cancelling", cancelling), ("scrolled", scrolled)]
+    for (name, scenario) in scenarios where only?.contains(name) ?? true { await scenario() }
     for m in all { _ = SidebarModel.shared.send(m, to: .list); Kit.defaults.removeObject(forKey: MenuBarIcon.key(m)) }
 }
 
