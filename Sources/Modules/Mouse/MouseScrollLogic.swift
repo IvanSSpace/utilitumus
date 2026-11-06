@@ -38,7 +38,7 @@ struct MouseSettings: Equatable, Codable {
         static let smoothness = "Mouse.Smoothness"
     }
 
-    static func load(from d: UserDefaults = .standard) -> MouseSettings {
+    static func load(from d: UserDefaults = Kit.defaults) -> MouseSettings {
         var s = MouseSettings()
         s.mouseDirection = d.string(forKey: Key.mouse).flatMap(ScrollDirection.init) ?? .system
         s.magicMouseDirection = d.string(forKey: Key.magic).flatMap(ScrollDirection.init) ?? .system
@@ -48,7 +48,7 @@ struct MouseSettings: Equatable, Codable {
         return s
     }
 
-    func save(to d: UserDefaults = .standard) {
+    func save(to d: UserDefaults = Kit.defaults) {
         d.set(mouseDirection.rawValue, forKey: Key.mouse)
         d.set(magicMouseDirection.rawValue, forKey: Key.magic)
         d.set(smoothEnabled, forKey: Key.smooth)

@@ -120,7 +120,7 @@ final class GameModeController {
     func cancelCurrent() {}
 }
 
-enum ActionLog { static func preparePrivate(file: URL) {} }
+enum PrivateLog { static func prepare(file: URL) {} }
 
 // MARK: - Проверки
 
