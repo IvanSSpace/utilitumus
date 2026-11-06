@@ -112,8 +112,8 @@ final class ClipboardStore {
             item.kind = .image
             png = data
             item.hash = Self.hash("image", data)
-        } else if var text = snap.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if text.count > ClipboardPolicy.maxTextLength { text = String(text.prefix(ClipboardPolicy.maxTextLength)) }
+        } else if let full = snap.text, !full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let text = ClipboardPolicy.trimmedText(full)
             item.kind = ClipboardPolicy.isLink(text) ? .link : .text
             item.text = item.kind == .link ? text.trimmingCharacters(in: .whitespacesAndNewlines) : text
             item.hash = Self.hash("text", Data(text.utf8))

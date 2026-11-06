@@ -31,6 +31,9 @@ final class ClipboardController: ObservableObject {
     @Published private(set) var storeNotice: String?
     @Published private(set) var axTrusted = AXIsProcessTrusted()
 
+    /// Последовательная: снимки приходят в том порядке, в каком буфер менялся.
+    private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
+
     private(set) var store: ClipboardStore?
     private var isRunning = false
     private var timer: Timer?
@@ -129,14 +132,26 @@ final class ClipboardController: ObservableObject {
         let count = pasteboard.changeCount
         guard count != lastChange else { return }
         lastChange = count
-        guard count != ownChange, let store else { return }
+        guard count != ownChange, store != nil else { return }
         let front = NSWorkspace.shared.frontmostApplication
         // Из программ-исключений не берём, даже если запись пришла без скрытого типа и программа уже ушла с переднего плана.
         let sources = frontHistory.sources() + [front?.bundleIdentifier].compactMap { $0 }
         if sources.contains(where: excludedApps.contains) { return }
-        var snap = ClipboardPasteboard.snapshot(of: pasteboard)
-        snap.sourceBundleID = front?.bundleIdentifier
-        snap.sourceName = front?.localizedName
+        let sourceID = front?.bundleIdentifier
+        let sourceName = front?.localizedName
+        // Большое содержимое не должно останавливать главный поток: на нём живёт перехват прокрутки «Мыши».
+        Self.readQueue.async {
+            guard var snap = ClipboardPasteboard.snapshot(of: NSPasteboard.general, change: count) else { return }
+            snap.sourceBundleID = sourceID
+            snap.sourceName = sourceName
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { ClipboardController.shared.finishRead(snap) }
+            }
+        }
+    }
+
+    private func finishRead(_ snap: ClipSnapshot) {
+        guard isRunning, let store else { return }
         if store.ingest(snap) { sync() }
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CryptoKit
+import ImageIO
 
 // Проверка логики «Буфера» без интерфейса. Запуск: Tests/run-clipboard-check.sh
 // Реальный буфер обмена и Keychain пользователя не трогаются: свой NSPasteboard, свой каталог, свой сервис.
@@ -298,6 +299,98 @@ do {
     }
     check(store.items.isEmpty, "после старых пометок история пуста")
     check(store.ingest(snap("обычный текст")), "обычный текст сохраняется")
+}
+
+// 10. Большое содержимое: обрезка без обхода всего текста, размер TIFF до декодирования, чтение вне главного потока
+do {
+    func ms(_ body: () -> Void) -> Double {
+        let start = Date()
+        body()
+        return Date().timeIntervalSince(start) * 1000
+    }
+    let maxLen = ClipboardPolicy.maxTextLength
+
+    check(ClipboardPolicy.trimmedText("коротко") == "коротко", "короткий текст не меняется")
+    // Обрезка та же, что была: по символам. Иначе русский текст стал бы короче, а хэш другим.
+    let russian = String(repeating: "я", count: 15_000)
+    check(ClipboardPolicy.trimmedText(russian) == russian, "15 000 русских букв (30 000 байт) не обрезаются")
+    let long = String(repeating: "я", count: 25_000)
+    check(ClipboardPolicy.trimmedText(long) == String(long.prefix(maxLen)), "25 000 русских букв обрезаются до 20 000 символов")
+    let ascii = String(repeating: "a", count: 25_000)
+    check(ClipboardPolicy.trimmedText(ascii) == String(ascii.prefix(maxLen)), "25 000 латинских обрезаются до 20 000")
+    let family = String(repeating: "👨‍👩‍👧‍👦", count: 25_000)
+    let cutFamily = ClipboardPolicy.trimmedText(family)
+    check(cutFamily.utf8.count <= ClipboardPolicy.maxTextBytes && !cutFamily.unicodeScalars.contains("\u{FFFD}"), "обрезка по байтам не режет символ")
+    check(ClipboardPolicy.trimmedText(cutFamily) == cutFamily, "повторная обрезка ничего не меняет")
+
+    let huge = String(repeating: "a", count: 50_000_000)
+    let hugeTime = ms { _ = ClipboardPolicy.trimmedText(huge) }
+    check(hugeTime < 200, "50 МБ текста обрезаются быстро: \(Int(hugeTime)) мс")
+    let zalgo = "a" + String(repeating: "\u{0301}", count: 5_000_000)
+    var cutZalgo = ""
+    let zalgoTime = ms { cutZalgo = ClipboardPolicy.trimmedText(zalgo) }
+    check(zalgoTime < 500 && cutZalgo.utf8.count <= ClipboardPolicy.maxTextBytes, "один символ в 10 МБ не обходится весь: \(Int(zalgoTime)) мс")
+
+    check(ClipboardPolicy.tiffFits(bytes: 100_000_000, width: 6016, height: 3384), "снимок экрана 6K в TIFF проходит")
+    check(!ClipboardPolicy.tiffFits(bytes: ClipboardPolicy.maxTIFFBytes + 1, width: 10, height: 10), "TIFF больше предела в байтах отвергается")
+    check(!ClipboardPolicy.tiffFits(bytes: 1000, width: 100_000, height: 100_000), "TIFF больше предела в пикселях отвергается")
+    check(!ClipboardPolicy.tiffFits(bytes: 1000, width: Int.max, height: 2), "большие размеры не переполняют расчёт")
+
+    let pb = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+    defer { pb.releaseGlobally() }
+
+    // Обычный TIFF по-прежнему становится PNG.
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 7, pixelsHigh: 5, bitsPerSample: 8, samplesPerPixel: 4,
+                               hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    pb.clearContents(); pb.setData(rep.tiffRepresentation!, forType: .tiff)
+    let converted = ClipboardPasteboard.snapshot(of: pb).imagePNG
+    check(converted != nil && NSBitmapImageRep(data: converted!)?.pixelsWide == 7, "обычный TIFF стал PNG")
+
+    // Настоящий сжатый TIFF: файл маленький, а распакованный занял бы сотни мегабайт.
+    let context = CGContext(data: nil, width: 9000, height: 8000, bitsPerComponent: 8, bytesPerRow: 9000,
+                            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+    let bombData = NSMutableData()
+    let destination = CGImageDestinationCreateWithData(bombData, "public.tiff" as CFString, 1, nil)!
+    let options = [kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFCompression: 5]] as CFDictionary
+    CGImageDestinationAddImage(destination, context.makeImage()!, options)
+    check(CGImageDestinationFinalize(destination) && bombData.length < 2_000_000, "сжатый TIFF собран: \(bombData.length) байт")
+    let header = CGImageSourceCreateWithData(bombData, nil).flatMap { CGImageSourceCopyPropertiesAtIndex($0, 0, nil) } as? [CFString: Any]
+    check(header?[kCGImagePropertyPixelWidth] as? Int == 9000, "размер TIFF читается из заголовка")
+    pb.clearContents(); pb.setData(bombData as Data, forType: .tiff)
+    var bombPNG: Data?
+    let bombTime = ms { bombPNG = ClipboardPasteboard.snapshot(of: pb).imagePNG }
+    check(bombPNG == nil && bombTime < 200, "72 Мпикс TIFF не декодируется: \(Int(bombTime)) мс")
+
+    pb.clearContents(); pb.setData(Data(count: ClipboardPolicy.maxImageBytes + 1), forType: .png)
+    check(ClipboardPasteboard.snapshot(of: pb).imagePNG == nil, "PNG больше предела не читается в снимок")
+
+    // Снимок вне главного потока и проверка, что буфер не поменялся.
+    pb.clearContents(); pb.setString("обычное копирование", forType: .string)
+    let change = pb.changeCount
+    let done = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var fromQueue: ClipSnapshot?
+    nonisolated(unsafe) let shared = pb
+    DispatchQueue(label: "clipcheck.read").async {
+        fromQueue = ClipboardPasteboard.snapshot(of: shared, change: change)
+        done.signal()
+    }
+    done.wait()
+    check(fromQueue?.text == "обычное копирование", "снимок вне главного потока читается")
+    pb.clearContents(); pb.setString("новое", forType: .string)
+    check(ClipboardPasteboard.snapshot(of: pb, change: change) == nil, "буфер поменялся: старый снимок не берём")
+
+    // Обычное копирование: чтение и запись в историю остаются быстрыми.
+    let store = ClipboardStore(directory: root.appendingPathComponent("speed"), key: key)
+    var total = 0.0
+    let runs = 200
+    for i in 0..<runs {
+        pb.clearContents(); pb.setString("строка номер \(i) " + String(repeating: "текст ", count: 150), forType: .string)
+        let now = pb.changeCount
+        total += ms { _ = store.ingest(ClipboardPasteboard.snapshot(of: pb, change: now)!) }
+    }
+    let average = total / Double(runs)
+    print("     обычное копирование 1 КБ: чтение и запись \(String(format: "%.2f", average)) мс в среднем на \(runs) записей")
+    check(average < 20, "обычное копирование быстрое: \(String(format: "%.2f", average)) мс")
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")
