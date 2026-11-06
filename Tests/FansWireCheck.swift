@@ -404,7 +404,11 @@ func config(_ change: (inout FanConfig) -> Void) -> [FanConfig] {
     check(controller.wireState.conflict?.id != issued, "другая программа — другой id")
     refused(.closeConflictingApp(id: issued), "id прежней программы")
     check(app.terminations == 0 && next.terminations == 0, "устаревший id не закрыл никого")
-    accepted(.closeConflictingApp(id: controller.wireState.conflict!.id), "свой id закрывает свою программу") { next.terminations == 1 && app.terminations == 0 }
+    // Стенд не закрывает программы (Kit.standRefuses в closeConflictingApp), даже с выданным id: настоящую Macs Fan Control он
+    // закрыл бы так же. Поэтому проверяется шов: id тот, что выдан экраном, действие отказано, ни одна программа не тронута.
+    check(controller.wireState.conflict?.id == controller.conflictID, "экран выдал id, по которому закрывает контроллер")
+    refused(.closeConflictingApp(id: controller.conflictID), "свой id: стенд отказывается закрывать программу")
+    check(app.terminations == 0 && next.terminations == 0, "стенд не закрыл ни одну программу, даже по своему id")
 
     print("== установка и удаление: только действия, окна пароля в сборке нет")
     pin(Pinned(name: "", configs: bothSensor))
@@ -443,10 +447,12 @@ func config(_ change: (inout FanConfig) -> Void) -> [FanConfig] {
 }
 
 /// Такт настоящий, служба поддельная: что из действий доходит до службы.
-@MainActor func serviceChecks() async {
+/// false — часть не проверялась (пропуск), и итог не должен выглядеть пройденным.
+@MainActor func serviceChecks() async -> Bool {
     print("== до службы доходит только проверенное")
     guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.crystalidea.macsfancontrol").isEmpty else {
-        return print("skip Macs Fan Control запущен: такт уступает ему, эту часть не проверить")
+        print("SKIP  Macs Fan Control запущен: такт уступает ему, часть «до службы доходит только проверенное» НЕ ПРОВЕРЕНА")
+        return false
     }
     let controller = FanController.shared
     pin(Pinned(name: "", configs: [FanConfig(mode: .auto), FanConfig(mode: .auto)]))
@@ -467,6 +473,7 @@ func config(_ change: (inout FanConfig) -> Void) -> [FanConfig] {
     check(Bench.shared.log.isEmpty, "после отказа команд нет")
     controller.stop()
     check(Bench.shared.log.contains("auto 0") && !Bench.shared.isManual(0), "остановка: вентилятор вернулся в «Авто»")
+    return true
 }
 
 @MainActor func forwardingChecks() {
@@ -568,9 +575,14 @@ Task { @MainActor in
         validationChecks()
         forwardingChecks()
         await pixelChecks(baseline: arguments[2], own: arguments[3])
-        await serviceChecks()
+        let serviceRan = await serviceChecks()
         #endif
-        print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
+        #if FANS_BASELINE
+        let serviceRan = true
+        #endif
+        if failures != 0 { print("ПРОВАЛОВ: \(failures)") }
+        else if serviceRan { print("ВСЁ ОК") }
+        else { print("SKIP: провалов нет, но часть проверки пропущена (см. SKIP выше): это не «ВСЁ ОК»") }
     }
     cleanSettings()
     exit(failures == 0 ? 0 : 1)

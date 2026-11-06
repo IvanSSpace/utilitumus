@@ -5,8 +5,9 @@
 #   ... проверки ...
 #   stand_snapshot_compare "$OUT/before.txt"      # 0 — не менялось, 1 — менялось
 #
-# Настоящее Utilitumus 0.5.3 может быть запущено и само пишет свои журналы и настройки. Тогда расхождения
-# в журналах и в local.utilitumus.plist только отмечаются (ПРИМЕЧАНИЕ), остальное всё равно провал. Приложение не трогаем.
+# Настоящее Utilitumus (центр или любая настоящая утилита, например Вентиляторы со своим fans.log) может быть запущено
+# и само пишет свои журналы и настройки. Тогда расхождения в журналах и в local.utilitumus.plist только отмечаются
+# (ПРИМЕЧАНИЕ), остальное всё равно провал. Приложение не трогаем.
 
 STAND_REAL_LOCATIONS=(
   "$HOME/Library/Application Support/Utilitumus"
@@ -29,7 +30,11 @@ stand_snapshot_take() {
   done | LC_ALL=C sort >> "$1"
 }
 
-stand_real_app_running() { pgrep -x Utilitumus > /dev/null 2>&1; }
+# Метки стендов — local.utilitumus.test.*, настоящих утилит — local.utilitumus.app.<id>: стенд под них не попадает.
+stand_real_app_running() {
+  pgrep -x Utilitumus > /dev/null 2>&1 \
+    || launchctl list 2>/dev/null | awk '$1 != "-" && $3 ~ /^local\.utilitumus\.app\./ { found = 1 } END { exit !found }'
+}
 
 stand_snapshot_compare() {
   local before="$1" after changed noisy hard

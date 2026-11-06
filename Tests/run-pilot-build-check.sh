@@ -24,8 +24,11 @@ CATALOG_SOURCE="$(cat Sources/Kit/SatelliteCatalog.swift)"
 for word in ProcessInfo CommandLine getenv UserDefaults Kit.defaults environment; do
   lacks "SatelliteCatalog.swift не читает $word" "$CATALOG_SOURCE" "$word"
 done
-FLAG_USERS="$(grep -rl 'KIT_PILOT_CATALOG\|KitPilotCatalog' Sources)"
-same "флаг только в SatelliteCatalog.swift" "$FLAG_USERS" "Sources/Kit/SatelliteCatalog.swift"
+# Второе место сделано нарочно: в пилоте автомиграция выключена (ModuleMigration.swift), ровно одним `#if`.
+FLAG_USERS="$(grep -rl 'KIT_PILOT_CATALOG\|KitPilotCatalog' Sources | LC_ALL=C sort)"
+same "флаг только в SatelliteCatalog.swift и ModuleMigration.swift" "$FLAG_USERS" "$(printf '%s\n%s' Sources/App/Satellites/ModuleMigration.swift Sources/Kit/SatelliteCatalog.swift)"
+same "в ModuleMigration.swift флаг один: #if без else (автомиграция выключена)" \
+  "$(grep -c 'KIT_PILOT_CATALOG\|KitPilotCatalog' Sources/App/Satellites/ModuleMigration.swift)" "1"
 DEFINED="$(grep -rn 'enum KitPilotCatalog' Sources || true)"
 same "в исходниках определения нет: без флага и файла сборки пилота не собрать" "$DEFINED" ""
 RELEASE="$(cat scripts/release.sh .github/workflows/ci.yml)"

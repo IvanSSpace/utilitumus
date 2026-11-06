@@ -6,6 +6,8 @@ Sources/Modules/Browser/BrowserCatalog.swift|UserDefaults(suiteName
 Sources/Modules/Browser/BrowserLinkHandler.swift|.terminate()
 Sources/Modules/Browser/BrowserLinkHandler.swift|LSRegisterURL
 Sources/Modules/Browser/BrowserLinkHandler.swift|setDefaultApplication
+# Пользовательское действие помощника ссылок («скопировать ссылку», ⌘C в окне выбора): пишет в общий буфер только по клавише человека, из стенда недостижимо.
+Sources/Modules/Browser/BrowserPicker.swift|NSPasteboard.general
 Sources/Modules/Browser/BrowserRouter.swift|NSWorkspace.shared.open
 Sources/Modules/Browser/BrowserRouter.swift|NSWorkspace.shared.openApplication
 Sources/Modules/Browser/BrowserRouter.swift|Process()
