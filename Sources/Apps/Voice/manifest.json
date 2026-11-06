@@ -1,0 +1,28 @@
+{
+  "frameworks": ["CoreAudio", "AudioToolbox"],
+  "entitlements": "Sources/Apps/Voice/Voice.entitlements",
+  "helpers": [
+    {
+      "kind": "c-tool",
+      "path": "Contents/MacOS/utilitumus-voice",
+      "identifier": "local.utilitumus.voice",
+      "includes": ["Vendor/sherpa-onnx/include"],
+      "sources": [
+        "Sources/VoiceHelper/main.c",
+        "Vendor/sherpa-onnx/lib/libsherpa-onnx-c-api.a",
+        "Vendor/sherpa-onnx/lib/libsherpa-onnx-core.a",
+        "Vendor/sherpa-onnx/lib/libonnxruntime.a",
+        "Vendor/sherpa-onnx/lib/libkaldi-decoder-core.a",
+        "Vendor/sherpa-onnx/lib/libkaldi-native-fbank-core.a",
+        "Vendor/sherpa-onnx/lib/libkissfft-float.a",
+        "Vendor/sherpa-onnx/lib/libsherpa-onnx-fst.a",
+        "Vendor/sherpa-onnx/lib/libsherpa-onnx-fstfar.a",
+        "Vendor/sherpa-onnx/lib/libsherpa-onnx-kaldifst-core.a",
+        "Vendor/sherpa-onnx/lib/libssentencepiece_core.a",
+        "Vendor/sherpa-onnx/lib/libutf8proc.a"
+      ],
+      "frameworks": ["Foundation", "Accelerate"],
+      "linkerFlags": ["-lc++", "-dead_strip"]
+    }
+  ]
+}

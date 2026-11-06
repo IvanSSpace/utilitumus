@@ -20,7 +20,7 @@ final class VoiceController: ObservableObject {
 
     // MARK: Настройки (UserDefaults "Voice.")
 
-    private enum Key {
+    enum Key {
         static let keyCode = "Voice.HotKeyCode"
         static let modifiers = "Voice.HotKeyModifiers"
         static let mode = "Voice.Mode"
@@ -85,6 +85,8 @@ final class VoiceController: ObservableObject {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        // Один раз за процесс и только пока ничего не качается: хвосты чужой загрузки трогать нельзя.
+        VoiceModelStore.shared.cleanLeftoversOnce()
         installHandler()
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -96,6 +98,7 @@ final class VoiceController: ObservableObject {
     }
 
     func stop() {
+        endTest()
         guard isRunning else { return }
         isRunning = false
         cancelAll()
@@ -356,9 +359,44 @@ final class VoiceController: ObservableObject {
         return VoiceModel.allCases.first { store.status($0) == .installed }
     }
 
+    // MARK: Режим проверки
+
+    /// Поле «Проверить» во внешнем модуле (решение Q6): пока режим включён, распознанное идёт в состояние для экрана,
+    /// а не в переднее приложение. Встроенный экран его не включает: там текст вставляется в поле, как раньше.
+    @Published private(set) var test: VoiceTestState?
+    private var testUntil = Date.distantPast
+
+    func beginTest(now: Date = Date()) {
+        test = VoiceTestState(phrase: nil, serial: test?.serial ?? 0)
+        testUntil = now + VoiceTestState.lifetime
+    }
+
+    func endTest() {
+        if test != nil { test = nil }
+    }
+
+    /// Срок на случай, если экран не выключил режим: иначе диктовка навсегда перестала бы доходить до программ.
+    var liveTest: VoiceTestState? {
+        Date() < testUntil ? test : nil
+    }
+
+    /// Забрать текст для экрана, если режим включён. false — вставлять как обычно.
+    func captureTestText(_ text: String) -> Bool {
+        guard let live = liveTest else {
+            endTest()
+            return false
+        }
+        test = VoiceTestState(phrase: String(text.prefix(VoiceTestState.maxPhrase)), serial: live.serial + 1)
+        return true
+    }
+
     // MARK: Вставка
 
     private func insert(_ text: String) {
+        if captureTestText(text) {
+            VoiceHUD.shared.hide()
+            return
+        }
         // Диктуют в поле самого Utilitumus (раздел «Проверить»): вставляем напрямую, права не нужны.
         if NSApp.isActive, let view = NSApp.keyWindow?.firstResponder as? NSTextView, view.isEditable {
             view.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))

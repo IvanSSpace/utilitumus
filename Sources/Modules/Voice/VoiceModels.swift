@@ -73,7 +73,7 @@ enum VoiceModel: String, CaseIterable, Identifiable {
 final class VoiceModelStore: ObservableObject {
     static let shared = VoiceModelStore()
 
-    enum Status: Equatable {
+    enum Status: Equatable, Codable {
         case notInstalled
         case downloading(progress: Double)
         case verifying
@@ -101,7 +101,6 @@ final class VoiceModelStore: ObservableObject {
     private init() {
         selected = Kit.defaults.string(forKey: Self.selectedKey)
             .flatMap(VoiceModel.init(rawValue:)) ?? .gigaam
-        cleanLeftovers()
         for model in VoiceModel.allCases {
             statuses[model] = Self.isInstalled(model) ? .installed : .notInstalled
         }
@@ -126,7 +125,9 @@ final class VoiceModelStore: ObservableObject {
             do {
                 try await Self.install(model) { progress in
                     Task { @MainActor in
-                        guard let self, case .downloading = self.status(model) else { return }
+                        guard let self, case let .downloading(old) = self.status(model) else { return }
+                        // Блоки идут десятками в секунду, а экран и связь показывают целые проценты.
+                        guard Int(progress * 100) != Int(old * 100) else { return }
                         self.statuses[model] = .downloading(progress: progress)
                     }
                 } onVerifying: {
@@ -149,6 +150,15 @@ final class VoiceModelStore: ObservableObject {
         tasks[model]?.cancel()
     }
 
+    /// Модуль остановлен: загрузка не должна идти там, где модуль уже не владелец.
+    func cancelAll() {
+        for task in tasks.values { task.cancel() }
+    }
+
+    var isBusy: Bool {
+        statuses.values.contains { if case .downloading = $0 { return true }; if case .verifying = $0 { return true }; return false }
+    }
+
     func delete(_ model: VoiceModel) {
         tasks[model]?.cancel()
         try? FileManager.default.removeItem(at: Self.folder(of: model))
@@ -168,8 +178,13 @@ final class VoiceModelStore: ObservableObject {
         }
     }
 
-    /// Хвосты прерванных загрузок (недокачанные архивы, недораспакованные папки).
-    private func cleanLeftovers() {
+    private var leftoversCleaned = false
+
+    /// Хвосты прерванных загрузок (недокачанные архивы, недораспакованные папки). Не при создании стора: его создаёт
+    /// и центр, пока модулем владеет утилита, и стёр бы её идущую загрузку. Зовёт запуск модуля, то есть владелец.
+    func cleanLeftoversOnce() {
+        guard !leftoversCleaned, tasks.isEmpty else { return }
+        leftoversCleaned = true
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: Self.modelsRoot.path)) ?? []
         for name in names where name.hasPrefix(".download-") || name.hasPrefix(".staging-") {

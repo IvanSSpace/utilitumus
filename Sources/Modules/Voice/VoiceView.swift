@@ -3,24 +3,25 @@ import AppKit
 import AVFoundation
 
 /// Экран модуля «Голос».
-struct VoiceView: View {
+struct VoiceView<Model: VoiceScreenModel>: View {
     @Environment(\.pageActive) private var pageActive
-    @ObservedObject private var store = VoiceModelStore.shared
-    @ObservedObject private var controller = VoiceController.shared
+    @ObservedObject var voice: Model
     @StateObject private var recorder = HotKeyRecorder()
     @State private var devices: [VoiceRecorder.InputDevice] = []
     @State private var testText = ""
     @FocusState private var testFocused: Bool
 
+    init(voice: Model) { self.voice = voice }
+
     private var noneInstalled: Bool {
-        !VoiceModel.allCases.contains { store.status($0) == .installed }
+        !VoiceModel.allCases.contains { voice.status($0) == .installed }
     }
 
     /// Главная кнопка: без моделей — скачать GigaAM, иначе — перейти в поле проверки.
     private var primary: DSAction {
         if noneInstalled {
             return DSAction("Скачать GigaAM", icon: "arrow.down.circle.fill") {
-                if !isBusy(.gigaam) { store.download(.gigaam) }
+                if !isBusy(.gigaam) { voice.download(.gigaam) }
             }
         }
         return DSAction("Проверить", icon: "mic.fill") { testFocused = true }
@@ -40,27 +41,34 @@ struct VoiceView: View {
         .onPageActive { active in
             if active {
                 devices = VoiceRecorder.inputDevices()
-                controller.refreshPermissions()
+                voice.refreshPermissions()
             } else {
                 recorder.stop()
+                voice.endTest()
             }
+        }
+        // Режим проверки у внешнего модуля: пока поле в фокусе, распознанное приходит сюда, а не в чужую программу.
+        .onChange(of: testFocused) { if testFocused { voice.beginTest() } else { voice.endTest() } }
+        .onChange(of: voice.test?.serial) {
+            guard let phrase = voice.test?.phrase else { return }
+            testText += (testText.isEmpty || testText.hasSuffix(" ") || testText.hasSuffix("\n") ? "" : " ") + phrase
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             guard pageActive else { return }
             devices = VoiceRecorder.inputDevices()
-            controller.refreshPermissions()
+            voice.refreshPermissions()
         }
         // Выбранная модель не установлена, а другая есть — переключаемся на неё.
-        .onReceive(store.$statuses) { _ in
-            if store.status(store.selected) != .installed,
-               let first = VoiceModel.allCases.first(where: { store.status($0) == .installed }) {
-                store.selected = first
+        .onReceive(voice.statusChanges) { _ in
+            if voice.status(voice.selected) != .installed,
+               let first = VoiceModel.allCases.first(where: { voice.status($0) == .installed }) {
+                voice.selected = first
             }
         }
     }
 
     private func isBusy(_ model: VoiceModel) -> Bool {
-        switch store.status(model) {
+        switch voice.status(model) {
         case .downloading, .verifying: return true
         default: return false
         }
@@ -103,15 +111,15 @@ struct VoiceView: View {
     }
 
     private func modelRow(_ model: VoiceModel) -> some View {
-        let status = store.status(model)
+        let status = voice.status(model)
         var subtitle = shortInfo(model)
         if case let .failed(message) = status { subtitle = message }
         return DSRow(icon: "cpu", title: shortTitle(model), subtitle: subtitle) {
             switch status {
             case .notInstalled:
-                DSButton("Скачать", icon: "arrow.down.circle.fill", small: true) { store.download(model) }
+                DSButton("Скачать", icon: "arrow.down.circle.fill", small: true) { voice.download(model) }
             case .failed:
-                DSButton("Повторить", icon: "arrow.clockwise", small: true) { store.download(model) }
+                DSButton("Повторить", icon: "arrow.clockwise", small: true) { voice.download(model) }
                     .help("Ошибка загрузки: повторить")
             case let .downloading(progress):
                 TintedProgress(value: progress)
@@ -119,17 +127,17 @@ struct VoiceView: View {
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.5))
                     .frame(width: 34, alignment: .trailing)
-                CircleIconButton(icon: "xmark", help: "Отменить загрузку") { store.cancel(model) }
+                CircleIconButton(icon: "xmark", help: "Отменить загрузку") { voice.cancel(model) }
             case .verifying:
                 ProgressView().controlSize(.small)
                 Text("Проверяю…").font(.caption).foregroundStyle(.white.opacity(0.5))
             case .installed:
-                if store.selected == model {
+                if voice.selected == model {
                     ActiveChip()
                 } else {
-                    DSButton("Выбрать", small: true) { store.selected = model }
+                    DSButton("Выбрать", small: true) { voice.selected = model }
                 }
-                CircleIconButton(icon: "trash", help: "Удалить модель") { store.delete(model) }
+                CircleIconButton(icon: "trash", help: "Удалить модель") { voice.delete(model) }
             }
         }
     }
@@ -142,19 +150,19 @@ struct VoiceView: View {
                 if recorder.isRecording {
                     TintedChip(text: "Нажми сочетание…")
                 } else {
-                    DSKeyCaps(controller.hotKeyLabel).fixedSize()
+                    DSKeyCaps(voice.hotKeyLabel).fixedSize()
                 }
                 DSButton(recorder.isRecording ? "Отмена" : "Изменить", small: true) {
-                    if recorder.isRecording { recorder.stop() } else { recorder.start(controller) }
+                    if recorder.isRecording { recorder.stop() } else { recorder.start(voice) }
                 }
                 .help("Кликни и нажми новое сочетание. Esc — отмена, Delete — вернуть ⌃⌥Space")
             }
-            if let error = controller.hotKeyError {
+            if let error = voice.hotKeyError {
                 DSRow(icon: "exclamationmark.triangle.fill", title: error)
             }
             DSRow(icon: "hand.tap.fill", title: "Режим",
-                  subtitle: controller.mode == .toggle ? "Нажал, сказал, нажал ещё раз" : "Говорю, пока держу клавишу") {
-                DSSegmented(VoiceController.Mode.allCases, selection: $controller.mode) { $0.title }
+                  subtitle: voice.mode == .toggle ? "Нажал, сказал, нажал ещё раз" : "Говорю, пока держу клавишу") {
+                DSSegmented(VoiceController.Mode.allCases, selection: $voice.mode) { $0.title }
             }
             DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
                 micMenu
@@ -163,23 +171,23 @@ struct VoiceView: View {
     }
 
     private var micName: String {
-        guard let uid = controller.micUID else { return "Системный" }
+        guard let uid = voice.micUID else { return "Системный" }
         return devices.first(where: { $0.uid == uid })?.name ?? "Отключён"
     }
 
     private var micMenu: some View {
         Menu {
-            Button { controller.micUID = nil } label: {
-                Label("Системный", systemImage: controller.micUID == nil ? "checkmark" : "")
+            Button { voice.micUID = nil } label: {
+                Label("Системный", systemImage: voice.micUID == nil ? "checkmark" : "")
             }
             ForEach(devices) { device in
-                Button { controller.micUID = device.uid } label: {
-                    Label(device.name, systemImage: controller.micUID == device.uid ? "checkmark" : "")
+                Button { voice.micUID = device.uid } label: {
+                    Label(device.name, systemImage: voice.micUID == device.uid ? "checkmark" : "")
                 }
             }
             // Выбранный микрофон сейчас отключён: оставляем его в списке, чтобы выбор не потерялся.
-            if let uid = controller.micUID, !devices.contains(where: { $0.uid == uid }) {
-                Button { controller.micUID = uid } label: { Label("Отключён", systemImage: "checkmark") }
+            if let uid = voice.micUID, !devices.contains(where: { $0.uid == uid }) {
+                Button { voice.micUID = uid } label: { Label("Отключён", systemImage: "checkmark") }
             }
         } label: {
             HStack(spacing: 6) {
@@ -203,7 +211,7 @@ struct VoiceView: View {
                 // Длинный список прокручивается внутри, чтобы не растягивать колонку.
                 DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(controller.excludedApps, id: \.self) { id in
+                        ForEach(voice.excludedApps, id: \.self) { id in
                             HStack(spacing: 10) {
                                 Group {
                                     if let icon = VoiceExcludedApps.icon(id) {
@@ -216,7 +224,7 @@ struct VoiceView: View {
                                 Text(VoiceExcludedApps.name(id)).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95))
                                     .lineLimit(1)
                                 Spacer(minLength: 8)
-                                DSButton("Убрать", style: .plain, small: true) { controller.removeExcluded(id) }
+                                DSButton("Убрать", style: .plain, small: true) { voice.removeExcluded(id) }
                             }
                             .padding(.horizontal, 14).padding(.vertical, 6)
                         }
@@ -224,9 +232,9 @@ struct VoiceView: View {
                 }
                 .frame(maxHeight: 130)
                 .fixedSize(horizontal: false, vertical: true)
-                DSRow(title: controller.excludedApps.isEmpty ? "Список пуст" : "Ещё") {
+                DSRow(title: voice.excludedApps.isEmpty ? "Список пуст" : "Ещё") {
                     DSButton("Добавить…", icon: "plus", small: true) {
-                        if let id = VoiceExcludedApps.pick() { controller.addExcluded(id) }
+                        if let id = VoiceExcludedApps.pick() { voice.addExcluded(id) }
                     }
                     .fixedSize()
                 }
@@ -262,12 +270,12 @@ struct VoiceView: View {
     /// Микрофон просит экран «Осталось дать доступ»; «Универсальный доступ» желателен, и тем, кто его
     /// пропустил, здесь остаётся одна строка.
     @ViewBuilder private var accessibilityHint: some View {
-        if !controller.axTrusted {
+        if !voice.axTrusted {
             HStack(spacing: 10) {
                 Text("Без «Универсального доступа» текст только копируется, остаётся нажать ⌘V.")
                     .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
                 Spacer()
-                DSButton("Разрешить…", small: true) { controller.requestAccessibility() }
+                DSButton("Разрешить…", small: true) { voice.requestAccessibility() }
             }
             .padding(.horizontal, 6)
         }

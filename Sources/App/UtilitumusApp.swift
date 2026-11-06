@@ -14,6 +14,7 @@ struct ModuleDetail: View {
             case .mixer: RemoteMixerPage()
             case .browser: RemoteBrowserPage()
             case .fans: RemoteFansPage()
+            case .voice: RemoteVoicePage()
             default: SatellitePage(module: module)
             }
         } else {
