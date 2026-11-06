@@ -175,9 +175,6 @@ private struct StoreShelf: View {
                 Text(category.subtitle).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.42)).lineLimit(1)
             }
             .padding(.horizontal, 4)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(theme.categoryColor(category).opacity(store.highlighted == category ? 0.22 : 0))
-                .padding(.vertical, -3))
             VStack(spacing: 6) {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     HStack(spacing: 8) {

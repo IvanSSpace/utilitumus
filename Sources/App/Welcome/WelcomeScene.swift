@@ -185,7 +185,7 @@ private struct WelcomeCategoriesStep: View {
             }
             HStack(spacing: 7) {
                 Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
-                Text("Вкладка категории открывается, когда в ней появится первый установленный модуль")
+                Text("Категории остались в Сторе, в панели модули идут общим списком")
                     .font(.system(size: 13))
             }
             .foregroundStyle(.white.opacity(0.5))

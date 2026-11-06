@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Мини-окошко темы 92×60: боковая панель с тремя вкладками, фон и карточка.
+/// Мини-окошко темы 92×60: боковая панель, фон и карточка.
 /// Рисуется теми же функциями темы, что и настоящее окно, поэтому не врёт.
 struct ThemePreview: View {
     let theme: DSTheme
@@ -32,7 +32,7 @@ struct ThemePreview: View {
         .contentShape(Rectangle())
     }
 
-    /// Полоска панели: по точке на категорию, у средней — подсветка выбранной вкладки.
+    /// Полоска панели: по точке на цвет категории, у средней — подсветка выбранной строки.
     private var sidebar: some View {
         VStack(spacing: 7) {
             ForEach(Array(ModuleCategory.all.enumerated()), id: \.element.id) { index, category in

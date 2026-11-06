@@ -259,9 +259,6 @@ final class StoreModel: ObservableObject {
 
     @Published var tab: StoreTab = .showcase
     @Published var detail: Module?
-    /// Категория, которую витрина подсвечивает после перехода из пустой вкладки панели.
-    @Published var highlighted: ModuleCategory?
-    private var highlightTask: Task<Void, Never>?
     /// Модуль, удаление которого ждёт подтверждения.
     @Published var pendingRemoval: Module?
 
@@ -324,18 +321,6 @@ final class StoreModel: ObservableObject {
     func updateNotes(_ module: Module) -> [String] {
         guard satellites.hasUpdate(module) else { return [] }
         return satellites.catalogApp(module)?.notes ?? []
-    }
-
-    /// Витрина с подсвеченной на пару секунд категорией.
-    func show(category: ModuleCategory) {
-        tab = .showcase
-        detail = nil
-        highlighted = category
-        highlightTask?.cancel()
-        highlightTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            if !Task.isCancelled { withAnimation(.easeOut(duration: 0.4)) { self?.highlighted = nil } }
-        }
     }
 
     // MARK: Окно подробностей
