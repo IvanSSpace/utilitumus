@@ -27,11 +27,7 @@ TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVer
 # Постоянный сертификат «Utilitumus Signing» (локально — ~/.config/utilitumus,
 # в CI — из секретов) даёт одинаковую подпись у всех версий. Нет его — ad-hoc.
 SIGN_NAME="Utilitumus Signing"
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 if security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   SIGN_ID="$SIGN_NAME"
 else

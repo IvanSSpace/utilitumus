@@ -219,11 +219,7 @@ TARGET="arm64-apple-macos$MIN_SYSTEM"
 
 # Подпись как в build.sh: нет сертификата (CI) — ad-hoc. Выкладывать такое не даст release-app.sh.
 SIGN_NAME="Utilitumus Signing"
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 if [[ "$(security find-identity -p codesigning)" == *"\"$SIGN_NAME\""* ]]; then
   SIGN_ID="$SIGN_NAME"
 else

@@ -36,11 +36,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/src" "$F"
 
 # Подпись как в build.sh.
-KC_PASSWORD_FILE="$HOME/.config/utilitumus/keychain-password"
-KC="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-if [ -f "$KC_PASSWORD_FILE" ] && [ -f "$KC" ]; then
-  security unlock-keychain -p "$(cat "$KC_PASSWORD_FILE")" "$KC"
-fi
+scripts/unlock-signing.sh
 if ! security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   echo "ПРОВАЛ: нет сертификата «$SIGN_NAME»"
   exit 1

@@ -34,8 +34,7 @@ satellite_check_setup() {
   FOREIGN="$OUT/$MODULE-check-foreign"
   failures=0
   # Подпись как в build.sh. Без этого codesign ждёт разблокировку связки и висит молча.
-  local kc_password="$HOME/.config/utilitumus/keychain-password" kc="$HOME/Library/Keychains/utilitumus-signing.keychain-db"
-  if [ -f "$kc_password" ] && [ -f "$kc" ]; then security unlock-keychain -p "$(cat "$kc_password")" "$kc"; fi
+  scripts/unlock-signing.sh
   mkdir -p "$OUT/src" "$OUT/png"
   rm -f "$OUT"/png/*.png
   trap 'exit 1' HUP INT TERM
