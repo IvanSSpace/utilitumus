@@ -7,15 +7,15 @@ final class LockState: ObservableObject {
     private static let key = "MicGuardBluetoothLocked"
 
     @Published var isLocked: Bool {
-        didSet { UserDefaults.standard.set(isLocked, forKey: Self.key) }
+        didSet { Kit.defaults.set(isLocked, forKey: Self.key) }
     }
 
     var isUnlocked: Bool { !isLocked }
 
     private init() {
-        if UserDefaults.standard.object(forKey: Self.key) == nil {
-            UserDefaults.standard.set(true, forKey: Self.key)
+        if Kit.defaults.object(forKey: Self.key) == nil {
+            Kit.defaults.set(true, forKey: Self.key)
         }
-        isLocked = UserDefaults.standard.bool(forKey: Self.key)
+        isLocked = Kit.defaults.bool(forKey: Self.key)
     }
 }

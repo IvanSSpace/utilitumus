@@ -51,11 +51,11 @@ enum KeyboardFeature: String, CaseIterable, Identifiable {
     var isOn: Bool {
         get {
             guard isAvailable else { return false }
-            let defaults = UserDefaults.standard
+            let defaults = Kit.defaults
             if defaults.object(forKey: key) == nil { return self == .fnLanguage }
             return defaults.bool(forKey: key)
         }
-        nonmutating set { UserDefaults.standard.set(newValue, forKey: key) }
+        nonmutating set { Kit.defaults.set(newValue, forKey: key) }
     }
 
     /// Включённые фишки в порядке экрана.

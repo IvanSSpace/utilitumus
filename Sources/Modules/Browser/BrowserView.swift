@@ -656,9 +656,8 @@ private struct AddRuleSheet: View {
 
     /// Запущенные обычные программы: именно из них чаще всего приходят ссылки.
     private static func loadRunningApps() -> [(id: String, name: String, icon: NSImage)] {
-        let own = Bundle.main.bundleIdentifier
         return NSWorkspace.shared.runningApplications.compactMap { running in
-            guard running.activationPolicy == .regular, let id = running.bundleIdentifier, id != own,
+            guard running.activationPolicy == .regular, let id = running.bundleIdentifier, !Kit.isOurs(id),
                   let name = running.localizedName else { return nil }
             return (id, name, running.icon ?? NSImage())
         }

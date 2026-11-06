@@ -139,7 +139,7 @@ final class FanController: ObservableObject {
     private nonisolated static let helperQueue = DispatchQueue(label: "utilitumus.fans.helper")
 
     private init() {
-        if let data = UserDefaults.standard.data(forKey: Self.configsKey),
+        if let data = Kit.defaults.data(forKey: Self.configsKey),
            let saved = try? JSONDecoder().decode([FanConfig].self, from: data) {
             // Прежние умолчания (50/85, 70/90), которые пользователь не трогал, — на новые 50/80.
             configs = saved.map { c in
@@ -491,7 +491,7 @@ final class FanController: ObservableObject {
         pendingPersist?.cancel()
         pendingPersist = nil
         if let data = try? JSONEncoder().encode(configs) {
-            UserDefaults.standard.set(data, forKey: Self.configsKey)
+            Kit.defaults.set(data, forKey: Self.configsKey)
         }
     }
 
@@ -517,7 +517,7 @@ final class FanController: ObservableObject {
             try? FileManager.default.removeItem(at: url)
         }
         // Каталог 0700, файл 0600 — журнал не должны читать другие пользователи мака.
-        ActionLog.preparePrivate(file: url)
+        PrivateLog.prepare(file: url)
         if let handle = try? FileHandle(forWritingTo: url) {
             handle.seekToEndOfFile(); handle.write(data); try? handle.close()
         }
