@@ -5,7 +5,7 @@ import ImageIO
 
 // Проверка логики «Буфера» без интерфейса. Запуск: Tests/run-clipboard-check.sh
 // Реальный буфер обмена и Keychain пользователя не трогаются: свой NSPasteboard, свой каталог, свой сервис.
-// `ClipboardKeychain()` без аргументов здесь не вызывать: это настоящий сервис с ключом настоящей истории.
+// Связка здесь только в памяти (`testKeychain()`); настоящую связку этот файл называть не может: страж в run-clipboard-check.sh.
 
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
@@ -101,8 +101,31 @@ do {
 }
 
 // 5. Keychain: свой сервис, ключ создаётся один раз и стабилен
-func testKeychain() -> ClipboardKeychain {
-    ClipboardKeychain(service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t")
+// Связка в памяти: проверка не пишет в настоящую связку ключей (страж в run-clipboard-check.sh).
+final class MemoryKeychain {
+    var items: [String: Data] = [:]
+    private func name(_ query: CFDictionary) -> String {
+        let q = query as! [String: Any]
+        return "\(q[kSecAttrService as String] as! String)|\(q[kSecAttrAccount as String] as! String)"
+    }
+    func copy(_ query: CFDictionary, _ out: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+        guard let data = items[name(query)] else { return errSecItemNotFound }
+        out?.pointee = data as CFData
+        return errSecSuccess
+    }
+    func add(_ query: CFDictionary, _ out: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+        let key = name(query)
+        guard items[key] == nil else { return errSecDuplicateItem }
+        items[key] = (query as! [String: Any])[kSecValueData as String] as? Data
+        return errSecSuccess
+    }
+    func delete(_ query: CFDictionary) -> OSStatus { items.removeValue(forKey: name(query)) == nil ? errSecItemNotFound : errSecSuccess }
+}
+let memoryKeychain = MemoryKeychain()
+/// `directory` — без истории по умолчанию: новый ключ допустим только там, где `index.bin` нет.
+func testKeychain(directory: URL = FileManager.default.temporaryDirectory.appendingPathComponent("clipcheck-nokeychain-\(UUID().uuidString)")) -> ClipboardKeychain {
+    ClipboardKeychain(directory: directory, service: "local.utilitumus.clipboard.test-\(UUID().uuidString)", account: "t",
+                      copyItem: memoryKeychain.copy, addItem: memoryKeychain.add, deleteItem: memoryKeychain.delete)
 }
 func keyBytes(_ key: SymmetricKey?) -> Data? { key?.withUnsafeBytes { Data($0) } }
 
@@ -163,18 +186,38 @@ do {
     let short = Data([1, 2, 3])
     let attrs: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
                                 kSecAttrAccount as String: odd.account, kSecValueData as String: short]
-    check(SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess, "короткая запись положена")
+    check(memoryKeychain.add(attrs as CFDictionary, nil) == errSecSuccess, "короткая запись положена")
     check((try? odd.key()) == nil, "короткая запись: ключа нет")
     var out: CFTypeRef?
-    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: odd.service,
-                                kSecAttrAccount as String: odd.account, kSecReturnData as String: true]
-    SecItemCopyMatching(query as CFDictionary, &out)
+    _ = memoryKeychain.copy(attrs as CFDictionary, &out)
     check(out as? Data == short, "короткая запись не заменена")
 
     // Сбой записи нового ключа: ошибка, а не молчаливое продолжение.
     var failing = testKeychain()
     failing.addItem = { _, _ in errSecDuplicateItem }
     check((try? failing.key()) == nil, "новый ключ не записался: ключа нет")
+
+    // История есть, записи нет: новый ключ не создаётся, индекс цел (ключ ушёл к утилите после передачи).
+    let historyDir = FileManager.default.temporaryDirectory.appendingPathComponent("clipcheck-hist-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: historyDir) }
+    let historyKey = SymmetricKey(size: .bits256)
+    ClipboardStore(directory: historyDir, key: historyKey).addSpace(name: "Работа", colorID: "teal")
+    let indexBefore = try? Data(contentsOf: historyDir.appendingPathComponent("index.bin"))
+    var addedAny = false
+    var orphan = testKeychain(directory: historyDir)
+    let addingRing = orphan.addItem
+    orphan.addItem = { query, out in addedAny = true; return addingRing(query, out) }
+    var thrownOrphan: ClipboardKeychainError?
+    do { _ = try orphan.key() } catch { thrownOrphan = error as? ClipboardKeychainError }
+    check(thrownOrphan?.indexWithoutKey == true && !addedAny, "история есть, записи нет: новый ключ не создан")
+    check((try? Data(contentsOf: historyDir.appendingPathComponent("index.bin"))) == indexBefore
+          && ((try? FileManager.default.contentsOfDirectory(atPath: historyDir.path)) ?? []) == ["index.bin"],
+          "история есть, записи нет: индекс на месте и не отложен")
+    // Запись есть: история открывается как обычно.
+    let holder = testKeychain(directory: historyDir)
+    _ = holder.addItem([kSecAttrService as String: holder.service, kSecAttrAccount as String: holder.account,
+                        kSecValueData as String: historyKey.withUnsafeBytes { Data($0) }] as CFDictionary, nil)
+    check(keyBytes(try? holder.key()) == keyBytes(historyKey), "история есть, запись есть: ключ выдан")
 }
 
 // 8. Индекс, который не открылся, не затирается

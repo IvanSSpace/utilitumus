@@ -110,8 +110,13 @@ final class ClipboardController: ObservableObject {
             storeOpener()
             return
         }
-        guard let key = try? ClipboardKeychain().key() else {
-            storeError = "Не удалось получить ключ из Связки ключей — история не ведётся, старая не тронута"
+        let key: SymmetricKey
+        do {
+            key = try ClipboardKeychain.system(directory: ClipboardStore.defaultDirectory).key()
+        } catch {
+            storeError = (error as? ClipboardKeychainError)?.indexWithoutKey == true
+                ? "История есть, а её ключ у утилиты «Буфер» — история не ведётся, файл не тронут. Установи утилиту снова"
+                : "Не удалось получить ключ из Связки ключей — история не ведётся, старая не тронута"
             return
         }
         let opened = ClipboardStore(directory: ClipboardStore.defaultDirectory, key: key, limit: limit)

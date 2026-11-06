@@ -5,15 +5,25 @@ import Security
 /// Связка ключей не отдала ключ. `status` — код ошибки Security.
 struct ClipboardKeychainError: Error {
     let status: OSStatus
+    /// Файл истории есть, а ключа нет нигде: новый ключ сделал бы историю нечитаемой.
+    var indexWithoutKey = false
 }
 
 /// Ключ шифрования: случайный, лежит в Keychain (generic password). Больше нигде не хранится.
 struct ClipboardKeychain {
+    /// Каталог истории: новый ключ не создаётся, пока в нём есть `index.bin`. Умолчания нет сознательно:
+    /// проверка, которая забыла каталог, смотрела бы в настоящую историю.
+    let directory: URL
     var service = "local.utilitumus.clipboard"
     var account = "history-key"
-    /// Подменяются в проверке: настоящий отказ связки без диалога не получить.
-    var copyItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemCopyMatching
-    var addItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus = SecItemAdd
+    /// Без умолчаний: настоящая связка берётся только через `system(directory:)`, проверка подставляет память.
+    var copyItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    var addItem: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
+    var deleteItem: (CFDictionary) -> OSStatus
+
+    static func system(directory: URL) -> ClipboardKeychain {
+        ClipboardKeychain(directory: directory, copyItem: SecItemCopyMatching, addItem: SecItemAdd, deleteItem: SecItemDelete)
+    }
 
     private var base: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
@@ -38,6 +48,11 @@ struct ClipboardKeychain {
     }
 
     private func createKey() throws -> SymmetricKey {
+        // Прежней записи нет, а история есть: ключ ушёл к утилите «Буфер» (центр удаляет прежнюю после передачи).
+        // Новый ключ отложил бы настоящую историю как нечитаемую.
+        guard ClipboardStore.indexCheck(directory: directory, key: SymmetricKey(size: .bits256)) == .noIndex else {
+            throw ClipboardKeychainError(status: errSecItemNotFound, indexWithoutKey: true)
+        }
         var bytes = [UInt8](repeating: 0, count: 32)
         let random = SecRandomCopyBytes(kSecRandomDefault, 32, &bytes)
         guard random == errSecSuccess else { throw ClipboardKeychainError(status: random) }
@@ -51,7 +66,7 @@ struct ClipboardKeychain {
     }
 
     func delete() {
-        SecItemDelete(base as CFDictionary)
+        _ = deleteItem(base as CFDictionary)
     }
 }
 
