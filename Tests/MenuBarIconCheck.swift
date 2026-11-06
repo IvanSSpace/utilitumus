@@ -15,10 +15,10 @@ func check(_ ok: Bool, _ name: String) {
 @MainActor func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
 
 @MainActor func snapshot(_ name: String, _ view: some View, theme: DSTheme, width: CGFloat) async -> NSBitmapImageRep {
-    UserDefaults.standard.set(theme.rawValue, forKey: DSTheme.storageKey)
+    Kit.defaults.set(theme.rawValue, forKey: DSTheme.storageKey)
     let host0 = NSHostingView(rootView: view.environment(\.dsTint, theme.accent(.sound)).dsThemed().frame(width: width))
     let height = max(host0.fittingSize.height, 100)
-    let root = ZStack { DSBackground(module: .sound, neutral: true); VStack { view.padding(DS.pagePadding); Spacer(minLength: 0) } }
+    let root = ZStack { DSBackground(module: .sound); VStack { view.padding(DS.pagePadding); Spacer(minLength: 0) } }
         .environment(\.pageActive, true)
         .environment(\.dsTint, theme.accent(.sound))
         .dsThemed()
@@ -147,27 +147,31 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
     icons.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
 
     print("== снимки раздела")
+    let shared = ModuleMenuIcons.shared
+    shared.makeItem = { _ in nil }
+    shared.tellUtility = { _, _ in }
     var shots: [NSBitmapImageRep] = []
     for (name, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
-        icons.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
+        shared.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
         let off = await snapshot("section-\(name)-off", MenuIconsSection(), theme: theme, width: 380)
         check(off.pixelsWide > 0, "раздел снят (\(name), все выключены)")
-        icons.set(.fans, true); icons.set(.awake, true); icons.set(.stash, true)
+        shared.set(.fans, true); shared.set(.awake, true); shared.set(.stash, true)
         let on = await snapshot("section-\(name)-on", MenuIconsSection(), theme: theme, width: 380)
         check(on.pixelsHigh == off.pixelsHigh && on.pixelsWide == off.pixelsWide, "раздел \(name): включение не сдвигает раскладку")
         check(differing(on, off) > 0, "раздел \(name): переключатели видны")
-        shots.append(off)
+        shots.append(on)
+        shared.set(.fans, false)
         let ctrlOff = await snapshot("header-\(name)-off", DSModuleControls(module: .fans), theme: theme, width: 380)
-        icons.set(.fans, false)
         let ctrlOff2 = await snapshot("header-\(name)-off2", DSModuleControls(module: .fans), theme: theme, width: 380)
-        check(differing(ctrlOff, ctrlOff2) >= 0 && ctrlOff.pixelsWide == ctrlOff2.pixelsWide, "шапка \(name): размер один")
-        icons.set(.fans, true)
+        check(differing(ctrlOff, ctrlOff2) == 0, "шапка \(name): выключенное состояние повторяется один в один")
+        shared.set(.fans, true)
         let ctrlOn = await snapshot("header-\(name)-on", DSModuleControls(module: .fans), theme: theme, width: 380)
         check(ctrlOn.pixelsHigh == ctrlOff2.pixelsHigh && ctrlOn.pixelsWide == ctrlOff2.pixelsWide, "шапка \(name): включение не сдвигает раскладку")
     }
     check(differing(shots[0], shots[1]) > 0, "темы различаются")
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
+    defaults.removeObject(forKey: DSTheme.storageKey)
 }
 
 await run()

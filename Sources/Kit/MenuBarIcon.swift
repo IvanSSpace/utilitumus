@@ -188,17 +188,15 @@ final class MenuBarIconItem: NSObject, NSMenuDelegate {
     }
 }
 
-/// Переключатель «Значок в строке меню» в шапке страницы модуля. Размер один при любом состоянии: страница не сдвигается.
+/// Переключатель «Значок в строке меню» в шапке страницы модуля: узкая кнопка со значком, чтобы шапка не стала шире
+/// заметно. Размер один при любом состоянии: страница не сдвигается.
 struct DSMenuIconSwitch: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "menubar.rectangle")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(isOn ? 0.85 : 0.5))
-            DSToggle("Значок в строке меню", isOn: $isOn)
-        }
-        .help(isOn ? "Свой значок в строке меню: включён" : "Свой значок модуля в строке меню")
+        DSButton("", icon: "menubar.rectangle", style: isOn ? .secondary : .plain, small: true) { isOn.toggle() }
+            .help(isOn ? "Свой значок модуля в строке меню: включён. Нажми, чтобы скрыть" : "Показать свой значок модуля в строке меню")
+            .accessibilityLabel("Значок в строке меню")
+            .accessibilityValue(isOn ? "включён" : "выключен")
     }
 }
