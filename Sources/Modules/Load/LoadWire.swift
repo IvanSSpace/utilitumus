@@ -153,7 +153,13 @@ extension LoadMeasure {
 
 extension BackgroundStore {
     var wireState: LoadBackgroundState {
-        LoadBackgroundState(data: data, prompt: prompt, running: running, journal: journal)
+        // Без полей, которые в связь не идут: так состояние после разбора равно исходному.
+        var d = data
+        for i in d.agents.indices { d.agents[i].targets = []; d.agents[i].loaded = false }
+        for i in d.bots.indices { d.bots[i].spec = .none }
+        var j = journal
+        for i in j.indices { j[i].kind = ""; j[i].label = "" }
+        return LoadBackgroundState(data: d, prompt: prompt, running: running, journal: j)
     }
 
     /// Просьба из связи: только агент и кнопка, которые модуль сам показал.
