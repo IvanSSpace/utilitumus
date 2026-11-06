@@ -508,6 +508,19 @@ func caseName(_ action: VoiceAction) -> String {
     check(sent == [LinkWire.encoded(VoiceAction.toggleTestRecording)], "кнопка шлёт одно проверяемое действие")
     check(LinkWire.decodeAction(VoiceAction.self, from: sent[0], limit: 512) == .toggleTestRecording, "утилита это действие принимает")
     sent = []
+    func pressed(version: String?) async -> Int {
+        sent = []
+        let model = RemoteVoiceModel(id: "test.voice-old", link: link, canRead: { true }, installedVersion: { version })
+        model.toggleTestRecording()
+        try? await Task.sleep(for: .milliseconds(100))
+        return sent.count
+    }
+    check(await pressed(version: "1.0.0") == 0, "старый «Голос»: кнопка только ставит фокус, «Непонятной команды» не будет")
+    check(await pressed(version: "0") == 0, "версию не прочитать: как у старого")
+    check(await pressed(version: "1.1.0") == 1, "«Голос» 1.1.0: кнопка запускает запись")
+    check(await pressed(version: "1.2") == 1, "«Голос» новее: тоже")
+    check(await pressed(version: nil) == 1, "версия ещё неизвестна: действие уходит")
+    sent = []
     remote.endTest()
     try? await Task.sleep(for: .milliseconds(100))
     check(sent.isEmpty, "записи нет и режима нет: лишнее действие не уходит")

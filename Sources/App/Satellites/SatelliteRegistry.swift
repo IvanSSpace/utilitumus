@@ -151,6 +151,18 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         entries[module]?.status?.enabled ?? false
     }
 
+    /// Утилита старше 1.1.0 не знает значка по просьбе центра и записи проверки из кнопки «Голоса»; центр обновляет её
+    /// только по кнопке в Сторе, так что рядом с новым центром она живёт долго. Боты вышли сразу со всем этим.
+    /// Версия неизвестна (опроса ещё не было) — не старая: лишнего предупреждения не нужно.
+    nonisolated static func isOutdated(_ module: Module, installed: String?) -> Bool {
+        guard let installed else { return false }
+        return Kit.isNewer(module == .bots ? "1.0.0" : "1.1.0", than: installed)
+    }
+
+    func isOutdated(_ module: Module) -> Bool {
+        Self.isOutdated(module, installed: entries[module]?.installedVersion)
+    }
+
     // MARK: Команды
 
     func setEnabled(_ module: Module, _ enabled: Bool) {
