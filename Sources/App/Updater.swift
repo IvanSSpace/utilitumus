@@ -80,7 +80,8 @@ final class Updater: ObservableObject {
             do {
                 try await Self.downloadAndReplace(from: url, expectedVersion: version,
                                                   target: Bundle.main.bundleURL,
-                                                  beforeReplace: { FanController.shared.restoreAutoBlocking() })
+                                                  beforeReplace: { FanController.shared.holdForUpdate() },
+                                                  replaceFailed: { FanController.shared.resumeAfterFailedUpdate() })
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)
@@ -127,7 +128,8 @@ final class Updater: ObservableObject {
     /// удаляется только после успешной подмены.
     nonisolated static func downloadAndReplace(
         from url: URL, expectedVersion: String, target: URL,
-        beforeReplace: @escaping @MainActor @Sendable () -> Void
+        beforeReplace: @escaping @MainActor @Sendable () -> Void,
+        replaceFailed: @escaping @MainActor @Sendable () -> Void
     ) async throws {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("utilitumus-update-\(UUID().uuidString)")
@@ -141,10 +143,9 @@ final class Updater: ObservableObject {
 
         let unpacked = work.appendingPathComponent("unpacked")
         try KitSigning.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
-        let staged = try UpdateBundle.stage(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target)
         // После подмены бандла на диске служба может не принять этот процесс по подписи: «Авто» при выходе не дойдёт.
-        await beforeReplace()
-        try UpdateBundle.commit(staged, expectedVersion: expectedVersion, target: target)
+        try await UpdateBundle.install(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target,
+                                       beforeReplace: beforeReplace, replaceFailed: replaceFailed)
     }
 
     /// Открыть новую версию после выхода текущей. Выход штатный —

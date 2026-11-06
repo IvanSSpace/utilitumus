@@ -94,12 +94,10 @@ func legacyChecks() {
 
     check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
     let updater = source("Sources/App/Updater.swift")
-    check(updater.contains("FanController.shared.restoreAutoBlocking()"), "обновление отдаёт вентиляторы")
-    if let hook = updater.range(of: "await beforeReplace()"), let replace = updater.range(of: "UpdateBundle.commit") {
-        check(hook.lowerBound < replace.lowerBound, "вентиляторы отданы раньше подмены бандла")
-    } else {
-        check(false, "вентиляторы отданы раньше подмены бандла")
-    }
+    // Сам порядок и удержание проверяет поведением Tests/run-update-order-check.sh; здесь — что Updater подключён именно к ним.
+    check(updater.contains("beforeReplace: { FanController.shared.holdForUpdate() }"), "обновление отдаёт вентиляторы")
+    check(updater.contains("replaceFailed: { FanController.shared.resumeAfterFailedUpdate() }"), "неудачное обновление возвращает управление")
+    check(updater.contains("try await UpdateBundle.install(") && !updater.contains("UpdateBundle.commit"), "обновление идёт через install с шагами вокруг подмены")
 }
 
 func statusChecks() {

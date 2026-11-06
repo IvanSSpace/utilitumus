@@ -117,6 +117,9 @@ final class FanController: ObservableObject {
     /// Между start() и stop(). Отложенные tick/apply после stop() ничего не делают,
     /// иначе они снова взяли бы вентиляторы под ручное управление.
     private var isRunning = false
+    /// Обновление подменяет бандл: после подмены служба может не принять этот процесс, и взятый в ручной режим вентилятор
+    /// вернуть будет нечем. Живёт до выхода, переживает stop() и start(): снимает только `resumeAfterFailedUpdate`.
+    private var holdingForUpdate = false
     /// Прежний setuid-помощник уже просили вернуть «Авто» за этот запуск модуля.
     private var legacyRestoreTried = false
     /// Последняя отправленная помощником цель по вентиляторам: от неё считается гистерезис.
@@ -206,16 +209,17 @@ final class FanController: ObservableObject {
     func restoreAutoBlocking() {
         if pendingPersist != nil { persist() }
         guard FanHelperInstaller.shared.status != .notInstalled, conflictingApp == nil, let smc else { return }
-        let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
+        // Команда в пути могла быть `set`: в SMC её ещё не видно, а вентилятор она возьмёт в ручной режим.
+        let releasing = fans.map(\.index).filter { inFlight.contains($0) || smc.uint8("F\($0)Md") == 1 }
         // Службы при setuid-установке нет, XPC ничего бы не дал. Убрать вместе с поддержкой setuid.
         if FanHelperInstaller.shared.status == .outdated, FanHelperInstaller.shared.hasLegacySetuid {
-            LegacyFanHelper.restoreAutoWithin(fans: manual, path: FanHelperInstaller.installedPath, on: Self.helperQueue) { error in
-                Self.log("прежний помощник auto \(manual) → \(error ?? "ok")")
+            LegacyFanHelper.restoreAutoWithin(fans: releasing, path: FanHelperInstaller.installedPath, on: Self.helperQueue) { error in
+                Self.log("прежний помощник auto \(releasing) → \(error ?? "ok")")
             }
             return
         }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
-        FanHelperClient.sendAll(manual.map { .auto($0) }, on: Self.helperQueue) { Self.logHelper($0, $1) }
+        FanHelperClient.sendAll(releasing.map { .auto($0) }, on: Self.helperQueue) { Self.logHelper($0, $1) }
     }
 
     /// Выключение модуля или выход: вентиляторы системе, опрос и управление
@@ -250,6 +254,21 @@ final class FanController: ObservableObject {
         conflictingApp = nil
         safetyTripped = false
         lastError = nil
+    }
+
+    /// Перед подменой бандла: отдать вентиляторы системе и больше ими не управлять.
+    /// Сам `restoreAutoBlocking` флагу не подчиняется: он только отпускает вентиляторы, и при выходе это последний шанс.
+    func holdForUpdate() {
+        Self.log("обновление → вентиляторы системе, управление на паузе")
+        holdingForUpdate = true
+        restoreAutoBlocking()
+    }
+
+    /// Подмена не удалась, приложение работает дальше: управление возвращается сразу, не дожидаясь такта.
+    func resumeAfterFailedUpdate() {
+        Self.log("обновление не удалось → управление снова включено")
+        holdingForUpdate = false
+        tick()
     }
 
     /// Режим «Максимум в играх» включился или выключился.
@@ -357,7 +376,7 @@ final class FanController: ObservableObject {
     /// приложения — такое расхождение само больше не исправилось бы.
     private func apply() {
         // Пока вентиляторами рулит другая программа — не воюем с ней.
-        guard isRunning, conflictingApp == nil, let smc else { return }
+        guard isRunning, !holdingForUpdate, conflictingApp == nil, let smc else { return }
         guard FanHelperInstaller.shared.status == .ready else {
             if FanHelperInstaller.shared.status == .outdated { releaseStuckFans(smc) }
             return
