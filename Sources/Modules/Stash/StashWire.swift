@@ -88,6 +88,7 @@ enum StashAction: Codable, Equatable, Sendable {
 extension StashStore {
     static let maxScenarioName = 100
     static let maxScenarios = 100
+    static let elsewhereText = "Стеш занят в другой программе"
 
     var wireState: StashState {
         func program(_ entry: RunningEntry) -> StashState.Program {
@@ -120,6 +121,7 @@ extension StashStore {
             selectOnlyHeavy()
         case .stash(let ids):
             guard busy == nil, pendingBusy == nil else { return "Стеш занят" }
+            guard !operationElsewhere else { return Self.elsewhereText }
             guard Self.isListed(ids, in: running) else { return "Список программ изменился" }
             let targets = running.filter { ids.contains($0.bundleID) }.map(\.app)
             guard targets.allSatisfy(Self.isEligible) else { return "Эту программу закрыть нельзя" }
@@ -130,6 +132,7 @@ extension StashStore {
             }
         case .restore:
             guard busy == nil, pendingBusy == nil else { return "Стеш занят" }
+            guard !operationElsewhere else { return Self.elsewhereText }
             guard !stashed.isEmpty else { return "Возвращать нечего" }
             pendingBusy = Self.restoringText
             Task {

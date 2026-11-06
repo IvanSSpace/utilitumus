@@ -376,6 +376,56 @@ let allActions: [StashAction] = [
     keys.forEach(UserDefaults(suiteName: suite)!.removeObject(forKey:))
 }
 
+/// Два процесса на одну запись (центр и утилита при передаче модуля): пока один закрывает или возвращает, второй
+/// не пишет, а после него читает запись заново. Процессы здесь подставные: свои номера и «жив ли».
+@MainActor func twoWriters() async {
+    keys.forEach(UserDefaults(suiteName: suite)!.removeObject(forKey:))
+    let defaults = UserDefaults(suiteName: suite)!
+    let mark = "StashOperation"
+    let slow = FakeApp("test.slow", name: "Упрямая", stubborn: true)
+    let other = FakeApp("test.other", name: "Другая")
+    let worldA = World(), worldB = World()
+    worldA.apps = [slow]
+    worldB.apps = [other]
+    let utility = makeStore(worldA)
+    let launcher = makeStore(worldB)
+    utility.processID = 1001
+    launcher.processID = 1002
+    utility.isAlive = { _ in true }
+    launcher.isAlive = { _ in true }
+
+    check(utility.handle(.stash(bundleIDs: ["test.slow"])) == nil, "процесс 1: закрытие принято")
+    await pause(0.3)
+    check(defaults.dictionary(forKey: mark)?["pid"] as? Int == 1001, "метка операции стоит за процессом 1")
+    let before = snapshot(launcher, worldB)
+    check(launcher.handle(.stash(bundleIDs: ["test.other"])) == StashStore.elsewhereText, "процесс 2: stash отвергнут, пока пишет первый")
+    check(launcher.handle(.restore) == StashStore.elsewhereText, "процесс 2: restore отвергнут")
+    await launcher.stash([other])
+    check(other.terminations == 0 && snapshot(launcher, worldB) == before, "процесс 2: прямой stash ничего не закрыл и не записал")
+    check(launcher.stashed.isEmpty, "процесс 2 ещё не видел запись первого")
+
+    await settle(utility)
+    check(defaults.dictionary(forKey: mark) == nil, "метка снята, когда первый закончил")
+    await launcher.stash([other])
+    check(other.terminations == 1, "процесс 2: после первого закрытие прошло")
+    check(Set(launcher.stashed.map(\.bundleID)) == ["test.slow", "test.other"], "запись первого не потеряна: \(launcher.stashed.map(\.bundleID))")
+    let saved = defaults.data(forKey: "StashedApp" + "s").flatMap { try? JSONDecoder().decode([StashedApp].self, from: $0) } ?? []
+    check(Set(saved.map(\.bundleID)) == ["test.slow", "test.other"], "в домене обе записи")
+    check(defaults.dictionary(forKey: mark) == nil, "метка снята и после второго")
+
+    // Метка умершего процесса и старая метка не держат.
+    defaults.set(["pid": 4242, "since": Date().timeIntervalSince1970], forKey: mark)
+    launcher.isAlive = { _ in false }
+    check(!launcher.operationElsewhere, "метка умершего процесса не держит")
+    launcher.isAlive = { _ in true }
+    defaults.set(["pid": 4242, "since": Date().timeIntervalSince1970 - StashStore.operationTimeout - 1], forKey: mark)
+    check(!launcher.operationElsewhere, "старая метка не держит")
+    defaults.set(["pid": 4242, "since": Date().timeIntervalSince1970], forKey: mark)
+    check(launcher.operationElsewhere, "свежая метка живого процесса держит")
+    defaults.removeObject(forKey: mark)
+    keys.forEach(defaults.removeObject(forKey:))
+}
+
 // MARK: - Экран
 
 #if !STASH_NO_SCREEN
@@ -598,6 +648,7 @@ enum Main {
             await usageRefresh()
             await validations()
             await dataPath()
+            await twoWriters()
             #if !STASH_NO_SCREEN
             await screen(out: CommandLine.arguments[1])
             #endif

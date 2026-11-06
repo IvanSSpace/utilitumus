@@ -161,6 +161,11 @@ final class StashStore: ObservableObject {
     private static let stashKey = "StashedApps"
     private static let excludedKey = "StashExcludedBundleIDs"
     private static let scenariosKey = "StashScenarios"
+    /// Кто сейчас закрывает или возвращает программы: `["pid": Int, "since": секунды]`. Запись `StashedApps` — единственный
+    /// список закрытых программ, и писать её одновременно центр и утилита не должны, что бы ни случилось с ролью.
+    private static let operationKey = "StashOperation"
+    /// Метка старше этого срока не держит: процесс мог упасть, не сняв её. Самая долгая операция — два срока ожидания и запуски.
+    static let operationTimeout: TimeInterval = 300
     /// Finder и сам Utilitumus не показываем и не закрываем никогда.
     private static let protectedIDs: Set<String> = ["com.apple.finder"]
 
@@ -183,6 +188,9 @@ final class StashStore: ObservableObject {
     var usagePending = false
     /// Экран открыт в центре: только тогда утилита замеряет память. Встроенному модулю окно проверяет `refreshUsage`.
     var screenLease = true
+    /// Номер процесса и проверка, жив ли чужой: проверке нужны два «процесса» в одном.
+    var processID = Int(getpid())
+    var isAlive: (Int) -> Bool = { kill(pid_t($0), 0) == 0 }
 
     private let defaults: UserDefaults
     /// Значки по bundle id и по пути. Не @Published: чтение из body не должно
@@ -209,6 +217,36 @@ final class StashStore: ObservableObject {
                 defaults.set(data, forKey: Self.stashKey + ".unreadable")
                 defaults.removeObject(forKey: Self.stashKey)
             }
+        }
+    }
+
+    // MARK: Одна операция на запись
+
+    /// Держит ли закрытие или возврат другой процесс, судя по метке в общем домене.
+    var operationElsewhere: Bool {
+        defaults.synchronize()
+        guard let mark = defaults.dictionary(forKey: Self.operationKey), let pid = mark["pid"] as? Int,
+              let since = mark["since"] as? Double else { return false }
+        return pid != processID && Date().timeIntervalSince1970 - since < Self.operationTimeout && isAlive(pid)
+    }
+
+    /// Занять запись под операцию и перечитать её: пока мы не владели, её мог изменить другой процесс.
+    private func claimOperation() -> Bool {
+        guard !operationElsewhere else { return false }
+        defaults.set(["pid": processID, "since": Date().timeIntervalSince1970], forKey: Self.operationKey)
+        defaults.synchronize()
+        if let data = defaults.data(forKey: Self.stashKey), let fresh = try? JSONDecoder().decode([StashedApp].self, from: data) {
+            stashed = fresh
+        } else if defaults.data(forKey: Self.stashKey) == nil {
+            stashed = []
+        }
+        return true
+    }
+
+    private func releaseOperation() {
+        if let mark = defaults.dictionary(forKey: Self.operationKey), mark["pid"] as? Int == processID {
+            defaults.removeObject(forKey: Self.operationKey)
+            defaults.synchronize()
         }
     }
 
@@ -456,7 +494,8 @@ final class StashStore: ObservableObject {
     func stash(_ apps: [NSRunningApplication]) async {
         guard busy == nil else { return }
         let targets = apps.filter(Self.isEligible)
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty, claimOperation() else { return }
+        defer { releaseOperation() }
         busy = Self.closingText
         report = nil
         defer { busy = nil }
@@ -505,7 +544,9 @@ final class StashStore: ObservableObject {
 
     /// Открыть программы из стеша без вывода вперёд и вернуть окна на места.
     func restore() async {
-        guard busy == nil, !stashed.isEmpty else { return }
+        guard busy == nil, claimOperation() else { return }
+        defer { releaseOperation() }
+        guard !stashed.isEmpty else { return }
         busy = Self.restoringText
         defer { busy = nil }
 
