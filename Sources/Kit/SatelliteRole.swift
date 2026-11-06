@@ -1,4 +1,5 @@
 import AppKit
+import Security
 
 /// Как утилите работать сейчас. Арбитр передачи — центр: см. «Переезд модуля» в дизайне.
 enum SatelliteRole {
@@ -50,7 +51,9 @@ enum SatelliteEnabled {
     }
 }
 
-/// Что утилита видит о центре: запущенный процесс и Info.plist его бандла, где бы тот ни лежал.
+/// Что утилита видит о центре: запущенный процесс с подписью автора и Info.plist его бандла, где бы тот ни лежал.
+/// Процесс с чужой подписью центром не считается, как бы он себя ни назвал: иначе подделка с нашим id выключала бы
+/// все утилиты. Не удалось проверить — тоже не центр: на сомнении утилита работает.
 /// В сборке со швом — подставное из suite стенда: настоящий центр на этом Mac может быть запущен, и стенд не должен
 /// от этого зависеть. `Test.HubBundleID` включает настоящий поиск, но подставного центра.
 enum SatelliteHub {
@@ -58,23 +61,65 @@ enum SatelliteHub {
         #if KIT_TEST_DEFAULTS
         if Kit.defaults.string(forKey: "Test.HubBundleID") == nil { return Kit.defaults.bool(forKey: "Test.HubRunning") }
         #endif
-        return process != nil
+        return verified != nil
     }
 
     static var version: String? {
         #if KIT_TEST_DEFAULTS
         if Kit.defaults.string(forKey: "Test.HubBundleID") == nil { return Kit.defaults.string(forKey: "Test.HubVersion") }
         #endif
-        guard let bundle = process?.bundleURL else { return nil }
-        return NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+        return verified?.version
     }
 
-    private static var process: NSRunningApplication? {
+    private static var verified: Verified? {
         #if KIT_TEST_DEFAULTS
         let id = Kit.defaults.string(forKey: "Test.HubBundleID") ?? ""
         #else
         let id = Kit.hubBundleID
         #endif
-        return NSRunningApplication.runningApplications(withBundleIdentifier: id).first { !$0.isTerminated }
+        for app in NSRunningApplication.runningApplications(withBundleIdentifier: id) where !app.isTerminated {
+            if let found = verify(pid: app.processIdentifier, identifier: id) { return found }
+        }
+        return nil
+    }
+
+    /// Проверенный центр: версия взята из бандла, чью подпись проверили.
+    struct Verified: Equatable {
+        let bundle: URL
+        let version: String?
+    }
+
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cache: [pid_t: Verified] = [:]
+
+    /// Подпись автора с меткой выпуска и нужным identifier: живой процесс и бандл на диске. Удачная проверка запоминается
+    /// на pid, неудачная нет: сбой разового вызова не должен навсегда сделать настоящий центр чужим.
+    /// Здесь pid не служит доказательством личности: решение «центр запущен» обратимо и пересматривается при каждом
+    /// изменении списка приложений, а власти над утилитой подделка не получает.
+    static func verify(pid: pid_t, identifier: String) -> Verified? {
+        cacheLock.lock()
+        if let cached = cache[pid] {
+            cacheLock.unlock()
+            return cached
+        }
+        cacheLock.unlock()
+        guard let result = check(pid: pid, identifier: identifier) else { return nil }
+        cacheLock.lock()
+        cache[pid] = result
+        cacheLock.unlock()
+        return result
+    }
+
+    private static func check(pid: pid_t, identifier: String) -> Verified? {
+        var code: SecCode?, staticCode: SecStaticCode?, requirement: SecRequirement?, path: CFURL?
+        guard SecRequirementCreateWithString(KitLink.requirement(identifier: identifier) as CFString, [], &requirement) == errSecSuccess,
+              let requirement,
+              SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: Int(pid)] as CFDictionary, [], &code) == errSecSuccess,
+              let code, SecCodeCheckValidity(code, [], requirement) == errSecSuccess,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecStaticCodeCheckValidity(staticCode, [], requirement) == errSecSuccess,
+              SecCodeCopyPath(staticCode, [], &path) == errSecSuccess, let url = path as URL? else { return nil }
+        let version = NSDictionary(contentsOf: url.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String
+        return Verified(bundle: url, version: version)
     }
 }

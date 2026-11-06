@@ -37,10 +37,19 @@ enum KitSigning {
     #else
     static let peerEpoch = securityEpoch
     #endif
+    /// Боевым нельзя просто `>=`: для требований «test.1» больше «1», и сборка со швом прошла бы как боевая (проверено на `codesign -R`).
+    /// Верхняя граница отсекает метки не из цифр. Сборка со швом ждёт только свою.
+    #if KIT_TEST_DEFAULTS
+    static let peerEpochClause = "info[\"\(securityEpochKey)\"] = \"\(testPeerEpoch)\""
+    #else
+    static let peerEpochClause = "info[\"\(securityEpochKey)\"] >= \"\(securityEpoch)\" and info[\"\(securityEpochKey)\"] < \"a\""
+    #endif
 
-    /// Требование к процессу-собеседнику по XPC: центру и утилите. Значение метки должно совпадать с их Info.plist.
+    /// Требование к процессу-собеседнику по XPC: центру и утилите. Метка своей или новее, как у `checkEpoch` и `epoch_ok`
+    /// в install.sh: иначе центр с меткой 1 поставил бы утилиту с меткой 2 и не смог бы с ней говорить. `>=` сравнивает
+    /// как числа (проверено на `codesign -R`: «225» >= «9»), а не как строки.
     static func peerRequirement(identifier: String, leafHash: String) -> String {
-        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] = \"\(peerEpoch)\""
+        requirement(identifier: identifier, leafHash: leafHash) + " and " + peerEpochClause
     }
 
     /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —

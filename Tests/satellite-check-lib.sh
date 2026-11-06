@@ -22,6 +22,7 @@ satellite_check_setup() {
   LABEL="local.utilitumus.test.$MODULE"
   IDENTIFIER="local.utilitumus.app.$ID"
   SERVICE="$IDENTIFIER.xpc"
+  SELF_SERVICE="$IDENTIFIER.self.xpc"
   # Его читает Kit.defaults в сборке со швом: и центр стенда, и утилита (через плист).
   SUITE="local.utilitumus.test.kit.$MODULE"
   export KIT_TEST_SUITE="$SUITE"
@@ -110,7 +111,7 @@ start_agent() {
 <key>ProgramArguments</key><array><string>$EXE</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><false/>
-<key>MachServices</key><dict><key>$SERVICE</key><true/></dict>
+<key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>
 <key>StandardErrorPath</key><string>$LOG</string>
 <key>EnvironmentVariables</key><dict><key>KIT_TEST_SUITE</key><string>$SUITE</string></dict>
 ${THROTTLE:+<key>ThrottleInterval</key><integer>$THROTTLE</integer>}

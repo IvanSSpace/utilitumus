@@ -114,7 +114,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
             MainActor.assumeIsolated { CustomPaletteStore.shared.reload() }
         })
 
-        let server = LinkServer(id: id, handler: self, peerIdentifiers: [Kit.hubBundleID, KitLink.bundleID(id)])
+        let server = LinkServer(id: id, handler: self)
         server.resume()
         self.server = server
         // Центр мог спросить раньше, чем сервис поднялся, и теперь показывает «Не отвечает».
@@ -316,7 +316,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
             var failure: Error?
             repeat {
                 do {
-                    try await LinkClient(id: id).openWindow()
+                    try await LinkSelfClient.openWindow(id: id)
                     exit(0)
                 } catch {
                     failure = error

@@ -1,35 +1,61 @@
 import Foundation
 
-/// Слушатель утилиты. Ссылку на него держит владелец: делегат у NSXPCListener слабый.
-/// Запуск и вызовы — на главном потоке, кроме делегата, которого зовёт сама система.
+/// Слушатели утилиты: две службы, два требования. Центр приходит на `machService`, копия самой утилиты из Finder —
+/// на `selfService`; кто пришёл, определяет служба и подпись на ней, а не pid. Ссылку на сервер держит владелец:
+/// делегат у NSXPCListener слабый. Запуск и вызовы — на главном потоке, кроме делегата, которого зовёт сама система.
 final class LinkServer: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
-    private let listener: NSXPCListener
-    private let requirement: String
+    enum Role: Equatable { case hub, selfCopy }
+
+    /// Что слушает одна служба. Чистое описание: проверяется без запуска.
+    struct Spec: Equatable {
+        let role: Role
+        let service: String
+        let requirement: String
+    }
+
+    static func specs(id: String, hubIdentifier: String = Kit.hubBundleID) -> [Spec] {
+        [Spec(role: .hub, service: KitLink.machService(id), requirement: KitLink.requirement(identifier: hubIdentifier)),
+         Spec(role: .selfCopy, service: KitLink.selfService(id), requirement: KitLink.requirement(identifier: KitLink.bundleID(id)))]
+    }
+
+    private var listeners: [(spec: Spec, listener: NSXPCListener)] = []
     private let handler: LinkHandler
     /// Соединения с `watch`, только на главном потоке.
     private var watching: [LinkSession] = []
     private var screenOpen = false
 
-    init(id: String, handler: LinkHandler, peerIdentifiers: [String] = [Kit.hubBundleID]) {
-        listener = NSXPCListener(machServiceName: KitLink.machService(id))
-        requirement = KitLink.requirement(identifiers: peerIdentifiers)
+    init(id: String, handler: LinkHandler, hubIdentifier: String = Kit.hubBundleID) {
         self.handler = handler
         super.init()
-        // Требование на слушателе не пускает чужого клиента даже до делегата (отчёт о пробе, п. 1).
-        listener.setConnectionCodeSigningRequirement(requirement)
-        listener.delegate = self
+        for spec in Self.specs(id: id, hubIdentifier: hubIdentifier) {
+            let listener = NSXPCListener(machServiceName: spec.service)
+            // Требование на слушателе не пускает чужого клиента даже до делегата (отчёт о пробе, п. 1).
+            listener.setConnectionCodeSigningRequirement(spec.requirement)
+            listener.delegate = self
+            listeners.append((spec, listener))
+        }
     }
 
     func resume() {
-        listener.resume()
+        for entry in listeners { entry.listener.resume() }
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        connection.setCodeSigningRequirement(requirement)
+        guard let spec = listeners.first(where: { $0.listener === listener })?.spec else { return false }
+        connection.setCodeSigningRequirement(spec.requirement)
+        switch spec.role {
+        case .selfCopy:
+            // Копия из Finder: интерфейс из одного вызова, подписок и действий в нём нет.
+            connection.exportedInterface = NSXPCInterface(with: LinkSelfXPC.self)
+            connection.exportedObject = LinkSelfSession(handler: handler)
+            connection.resume()
+            return true
+        case .hub:
+            break
+        }
         connection.exportedInterface = NSXPCInterface(with: LinkXPC.self)
         connection.remoteObjectInterface = NSXPCInterface(with: LinkPingXPC.self)
-        let session = LinkSession(handler: handler, server: self, connection: connection,
-                                  fromHub: LinkCaller.peerIsHub(pid: connection.processIdentifier))
+        let session = LinkSession(handler: handler, server: self, connection: connection)
         connection.exportedObject = session
         // Клиент умер или закрыл соединение: аренда и подписка кончаются здесь, а не по его просьбе.
         // Сообщения этого соединения к этому моменту уже ушли на главный поток, порядок сохраняется.
@@ -70,7 +96,21 @@ final class LinkServer: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     }
 }
 
-/// Одно соединение. Сообщения XPC приходят на его очереди; обработчик вызывается на главном потоке в том же порядке.
+/// Копия утилиты из Finder: может попросить показать окно, больше ничего.
+private final class LinkSelfSession: NSObject, LinkSelfXPC, @unchecked Sendable {
+    private let handler: LinkHandler
+
+    init(handler: LinkHandler) { self.handler = handler }
+
+    func openWindow(reply: @escaping @Sendable () -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.handler.linkOpenWindow() }
+            reply()
+        }
+    }
+}
+
+/// Одно соединение центра. Сообщения XPC приходят на его очереди; обработчик вызывается на главном потоке в том же порядке.
 private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
     private let handler: LinkHandler
     private weak var server: LinkServer?
@@ -78,11 +118,7 @@ private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
     /// Только на главном потоке.
     var level = LinkWatch.none
 
-    /// Подписан как центр, а не как копия самой утилиты.
-    private let fromHub: Bool
-
-    init(handler: LinkHandler, server: LinkServer, connection: NSXPCConnection, fromHub: Bool) {
-        self.fromHub = fromHub
+    init(handler: LinkHandler, server: LinkServer, connection: NSXPCConnection) {
         self.handler = handler
         self.server = server
         self.connection = connection
@@ -107,8 +143,9 @@ private final class LinkSession: NSObject, LinkXPC, @unchecked Sendable {
     }
 
     func moduleAction(_ action: Data, reply: @escaping @Sendable (Data) -> Void) {
-        onMain { [fromHub] handler in
-            reply(LinkCaller.run(fromHub: fromHub) { handler.linkModuleAction(action) })
+        onMain { handler in
+            // Сюда доходит только соединение со службы центра.
+            reply(LinkCaller.run(fromHub: true) { handler.linkModuleAction(action) })
         }
     }
 

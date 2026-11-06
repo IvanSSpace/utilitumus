@@ -11,6 +11,7 @@ DOMAIN="gui/$(id -u)"
 # Метка launchd только тестовая; Mach-сервис и identifier сервера — как их даёт KitLink для id test.link.
 LABEL="local.utilitumus.test.link"
 SERVICE="local.utilitumus.app.test.link.xpc"
+SELF_SERVICE="local.utilitumus.app.test.link.self.xpc"
 SERVER_ID="local.utilitumus.app.test.link"
 PEER_ID="local.utilitumus.test.link.hub"
 FOREIGN_ID="local.utilitumus.test.link.foreign"
@@ -35,6 +36,7 @@ forbid() {
   esac
 }
 forbid 'userInfo' 'userInfo в Sources/Kit/Link'
+forbid 'kSecGuestAttributePid|processIdentifier|peerIsHub' 'определение собеседника по pid в Sources/Kit/Link'
 forbid 'synchronousRemoteObjectProxy|DispatchSemaphore|DispatchGroup|\.wait\(' 'синхронное ожидание в Sources/Kit/Link'
 
 mkdir -p "$OUT"
@@ -72,6 +74,7 @@ signed server fake-adhoc    -            "$SERVER_ID"
 signed server fake-foreign  "$SIGN_NAME" "$FOREIGN_ID"
 signed server fake-ours     "$SIGN_NAME" "$SERVER_ID"
 signed client client        "$SIGN_NAME" "$PEER_ID"
+signed client selfcopy      "$SIGN_NAME" "$SERVER_ID"
 signed client rogue-adhoc   -            "$PEER_ID"
 signed client rogue-foreign "$SIGN_NAME" "$FOREIGN_ID"
 signed client-unmarked rogue-unmarked "$SIGN_NAME" "$PEER_ID"
@@ -92,7 +95,7 @@ agent() {
     echo '<key>ProgramArguments</key><array>'
     for arg in "$@"; do echo "<string>$arg</string>"; done
     echo '</array>'
-    echo "<key>MachServices</key><dict><key>$SERVICE</key><true/></dict>"
+    echo "<key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>"
     echo "<key>StandardErrorPath</key><string>$OUT/agent.log</string>"
     if [ -n "${THROTTLE:-}" ]; then echo "<key>ThrottleInterval</key><integer>$THROTTLE</integer>"; fi
     echo '</dict></plist>'
@@ -116,6 +119,12 @@ scenario rogue-adhoc rogue
 scenario rogue-foreign rogue
 scenario rogue-unmarked rogue
 scenario rogue-old rogue
+echo "== копия самой утилиты (identifier сервера): служба центра закрыта, своя служба умеет только окно"
+: > "$OUT/calls.log"
+scenario selfcopy selfcopy
+echo "== центр на службе копии"
+: > "$OUT/calls.log"
+scenario client hub-on-self
 echo "== настоящий клиент после rogue"
 : > "$OUT/calls.log"
 scenario client basic

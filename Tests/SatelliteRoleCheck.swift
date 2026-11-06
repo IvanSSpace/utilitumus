@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 // Проверка роли утилиты. Запуск: Tests/run-satellite-role-check.sh
 // Без аргументов — чистая логика. С аргументами — клиент связи и замена бандла для Tests/run-awake-app-check.sh:
@@ -119,6 +119,31 @@ func requirementChecks() {
     check(KitLink.requirement(identifiers: ["x"], hashes: ["aa"]) == KitLink.requirement(identifier: "x", hashes: ["aa"]), "один identifier — то же требование")
 }
 
+/// Центр узнаётся по подписи, а не по id и Info.plist. Подделка: процесс с нужным id, но без нашего сертификата.
+func hubVerificationChecks() {
+    check(SatelliteHub.verify(pid: getpid(), identifier: "local.utilitumus") == nil, "центр: этот процесс (без подписи автора) центром не признан")
+    check(SatelliteHub.verify(pid: 1, identifier: "local.utilitumus") == nil, "центр: чужой подписанный процесс (launchd) центром не признан")
+    check(SatelliteHub.verify(pid: 999_999, identifier: "local.utilitumus") == nil, "центр: нет такого процесса — не центр")
+    // Правильный identifier, чужой сертификат: у системного sleep свой id, и именно его назовём центром.
+    let sleeper = Process()
+    sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    sleeper.arguments = ["30"]
+    if (try? sleeper.run()) != nil {
+        defer { sleeper.terminate() }
+        check(SatelliteHub.verify(pid: sleeper.processIdentifier, identifier: "com.apple.sleep") == nil, "центр: верный identifier, но не наш сертификат — не центр")
+    }
+    // Настоящий поиск, подставной id: Finder запущен и подписан Apple. Утилита не должна считать его центром.
+    Kit.defaults.set("com.apple.finder", forKey: "Test.HubBundleID")
+    defer { Kit.defaults.removeObject(forKey: "Test.HubBundleID") }
+    let running = !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").isEmpty
+    if running {
+        check(!SatelliteHub.isRunning, "центр: запущенный процесс с этим id, но чужой подписью — не запущен")
+        check(SatelliteHub.version == nil, "центр: версия подделки не читается")
+        let mode = SatelliteRole.decide(launchedByLaunchd: true, hubRunning: SatelliteHub.isRunning, hubVersion: SatelliteHub.version, hubModuleOn: true, handedOver: false)
+        check(mode == .active, "центр: подделка не переводит утилиту в пассивный режим")
+    }
+}
+
 func updateChecks() {
     func app(_ id: String, _ version: String) -> CatalogApp {
         CatalogApp(id: id, version: version, minHub: "9.9.9", url: URL(string: "https://example.com/a.zip")!, sha256: "ab", sizeMB: 1)
@@ -190,6 +215,7 @@ if args.isEmpty {
     keyChecks()
     enabledChecks()
     requirementChecks()
+    hubVerificationChecks()
     updateChecks()
     print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
     exit(failures == 0 ? 0 : 1)

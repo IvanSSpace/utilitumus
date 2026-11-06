@@ -124,6 +124,19 @@ final class ClipboardModule: SatelliteModule {
         return LinkWire.encoded(ClipboardKeyReply(received: true))
     }
 
+    /// Центр забирает ключ перед удалением утилиты. Только от центра. Чтение своей записи здесь идёт на главном
+    /// потоке: запись принадлежит этому процессу, системный запрос по ней не показывается.
+    private func returnKey(_ message: ClipboardKeyReturnMessage) -> Data {
+        guard LinkCaller.isHub, !verifying else {
+            return LinkWire.encoded(ClipboardKeyReturnReply(key: nil, error: "Утилита занята ключом или вызов не от Utilitumus"))
+        }
+        let resolver = ClipboardKeyResolver(keyring: keyring, directory: directory)
+        switch message {
+        case .returnKey: return LinkWire.encoded(resolver.keyToReturn())
+        case .dropKey: return LinkWire.encoded(ClipboardKeyReturnReply(key: nil, error: resolver.dropOwn()))
+        }
+    }
+
     // MARK: - Статус
 
     func statusLine(passiveReason: String?) -> String {
@@ -171,6 +184,9 @@ final class ClipboardModule: SatelliteModule {
     func handle(_ data: Data) -> Data {
         if let message = LinkWire.decodeAction(ClipboardKeyMessage.self, from: data, limit: ClipboardKeyMessage.limit) {
             return receiveKey(message)
+        }
+        if let message = LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: data, limit: ClipboardKeyReturnMessage.limit) {
+            return returnKey(message)
         }
         return LinkWire.handle(data, as: ClipboardAction.self, limit: 1024, state: { wireState }) { action in
             // Остановленная утилита историю не трогает, даже если действие дошло.

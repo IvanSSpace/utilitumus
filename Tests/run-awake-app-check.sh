@@ -13,6 +13,7 @@ LABEL="local.utilitumus.test.awake"
 ID="test.awake"
 IDENTIFIER="local.utilitumus.app.$ID"
 SERVICE="$IDENTIFIER.xpc"
+SELF_SERVICE="$IDENTIFIER.self.xpc"
 SUITE="local.utilitumus.test.kit"
 SIGN_NAME="Utilitumus Signing"
 ASSERTION="Utilitumus: Keep Awake"
@@ -83,7 +84,7 @@ start_agent() {
 <key>ProgramArguments</key><array><string>$EXE</string></array>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><false/>
-<key>MachServices</key><dict><key>$SERVICE</key><true/></dict>
+<key>MachServices</key><dict><key>$SERVICE</key><true/><key>$SELF_SERVICE</key><true/></dict>
 <key>StandardErrorPath</key><string>$LOG</string>
 </dict></plist>
 PLIST_EOF
@@ -146,7 +147,8 @@ png() {
   if wait_until "PNG $1" test -s "$1"; then ok "окно за экраном отрисовано: $1"; fi
 }
 
-# fake_hub_start <версия>: версию утилита может узнать только из Info.plist запущенного бандла.
+# fake_hub_start <версия> [adhoc]: версию утилита может узнать только из Info.plist запущенного бандла.
+# Центр признаётся по подписи автора, поэтому подставной подписывается; с `adhoc` — подделка без нашего сертификата.
 fake_hub_start() {
   cat > "$FAKE_HUB/Contents/Info.plist" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
@@ -154,10 +156,14 @@ fake_hub_start() {
 <key>CFBundleExecutable</key><string>FakeHub</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$1</string>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST_EOF
   if [ "$1" = нечитаемая ]; then plutil -remove CFBundleShortVersionString "$FAKE_HUB/Contents/Info.plist" > /dev/null; fi
+  local identity="$SIGN_NAME"
+  if [ "${2:-}" = adhoc ]; then identity=-; fi
+  codesign --force --options runtime --sign "$identity" --identifier "$FAKE_HUB_ID" "$FAKE_HUB" 2>/dev/null
   "$FAKE_HUB/Contents/MacOS/FakeHub" & FAKE_HUB_PID=$!
 }
 # fake_hub_stop <сигнал>
@@ -326,6 +332,22 @@ expect_no_assertion "старый центр снимает блокировку
 expect_line "старый центр: версия из его Info.plist" "Модуль уже работает в Utilitumus — обновите центр"
 fake_hub_stop TERM
 expect_line "старый центр вышел: активна" "Mac засыпает как обычно"
+
+echo "== подделка центра: тот же id и версия, подпись не наша"
+command_keep_awake "$PID"
+expect_assertion "блокировка перед подделкой" "$PID"
+fake_hub_start 0.6.0 adhoc
+sleep 2
+expect_icon "подделка запущена: значок виден" "виден"
+expect_line "подделка запущена: утилита активна, не пассивна" "Mac не уснёт"
+if holds_assertion "$PID"; then ok "подделка не сняла блокировку"; else bad "подделка выключила утилиту"; fi
+fake_hub_stop TERM
+fake_hub_start 0.6.0
+expect_icon "настоящая подпись: значок скрыт" "скрыт"
+fake_hub_stop TERM
+expect_icon "центр вышел: значок вернулся" "виден"
+command_keep_awake "$PID"
+expect_no_assertion "блокировку снимаем для следующего раздела" "$PID"
 
 echo "== версию центра не прочитать"
 command_keep_awake "$PID"
