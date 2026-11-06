@@ -21,7 +21,7 @@ matches() { local LC_ALL=C; [[ "$1" =~ $2 ]]; }
 matches "$OUT" '^[A-Za-z0-9/._-]+$' || fail "В пути к папке вывода только латиница, цифры и . _ - /: ${OUT}"
 cd "$(dirname "$0")/.."
 
-VERSION="1.0.0"
+VERSION="${PILOT_VERSION:-1.0.0}"
 # Все модули. Автопереход в пилоте выключен: утилита встаёт только по «＋» автора.
 PILOT_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser"
 MIN_HUB="0.6.0"
