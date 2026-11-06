@@ -34,12 +34,9 @@ Sources/Modules/Keyboard/InputSources.swift|TISSelectInputSource
 Sources/Modules/Keyboard/InputSources.swift|kill(
 Sources/Modules/Keyboard/KeyboardController.swift|NSWorkspace.shared.open
 Sources/Modules/Keyboard/KeyboardLog.swift|homeDirectoryForCurrentUser
-Sources/Modules/Load/Native/Background/BackgroundActions.swift|NSHomeDirectory
-Sources/Modules/Load/Native/Background/BackgroundActions.swift|homeDirectoryForCurrentUser
-Sources/Modules/Load/Native/Background/BackgroundActions.swift|kill(
 Sources/Modules/Load/Native/Background/BackgroundActions.swift|launchctl
-Sources/Modules/Load/Native/Background/BotRegistry.swift|NSHomeDirectory
-Sources/Modules/Load/Native/Background/BotRegistry.swift|homeDirectoryForCurrentUser
+Sources/Modules/Bots/BotsModel.swift|launchctl
+Sources/Modules/Bots/BotsMonitor.swift|launchctl
 Sources/Modules/Load/Native/Background/LaunchAgents.swift|"/Library
 Sources/Modules/Load/Native/Background/LaunchAgents.swift|NSHomeDirectory
 Sources/Modules/Load/Native/Background/LaunchAgents.swift|launchctl
