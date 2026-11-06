@@ -1,6 +1,8 @@
 #!/bin/bash
 # Сборка для пилота без публикации: центр читает каталог из папки вывода, а не с GitHub.
 #   scripts/build-pilot.sh <папка-вывода>
+#   PILOT_ONLY="voice bots" scripts/build-pilot.sh <папка-вывода> — только эти утилиты и центр, в уже собранную папку:
+#     остальные записи каталога остаются как были. PILOT_ONLY="-" — один центр. PILOT_HUB_DIR — куда положить центр.
 # Адрес каталога подменяется только флагом компилятора KIT_PILOT_CATALOG: окружением, аргументами и настройками
 # обычную сборку не перенаправить. Утилита ставится в /Applications/Utilitumus как настоящая.
 # Сам скрипт в /Applications ничего не кладёт: что делать дальше, он печатает.
@@ -40,6 +42,7 @@ mkdir -p "$OUT"
 ENTRIES=""
 for pair in $PILOT_APPS; do
   ID="${pair%%:*}"; NAME="${pair##*:}"
+  if [ -n "${PILOT_ONLY:-}" ] && [[ " $PILOT_ONLY " != *" $ID "* ]]; then continue; fi
   scripts/build-app.sh "$ID" "$NAME" "$VERSION" "$OUT/app"
   signed_by_author "$OUT/app/$NAME.app" "local.utilitumus.app.$ID"
   ZIP="$OUT/$NAME.zip"
@@ -51,7 +54,21 @@ for pair in $PILOT_APPS; do
 done
 
 CATALOG="$OUT/catalog.json"
-printf '{"schema":1,"apps":[%s]}\n' "$ENTRIES" > "$CATALOG"
+if [ -n "${PILOT_ONLY:-}" ]; then
+  [ -f "$CATALOG" ] || fail "PILOT_ONLY: в $OUT нет каталога, сначала полная сборка."
+  # Новые записи заменяют старые с тем же id, порядок прежний.
+  ENTRIES="$ENTRIES" python3 -I - "$CATALOG" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+catalog = json.load(open(path))
+fresh = {a["id"]: a for a in json.loads("[" + os.environ["ENTRIES"] + "]")}
+apps = [fresh.pop(a["id"], a) for a in catalog["apps"]] + list(fresh.values())
+catalog["apps"] = apps
+json.dump(catalog, open(path, "w"), ensure_ascii=False)
+PY
+else
+  printf '{"schema":1,"apps":[%s]}\n' "$ENTRIES" > "$CATALOG"
+fi
 
 SOURCE="$OUT/PilotCatalog.swift"
 cat > "$SOURCE" <<SWIFT
@@ -60,8 +77,9 @@ enum KitPilotCatalog {
 }
 SWIFT
 
-NO_INSTALL=1 BUILD_DIR="$OUT/hub" ./build.sh --pilot-catalog-source "$SOURCE"
-HUB="$OUT/hub/Utilitumus.app"
+HUB_DIR="${PILOT_HUB_DIR:-$OUT/hub}"
+NO_INSTALL=1 BUILD_DIR="$HUB_DIR" ./build.sh --pilot-catalog-source "$SOURCE"
+HUB="$HUB_DIR/Utilitumus.app"
 signed_by_author "$HUB" local.utilitumus
 STRINGS="$(strings -a "$HUB/Contents/MacOS/Utilitumus")"
 [[ "$STRINGS" == *"$CATALOG"* ]] || fail "В собранном центре нет пути к каталогу пилота."
