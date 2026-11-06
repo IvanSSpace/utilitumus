@@ -9,7 +9,18 @@ final class MixerModule: SatelliteModule {
 
     init() { controller.runsInUtility = true }
 
+    #if KIT_TEST_DEFAULTS
+    /// Стенд не зависит от Mac: вместо опроса HAL и запущенных программ три готовые строки в каждом списке.
+    func start() {
+        func row(_ id: String, _ name: String) -> MixerApp { MixerApp(id: id, name: name, icon: NSImage(), volume: 1, muted: false) }
+        controller.testPin(apps: [row("test.fixture.playing", "Играющее")],
+                           idle: [row("test.fixture.idle", "Молчащее")],
+                           preset: [row("test.fixture.preset", "Настроенное заранее")],
+                           other: [row("test.fixture.other", "Редактор")])
+    }
+    #else
     func start() { controller.start() }
+    #endif
 
     /// Тапы и агрегаты снимаются, звук приложений возвращается как был. Громкости остаются в настройках.
     func stop() { controller.stop() }

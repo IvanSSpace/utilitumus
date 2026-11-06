@@ -65,6 +65,8 @@ func wirePure() {
 
     // Частые шаги ползунка: в пути одно на ключ, последнее значение доходит.
     for step in 1...20 { model.setVolume(Double(step) / 40, for: target.id) }
+    // `setVolume` ставит действие в очередь главного потока: «сразу» значит после одного оборота, ещё до ответа утилиты.
+    await Task.yield()
     check(allRows(model.state).first { $0.id == target.id }?.volume == 0.5, "ползунок: сразу виден последний шаг")
     check(await until(3) { allRows(model.state).first { $0.id == target.id }?.volume == 0.5 && model.actionError == nil }, "ползунок: ответ утилиты совпал с последним шагом")
     await model.perform(.reset(id: target.id))
@@ -153,7 +155,7 @@ func wirePure() {
     let registry = SatelliteRegistry.shared
     await model.read()
     check(model.responding && model.screen(of: .mixer, registry) == .module, "до этого экран модуля")
-    kill(utility, SIGKILL)
+    killUtilityForGood(utility)
     await registry.update()
     check(await until(6) { !model.responding }, "утилиту убили: модель это увидела")
     check(model.screen(of: .mixer, registry) == .notResponding, "и вкладка показывает запасной экран")
