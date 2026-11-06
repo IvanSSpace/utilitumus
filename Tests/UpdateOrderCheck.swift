@@ -318,6 +318,12 @@ guard fm.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path == URL(fileU
     exit(1)
 }
 
+// Пока запущен Macs Fan Control, такт контроллера уступает ему и ничего не шлёт: порядок шагов не проверить.
+guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.crystalidea.macsfancontrol").isEmpty else {
+    print("skip Macs Fan Control запущен: такт уступает ему, проверку не запустить")
+    exit(0)
+}
+
 // Настройки контроллера идут мимо подменённой папки, в домен этого бинарника (не приложения): не оставляем его ни до, ни после.
 let defaultsDomain = ProcessInfo.processInfo.processName
 UserDefaults.standard.removePersistentDomain(forName: defaultsDomain)

@@ -132,7 +132,7 @@ swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name HubE2E -o "$HUB" "$OU
   $(find Sources/Kit -name '*.swift') \
   Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
-  Sources/App/Satellites/SatelliteInstaller.swift Sources/Kit/KitArchive.swift Sources/App/Satellites/SatelliteAgent.swift \
+  Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift \
   Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteAwakeModel.swift Sources/Modules/Awake/AwakeController.swift \
   Sources/Modules/Awake/AwakeModel.swift Sources/Modules/Awake/AwakeWire.swift \
   -framework SwiftUI -framework AppKit -framework Carbon \

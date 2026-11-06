@@ -35,7 +35,7 @@ codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$IDENTIFIER
 
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ProbeCheck -o "$OUT/hub-build" \
   Tests/SatelliteBaseCheck.swift Tests/SatelliteCheckKit.swift Tests/SatelliteProbeWire.swift "$OUT/src/ProbeName.swift" \
-  Sources/App/Satellites/RemoteModuleModel.swift $(find Sources/Kit -name '*.swift') -framework SwiftUI -framework AppKit \
+  Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModuleSurface.swift Sources/App/Design/DashState.swift $(find Sources/Kit -name "*.swift") -framework SwiftUI -framework AppKit \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 sign_hub
 

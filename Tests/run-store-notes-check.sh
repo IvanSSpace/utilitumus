@@ -41,6 +41,10 @@ build() {
   sed 's/^@main$//' "$from/Sources/App/UtilitumusApp.swift" > "$to/src/UtilitumusApp.swift"
   if grep -q '^@main' "$to/src/UtilitumusApp.swift"; then echo "ПРОВАЛ: @main остался"; exit 1; fi
   cp "$ROOT/Tests/StoreNotesCheck.swift" "$to/src/main.swift"
+  # В BASE замыкание выхода ещё без причины: те же строки проверки, старая форма closure.
+  if grep -q 'var quit: (String) async' "$from/Sources/App/Satellites/SatelliteInstaller.swift"; then
+    sed -i '' 's/quit: { _, _ in }/quit: { _ in }/' "$to/src/main.swift"
+  fi
   # shellcheck disable=SC2046
   (cd "$from" && swiftc -target "$TARGET" -module-name StoreNotesStand -o "$to/$BIN" "$@" \
     "$to/src/main.swift" "$to/src/KitDefaults.swift" "$to/src/UtilitumusApp.swift" \

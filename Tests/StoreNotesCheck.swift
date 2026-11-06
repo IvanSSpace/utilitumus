@@ -48,7 +48,7 @@ func catalogData(_ apps: [[String: Any]]) -> Data {
         paths: paths,
         defaults: Kit.defaults,
         installer: SatelliteInstaller(paths: paths, launchctl: { _ in }, download: { _ in throw Boom() }, verify: { _, _ in },
-                                      link: SatelliteLink(quit: { _ in }, hello: { _ in })),
+                                      link: SatelliteLink(quit: { _, _ in }, hello: { _ in })),
         commands: SatelliteCommands(
             status: { _ in LinkStatus(enabled: true, line: "Работает", needsSetup: 0) },
             setEnabled: { _, _ in },
