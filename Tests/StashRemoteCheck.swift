@@ -22,7 +22,8 @@ let notOneAction: [(String, String)] = [
 
 func wirePure() {
     for (name, payload) in notOneAction {
-        check((try? JSONDecoder().decode(StashAction.self, from: Data(payload.utf8))) == nil, "\(name) не разбирается: \(payload)")
+        // Как у утилиты: повтор ключа разбор не видит, его ловит сверка с каноническим кодированием.
+        check(LinkWire.decodeAction(StashAction.self, from: Data(payload.utf8), limit: 64 * 1024) == nil, "\(name) не разбирается: \(payload)")
     }
     let actions: [StashAction] = [.restore, .stash(bundleIDs: ["a"]), .setClosing(bundleID: "a", closing: false), .refreshUsage]
     for action in actions {
@@ -78,14 +79,19 @@ func wirePure() {
     let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     var shots: [NSBitmapImageRep] = []
+    // Шаги настройки у встроенного экрана свои (доступ центра), у утилиты свои (доступ утилиты), а на стенде доступа нет ни у кого:
+    // у одного экран был бы чек-листом, у другого нет. Подмена шагов (для стенда снимков) убирает эту разницу, сравнивается сам экран Стеша.
+    SetupFlow.overrides[.stash] = []
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
         modules.setExternal(.stash, false)
+        AccessState.shared.refresh()
         let local = await Stand.open(theme)
         Stand.save(local, "\(themeName)-local")
         modules.setExternal(.stash, true)
         await registry.update()
         await RemoteStashModel.shared.read()
+        AccessState.shared.refresh()
         let remote = await Stand.open(theme)
         Stand.save(remote, "\(themeName)-remote")
         let diff = differingPixels(local, remote)
@@ -121,11 +127,11 @@ func wirePure() {
     check(await until(4) { model.responding }, "ожила: модель ответила")
 }
 
-/// Утилита убита: центр это замечает и не падает. Агент не перезапускается (KeepAlive выключен).
+/// Утилита убита насовсем: центр это замечает и не падает.
 @MainActor func death(utility: Int32) async {
     let model = RemoteStashModel.shared
     let registry = SatelliteRegistry.shared
-    kill(utility, SIGKILL)
+    killUtilityForGood(utility)
     await registry.update()
     check(await until(8) { !model.responding }, "утилита умерла: модель говорит «не отвечает»")
     check(model.screen(registry) == .notResponding, "утилита умерла: экран «не отвечает»")
