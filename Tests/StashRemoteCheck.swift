@@ -79,14 +79,19 @@ func wirePure() {
     let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     var shots: [NSBitmapImageRep] = []
+    // Шаги настройки у встроенного экрана свои (доступ центра), у утилиты свои (доступ утилиты), а на стенде доступа нет ни у кого:
+    // у одного экран был бы чек-листом, у другого нет. Подмена шагов (для стенда снимков) убирает эту разницу, сравнивается сам экран Стеша.
+    SetupFlow.overrides[.stash] = []
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
         modules.setExternal(.stash, false)
+        AccessState.shared.refresh()
         let local = await Stand.open(theme)
         Stand.save(local, "\(themeName)-local")
         modules.setExternal(.stash, true)
         await registry.update()
         await RemoteStashModel.shared.read()
+        AccessState.shared.refresh()
         let remote = await Stand.open(theme)
         Stand.save(remote, "\(themeName)-remote")
         let diff = differingPixels(local, remote)
