@@ -141,14 +141,7 @@ struct DSSidebar: View {
     @Binding var selection: Module
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
-    /// Последний открытый модуль каждой категории: вкладка возвращает на него.
-    @State private var last: [String: Module] = [:]
-
-    /// Категория выбранной вкладки. На дашборде вкладки не выбраны, в списке — все модули.
-    private var activeCategory: ModuleCategory? {
-        if (showDashboard && !showAbout) || showStore { return nil }
-        return (peeked ?? current ?? selection).category
-    }
+    @ObservedObject private var icons = ModuleMenuIcons.shared
 
     /// Модуль, чья страница открыта прямо сейчас. Его могли выключить тумблером на этой странице:
     /// строка остаётся до ухода со страницы.
@@ -156,15 +149,13 @@ struct DSSidebar: View {
         showDashboard || showAbout || showStore || peeked != nil ? nil : current
     }
 
-    /// Модули панели: только установленные (как в Сторе) и открытый сейчас.
-    private var visible: [Module] {
-        let open = openModule
-        return modules.shownModules.filter { modules.isInstalled($0) || $0 == open }
+    /// Выбранная строка: открытая страница модуля (в том числе разовый показ скрытого).
+    private var selected: Module? {
+        showDashboard || showAbout || showStore ? nil : (peeked ?? current)
     }
 
     var body: some View {
-        // Список модулей панели считаем один раз за body.
-        let shown = visible
+        let layout = SidebarModel.layout(modules: modules, pins: Set(Module.allCases.filter { icons.isOn($0) }), open: openModule)
         return VStack(alignment: .leading, spacing: 0) {
             // Место под светофоры и кнопку скрытия панели.
             Spacer().frame(height: 46)
@@ -180,114 +171,42 @@ struct DSSidebar: View {
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
             // Ничего не установлено: подсказка ведёт в Стор.
-            if shown.isEmpty {
+            if layout.flattened.isEmpty {
                 Text("Выбери модули в Сторе")
                     .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                     .padding(.horizontal, 12).padding(.bottom, 8)
             }
-            DSCategoryTabs(active: activeCategory, pick: pick)
-                .padding(.horizontal, 10).padding(.bottom, 6)
-            list(shown)
+            SidebarContent(layout: layout, actions: actions, openModule: openModule)
             DSSidebarFooter(showAbout: $showAbout, showStore: $showStore, peeked: $peeked)
-        }
-        .onChange(of: current, initial: true) { _, module in
-            if let module { last[module.category.id] = module }
         }
         // Рамку фокуса клавиатуры в панели не рисуем: после клика кнопка получала фокус, и вокруг неё
         // появлялась синяя рамка. Строки и ссылки подвала кликаются мышью, Tab по ним не нужен.
         .focusEffectDisabled()
     }
 
-    private func list(_ shown: [Module]) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                if let category = activeCategory {
-                    rows(category, shown: shown)
-                } else if !shown.isEmpty {
-                    // На дашборде и в сторе — все модули подряд (без статусов, чтобы влезли над футером),
-                    // перетаскивать здесь нечего: порядок меняют внутри вкладки.
-                    DSAllModulesHeading()
-                    ForEach(ModuleCategory.all.flatMap { category in shown.filter { $0.category == category } }) {
-                        row($0, withStatus: false)
-                    }
+    private var actions: SidebarActions {
+        SidebarActions(
+            selected: selected,
+            // Точка и «выкл» в строке говорят о работе самого модуля; утилита выключается отдельно от установки.
+            isOn: { modules.isExternal($0) ? satellites.isEnabled($0) : modules.isOn($0) },
+            open: { module in
+                // Скрытый открывается разовым показом: состояние не меняем.
+                if modules.isHidden(module) {
+                    peeked = module
+                } else {
+                    selection = module
+                    peeked = nil
                 }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 2)
-        }
-        .scrollIndicators(.never)
-    }
-
-    private func shownModules(in category: ModuleCategory) -> [Module] {
-        visible.filter { $0.category == category }
-    }
-
-    /// Строки категории с живым перетаскиванием. Состояние перетаскивания — внутри `DSReorderList`,
-    /// окно целиком при движении не перерисовывается.
-    private func rows(_ category: ModuleCategory, shown: [Module]) -> some View {
-        let items = shown.filter { $0.category == category }
-        let status = category.showsStatus
-        return DSReorderList(items: items, rowHeight: status ? 46 : 38) { from, to in
-            move(items, from: IndexSet(integer: from), to: to)
-        } content: { row($0, withStatus: status) }
-    }
-
-    /// Вкладка: на последний открытый модуль категории (или первый в панели). На той же вкладке — ничего.
-    /// Закрытая вкладка (в категории нет установленных) не нажимается, сюда она не доходит.
-    private func pick(_ category: ModuleCategory) {
-        if category == activeCategory && !showAbout && !showStore && peeked == nil { return }
-        let shown = shownModules(in: category)
-        guard let target = last[category.id].flatMap({ shown.contains($0) ? $0 : nil }) ?? shown.first else {
-            // В категории ничего не стоит: открываем Стор с подсвеченной категорией.
-            StoreModel.shared.show(category: category)
-            peeked = nil
-            showAbout = false
-            showStore = true
-            return
-        }
-        selection = target
-        peeked = nil
-        showAbout = false
-        showStore = false
-        showDashboard = false
-    }
-
-    private func row(_ module: Module, withStatus: Bool) -> some View {
-        // Точка и «выкл» в строке говорят о работе самого модуля; утилита выключается отдельно от установки.
-        let on = modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module)
-        let selected = !showDashboard && !showAbout && !showStore && peeked == nil && current == module
-        let open = {
-            selection = module
-            peeked = nil
-            showAbout = false
-            showStore = false
-            showDashboard = false
-        }
-        return Group {
-            if withStatus {
-                DSStatusRow(module: module, on: on, selected: selected, action: open)
-            } else {
-                DSSidebarRow(module: module, on: on, status: nil, selected: selected, action: open)
-            }
-        }
-        // «Выключить» убран: он делал то же, что «Удалить», только оставлял скачанное и путал.
-        .contextMenu {
-            Button("Как это работает") { modules.infoModule = module }
-            Divider()
-            Button("Скрыть из панели") { modules.setHidden(module, true) }
-            Button("Удалить модуль…", role: .destructive) { StoreModel.shared.requestRemoval(module) }
-        }
-    }
-
-    /// Перетаскивание только внутри категории: индексы категории переводим в индексы общего списка панели.
-    private func move(_ items: [Module], from source: IndexSet, to destination: Int) {
-        let shown = modules.shownModules
-        let global = items.compactMap { shown.firstIndex(of: $0) }
-        let to = destination < global.count ? global[destination] : (global.last ?? 0) + 1
-        modules.moveShown(from: IndexSet(source.map { global[$0] }), to: to)
+                showAbout = false
+                showStore = false
+                showDashboard = false
+            },
+            showInfo: { modules.infoModule = $0 },
+            remove: { StoreModel.shared.requestRemoval($0) })
     }
 }
 
-/// Строка «Дашборд» / «Стор» над вкладками.
+/// Строка «Дашборд» над панелью.
 private struct DSDashboardRow: View {
     let icon: String
     let title: String
@@ -312,211 +231,6 @@ private struct DSDashboardRow: View {
         .onTapGesture(perform: action)
         .help(help)
         .accessibilityAddTraits(.isButton)
-    }
-}
-
-/// Три вкладки-пилюли: Фоном, Под рукой, С ИИ. Выбранная залита цветом категории.
-/// Вкладка без установленных модулей открывает Стор на этой категории.
-private struct DSCategoryTabs: View {
-    let active: ModuleCategory?
-    let pick: (ModuleCategory) -> Void
-    @ObservedObject private var modules = ModuleManager.shared
-
-    var body: some View {
-        let installed = Set(modules.installedModules.map(\.category))
-        HStack(spacing: 3) {
-            ForEach(ModuleCategory.all) { category in
-                DSCategoryTab(category: category, selected: category == active,
-                              hasModules: installed.contains(category), pick: pick)
-            }
-        }
-        .padding(3)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.05)))
-    }
-}
-
-/// Одна вкладка. Всегда нажимается: замок путал (казалось, что приложение заблокировано). Когда в категорию
-/// ставят первый модуль, цвет категории мягко вспыхивает вокруг ~1 с.
-private struct DSCategoryTab: View {
-    let category: ModuleCategory
-    let selected: Bool
-    let hasModules: Bool
-    let pick: (ModuleCategory) -> Void
-    @Environment(\.dsTheme) private var theme
-    /// Сила свечения разблокировки: 0 — нет, 1 — пик.
-    @State private var glow = 0.0
-
-    var body: some View {
-        let tint = theme.categoryColor(category)
-        VStack(spacing: 4) {
-            Image(systemName: category.icon).font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(tint.opacity(selected ? 1 : 0.65))
-            Text(category.title).font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(selected ? 0.95 : 0.5))
-                .lineLimit(1).fixedSize()
-        }
-        .frame(maxWidth: .infinity).frame(height: 52)
-        .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(tint.opacity(0.18))
-                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(tint.opacity(0.35), lineWidth: 0.6))
-                .opacity(selected ? 1 : 0)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(tint.opacity(0.22 * glow))
-                .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .stroke(tint.opacity(0.9 * glow), lineWidth: 1.2))
-                .shadow(color: tint.opacity(0.8 * glow), radius: 10 * glow)
-                .allowsHitTesting(false)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { pick(category) }
-        .help(hasModules ? category.subtitle : "Модули этой категории — в Сторе")
-        .accessibilityAddTraits(.isButton)
-        .onChange(of: hasModules) { was, now in
-            guard now, !was else { return }
-            // Быстро вспыхнуть, потом ~1 с гаснуть.
-            withAnimation(.easeOut(duration: 0.18)) { glow = 1 }
-            withAnimation(.easeOut(duration: 1.0).delay(0.2)) { glow = 0 }
-        }
-    }
-}
-
-/// Заголовок общего списка на дашборде: вкладки не выбраны, модули идут подряд.
-private struct DSAllModulesHeading: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Все модули").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
-            Text("Вкладка выберется сама").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.45))
-        }
-        .padding(.leading, 10).padding(.top, 4).padding(.bottom, 6)
-    }
-}
-
-// MARK: - Перетаскивание
-
-/// Список с живым перетаскиванием: взятая строка приподнимается и едет за курсором по вертикали
-/// (только внутри списка), остальные плавно расступаются. Отпустили — строка встаёт на место,
-/// `move(откуда, куда)` — индексы как в `moveItems`. Esc или уход курсора вбок отменяют.
-/// Всё состояние локальное, поэтому на каждый пиксель перерисовывается только этот список.
-private struct DSReorderList<Content: View>: View {
-    let items: [Module]
-    /// Высота строки у всей категории одинакова: 46 со статусом, 38 без.
-    let rowHeight: CGFloat
-    let move: (Int, Int) -> Void
-    @ViewBuilder let content: (Module) -> Content
-
-    @State private var dragging: Module?
-    @State private var start = 0
-    @State private var target = 0
-    @State private var offset: CGFloat = 0
-    @State private var cancelled = false
-    @State private var escMonitor: Any?
-
-    private let spacing: CGFloat = 2
-    private let settle = Animation.easeOut(duration: 0.15)
-    private var stride: CGFloat { rowHeight + spacing }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: spacing) {
-            ForEach(Array(items.enumerated()), id: \.element) { index, module in
-                let lifted = dragging == module
-                let shift = lifted ? 0 : gap(at: index)
-                content(module)
-                    .background {
-                        if lifted {
-                            RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous).fill(.white.opacity(0.08))
-                        }
-                    }
-                    .scaleEffect(lifted ? 1.02 : 1)
-                    .shadow(color: .black.opacity(lifted ? 0.4 : 0), radius: lifted ? 8 : 0, y: lifted ? 3 : 0)
-                    .offset(y: lifted ? offset : shift)
-                    .zIndex(lifted ? 1 : 0)
-                    .animation(lifted ? nil : settle, value: shift)
-                    .animation(settle, value: lifted)
-                    // Приоритетный жест: клик без движения (менее 4 pt) проходит строке как раньше.
-                    .highPriorityGesture(drag(module, index: index))
-            }
-        }
-        .onDisappear { stopMonitor() }
-    }
-
-    /// Насколько сдвинута строка `index`, пока тянут другую.
-    private func gap(at index: Int) -> CGFloat {
-        guard dragging != nil else { return 0 }
-        if index > start && index <= target { return -stride }
-        if index < start && index >= target { return stride }
-        return 0
-    }
-
-    private func drag(_ module: Module, index: Int) -> some Gesture {
-        DragGesture(minimumDistance: 4)
-            .onChanged { value in
-                if dragging == nil {
-                    dragging = module
-                    start = index
-                    target = index
-                    cancelled = false
-                    startMonitor()
-                }
-                guard dragging == module, !cancelled else { return }
-                // Ушли за боковые края панели: отмена.
-                if value.location.x < -8 || value.location.x > DS.sidebarWidth - 12 { return cancel() }
-                let low = -CGFloat(start) * stride
-                let high = CGFloat(items.count - 1 - start) * stride
-                offset = min(max(value.translation.height, low), high)
-                let new = min(max(start + Int((offset / stride).rounded()), 0), items.count - 1)
-                if new != target { target = new }
-            }
-            .onEnded { _ in
-                guard dragging == module else { return }
-                let drop = cancelled ? start : target
-                withAnimation(settle) { offset = CGFloat(drop - start) * stride }
-                finish(drop: drop)
-            }
-    }
-
-    private func cancel() {
-        guard dragging != nil, !cancelled else { return }
-        cancelled = true
-        withAnimation(settle) {
-            target = start
-            offset = 0
-        }
-    }
-
-    /// Строка встаёт на место за 0,15 с; порядок сохраняем и сбрасываем состояние без анимации.
-    private func finish(drop: Int) {
-        stopMonitor()
-        let from = start
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
-            var plain = Transaction()
-            plain.disablesAnimations = true
-            withTransaction(plain) {
-                if drop != from { move(from, drop > from ? drop + 1 : drop) }
-                dragging = nil
-                offset = 0
-                cancelled = false
-            }
-        }
-    }
-
-    private func startMonitor() {
-        guard escMonitor == nil else { return }
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 {
-                cancel()
-                return nil
-            }
-            return event
-        }
-    }
-
-    private func stopMonitor() {
-        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
-        escMonitor = nil
     }
 }
 
@@ -601,84 +315,13 @@ private struct TrafficLightProbe: NSViewRepresentable {
     }
 }
 
-/// Строка со статусом из дашборда: наблюдает только статус своего модуля.
-private struct DSStatusRow: View {
-    let module: Module
-    let on: Bool
-    let selected: Bool
-    let action: () -> Void
-    @ObservedObject private var slot: DashSlot
-
-    init(module: Module, on: Bool, selected: Bool, action: @escaping () -> Void) {
-        self.module = module
-        self.on = on
-        self.selected = selected
-        self.action = action
-        slot = DashboardLive.slot(module)
-    }
-
-    var body: some View {
-        DSSidebarRow(module: module, on: on, status: (slot.state.text, slot.state.attention),
-                     selected: selected, action: action)
-            .onAppear { slot.attach() }
-            .onDisappear { slot.detach() }
-    }
-}
-
-/// Строка модуля: значок, название, справа точка «включён» или «выкл». Выбранная залита оттенком.
-/// В категории со статусами вторая строка — живой статус вместо «выкл».
-private struct DSSidebarRow: View {
-    let module: Module
-    let on: Bool
-    var status: (text: String, attention: Bool)?
-    let selected: Bool
-    let action: () -> Void
-    @Environment(\.dsTheme) private var theme
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ModuleIconBadge(module: module, size: 24).opacity(on ? 1 : 0.45)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(module.title)
-                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
-                    .foregroundStyle(.white.opacity(on ? (selected ? 1 : 0.85) : 0.5))
-                    .lineLimit(1).minimumScaleFactor(0.85)
-                if let status {
-                    Text(status.text).font(.system(size: 11)).lineLimit(1)
-                        .foregroundStyle(status.attention ? AnyShapeStyle(Color.orange)
-                                                          : AnyShapeStyle(.white.opacity(on ? (selected ? 0.6 : 0.42) : 0.3)))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            // У строки со статусом точки нет: статус сам говорит, включён модуль, а ширины ему и так мало.
-            if status == nil {
-                if on {
-                    Circle().fill(theme.tone(module)).frame(width: 6, height: 6)
-                } else {
-                    Text("выкл").font(.system(size: 11)).foregroundStyle(.white.opacity(0.35))
-                }
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: status == nil ? 38 : 46)
-        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
-                   normal: selected ? theme.selection(module) : .clear,
-                   hovered: selected ? theme.selection(module) : .white.opacity(0.06))
-        .onTapGesture(perform: action)
-        .help(on ? "" : "Выключен — открой, чтобы включить")
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-/// Внизу панели: обновление, «Скрытые», «Стор», «Что нового», «Настройки», «О проекте», версия.
+/// Внизу панели: обновление, «Стор», «Что нового», «Настройки», «О проекте», версия.
 struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
     @Binding var showAbout: Bool
     @Binding var showStore: Bool
     @Binding var peeked: Module?
-    /// Свёрнутость списка помним между запусками: скрытые открывают редко, но привычка остаётся.
-    @AppStorage("HiddenModulesExpanded") private var hiddenExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -709,7 +352,6 @@ struct DSSidebarFooter: View {
             default:
                 EmptyView()
             }
-            hiddenSection
             // Стор внизу, рядом с настройками: открывают его редко, а наверху он занимал много места.
             FooterLink(icon: "bag", title: "Стор", selected: showStore) {
                 peeked = nil
@@ -750,33 +392,6 @@ struct DSSidebarFooter: View {
         .padding(.horizontal, 10)
         // Воздух снизу и слева такой же, как у карточки страницы (10 pt).
         .padding(.bottom, 10)
-    }
-
-    /// «Скрытые · N» над «Что нового»: без скрытых модулей строки нет совсем.
-    @ViewBuilder
-    private var hiddenSection: some View {
-        let hidden = modules.hiddenModules
-        if !hidden.isEmpty {
-            FooterLink(icon: "eye.slash", title: "Скрытые · \(hidden.count)", dim: true,
-                       chevron: hiddenExpanded) { hiddenExpanded.toggle() }
-            if hiddenExpanded {
-                ForEach(hidden) { module in
-                    HiddenRow(module: module, selected: peeked == module && !showAbout,
-                              show: { modules.setHidden(module, false) },
-                              remove: { StoreModel.shared.requestRemoval(module) }) {
-                        // Разовый показ: состояние не меняем, выделение в основном списке снимается через peeked.
-                        peeked = module
-                        showAbout = false
-                    }
-                    .contextMenu {
-                        Button("Показать в панели") { modules.setHidden(module, false) }
-                        Button("Как это работает") { modules.infoModule = module }
-                        Divider()
-                        Button("Удалить модуль…", role: .destructive) { StoreModel.shared.requestRemoval(module) }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -819,46 +434,5 @@ private struct FooterLink: View {
                    hovered: selected ? tint.opacity(0.26) : .white.opacity(0.06))
         .onTapGesture(perform: action)
         .accessibilityAddTraits(.isButton)
-    }
-}
-
-private struct HiddenRow: View {
-    let module: Module
-    let selected: Bool
-    /// «Показать» и «Удалить…» появляются при наведении; те же пункты есть в контекстном меню.
-    let show: () -> Void
-    let remove: () -> Void
-    let action: () -> Void
-    @Environment(\.dsTint) private var tint
-    @State private var hover = false
-
-    var body: some View {
-        HStack(spacing: 10) {
-            ModuleIconBadge(module: module, size: 18).opacity(0.6).frame(width: 24)
-            Text(module.title).font(.system(size: 12.5))
-            Spacer(minLength: 0)
-            if hover {
-                rowButton("eye", help: "Показать в панели", action: show)
-                rowButton("trash", help: "Удалить модуль…", action: remove)
-            }
-        }
-        .foregroundStyle(.white.opacity(selected ? 1 : 0.55))
-        .padding(.horizontal, 10)
-        .frame(height: 26)
-        .hoverFill(RoundedRectangle(cornerRadius: DS.rowRadius, style: .continuous),
-                   normal: selected ? tint.opacity(0.26) : .clear,
-                   hovered: selected ? tint.opacity(0.26) : .white.opacity(0.06))
-        .onHover { hover = $0 }
-        .onTapGesture(perform: action)
-        .accessibilityAddTraits(.isButton)
-    }
-
-    private func rowButton(_ icon: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 11)).foregroundStyle(.white.opacity(0.75))
-                .frame(width: 20, height: 20).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
     }
 }

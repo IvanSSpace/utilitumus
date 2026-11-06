@@ -125,10 +125,6 @@ final class ModuleManager: ObservableObject {
     func runsBuiltIn(_ module: Module) -> Bool { enabled.contains(module) && !external.contains(module) }
     func isHidden(_ module: Module) -> Bool { hidden.contains(module) }
 
-    /// Модули в порядке панели без скрытых; выключенные тоже тут (панель сама оставляет только установленные
-    /// и открытый сейчас). Нужно для перетаскивания: переставляются места, занятые видимыми.
-    var shownModules: [Module] { order.filter { !hidden.contains($0) } }
-
     /// «Установлен» = включён или ведётся утилитой. Скрытие на это не влияет.
     func isInstalled(_ module: Module) -> Bool { isOn(module) }
 
@@ -141,10 +137,10 @@ final class ModuleManager: ObservableObject {
     /// Модули, у которых есть строка в панели, в порядке панели.
     var panelModules: [Module] { order.filter(isInPanel) }
 
-    /// Первый модуль панели так, как их показывает панель: по вкладкам, внутри вкладки по порядку.
+    /// Первый модуль панели: сначала закреплённые, потом список, как их показывает панель.
     var firstInPanel: Module? {
-        let inPanel = panelModules
-        return ModuleCategory.all.lazy.compactMap { category in inPanel.first { $0.category == category } }.first
+        let layout = SidebarModel.layout(modules: self, pins: SidebarModel.shared.pins, open: nil)
+        return (layout.pinned + layout.list).first
     }
 
     /// Скрытые модули в порядке панели — для списка «Скрытые» внизу боковой панели. Только установленные.
@@ -174,22 +170,16 @@ final class ModuleManager: ObservableObject {
         if isHidden { hidden.insert(module) } else { hidden.remove(module) }
     }
 
-    /// Перетаскивание в боковой панели: там только видимые. Скрытые остаются на своих местах,
-    /// переставляются лишь места, занятые видимыми.
-    func moveShown(from source: IndexSet, to destination: Int) {
-        var shown = shownModules
-        shown.moveItems(from: source, to: destination)
-        var new = order
-        let slots = new.indices.filter { !hidden.contains(new[$0]) }
-        for (slot, module) in zip(slots, shown) { new[slot] = module }
-        setOrder(new)
-    }
-
     /// Порядок по умолчанию и все модули в панели. Включённость не трогаем.
     func resetAll() {
         defaults.removeObject(forKey: Self.orderKey)
         order = Module.allCases
         for module in Module.allCases { setHidden(module, false) }
+    }
+
+    /// Новый общий порядок (перетаскивание в панели). Лишние и повторы отбрасываются, недостающие идут в конец.
+    func applyOrder(_ new: [Module]) {
+        setOrder(Self.normalizedOrder(new.map(\.rawValue)))
     }
 
     private func setOrder(_ new: [Module]) {
@@ -233,15 +223,5 @@ final class ModuleManager: ObservableObject {
             // поэтому встроенный останавливается как при выходе. Выключил человек — обычная остановка.
             if external.contains(module) { (hook.quit ?? hook.stop)() } else { hook.stop() }
         }
-    }
-}
-
-private extension Array {
-    /// Как `move(fromOffsets:toOffset:)` из SwiftUI, но без зависимости от него.
-    mutating func moveItems(from source: IndexSet, to destination: Int) {
-        let moving = source.map { self[$0] }
-        let shift = source.filter { $0 < destination }.count
-        for index in source.sorted(by: >) { remove(at: index) }
-        insert(contentsOf: moving, at: destination - shift)
     }
 }

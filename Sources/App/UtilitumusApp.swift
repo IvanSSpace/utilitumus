@@ -288,6 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MicGuardMigration.run()
         DockMode.start()
         ModuleMenuIcons.shared.start()
+        SidebarModel.shared.start()
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
         SatelliteRegistry.shared.startMigration()
