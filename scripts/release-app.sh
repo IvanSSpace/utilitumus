@@ -1,7 +1,8 @@
 #!/bin/bash
 # Выпуск утилиты со своего Mac: собрать, подписать, выложить в GitHub Releases без пометки Latest
 # (старые центры берут /releases/latest), затем записать в Catalog/catalog.json.
-#   ./scripts/release-app.sh awake Awake 1.0.0 [--dry-run]
+#   ./scripts/release-app.sh awake Awake 1.0.0 --note "Что изменилось" [--note "Ещё"] [--dry-run]
+# --note обязателен: заметки попадают в каталог и видны в Сторе рядом с обновлением.
 # --dry-run проверяет и собирает так же, но вместо выкладки печатает команды, а новый каталог
 # и архив оставляет во временной папке.
 set -euo pipefail
@@ -9,18 +10,50 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "$1" >&2; exit 1; }
 
-if [ $# -lt 3 ] || [ $# -gt 4 ]; then
-  fail "Использование: ./scripts/release-app.sh <id> <Имя> X.Y.Z [--dry-run]"
+USAGE='Использование: ./scripts/release-app.sh <id> <Имя> X.Y.Z --note "Что изменилось" [--note "Ещё"] [--dry-run]'
+if [ $# -lt 3 ]; then
+  fail "$USAGE"
 fi
 ID="$1"
 NAME="$2"
 VERSION="$3"
+shift 3
 DRY_RUN=""
-if [ $# -eq 4 ]; then
-  # Опечатка в --dry-run не должна превращаться в настоящий выпуск.
-  [ "$4" = "--dry-run" ] || fail "Неизвестный аргумент: ${4}"
-  DRY_RUN=1
+NOTES=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --note)
+      # Иначе «--note --dry-run» съел бы флаг, и вместо проверки вышел бы настоящий выпуск.
+      if [ $# -lt 2 ] || [ "${2#--}" != "$2" ]; then
+        fail "После --note нужен текст заметки."
+      fi
+      NOTES+=("$2")
+      shift 2
+      ;;
+    # Опечатка в --dry-run не должна превращаться в настоящий выпуск.
+    *) fail "Неизвестный аргумент: ${1}. ${USAGE}" ;;
+  esac
+done
+if [ ${#NOTES[@]} -eq 0 ]; then
+  fail "Нет заметок: напиши через --note, что изменилось в ${VERSION}."
 fi
+# Те же пределы у SatelliteCatalog.cleanNotes. Заметку, которую центр исправил бы при чтении, выпуск отвергает.
+python3 -c '
+import sys, unicodedata
+MAX_NOTES = 8
+MAX_NOTE_LENGTH = 200
+notes = sys.argv[1:]
+if len(notes) > MAX_NOTES:
+    sys.exit("Заметок больше %d." % MAX_NOTES)
+for note in notes:
+    if not note.strip():
+        sys.exit("Пустая заметка.")
+    if len(note) > MAX_NOTE_LENGTH:
+        sys.exit("Заметка длиннее %d знаков: %s" % (MAX_NOTE_LENGTH, note))
+    if any(unicodedata.category(c) in ("Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp") for c in note):
+        sys.exit("В заметке перевод строки или управляющий символ: %r" % note)
+' "${NOTES[@]}"
 
 TAG="$ID-v$VERSION"
 REPO="IvanSSpace/utilitumus"
@@ -68,8 +101,8 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 NEW_CATALOG="$WORK/catalog.json"
 python3 -c '
 import hashlib, json, math, os, sys
-source, target, app_id, version, url, archive, min_hub = sys.argv[1:]
-with open(source) as f:
+source, target, app_id, version, url, archive, min_hub, *notes = sys.argv[1:]
+with open(source, encoding="utf-8") as f:
     catalog = json.load(f)
 if catalog["schema"] != 1:
     sys.exit("Каталог другого формата: %s" % catalog["schema"])
@@ -79,12 +112,12 @@ if entry is None:
     catalog["apps"].append(entry)
 with open(archive, "rb") as f:
     sha256 = hashlib.sha256(f.read()).hexdigest()
-entry.update(version=version, url=url, sha256=sha256, sizeMB=math.ceil(os.path.getsize(archive) / 1048576))
-with open(target, "w") as f:
+entry.update(version=version, url=url, sha256=sha256, sizeMB=math.ceil(os.path.getsize(archive) / 1048576), notes=notes)
+with open(target, "w", encoding="utf-8") as f:
     json.dump(catalog, f, ensure_ascii=False, indent=2)
     f.write("\n")
 ' Catalog/catalog.json "$NEW_CATALOG" "$ID" "$VERSION" \
-  "https://github.com/$REPO/releases/download/$TAG/$NAME.zip" "$ZIP" "$MIN_HUB"
+  "https://github.com/$REPO/releases/download/$TAG/$NAME.zip" "$ZIP" "$MIN_HUB" "${NOTES[@]}"
 
 if [ -n "$DRY_RUN" ]; then
   echo "Архив: $ZIP"

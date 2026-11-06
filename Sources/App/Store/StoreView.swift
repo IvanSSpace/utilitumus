@@ -98,7 +98,11 @@ private struct StoreFeatured: View {
                     StoreMeta(module: module)
                 }
                 Text(module.title).font(.system(size: 20, weight: .bold, design: .rounded))
-                Text(module.info.tagline).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                if let note = store.updateNotes(module).first {
+                    StoreUpdateTeaser(note: note)
+                } else {
+                    Text(module.info.tagline).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                }
             }
             Spacer(minLength: 12)
             VStack(spacing: 4) {
@@ -221,6 +225,8 @@ private struct StoreTile: View {
                 if installed {
                     if let progress = store.pendingSetup(module) {
                         StoreSetupChip(module: module, progress: progress)
+                    } else if let note = store.updateNotes(module).first {
+                        StoreUpdateTeaser(note: note)
                     } else {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark")
@@ -251,6 +257,19 @@ private struct StoreTile: View {
         .contentShape(Rectangle())
         .onTapGesture { store.open(module) }
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Первая заметка к обновлению там, где места на одну строку; все заметки в подробностях.
+struct StoreUpdateTeaser: View {
+    let note: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkle")
+            Text(verbatim: note)
+        }
+        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange).lineLimit(1)
     }
 }
 
