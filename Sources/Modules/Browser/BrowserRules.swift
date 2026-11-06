@@ -1,4 +1,6 @@
+import Darwin
 import Foundation
+import Security
 
 // Чистая логика модуля «Браузер»: без AppKit, чтобы её можно было проверить отдельно.
 
@@ -177,9 +179,77 @@ enum BrowserKnown {
     }
 }
 
+/// Браузер не из списка `BrowserKnown`: можно ли открывать в нём без панели. Bundle id назначает себе само
+/// приложение, поэтому смотрим на то, что труднее подделать: LaunchServices знает его как обработчик и http, и https,
+/// оно лежит в /Applications и подписано. Подпись любая, так что настоящим браузером это его не делает:
+/// поддельное приложение с действующей подписью в /Applications эту проверку пройдёт.
+enum BrowserTrust {
+    static func isInside(_ app: URL, root: String = "/Applications/") -> Bool {
+        // realpath: ссылка из /Applications на папку пользователя не считается.
+        guard let real = realpath(app.path, nil) else { return false }
+        defer { free(real) }
+        return String(cString: real).hasPrefix(root)
+    }
+
+    /// Подпись цела и есть сертификат. Ad-hoc не подходит, хотя `codesign --verify` её принимает:
+    /// подписанта у неё нет, а поставить её можно одной командой.
+    static func hasValidSignature(_ app: URL) -> Bool {
+        var code: SecStaticCode?
+        var info: CFDictionary?
+        guard SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
+              SecStaticCodeCheckValidity(code, [], nil) == errSecSuccess,
+              SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let certificates = (info as? [String: Any])?[kSecCodeInfoCertificates as String] as? [Any] else { return false }
+        return !certificates.isEmpty
+    }
+
+    /// Отпечаток бандла для кэша: ctime задним числом не поставить. nil — бандла нет или он неполный.
+    static func stamp(of app: URL) -> String? {
+        let contents = app.appendingPathComponent("Contents")
+        let plist = contents.appendingPathComponent("Info.plist")
+        guard let executable = NSDictionary(contentsOf: plist)?["CFBundleExecutable"] as? String else { return nil }
+        var parts: [String] = []
+        for item in [app, contents, plist, contents.appendingPathComponent("MacOS/\(executable)")] {
+            var info = stat()
+            guard lstat(item.path, &info) == 0 else { return nil }
+            parts.append("\(info.st_ctimespec.tv_sec).\(info.st_ctimespec.tv_nsec)/\(info.st_size)")
+        }
+        return parts.joined(separator: "|")
+    }
+}
+
+/// Проверка подписи большого бандла занимает заметное время: вне главного потока и один раз на бандл,
+/// пока он не изменился. Одновременные запросы ждут одну проверку.
+actor BrowserSignatures {
+    static let shared = BrowserSignatures()
+
+    private let check: @Sendable (URL) -> Bool
+    private var results: [String: (stamp: String, ok: Bool)] = [:]
+    private var running: [String: (stamp: String, task: Task<Bool, Never>)] = [:]
+
+    init(check: @escaping @Sendable (URL) -> Bool = BrowserTrust.hasValidSignature) {
+        self.check = check
+    }
+
+    func isValid(_ app: URL) async -> Bool {
+        let path = app.path
+        guard let stamp = BrowserTrust.stamp(of: app) else { return false }
+        if let done = results[path], done.stamp == stamp { return done.ok }
+        if let current = running[path], current.stamp == stamp { return await current.task.value }
+        let check = check
+        let task = Task.detached(priority: .userInitiated) { check(app) }
+        running[path] = (stamp, task)
+        let ok = await task.value
+        if running[path]?.stamp == stamp { running[path] = nil }
+        results[path] = (stamp, ok)
+        return ok
+    }
+}
+
 /// Куда вести ссылку. Правила и основной браузер лежат в настройках, куда может написать любая программа
-/// пользователя, и список показанных браузеров там же. Поэтому молча открываем только в настоящем браузере
-/// (`BrowserKnown`): в незнакомом приложении ссылка откроется, лишь если его выбрать на панели.
+/// пользователя, и список показанных браузеров там же. Поэтому молча открываем только то, чему можно верить
+/// без настроек (`isTrusted`: список `BrowserKnown` или `BrowserTrust`): остальное — только по выбору на панели.
+/// Подпись проверяем только у той цели, что сейчас нужна: остальные приложения ссылку не задерживают.
 enum BrowserRouting {
     enum Route: Equatable {
         case open(id: String, isPrivate: Bool)
@@ -189,27 +259,31 @@ enum BrowserRouting {
     }
 
     /// `installed` — установленные bundle id, `shown` — показанные в панели по порядку.
-    static func route(rules: [BrowserRule], url: URL?, sourceBundleID: String?, installed: Set<String>, shown: [String]) -> Route {
+    static func route(rules: [BrowserRule], url: URL?, sourceBundleID: String?, installed: Set<String>, shown: [String],
+                      isTrusted: (String) async -> Bool) async -> Route {
         let usable = rules.filter { installed.contains($0.browserID) }
         if let rule = BrowserRuleMatcher.firstMatch(rules: usable, url: url, sourceBundleID: sourceBundleID) {
-            if BrowserKnown.isBrowser(rule.browserID) { return .open(id: rule.browserID, isPrivate: rule.isPrivate) }
+            if await isTrusted(rule.browserID) { return .open(id: rule.browserID, isPrivate: rule.isPrivate) }
             return shown.isEmpty ? .fallback : .panel
         }
         switch shown.count {
         case 0: return .fallback
-        // С одной иконкой панель — лишний клик, но незнакомое приложение открываем только по выбору.
-        case 1 where BrowserKnown.isBrowser(shown[0]): return .open(id: shown[0], isPrivate: false)
+        // С одной иконкой панель — лишний клик, но приложение, которому нельзя верить, открываем только по выбору.
+        case 1: return await isTrusted(shown[0]) ? .open(id: shown[0], isPrivate: false) : .panel
         default: return .panel
         }
     }
 
-    /// Куда открыть без панели: основной, а если он не выбран или удалён — первый настоящий браузер.
-    /// nil — основной незнаком или настоящих браузеров нет, тогда показываем панель.
-    static func fallbackTarget(fallbackID: String?, installed: [String], shown: [String]) -> String? {
+    /// Куда открыть без панели: основной, а если он не выбран или удалён — первый браузер из списка, затем первый
+    /// показанный, которому можно верить. nil — основному верить нельзя или выбирать не из чего, тогда показываем панель.
+    static func fallbackTarget(fallbackID: String?, installed: [String], shown: [String],
+                               isTrusted: (String) async -> Bool) async -> String? {
         if let fallbackID, installed.contains(fallbackID) {
-            return BrowserKnown.isBrowser(fallbackID) ? fallbackID : nil
+            return await isTrusted(fallbackID) ? fallbackID : nil
         }
-        return shown.first(where: BrowserKnown.isBrowser) ?? installed.first(where: BrowserKnown.isBrowser)
+        if let known = shown.first(where: BrowserKnown.isBrowser) ?? installed.first(where: BrowserKnown.isBrowser) { return known }
+        for id in shown where await isTrusted(id) { return id }
+        return nil
     }
 }
 

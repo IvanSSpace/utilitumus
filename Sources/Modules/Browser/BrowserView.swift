@@ -335,8 +335,8 @@ struct BrowserView: View {
         } trailing: {
             HStack(spacing: 10) {
                 keyBadge(browser, keyCode: keyCode, recording: recording)
-                // Основным может быть только настоящий браузер (см. `BrowserRouting`).
-                if BrowserKnown.isBrowser(browser.id) {
+                // Основным может быть только то, чему можно верить (см. `BrowserRouting`).
+                if catalog.canTarget(browser.id) {
                     Button {
                         catalog.setFallback(isMain ? nil : browser.id)
                     } label: {
@@ -616,8 +616,8 @@ private struct AddRuleSheet: View {
             DSSection("Куда открывать") {
                 DSRow(icon: "safari", title: "Открывать в") {
                     Picker("Открывать в", selection: $browserID) {
-                        // Правило на незнакомое приложение открывает панель. Новое такое завести нельзя, старое видно.
-                        ForEach(catalog.browsers.filter { BrowserKnown.isBrowser($0.id) || $0.id == browserID }) { browser in
+                        // Правило на приложение, которому нельзя верить, открывает панель. Новое такое завести нельзя, старое видно.
+                        ForEach(catalog.browsers.filter { catalog.canTarget($0.id) || $0.id == browserID }) { browser in
                             Text(browser.name).tag(browser.id)
                         }
                     }
@@ -646,7 +646,7 @@ private struct AddRuleSheet: View {
         .onAppear {
             if runningApps.isEmpty { runningApps = Self.loadRunningApps() }
             if browserID.isEmpty {
-                browserID = catalog.fallback?.id ?? catalog.pickerBrowsers.first { BrowserKnown.isBrowser($0.id) }?.id ?? ""
+                browserID = catalog.fallback?.id ?? catalog.pickerBrowsers.first { catalog.canTarget($0.id) }?.id ?? ""
             }
         }
         .onChange(of: browserID) {

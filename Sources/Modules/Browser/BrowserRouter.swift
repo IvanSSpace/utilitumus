@@ -32,30 +32,38 @@ final class BrowserRouter {
         // Настройки меняются в Utilitumus, а ссылки ведёт помощник: перечитываем на каждую ссылку.
         catalog.refresh()
         let forcePanel = forcePanel || url == BrowserHelper.testURL
+        // Подпись браузера не из списка проверяется вне главного потока, поэтому решение асинхронное.
+        Task { await decide(url, from: source, forcePanel: forcePanel) }
+    }
 
+    private func decide(_ url: URL, from source: NSRunningApplication?, forcePanel: Bool) async {
+        let catalog = BrowserCatalog.shared
         if !forcePanel {
             guard !BrowserHelper.moduleDisabled else {
-                openInFallback(url, from: source)
+                await openInFallback(url, from: source)
                 return
             }
-            switch BrowserRouting.route(rules: catalog.rules, url: url, sourceBundleID: source?.bundleIdentifier,
-                                        installed: Set(catalog.browsers.map(\.id)), shown: catalog.pickerBrowsers.map(\.id)) {
+            switch await BrowserRouting.route(rules: catalog.rules, url: url, sourceBundleID: source?.bundleIdentifier,
+                                              installed: Set(catalog.browsers.map(\.id)), shown: catalog.pickerBrowsers.map(\.id),
+                                              isTrusted: { await catalog.isTrusted($0) }) {
             case .open(let id, let isPrivate):
                 if let browser = catalog.browser(id: id) { open(url, in: browser, private: isPrivate) }
                 return
             case .fallback:
-                openInFallback(url, from: source)
+                await openInFallback(url, from: source)
                 return
             case .panel:
                 break
             }
         }
         guard !catalog.pickerBrowsers.isEmpty else { return }
-        showPanel(url, from: source, browsers: catalog.pickerBrowsers)
+        await showPanel(url, from: source, browsers: catalog.pickerBrowsers)
     }
 
-    private func showPanel(_ url: URL, from source: NSRunningApplication?, browsers: [InstalledBrowser]) {
+    private func showPanel(_ url: URL, from source: NSRunningApplication?, browsers: [InstalledBrowser]) async {
         let catalog = BrowserCatalog.shared
+        // Чтобы основной браузер не из списка был предвыбран уже при первой панели.
+        if let main = catalog.fallbackID { _ = await catalog.isTrusted(main) }
         BrowserPicker.shared.show(url: url, source: source, browsers: browsers, keys: catalog.effectiveKeys,
                                   preselected: catalog.fallback?.id) { [weak self] browser, isPrivate, remember in
             if remember { self?.remember(url, browser: browser, isPrivate: isPrivate) }
@@ -64,19 +72,22 @@ final class BrowserRouter {
     }
 
     /// Правило из выбора в панели: «домен → этот браузер». У файла и ссылки без хоста правила нет.
-    /// На незнакомое приложение правило не сработало бы (см. `BrowserRouting`), поэтому его не пишем.
+    /// На приложение, которому нельзя верить, правило не сработало бы (см. `BrowserRouting`), поэтому его не пишем.
     private func remember(_ url: URL, browser: InstalledBrowser, isPrivate: Bool) {
-        guard BrowserKnown.isBrowser(browser.id), let host = BrowserRuleMatcher.host(of: url),
+        guard let host = BrowserRuleMatcher.host(of: url),
               let domain = BrowserRuleMatcher.normalizeDomain(host) else { return }
-        BrowserCatalog.shared.addRule(BrowserRule(kind: .domain, value: domain, browserID: browser.id,
-                                                  isPrivate: isPrivate && browser.supportsPrivate))
+        Task {
+            guard await BrowserCatalog.shared.isTrusted(browser.id) else { return }
+            BrowserCatalog.shared.addRule(BrowserRule(kind: .domain, value: domain, browserID: browser.id,
+                                                      isPrivate: isPrivate && browser.supportsPrivate))
+        }
     }
 
-    /// Основной браузер, а если не выбран — первый настоящий (Utilitumus в списке нет).
-    /// Основной незнаком или настоящих нет — панель: потерять ссылку нельзя, открыть молча тоже.
-    func openInFallback(_ url: URL, from source: NSRunningApplication?) {
+    /// Основной браузер, а если не выбран — первый, которому можно верить (Utilitumus в списке нет).
+    /// Основному верить нельзя или выбирать не из чего — панель: потерять ссылку нельзя, открыть молча тоже.
+    func openInFallback(_ url: URL, from source: NSRunningApplication?) async {
         let catalog = BrowserCatalog.shared
-        if let browser = catalog.openTarget {
+        if let browser = await catalog.openTarget() {
             open(url, in: browser, private: false)
             return
         }
@@ -85,7 +96,7 @@ final class BrowserRouter {
             NSSound.beep()
             return
         }
-        showPanel(url, from: source, browsers: choices)
+        await showPanel(url, from: source, browsers: choices)
     }
 
     func open(_ url: URL, in browser: InstalledBrowser, private isPrivate: Bool) {

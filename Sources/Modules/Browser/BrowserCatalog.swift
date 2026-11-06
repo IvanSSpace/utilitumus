@@ -8,6 +8,8 @@ struct InstalledBrowser: Identifiable, Equatable {
     let name: String
     let url: URL
     let icon: NSImage
+    /// LaunchServices знает его как обработчик и http, и https.
+    var handlesBothSchemes = false
 
     var supportsPrivate: Bool { BrowserPrivateMode.arguments(for: id) != nil }
 }
@@ -72,6 +74,8 @@ final class BrowserCatalog: ObservableObject {
     @Published private(set) var rules: [BrowserRule]
     /// Свои клавиши выбора: bundle id → keyCode. У остальных клавиши раздаются автоматически.
     @Published private(set) var keys: [String: UInt16]
+    /// Браузеры не из списка `BrowserKnown`, у которых проверена подпись.
+    @Published private(set) var signedIDs: Set<String> = []
 
     private let defaults: UserDefaults
     private var storedOrder: [String]
@@ -81,6 +85,7 @@ final class BrowserCatalog: ObservableObject {
     private var iconCache: [String: NSImage] = [:]
 
     private let probe = URL(string: "https://example.com")!
+    private let httpProbe = URL(string: "http://example.com")!
 
     init(defaults: UserDefaults = BrowserHelper.defaults) {
         self.defaults = defaults
@@ -123,14 +128,32 @@ final class BrowserCatalog: ObservableObject {
         BrowserStorage.save(keys, key: Self.keysKey, defaults: defaults)
     }
 
-    /// Основной браузер, если он ещё установлен и это настоящий браузер (см. `BrowserRouting`).
-    var fallback: InstalledBrowser? { browsers.first { $0.id == fallbackID && BrowserKnown.isBrowser($0.id) } }
+    /// Основной браузер, если он ещё установлен и ему можно верить (см. `BrowserRouting`).
+    var fallback: InstalledBrowser? { browsers.first { $0.id == fallbackID && canTarget($0.id) } }
 
     /// Куда открывать, когда панель не нужна. nil — решать пользователю на панели.
-    var openTarget: InstalledBrowser? {
-        BrowserRouting.fallbackTarget(fallbackID: fallbackID, installed: browsers.map(\.id), shown: pickerBrowsers.map(\.id))
+    func openTarget() async -> InstalledBrowser? {
+        await BrowserRouting.fallbackTarget(fallbackID: fallbackID, installed: browsers.map(\.id), shown: pickerBrowsers.map(\.id),
+                                            isTrusted: { await self.isTrusted($0) })
             .flatMap(browser(id:))
     }
+
+    /// Для экрана: то, что уже известно, без ожидания подписи.
+    func canTarget(_ id: String) -> Bool { BrowserKnown.isBrowser(id) || signedIDs.contains(id) }
+
+    /// Можно ли открывать в приложении без панели. Для решения о ссылке — всегда этот путь, он сверяет бандл заново.
+    func isTrusted(_ id: String) async -> Bool {
+        if BrowserKnown.isBrowser(id) { return true }
+        guard let app = browser(id: id), isCandidate(app) else {
+            signedIDs.remove(id)
+            return false
+        }
+        let ok = await BrowserSignatures.shared.isValid(app.url)
+        if ok { signedIDs.insert(id) } else { signedIDs.remove(id) }
+        return ok
+    }
+
+    private func isCandidate(_ app: InstalledBrowser) -> Bool { app.handlesBothSchemes && BrowserTrust.isInside(app.url) }
 
     // MARK: - Запуск
 
@@ -164,8 +187,10 @@ final class BrowserCatalog: ObservableObject {
             found[id] = url
         }
 
+        let httpHandlers = Set(NSWorkspace.shared.urlsForApplications(toOpen: httpProbe).map(\.standardizedFileURL.path))
         let items = found.map { id, url in
-            InstalledBrowser(id: id, name: Self.displayName(url), url: url, icon: icon(id: id, url: url))
+            InstalledBrowser(id: id, name: Self.displayName(url), url: url, icon: icon(id: id, url: url),
+                             handlesBothSchemes: httpHandlers.contains(url.standardizedFileURL.path))
         }
         // Новым: сначала настоящие браузеры, внутри — по алфавиту.
         let sorted = items.sorted {
@@ -193,13 +218,19 @@ final class BrowserCatalog: ObservableObject {
             BrowserStorage.save(order, key: Self.orderKey, defaults: defaults)
         }
         adoptCurrentDefaultAsFallback()
+        // Экрану нужно знать заранее, что можно выбрать. Помощнику ссылок — нет: он проверит только нужную цель.
+        if Bundle.main.bundleIdentifier != BrowserHelper.bundleID {
+            let candidates = browsers.filter { !BrowserKnown.isBrowser($0.id) && isCandidate($0) }.map(\.id)
+            Task(priority: .utility) { for id in candidates { _ = await isTrusted(id) } }
+        }
     }
 
     /// Основной браузер не выбран, а по умолчанию стоит чужой: он и есть тот, куда вести ссылки.
     private func adoptCurrentDefaultAsFallback() {
-        guard fallback == nil, let url = NSWorkspace.shared.urlForApplication(toOpen: probe),
-              let id = Bundle(url: url)?.bundleIdentifier, BrowserKnown.isBrowser(id),
-              let candidate = browsers.first(where: { $0.id == id }) else { return }
+        guard fallbackID.flatMap(browser(id:)) == nil, let url = NSWorkspace.shared.urlForApplication(toOpen: probe),
+              let id = Bundle(url: url)?.bundleIdentifier,
+              let candidate = browsers.first(where: { $0.id == id }),
+              BrowserKnown.isBrowser(id) || isCandidate(candidate) else { return }
         setFallback(candidate.id)
     }
 
