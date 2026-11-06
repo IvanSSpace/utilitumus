@@ -268,6 +268,7 @@ struct NoShownModules: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        KeyboardController.onFeaturesChanged = { AccessState.shared.refresh() }
         MicGuardMigration.run()
         DockMode.start()
         ModuleManager.shared.startEnabled()

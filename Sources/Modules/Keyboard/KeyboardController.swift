@@ -14,6 +14,9 @@ import CoreGraphics
 final class KeyboardController: ObservableObject {
     static let shared = KeyboardController()
 
+    /// Сменился набор фишек. Что от него зависит вне модуля, назначает тот, кто его запускает.
+    static var onFeaturesChanged: @MainActor () -> Void = {}
+
     @Published var trigger: FnTrigger {
         didSet { UserDefaults.standard.set(trigger.rawValue, forKey: "Keyboard.Trigger"); detector.trigger = trigger }
     }
@@ -137,7 +140,7 @@ final class KeyboardController: ObservableObject {
             note("фишка «\(feature.title)» \(on ? "включена" : "выключена")")
         }
         // Шаги настройки модуля зависят от включённых фишек.
-        AccessState.shared.refresh()
+        Self.onFeaturesChanged()
     }
 
     /// Привести ресурсы в соответствие с включёнными фишками. Идемпотентно.
