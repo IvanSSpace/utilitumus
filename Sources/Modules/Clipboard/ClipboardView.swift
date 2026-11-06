@@ -288,3 +288,5 @@ extension ClipboardView where Model == ClipboardController {
     /// Встроенный модуль.
     init() { self.init(model: .shared) }
 }
+
+extension ClipboardController: HotKeyTarget {}

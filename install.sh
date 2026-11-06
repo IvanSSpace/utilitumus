@@ -40,6 +40,16 @@ verify_signature() { # путь, identifier
   codesign --verify --deep --strict -R="identifier \"$2\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$1" >/dev/null 2>&1
 }
 
+# Помощники утилиты, «путь в бандле|identifier». Та же таблица, что KitSigning.helpers. Список здесь, а не в бандле:
+# подделанный бандл не вычеркнет из него помощника.
+helpers_of() {
+  case "$1" in
+    browser) echo 'Contents/Helpers/Utilitumus Links.app|local.utilitumus.links' ;;
+    fans) echo 'Contents/MacOS/utilitumus-fan|local.utilitumus.fan' ;;
+    voice) echo 'Contents/MacOS/utilitumus-voice|local.utilitumus.voice' ;;
+  esac
+}
+
 # Утилита по каталогу. Каталог и архив недоверенные, как и GitHub выше: доверие держится на подписи.
 CATALOG_URL="${CATALOG_URL:-https://raw.githubusercontent.com/IvanSSpace/utilitumus/main/Catalog/catalog.json}"
 fail() { echo "$1" >&2; exit 1; }
@@ -48,6 +58,35 @@ matches() { local LC_ALL=C; [[ "$1" =~ $2 ]]; }
 # На чистом Mac может не быть python3, а plutil есть всегда и читает JSON.
 catalog_field() { plutil -extract "$1" raw -o - "$WORK/catalog.json" 2>/dev/null; }
 info_field() { plutil -extract "$1" raw -o - "$2/Contents/Info.plist" 2>/dev/null; }
+
+# Тот же номер, что KitSigning.securityEpoch. Новее своей можно, старее нет.
+SECURITY_EPOCH=1
+epoch_ok() { # бандл
+  local FOUND
+  FOUND="$(info_field UtilitumusSecurityEpoch "$1")" || return 1
+  matches "$FOUND" '^[0-9]{1,18}$' && [ "$FOUND" -ge "$SECURITY_EPOCH" ]
+}
+
+# Правила те же, что у KitSigning.verifyHelper.
+verify_helper() { # бандл, путь в нём, identifier
+  local HELPER="$1/$2"
+  if [ -L "$HELPER" ] || [ ! -e "$HELPER" ]; then
+    fail "В архиве нет помощника $2 — ничего не установлено."
+  fi
+  case "$2" in
+    *.app)
+      verify_signature "$HELPER" "$3" || refuse "$2"
+      epoch_ok "$HELPER" || fail "У помощника $2 нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+      ;;
+    *)
+      codesign --verify -R="identifier \"$3\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$HELPER" >/dev/null 2>&1 || refuse "$2"
+      ;;
+  esac
+  # Через переменную: grep -q закрыл бы канал раньше времени, а при pipefail это выглядит как сбой.
+  local DETAILS
+  DETAILS="$(codesign -d --verbose=1 "$HELPER" 2>&1)" || DETAILS=""
+  matches "$DETAILS" 'flags=0x[0-9a-f]+\([^)]*runtime' || fail "Помощник $2 собран без hardened runtime — ничего не установлено."
+}
 
 # launchd отпускает метку не сразу после bootout.
 load_agent() {
@@ -123,6 +162,11 @@ install_app() {
   [ -z "$WRITABLE" ] || fail "В архиве запись разрешена группе или всем: ${WRITABLE}"
 
   verify_signature "$APP" "$LABEL" || refuse "$NAME.app"
+  epoch_ok "$APP" || fail "У ${NAME}.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+  local HELPER_PATH HELPER_ID
+  while IFS='|' read -r HELPER_PATH HELPER_ID; do
+    [ -z "$HELPER_PATH" ] || verify_helper "$APP" "$HELPER_PATH" "$HELPER_ID"
+  done <<<"$(helpers_of "$ID")"
 
   # Сверка с каталогом уже после подписи: Info.plist ею запечатан.
   local ACTUAL
@@ -208,6 +252,12 @@ PLIST
   if [ -n "$HAD_OLD" ]; then fail "$NAME $VERSION не установлен. Прежняя версия возвращена."; fi
   fail "$NAME $VERSION не установлен: не удалось положить приложение или загрузить ${LABEL}."
 }
+
+# Для scripts/build-app.sh: манифест утилиты не должен расходиться с тем, что проверяет установщик.
+if [ $# -eq 2 ] && [ "$1" = "--helpers" ]; then
+  helpers_of "$2"
+  exit 0
+fi
 
 if [ $# -gt 0 ]; then
   install_app "$@"

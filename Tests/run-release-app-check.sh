@@ -140,6 +140,8 @@ chmod +x "$FAKE/gh" "$FAKE/launchctl" "$OUT/curl-stub" "$NOCERT/security"
 G=(/usr/bin/git -C "$FX" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test -c user.email=test@example.invalid)
 mkdir -p "$FX/scripts" "$FX/Sources/Apps/Awake" "$FX/Sources/Modules/Awake" "$FX/Catalog" "$FX/Resources"
 cp scripts/build-app.sh scripts/release-app.sh "$FX/scripts/"
+cp install.sh "$FX/install.sh"
+echo '{}' > "$FX/Sources/Apps/Awake/manifest.json"
 cp -R Sources/Kit "$FX/Sources/Kit"
 cp Info.plist "$FX/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$FX/Resources/"
@@ -162,6 +164,7 @@ cat > "$FX/Sources/Apps/Awake/Info.plist" <<'EOF'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.0.0</string>
 <key>LSUIElement</key><true/>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 </dict></plist>
 EOF
 cat > "$FX/Catalog/catalog.json" <<'EOF'
@@ -208,6 +211,9 @@ refused "версия с мусором" "верси" "$BA" awake Awake 1.2.x "$
 refused "версия, которая не влезает в число" "верси" "$BA" awake Awake 1.9999999999999999999 "$OUT/x"
 refused "нет исходников" "Sources/Apps/Nope" "$BA" nope Nope 1.2.3 "$OUT/x"
 refused "мало аргументов" "build-app.sh" "$BA" awake Awake
+mv "$FX/Sources/Apps/Awake/manifest.json" "$OUT/manifest.keep"
+refused "нет манифеста" "manifest.json" "$BA" awake Awake 1.2.3 "$OUT/x"
+mv "$OUT/manifest.keep" "$FX/Sources/Apps/Awake/manifest.json"
 check "после отказов папка вывода не создана" test ! -e "$OUT/x"
 
 # Относительный путь — от вызывающего, чужое в папке вывода цело, umask вызывающего не важен.
@@ -241,10 +247,11 @@ check "без сертификата — подпись ad-hoc" grep -q 'Signatu
 echo "== release-app.sh --dry-run"
 RA="$FX/scripts/release-app.sh"
 dry() { env PATH="$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" "$@"; }
+NOTE=(--note "Первая заметка" --note "**Вторая** как есть")
 
 BEFORE="$(state)"
 PLAN="$OUT/plan.txt"
-dry awake Awake 1.2.3 --dry-run > "$PLAN" 2>&1 || { cat "$PLAN"; bad "--dry-run упал"; finish; }
+dry awake Awake 1.2.3 "${NOTE[@]}" --dry-run > "$PLAN" 2>&1 || { cat "$PLAN"; bad "--dry-run упал"; finish; }
 cat "$PLAN"
 same "--dry-run не изменил репозиторий, теги и origin" "$(state)" "$BEFORE"
 check "gh не выкладывал" lacks "$GH_LOG" "release create"
@@ -278,6 +285,9 @@ same "каталог: minHub записи сохранён" "$(field apps.1.minH
 same "каталог: другая запись цела" "$(field apps.0.version) $(field apps.0.sha256)" "3.0.0 aa"
 same "каталог: записей столько же" "$(field apps)" 2
 same "каталог: schema" "$(field schema)" 1
+same "каталог: заметок две" "$(field apps.1.notes)" 2
+same "каталог: заметки как есть" "$(field apps.1.notes.0) / $(field apps.1.notes.1)" "Первая заметка / **Вторая** как есть"
+if plutil -extract apps.0.notes raw -o - "$NEW_CATALOG" >/dev/null 2>&1; then bad "чужой записи дописаны заметки"; else pass "чужой записи заметки не дописаны"; fi
 SIZE_MB="$(field apps.1.sizeMB)"
 if [ "$SIZE_MB" -ge 1 ] 2>/dev/null; then pass "каталог: sizeMB $SIZE_MB"; else bad "каталог: sizeMB «${SIZE_MB}»"; fi
 same "каталог читается настоящим SatelliteCatalog.decode" \
@@ -286,7 +296,7 @@ same "имя файла в архиве" "$(unzip -Z1 "$ZIP" | cut -d/ -f1 | sor
 
 # Первый выпуск: без minHub и sizeMB каталог не прочитает ни один центр.
 FRESH_PLAN="$OUT/fresh.txt"
-dry fresh Awake 2.0.0 --dry-run > "$FRESH_PLAN" 2>&1 || { cat "$FRESH_PLAN"; bad "--dry-run нового id упал"; finish; }
+dry fresh Awake 2.0.0 "${NOTE[@]}" --dry-run > "$FRESH_PLAN" 2>&1 || { cat "$FRESH_PLAN"; bad "--dry-run нового id упал"; finish; }
 FRESH_CATALOG="$(sed -n 's/^Каталог: //p' "$FRESH_PLAN")"
 FRESH_ZIP="$(sed -n 's/^Архив: //p' "$FRESH_PLAN")"
 FRESH_SIZE="$(plutil -extract apps.2.sizeMB raw -o - "$FRESH_CATALOG")"
@@ -294,6 +304,34 @@ same "новый id дописан со всеми полями" \
   "$("$APP/Contents/MacOS/Awake" "$FRESH_CATALOG")" "other 3.0.0 0.6.0 1, awake 1.0.0 0.7.0 9, fresh 2.0.0 0.6.0 $FRESH_SIZE"
 same "новый id: sha256" "$(plutil -extract apps.2.sha256 raw -o - "$FRESH_CATALOG")" "$(shasum -a 256 "$FRESH_ZIP" | cut -d' ' -f1)"
 same "новый id: url" "$(plutil -extract apps.2.url raw -o - "$FRESH_CATALOG")" "https://github.com/IvanSSpace/utilitumus/releases/download/fresh-v2.0.0/Awake.zip"
+same "новый id: заметки" "$(plutil -extract apps.2.notes.0 raw -o - "$FRESH_CATALOG")" "Первая заметка"
+
+echo "== заметки выпуска"
+same "предел числа заметок тот же, что в SatelliteCatalog" \
+  "$(sed -n 's/^MAX_NOTES = //p' scripts/release-app.sh)" "$(sed -n 's/.*static let maxNotes = //p' Sources/Kit/SatelliteCatalog.swift)"
+same "предел длины заметки тот же, что в SatelliteCatalog" \
+  "$(sed -n 's/^MAX_NOTE_LENGTH = //p' scripts/release-app.sh)" "$(sed -n 's/.*static let maxNoteLength = //p' Sources/Kit/SatelliteCatalog.swift)"
+LETTERS_200="$(printf 'ы%.0s' $(seq 1 200))"
+EIGHT=()
+for _ in 1 2 3 4 5 6 7 8; do EIGHT+=(--note "$LETTERS_200"); done
+# Кириллица при LC_ALL=C: каталог пишется в UTF-8 независимо от языка окружения.
+LIMIT_PLAN="$OUT/limit.txt"
+env LC_ALL=C PATH="$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" awake Awake 1.2.4 "${EIGHT[@]}" --dry-run > "$LIMIT_PLAN" 2>&1 || { cat "$LIMIT_PLAN"; bad "ровно по пределам --dry-run упал"; }
+LIMIT_CATALOG="$(sed -n 's/^Каталог: //p' "$LIMIT_PLAN")"
+same "восемь заметок по 200 знаков записаны" "$(plutil -extract apps.1.notes raw -o - "$LIMIT_CATALOG") $(plutil -extract apps.1.notes.7 raw -o - "$LIMIT_CATALOG")" "8 $LETTERS_200"
+: > "$GH_LOG"
+BEFORE="$(state)"
+refused "без заметок выпуска нет" "--note" dry awake Awake 1.2.3 --dry-run
+refused "--note без текста" "--note" dry awake Awake 1.2.3 --note
+refused "--note не съедает --dry-run" "--note" dry awake Awake 1.2.3 --note --dry-run
+refused "--note=текст не считается заметкой" "--note=x" dry awake Awake 1.2.3 --note=x --dry-run
+refused "пустая заметка" "Пустая" dry awake Awake 1.2.3 --note "  " --dry-run
+refused "заметка длиннее предела" "длиннее" dry awake Awake 1.2.3 --note "${LETTERS_200}ы" --dry-run
+refused "заметок больше предела" "больше" dry awake Awake 1.2.3 "${EIGHT[@]}" --note лишняя --dry-run
+refused "перевод строки в заметке" "управляющий" dry awake Awake 1.2.3 --note $'две\nстроки' --dry-run
+refused "переворот текста в заметке" "управляющий" dry awake Awake 1.2.3 --note $'a\xe2\x80\xaeb' --dry-run
+same "отказы по заметкам: до gh и сети" "$(cat "$GH_LOG")" ""
+same "отказы по заметкам не изменили репозиторий" "$(state)" "$BEFORE"
 
 : > "$GH_LOG"
 BEFORE="$(state)"
@@ -301,20 +339,20 @@ refused "опечатка в --dry-run не выкладывает" "--dryrun" d
 refused "--dry-run первым аргументом" "аргумент" dry --dry-run awake Awake 1.2.3
 refused "лишний аргумент" "release-app.sh" dry awake Awake 1.2.3 --dry-run extra
 refused "мало аргументов" "release-app.sh" dry awake Awake
-refused "id с переводом строки" "id" dry $'awake\n' Awake 1.2.3 --dry-run
-refused "версия с мусором" "верси" dry awake Awake 1.2.x --dry-run
-refused "выпуск уже есть" "уже есть" env GH_RELEASE_EXISTS=1 PATH="$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" awake Awake 1.2.3 --dry-run
-refused "неподписанную сборку не выкладывает" "не подписана" env PATH="$NOCERT:$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" awake Awake 1.2.3 --dry-run
+refused "id с переводом строки" "id" dry $'awake\n' Awake 1.2.3 "${NOTE[@]}" --dry-run
+refused "версия с мусором" "верси" dry awake Awake 1.2.x "${NOTE[@]}" --dry-run
+refused "выпуск уже есть" "уже есть" env GH_RELEASE_EXISTS=1 PATH="$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" awake Awake 1.2.3 "${NOTE[@]}" --dry-run
+refused "неподписанную сборку не выкладывает" "не подписана" env PATH="$NOCERT:$FAKE:$PATH" TMPDIR="$OUT/tmp" "$RA" awake Awake 1.2.3 "${NOTE[@]}" --dry-run
 same "отказы не изменили репозиторий" "$(state)" "$BEFORE"
 
 echo untracked > "$FX/untracked"
-refused "новый файл в дереве — отказ" "незакоммиченные" dry awake Awake 1.2.3 --dry-run
+refused "новый файл в дереве — отказ" "незакоммиченные" dry awake Awake 1.2.3 "${NOTE[@]}" --dry-run
 rm "$FX/untracked"
 echo changed >> "$FX/Catalog/catalog.json"
-refused "изменённый файл в дереве — отказ" "незакоммиченные" dry awake Awake 1.2.3 --dry-run
+refused "изменённый файл в дереве — отказ" "незакоммиченные" dry awake Awake 1.2.3 "${NOTE[@]}" --dry-run
 "${G[@]}" checkout -q -- Catalog/catalog.json
 "${G[@]}" commit -q --allow-empty -m ahead
-refused "HEAD не совпадает с origin/main — отказ" "не совпадает" dry awake Awake 1.2.3 --dry-run
+refused "HEAD не совпадает с origin/main — отказ" "не совпадает" dry awake Awake 1.2.3 "${NOTE[@]}" --dry-run
 "${G[@]}" reset -q --hard origin/main
 check "gh не выкладывал и при отказах" lacks "$GH_LOG" "release create"
 

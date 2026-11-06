@@ -18,6 +18,7 @@ struct StoreDetail: View {
                           name: SatelliteRegistry.bundleName(module) + " " + $0.version)
         } ?? StoreCatalog.downloads(module)
         let isSatellite = store.satellites.hasBundle(module)
+        let notes = store.updateNotes(module)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 ModuleIconBadge(module: module, size: 42)
@@ -58,6 +59,7 @@ struct StoreDetail: View {
                         StoreStages(stage: stage, progress: p, tint: cat)
                     }
                     if state == .installed { installedNotes }
+                    if let app, !notes.isEmpty { StoreUpdateNotes(version: app.version, notes: notes, tint: cat) }
                     DSSection("Что делает") {
                         Text(module.summary).font(.system(size: 12)).foregroundStyle(.white.opacity(0.75))
                             .fixedSize(horizontal: false, vertical: true)
@@ -159,6 +161,21 @@ struct StoreDetail: View {
                 }
             }
             DSButton("Открыть", icon: "arrow.right", style: .primary, small: true) { store.openInApp(module) }
+        }
+    }
+}
+
+/// Что изменилось в ожидающей версии: значок как в окне «Что нового», строки как у остальных секций панели.
+struct StoreUpdateNotes: View {
+    let version: String
+    let notes: [String]
+    let tint: Color
+
+    var body: some View {
+        DSSection("Что нового", trailing: "версия \(version)") {
+            ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
+                DSRow(icon: "sparkle", title: note, iconTint: tint)
+            }
         }
     }
 }
