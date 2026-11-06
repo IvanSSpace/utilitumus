@@ -75,6 +75,11 @@ final class VoiceModule: SatelliteModule {
         return nil
     }
 
+    /// Экран закрыт или центр пропал: запись проверки обрывается, микрофон не остаётся включённым.
+    func screenOpen(_ open: Bool) {
+        if !open { controller.endTest() }
+    }
+
     func state() -> Data { LinkWire.encoded(controller.wireState) }
     func handle(_ action: Data) -> Data { controller.handle(action) }
 

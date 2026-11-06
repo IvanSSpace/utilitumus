@@ -3,6 +3,16 @@ import AVFoundation
 import CoreAudio
 import AudioToolbox
 
+/// Что контроллеру нужно от записи: настоящая — `VoiceRecorder`, в проверках подставная.
+protocol VoiceCapturing: AnyObject, Sendable {
+    var count: Int { get }
+    var level: Float { get }
+    func start(deviceUID: String?) throws
+    func finish() -> [Float]
+}
+
+extension VoiceRecorder: VoiceCapturing {}
+
 /// Запись с микрофона в память: 16 кГц, моно, Float32 — как ждёт `VoiceEngine`.
 /// Звук нигде не сохраняется: только массив в оперативке, который отдаёт `finish()`.
 final class VoiceRecorder: @unchecked Sendable {

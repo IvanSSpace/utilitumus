@@ -197,6 +197,8 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     var test: VoiceTestState? { nil }
     func beginTest() {}
     func endTest() {}
+    var recording: Bool { false }
+    func toggleTestRecording() {}
 }
 
 // MARK: - Связь
@@ -232,6 +234,7 @@ func caseName(_ action: VoiceAction) -> String {
     case .selectModel: return "selectModel"
     case .beginTest: return "beginTest"
     case .endTest: return "endTest"
+    case .toggleTestRecording: return "toggleTestRecording"
     }
 }
 
@@ -240,9 +243,9 @@ func caseName(_ action: VoiceAction) -> String {
         .setMode(.hold), .setMic("uid"), .setMic(nil), .addExcluded("com.example.a"), .removeExcluded("com.example.a"),
         .setHotKey(keyCode: 49, modifiers: 4096), .resetHotKey, .suspendHotKey, .resumeHotKey, .refreshPermissions,
         .requestAccessibility, .download(.gigaam), .cancelDownload(.parakeet), .deleteModel(.gigaam), .selectModel(.parakeet),
-        .beginTest, .endTest,
+        .beginTest, .endTest, .toggleTestRecording,
     ]
-    check(Set(actions.map(caseName)).count == 16, "в списке все 16 действий")
+    check(Set(actions.map(caseName)).count == 17, "в списке все 17 действий")
     check(actions.allSatisfy(roundTrips), "действия: JSON туда и обратно, байты с sortedKeys те же")
 
     let statuses: [VoiceModelStore.Status] = [.notInstalled, .downloading(progress: 0.25), .verifying, .installed, .failed("ошибка")]
@@ -488,12 +491,42 @@ func caseName(_ action: VoiceAction) -> String {
     controller.removeExcluded("com.apple.finder")
 }
 
+/// Кнопка «Проверить» на экране центра: уходит одним проверяемым действием; уход с экрана посреди записи снимает режим.
+@MainActor func remoteButton() async {
+    var sent: [Data] = []
+    var recording = false
+    let link = RemoteModuleLink(
+        state: { LinkWire.encoded(VoiceController.shared.wireState) },
+        action: { data in
+            sent.append(data)
+            var state = VoiceController.shared.wireState
+            state.recording = recording
+            return LinkWire.encoded(LinkReply(state: state))
+        }, setWatch: { _ in }, onPing: { _ in })
+    let remote = RemoteVoiceModel(id: "test.voice-button", link: link, canRead: { true })
+    await remote.perform(.toggleTestRecording)
+    check(sent == [LinkWire.encoded(VoiceAction.toggleTestRecording)], "кнопка шлёт одно проверяемое действие")
+    check(LinkWire.decodeAction(VoiceAction.self, from: sent[0], limit: 512) == .toggleTestRecording, "утилита это действие принимает")
+    sent = []
+    remote.endTest()
+    try? await Task.sleep(for: .milliseconds(100))
+    check(sent.isEmpty, "записи нет и режима нет: лишнее действие не уходит")
+    recording = true
+    await remote.perform(.toggleTestRecording)
+    sent = []
+    check(remote.recording, "запись видна экрану")
+    remote.endTest()
+    try? await Task.sleep(for: .milliseconds(100))
+    check(sent == [LinkWire.encoded(VoiceAction.endTest)], "уход с экрана посреди записи шлёт endTest")
+}
+
 @MainActor func run() async {
     wire()
     await screen()
     await remoteScreen()
     await validations()
     testMode()
+    await remoteButton()
     finish()
 }
 

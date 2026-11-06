@@ -68,9 +68,11 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
 
     var test: VoiceTestState? { state.test }
     func beginTest() { send(.beginTest) }
+    var recording: Bool { state.recording }
+    func toggleTestRecording() { send(.toggleTestRecording) }
     func endTest() {
-        // Режим уже выключен: лишнее действие не нужно, и утилиту ради него не будят.
-        if state.test != nil { send(.endTest) }
+        // Режим уже выключен и записи нет: лишнее действие не нужно, и утилиту ради него не будят.
+        if state.test != nil || state.recording { send(.endTest) }
     }
 
     // Карточка та же, что у встроенного: «идёт запись…» приходит флагом в состоянии, строка статуса от записи не меняется.

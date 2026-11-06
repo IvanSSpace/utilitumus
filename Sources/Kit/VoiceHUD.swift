@@ -99,6 +99,8 @@ final class VoiceHUD {
         hideTask?.cancel()
         hideTask = nil
         model.kind = kind
+        // Стенд ничего не показывает на экране; состояние плашки в модели.
+        if Kit.standRefuses("плашка голоса") { return }
         let panel = self.panel ?? makePanel()
         self.panel = panel
         // Внизу по центру экрана, где сейчас курсор.

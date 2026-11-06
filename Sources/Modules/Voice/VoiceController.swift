@@ -50,7 +50,22 @@ final class VoiceController: ObservableObject {
     @Published private(set) var hotKeyError: String?
 
     private var isRunning = false
-    private let recorder = VoiceRecorder()
+    /// Шов для проверок: настоящие микрофон, права и распознавание в автоматических прогонах не нужны.
+    struct Seam {
+        var recorder: VoiceCapturing = VoiceRecorder()
+        var micStatus: () -> AVAuthorizationStatus = { AVCaptureDevice.authorizationStatus(for: .audio) }
+        var requestMic: (@escaping @Sendable (Bool) -> Void) -> Void = { AVCaptureDevice.requestAccess(for: .audio, completionHandler: $0) }
+        var readyModel: @MainActor () -> VoiceModel? = {
+            let store = VoiceModelStore.shared
+            if store.status(store.selected) == .installed { return store.selected }
+            return VoiceModel.allCases.first { store.status($0) == .installed }
+        }
+        /// Esc на время записи занимает глобальную клавишу: проверке она не нужна.
+        var grabsEsc = true
+        var transcribe: @Sendable ([Float], VoiceModel) async throws -> String = { try await VoiceEngine.shared.transcribe($0, model: $1) }
+    }
+    var seam = Seam()
+    private var recorder: VoiceCapturing { seam.recorder }
     private var levelTimer: Timer?
     private var recordingStart = Date()
     private var transcribeTask: Task<Void, Never>?
@@ -201,7 +216,7 @@ final class VoiceController: ObservableObject {
 
     /// Esc берём только на время записи и распознавания, иначе он пропал бы у всех программ.
     private func registerEsc() {
-        guard escHotKey == nil else { return }
+        guard escHotKey == nil, seam.grabsEsc else { return }
         let id = EventHotKeyID(signature: Self.signature, id: Self.escID)
         if RegisterEventHotKey(UInt32(kVK_Escape), 0, id, GetApplicationEventTarget(), 0, &escHotKey) != noErr {
             escHotKey = nil
@@ -245,7 +260,7 @@ final class VoiceController: ObservableObject {
         case .authorized:
             startRecorder()
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+            seam.requestMic { [weak self] granted in
                 Task { @MainActor in
                     self?.refreshPermissions()
                     VoiceHUD.shared.showMessage(granted ? "Микрофон разрешён — нажми ещё раз" : "Нет доступа к микрофону",
@@ -257,13 +272,14 @@ final class VoiceController: ObservableObject {
         }
     }
 
-    private func startRecorder() {
+    @discardableResult
+    private func startRecorder() -> Bool {
         do {
             try recorder.start(deviceUID: micUID)
         } catch {
             _ = recorder.finish()
             VoiceHUD.shared.showMessage("Микрофон не включился", isError: true)
-            return
+            return false
         }
         phase = .recording
         recordingStart = Date()
@@ -274,6 +290,7 @@ final class VoiceController: ObservableObject {
         levelTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
+        return true
     }
 
     @objc nonisolated private func audioConfigChanged() {
@@ -306,30 +323,35 @@ final class VoiceController: ObservableObject {
         transcribeTask = nil
         unregisterEsc()
         phase = .idle
+        testSession = nil
     }
 
     private func finishRecording() {
         let duration = Date().timeIntervalSince(recordingStart)
         var samples = stopRecorder()
         if samples.count > VoiceRecorder.maxSamples { samples.removeLast(samples.count - VoiceRecorder.maxSamples) }
+        let session = testSession
         guard duration > 0.3, samples.count > 4800 else {
             unregisterEsc()
             phase = .idle
+            testSession = nil
             VoiceHUD.shared.showMessage("Слишком коротко", isError: true, seconds: 1.5)
             return
         }
         guard let model = anyModelReady else {
             unregisterEsc()
             phase = .idle
+            testSession = nil
             VoiceHUD.shared.showMessage("Скачай модель в «Голосе»", isError: true)
             return
         }
         phase = .transcribing
         VoiceHUD.shared.showTranscribing()
+        let transcribe = seam.transcribe
         transcribeTask = Task { [weak self] in
             let result: Result<String, Error>
             do {
-                result = .success(try await VoiceEngine.shared.transcribe(samples, model: model))
+                result = .success(try await transcribe(samples, model))
             } catch {
                 result = .failure(error)
             }
@@ -338,13 +360,14 @@ final class VoiceController: ObservableObject {
             self.transcribeTask = nil
             self.unregisterEsc()
             self.phase = .idle
+            self.testSession = nil
             switch result {
             case let .success(text):
                 let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if clean.isEmpty {
                     VoiceHUD.shared.showMessage("Ничего не расслышал", isError: true, seconds: 1.8)
                 } else {
-                    self.insert(clean)
+                    self.insert(clean, session: session)
                 }
             case let .failure(error):
                 VoiceHUD.shared.showMessage(error.localizedDescription, isError: true, seconds: 4)
@@ -353,11 +376,7 @@ final class VoiceController: ObservableObject {
     }
 
     /// Выбранная модель, если установлена; иначе любая установленная.
-    private var anyModelReady: VoiceModel? {
-        let store = VoiceModelStore.shared
-        if store.status(store.selected) == .installed { return store.selected }
-        return VoiceModel.allCases.first { store.status($0) == .installed }
-    }
+    private var anyModelReady: VoiceModel? { seam.readyModel() }
 
     // MARK: Режим проверки
 
@@ -371,8 +390,55 @@ final class VoiceController: ObservableObject {
         testUntil = now + VoiceTestState.lifetime
     }
 
+    /// Выключает режим и обрывает запись, начатую кнопкой «Проверить»: ушёл с экрана, потерял связь — микрофон не остаётся включённым.
     func endTest() {
+        cancelTestRecording()
         if test != nil { test = nil }
+    }
+
+    /// Запись по клавише не трогает: она не от экрана.
+    func cancelTestRecording() {
+        guard testSession != nil else { return }
+        cancelAll()
+        VoiceHUD.shared.hide()
+    }
+
+    /// Запись, начатую кнопкой «Проверить»: текст из неё идёт только в поле проверки и никогда в другую программу.
+    /// `.state` — поле на экране центра, текст уходит в состояние; `.field` — поле в окне этого же процесса.
+    enum TestSession { case state, field }
+    private var testSession: TestSession?
+
+    /// Кнопка «Проверить»: первое нажатие начинает запись, второе заканчивает. Возвращает текст отказа.
+    func toggleTestRecording(intoState: Bool) -> String? {
+        switch phase {
+        case .recording:
+            guard testSession != nil else { return "Идёт запись по горячей клавише" }
+            finishRecording()
+            return nil
+        case .transcribing:
+            return "Идёт распознавание"
+        case .idle:
+            break
+        }
+        refreshPermissions()
+        guard anyModelReady != nil else { return "Скачай модель, без неё голос не распознать" }
+        switch micStatus {
+        case .authorized:
+            break
+        case .notDetermined:
+            seam.requestMic { [weak self] _ in Task { @MainActor in self?.refreshPermissions() } }
+            return "Разреши микрофон в окне системы и нажми «Проверить» ещё раз"
+        default:
+            return "Нет доступа к микрофону: разреши его в настройках macOS"
+        }
+        if intoState { beginTest() }
+        testSession = intoState ? .state : .field
+        guard startRecorder() else {
+            testSession = nil
+            if intoState { endTest() }
+            return "Микрофон не включился"
+        }
+        return nil
     }
 
     /// Срок на случай, если экран не выключил режим: иначе диктовка навсегда перестала бы доходить до программ.
@@ -392,15 +458,20 @@ final class VoiceController: ObservableObject {
 
     // MARK: Вставка
 
-    private func insert(_ text: String) {
+    private func insert(_ text: String, session: TestSession?) {
         if captureTestText(text) {
             VoiceHUD.shared.hide()
             return
         }
         // Диктуют в поле самого Utilitumus (раздел «Проверить»): вставляем напрямую, права не нужны.
-        if NSApp.isActive, let view = NSApp.keyWindow?.firstResponder as? NSTextView, view.isEditable {
+        if session != .state, NSApp.isActive, let view = NSApp.keyWindow?.firstResponder as? NSTextView, view.isEditable {
             view.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
             VoiceHUD.shared.hide()
+            return
+        }
+        // Проверка не вставляет в чужие программы: поле закрыто, текст пропадает.
+        if session != nil {
+            VoiceHUD.shared.showMessage("Поле проверки закрыто — текст не вставлен", isError: true)
             return
         }
         let pasteboard = Kit.pasteboard
@@ -446,7 +517,7 @@ final class VoiceController: ObservableObject {
     // MARK: Разрешения
 
     func refreshPermissions() {
-        micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        micStatus = seam.micStatus()
         axTrusted = AXIsProcessTrusted()
     }
 
