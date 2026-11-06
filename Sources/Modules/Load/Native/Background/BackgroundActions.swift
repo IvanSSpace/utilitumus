@@ -324,15 +324,20 @@ final class BackgroundExecutor: @unchecked Sendable {
         let label = item.label
         let bots = BotRegistry.load()
         let state = LaunchState.shared
-        let systemJob = item.domain != "gui" || state.plists(LaunchAgents.systemDirs)[label] != nil
-        if let why = LaunchAgents.whyRefused(label: label, domain: systemJob ? "system" : "gui", botLabels: LaunchAgents.botLabels(bots)) {
-            throw BackgroundActionError(message: "Не трогаю \(label): \(why)")
-        }
+        let rootPlist = state.plists(LaunchAgents.systemDirs)[label]?.plist
+        let systemJob = item.domain != "gui" || rootPlist != nil
         guard let jobs = jobs() else { throw BackgroundActionError(message: "launchctl не ответил — повтори позже") }
         let loaded = jobs.keys.contains(label)
         let pid: Int32? = jobs[label] ?? nil
 
         let procs = scanner.scan(rootMemory: [:], compressed: [:])
+        // Служба macOS или нет — по свежим plist и пути процесса, как при составлении списка.
+        let apple = LaunchAgents.isAppleService(label: label, plist: state.plists(LaunchAgents.guiDirs)[label]?.plist ?? rootPlist,
+                                                exe: pid.flatMap { procs[$0]?.exe })
+        if let why = LaunchAgents.whyRefused(label: label, domain: systemJob ? "system" : "gui", botLabels: LaunchAgents.botLabels(bots),
+                                             appleService: apple) {
+            throw BackgroundActionError(message: "Не трогаю \(label): \(why)")
+        }
         let tree = ProcessTree(procs)
         let sub = pid.flatMap { procs[$0] != nil ? tree.subtree(of: $0) : nil } ?? []
         let fence = Protection.fence(procs: procs, tree: tree, extra: BotRegistry.fence(bots, procs: procs, tree: tree, launchd: jobs))

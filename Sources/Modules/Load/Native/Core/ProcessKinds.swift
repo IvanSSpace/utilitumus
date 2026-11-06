@@ -61,11 +61,25 @@ enum Kinds {
     /// Хост вкладок терминала: шеллы под ним — вкладки, а атрибуцию от него не наследуем.
     static func terminalApp(_ p: LoadProcess) -> String? { p.terminal }
 
-    static func terminalApp(name: String, exe: String) -> String? {
-        if name == "orca-terminal-host" { return "Orca" }
-        if name.hasPrefix("iTermServer") || name == "iTerm2" { return "iTerm2" }
+    /// По пути, а не по имени: имя берётся из argv[0], а его задаёт сам процесс.
+    static func terminalApp(exe: String) -> String? {
+        let file = exe.split(separator: "/").last ?? ""
+        if file == "orca-terminal-host", exe.contains("/Orca Terminal Host.app/Contents/") || exe.contains("/Orca.app/Contents/") {
+            return "Orca"
+        }
+        if exe.hasSuffix("/iTerm.app/Contents/MacOS/iTerm2") { return "iTerm2" }
+        // Новые версии копируют сервер в Application Support.
+        if file.hasPrefix("iTermServer"), exe.contains("/Library/Application Support/iTerm2/") || exe.contains("/iTerm.app/Contents/") {
+            return "iTerm2"
+        }
         if exe.hasSuffix("/Terminal.app/Contents/MacOS/Terminal") { return "Terminal" }
         return nil
+    }
+
+    /// Файл на защищённом томе системы. /usr/local — это Homebrew, а через /System/Volumes/Data
+    /// можно запустить любой файл пользователя, и путь процесса будет начинаться с /System/.
+    static func isOSExecutable(_ exe: String) -> Bool {
+        (exe.hasPrefix("/System/") && !exe.hasPrefix("/System/Volumes/Data/")) || (exe.hasPrefix("/usr/") && !exe.hasPrefix("/usr/local/"))
     }
 
     // MARK: Claude

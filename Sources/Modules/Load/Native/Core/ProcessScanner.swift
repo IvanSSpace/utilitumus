@@ -52,7 +52,7 @@ final class ProcessScanner {
             name = ProcessScanner.processName(args: args, exe: exe, comm: comm)
             exeName = String(exe.split(separator: "/").last ?? "")
             isClaude = Kinds.isClaudeSession(exe: exe, exeName: exeName, name: name, args: args)
-            terminal = Kinds.terminalApp(name: name, exe: exe)
+            terminal = Kinds.terminalApp(exe: exe)
         }
     }
 

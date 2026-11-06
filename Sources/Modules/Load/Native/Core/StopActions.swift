@@ -39,11 +39,13 @@ enum Protection {
         if p.pid <= 1 { return "системный процесс" }
         if let why = fence[p.pid] { return why }
         if p.user != getuid() { return "процесс другого пользователя" }
-        if systemNames.contains(p.name) || systemNames.contains(p.exeName) { return "системный процесс" }
+        // Только вместе с путём: процесс может назваться Dock, а файл из системного каталога ему не подложить.
+        if systemNames.contains(p.exeName), Kinds.isOSExecutable(p.exe) { return "системный процесс" }
         if Kinds.terminalApp(p) != nil { return "хост вкладок терминала" }
         if p.exe.isEmpty { return "не удалось прочитать путь" }
         let isShell = p.exe.hasPrefix("/bin/") && Kinds.shells.contains(p.exeName)
-        if root, systemDirs.contains(where: { p.exe.hasPrefix($0) }), !p.exe.hasPrefix("/usr/local/"), !isShell {
+        if root, systemDirs.contains(where: { p.exe.hasPrefix($0) }), !p.exe.hasPrefix("/usr/local/"),
+           !p.exe.hasPrefix("/System/Volumes/Data/"), !isShell {
             return "системный файл"
         }
         return nil

@@ -1,0 +1,92 @@
+import Darwin
+import Foundation
+
+// Модуль «Нагрузка»: защита от остановки и подписи агентов не верят тому, что процесс и агент пишут о себе сами.
+
+var failed = false
+func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
+    print((ok ? "ok   " : "ПРОВАЛ ") + name + (ok ? "" : ": " + detail()))
+    if !ok { failed = true }
+}
+
+func process(name: String, exe: String, args: [String] = [], pid: Int32 = 500) -> LoadProcess {
+    LoadProcess(pid: pid, ppid: 1, user: getuid(), uniqueID: 1, startTime: 0, name: name, exe: exe,
+                exeName: String(exe.split(separator: "/").last ?? ""), isClaude: false,
+                terminal: Kinds.terminalApp(exe: exe), cwd: nil, args: args, tty: nil, memMB: 1, residentMB: 1, wiredMB: nil, compressedMB: 0,
+                readable: true, pgid: pid, tpgid: 0, cpuPercent: nil)
+}
+func why(_ p: LoadProcess, root: Bool = true) -> String? { Protection.why(p, fence: [:], root: root) }
+
+// MARK: Имя процесса
+
+let dock = "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock"
+check("настоящий Dock защищён", why(process(name: "Dock", exe: dock)) == "системный процесс")
+check("настоящий WindowServer защищён", why(process(name: "WindowServer",
+      exe: "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/Resources/WindowServer")) == "системный процесс")
+check("чужая программа с argv[0] Dock не защищена", why(process(name: "Dock", exe: "/Users/u/bin/x")) == nil)
+check("чужой файл с именем Dock не защищён", why(process(name: "Dock", exe: "/Users/u/bin/Dock")) == nil)
+check("Dock из /usr/local не защищён", why(process(name: "Dock", exe: "/usr/local/bin/Dock")) == nil)
+let firmlink = "/System/Volumes/Data/Users/u/bin/Dock"
+check("Dock через /System/Volumes/Data не защищён", why(process(name: "Dock", exe: firmlink)) == nil, why(process(name: "Dock", exe: firmlink)) ?? "")
+check("системный файл по-прежнему не цель", why(process(name: "sleep", exe: "/usr/bin/sleep")) == "системный файл")
+check("но потомком цели останавливается", why(process(name: "sleep", exe: "/usr/bin/sleep"), root: false) == nil)
+check("шелл по-прежнему цель", why(process(name: "zsh", exe: "/bin/zsh")) == nil)
+check("без пути по-прежнему не трогаем", why(process(name: "Dock", exe: "")) == "не удалось прочитать путь")
+
+// MARK: Хост вкладок терминала
+
+let iterm = "/Applications/iTerm.app/Contents/MacOS/iTerm2"
+let server = "/Users/u/Library/Application Support/iTerm2/iTermServer-3.5.14"
+let orca = "/Users/u/Library/Application Support/orca/daemon-host/macos/terminal-host-1/app.noindex/Orca Terminal Host.app/Contents/MacOS/orca-terminal-host"
+let terminal = "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"
+check("iTerm2", Kinds.terminalApp(exe: iterm) == "iTerm2")
+check("сервер iTerm2", Kinds.terminalApp(exe: server) == "iTerm2")
+check("сервер iTerm2 внутри бандла", Kinds.terminalApp(exe: "/Applications/iTerm.app/Contents/MacOS/iTermServer") == "iTerm2")
+check("хост Orca", Kinds.terminalApp(exe: orca) == "Orca")
+check("Terminal", Kinds.terminalApp(exe: terminal) == "Terminal")
+check("хост защищён от остановки", why(process(name: "iTermServer-3.5.14", exe: server)) == "хост вкладок терминала")
+check("argv[0] iTermServer-1 не делает хостом", why(process(name: "iTermServer-1", exe: "/Users/u/bin/x")) == nil)
+check("файл iTermServer-1 в чужой папке не хост", Kinds.terminalApp(exe: "/Users/u/bin/iTermServer-1") == nil)
+check("файл orca-terminal-host в чужой папке не хост", Kinds.terminalApp(exe: "/Users/u/bin/orca-terminal-host") == nil)
+
+// MARK: Метки com.apple.
+
+func apple(_ label: String, plist: String? = nil, exe: String? = nil) -> Bool {
+    LaunchAgents.isAppleService(label: label, plist: plist, exe: exe)
+}
+check("plist из /System/Library — служба macOS", apple("com.apple.x", plist: "/System/Library/LaunchAgents/com.apple.x.plist"))
+check("plist в LaunchAgents пользователя — нет", !apple("com.apple.x", plist: "/Users/u/Library/LaunchAgents/com.apple.x.plist"))
+check("plist в /Library/LaunchAgents — нет", !apple("com.apple.x", plist: "/Library/LaunchAgents/com.apple.x.plist"))
+check("без plist с программой из системы — служба (mdworker, XPC)",
+      apple("com.apple.mdworker.shared.1", exe: "/System/Library/Frameworks/CoreServices.framework/mdworker_shared"))
+check("без plist с программой из /usr/libexec — служба", apple("com.apple.dmd", exe: "/usr/libexec/dmd"))
+check("без plist с чужой программой — нет", !apple("com.apple.x", exe: "/Users/u/bin/x"))
+check("без plist через /System/Volumes/Data — нет", !apple("com.apple.x", exe: firmlink))
+check("без plist и процесса скрывать нечего", apple("com.apple.x"))
+check("чужая метка службой macOS не бывает", !apple("com.logi.x", plist: "/System/Library/LaunchAgents/x.plist"))
+check("службу macOS не трогаем", LaunchAgents.whyRefused(label: "com.apple.x", domain: "gui", botLabels: [], appleService: true) == "служба macOS")
+check("метка com.apple. с чужим plist управляется как обычный агент",
+      LaunchAgents.whyRefused(label: "com.apple.x", domain: "gui", botLabels: [], appleService: false) == nil)
+
+// MARK: Производитель
+
+let home = NSHomeDirectory()
+func vendor(_ label: String, _ program: String) -> String { LaunchAgents.vendor(of: label, program: program).vendor }
+check("Logitech", vendor("com.logi.optionsplus", "/Library/Application Support/Logitech.localized/LogiOptionsPlus/logioptionsplus_agent.app/Contents/MacOS/logioptionsplus_agent") == "Logitech")
+check("Google из домашней папки", vendor("com.google.GoogleUpdater.wake", home + "/Library/Application Support/Google/GoogleUpdater/Current/GoogleUpdater.app/Contents/MacOS/GoogleUpdater") == "Google")
+check("Keystone", vendor("com.google.keystone.agent", home + "/Library/Google/GoogleSoftwareUpdate/GoogleSoftwareUpdate.bundle/Contents/Resources/GoogleSoftwareUpdateAgent.app/Contents/MacOS/GoogleSoftwareUpdateAgent") == "Google")
+check("Zoom", vendor("us.zoom.updater", "/Applications/zoom.us.app/Contents/Library/LaunchAgents/ZoomUpdater.app/Contents/MacOS/ZoomUpdater") == "Zoom")
+check("Zoom, служба", vendor("us.zoom.ZoomDaemon", "/Library/PrivilegedHelperTools/us.zoom.ZoomDaemon") == "Zoom")
+check("Steam", vendor("com.valvesoftware.steamclean", home + "/Library/Application Support/Steam/SteamApps/steamclean") == "Steam")
+check("Adobe", vendor("com.adobe.ccxprocess", "/Applications/Utilities/Adobe Creative Cloud Experience/CCXProcess/CCXProcess.app/Contents/MacOS/CCXProcess") == "Adobe")
+check("Microsoft", vendor("com.microsoft.update.agent", "/Library/Application Support/Microsoft/MAU2.0/Microsoft AutoUpdate.app/Contents/MacOS/Microsoft Update Assistant.app/Contents/MacOS/Microsoft Update Assistant") == "Microsoft")
+check("Rogue Amoeba", vendor("com.rogueamoeba.arkaudiod", "/Library/Audio/Plug-Ins/HAL/ARK.driver/Contents/Resources/Audio Routing Kit (ARK).app/Contents/MacOS/arkaudiod") == "Rogue Amoeba")
+check("Rogue Amoeba из домашней папки", vendor("com.rogueamoeba.loopbackd", home + "/Library/Application Support/Loopback/Loopback.app/Contents/MacOS/Loopback") == "Rogue Amoeba")
+check("метка Logitech с чужой программой без подписи", vendor("com.logi.x", "/Users/u/bin/x") == "")
+check("метка Logitech с программой Google без подписи", vendor("com.logi.x", "/Library/Application Support/Google/x") == "")
+check("обход через .. без подписи", vendor("com.logi.x", "/Applications/logi/../../tmp/x") == "")
+check("нет программы — нет подписи", vendor("com.logi.x", "") == "")
+check("без подписи — общая заметка", LaunchAgents.vendor(of: "com.logi.x", program: "/tmp/x").note == LaunchAgents.unknown)
+
+//L4
+exit(failed ? 1 : 0)
