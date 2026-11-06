@@ -14,7 +14,7 @@ func check(_ ok: Bool, _ name: String) {
     if !ok { failures += 1 }
 }
 
-/// Читает скрипт сборки: и новый экран, и старый берут отсюда начальное значение `logShown`.
+/// Скрипт подставляет её вместо `false` в `logShown` обоих экранов: журнал раскрывается только нажатием.
 nonisolated(unsafe) var testLogShown = false
 
 /// Модель для экрана: как будущая модель утилиты, живёт только на состоянии из связи.
@@ -281,25 +281,37 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     check(same == 0, "соседние состояния различаются, снимки не пустые")
 
     // Настоящий контроллер против экрана на его же состоянии, прочитанном из JSON: состояние несёт всё, что видно.
-    clearSettings()
-    Stub.usage = 1
-    Stub.current = Stub.layouts[1]
-    KeyboardFeature.perAppLayout.isOn = true
-    let real = KeyboardController()
-    _ = real.handle(.addExcluded("com.apple.calculator"))
-    _ = real.handle(.setTrigger(.onPress))
-    _ = real.handle(.repair)
-    let live = await Shot.take(KeyboardView(model: real))
-    let state = try! JSONDecoder().decode(KeyboardState.self, from: sorted(real.wireState))
-    seedFeatures(state)
-    baselineModel = FakeKeyboardModel(state)
-    let old = await Shot.take(BaselineKeyboardView())
-    let remote = await Shot.take(KeyboardView(model: FakeKeyboardModel(state)))
-    Shot.save(live, "real-controller", out: out)
-    check(real.tapActive == false && state.currentName == "Русская", "настоящий контроллер: tap нет, имя раскладки на месте")
-    let oldDiff = differingPixels(live, old), remoteDiff = differingPixels(live, remote)
-    check(oldDiff == 0, "настоящий контроллер и старый экран, разных пикселей \(oldDiff)")
-    check(remoteDiff == 0, "настоящий контроллер и модель из JSON, разных пикселей \(remoteDiff)")
+    // Первый случай раскрывает настройки Fn и журнал, второй — настройки раскладки по приложениям.
+    // tapActive и secureInputApp без работающего tap настоящими не бывают: они проверены на модели выше.
+    for fnOn in [true, false] {
+        clearSettings()
+        Stub.usage = 1
+        Stub.current = Stub.layouts[1]
+        KeyboardFeature.fnLanguage.isOn = fnOn
+        KeyboardFeature.perAppLayout.isOn = true
+        testLogShown = fnOn
+        let real = KeyboardController()
+        _ = real.handle(.refreshAccess)
+        _ = real.handle(.addExcluded("com.apple.calculator"))
+        _ = real.handle(.setNewAppLayout("com.apple.keylayout.Russian"))
+        _ = real.handle(.setTrigger(.onPress))
+        _ = real.handle(.setMode(.cycle))
+        _ = real.handle(.repair)
+        if fnOn { _ = real.handle(.disableAllSystemActions) }
+        let live = await Shot.take(KeyboardView(model: real))
+        let state = try! JSONDecoder().decode(KeyboardState.self, from: sorted(real.wireState))
+        seedFeatures(state)
+        baselineModel = FakeKeyboardModel(state)
+        let old = await Shot.take(BaselineKeyboardView())
+        let remote = await Shot.take(KeyboardView(model: FakeKeyboardModel(state)))
+        let name = fnOn ? "настоящий контроллер, Fn" : "настоящий контроллер, по приложениям"
+        Shot.save(live, fnOn ? "real-fn" : "real-app", out: out)
+        check(real.tapActive == false && state.currentName == "Русская" && (state.logCount > 0) == fnOn, "\(name): tap нет, имя раскладки и журнал на месте")
+        let oldDiff = differingPixels(live, old), remoteDiff = differingPixels(live, remote)
+        check(oldDiff == 0, "\(name) и старый экран, разных пикселей \(oldDiff)")
+        check(remoteDiff == 0, "\(name) и модель из JSON, разных пикселей \(remoteDiff)")
+    }
+    testLogShown = false
     clearSettings()
 }
 
