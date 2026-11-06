@@ -325,7 +325,7 @@ final class SidebarSession: ObservableObject {
         withTransaction(plain) {
             if let target {
                 var next = SidebarModel.shared.layout(open: openModule)
-                if next.move(module, to: target.zone, at: target.index) { SidebarModel.shared.apply(next, moved: module) }
+                if next.move(module, to: target.zone, at: target.index) { SidebarModel.shared.apply(next, moved: module, open: openModule) }
             }
             drag.module = nil
             drag.target = nil

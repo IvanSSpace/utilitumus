@@ -156,6 +156,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         let setting = MenuBarIcon.setting(module.module)
         let shows = MenuBarIcon.utilityShows(setting: setting, hubRunning: hubRunning, active: mode == .active)
         menuIconOn = MenuBarIcon.switchOn(setting)
+        menuIconNotice = nil
         statusItem?.isVisible = shows
         statusItem?.setUsesMenu(MenuBarIcon.utilityUsesMenu(hubRunning: hubRunning))
         #if KIT_TEST_DEFAULTS
@@ -170,7 +171,6 @@ final class SatelliteHost: ObservableObject, LinkHandler {
             menuIconNotice = MenuBarIcon.limitNotice
             return
         }
-        menuIconNotice = nil
         MenuBarIcon.set(on, module.module)
         Kit.defaults.synchronize()
         applyMenuIcon()

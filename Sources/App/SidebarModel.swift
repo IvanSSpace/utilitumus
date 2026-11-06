@@ -64,10 +64,10 @@ final class SidebarModel {
 
     /// Применить раскладку, в которой `module` переехал в зону `zone` (после `SidebarLayout.move`).
     /// Закрепление и скрытие идут через те же места, что и раньше: значок — `ModuleMenuIcons.set`, скрытие — `ModuleManager`.
-    func apply(_ layout: SidebarLayout, moved module: Module) {
+    func apply(_ layout: SidebarLayout, moved module: Module, open: Module? = nil) {
         guard let zone = layout.zone(of: module) else { return }
         // Десятый со значком лежит в списке: перенос по списку его значка не трогает.
-        let wasPinned = self.layout().pinned.contains(module)
+        let wasPinned = self.layout(open: open).pinned.contains(module)
         switch zone {
         case .pinned:
             modules.setHidden(module, false)
@@ -87,7 +87,7 @@ final class SidebarModel {
     func send(_ module: Module, to zone: SidebarLayout.Zone, open: Module? = nil) -> Bool {
         var current = layout(open: open)
         guard current.move(module, to: zone, at: Int.max) else { return false }
-        apply(current, moved: module)
+        apply(current, moved: module, open: open)
         return true
     }
 
