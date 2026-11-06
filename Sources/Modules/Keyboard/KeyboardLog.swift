@@ -11,8 +11,14 @@ final class KeyboardLog: @unchecked Sendable {
     static let maxEntries = 50
     static let maxFileBytes = 200_000
 
+    #if KIT_TEST_DEFAULTS
+    /// Стенд не пишет в настоящий журнал пользователя: свой файл во временной папке.
+    static let shared = KeyboardLog(fileURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("utilitumus-keyboard-test.log"))
+    #else
     static let shared = KeyboardLog(fileURL: FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Utilitumus/keyboard.log"))
+    #endif
 
     private let fileURL: URL?
     private let lock = NSLock()

@@ -60,7 +60,14 @@ extension ModuleHooks {
                                stop: { ClipboardController.shared.stop() })
         case .keyboard:
             return ModuleHooks(start: { KeyboardController.shared.start() },
-                               stop: { KeyboardController.shared.stop() },
+                               // Модуль передан утилите: настройки пользователя (🌐, диктовка) остаются, их держит утилита.
+                               stop: {
+                                   if ModuleManager.shared.isExternal(.keyboard) {
+                                       KeyboardController.shared.quit()
+                                   } else {
+                                       KeyboardController.shared.stop()
+                                   }
+                               },
                                quit: { KeyboardController.shared.quit() })
         case .awake:
             return ModuleHooks(start: { AwakeController.shared.start() },
