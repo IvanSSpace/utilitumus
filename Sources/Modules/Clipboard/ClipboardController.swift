@@ -37,6 +37,8 @@ final class ClipboardController: ObservableObject {
     private var lastChange = 0
     /// changeCount после нашей собственной записи (вставка из панели): такую запись не запоминаем.
     private var ownChange = -1
+    private var frontHistory = ClipFrontHistory()
+    private var activationObserver: NSObjectProtocol?
 
     private var handlerRef: EventHandlerRef?
     private var hotKeyRef: EventHotKeyRef?
@@ -61,6 +63,14 @@ final class ClipboardController: ObservableObject {
         isRunning = true
         openStore()
         lastChange = NSPasteboard.general.changeCount  // что лежало до включения — не берём
+        frontHistory = ClipFrontHistory(current: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let id = app?.bundleIdentifier
+            MainActor.assumeIsolated { ClipboardController.shared.frontHistory.activated(id) }
+        }
         // Опрос changeCount — одно целое число; чтение содержимого только когда оно поменялось.
         let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
             MainActor.assumeIsolated { ClipboardController.shared.poll() }
@@ -77,6 +87,8 @@ final class ClipboardController: ObservableObject {
         isRunning = false
         timer?.invalidate()
         timer = nil
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        activationObserver = nil
         unregisterHotKey()
         if let handlerRef { RemoveEventHandler(handlerRef) }
         handlerRef = nil
@@ -119,8 +131,9 @@ final class ClipboardController: ObservableObject {
         lastChange = count
         guard count != ownChange, let store else { return }
         let front = NSWorkspace.shared.frontmostApplication
-        // Пароли из менеджеров не берём, даже если они забыли поставить скрытый тип.
-        if let id = front?.bundleIdentifier, excludedApps.contains(id) { return }
+        // Из программ-исключений не берём, даже если запись пришла без скрытого типа и программа уже ушла с переднего плана.
+        let sources = frontHistory.sources() + [front?.bundleIdentifier].compactMap { $0 }
+        if sources.contains(where: excludedApps.contains) { return }
         var snap = ClipboardPasteboard.snapshot(of: pasteboard)
         snap.sourceBundleID = front?.bundleIdentifier
         snap.sourceName = front?.localizedName

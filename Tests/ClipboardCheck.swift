@@ -277,5 +277,28 @@ do {
     check(old.items.count == 1 && old.items[0].spaceID != nil, "повтор находит старую запись по прежнему хэшу")
 }
 
+// 9. Исключения: источник — и текущая программа, и те, что были впереди в последние 2 секунды
+do {
+    let t0 = Date(timeIntervalSince1970: 1000)
+    var front = ClipFrontHistory(current: "com.apple.keychainaccess")
+    check(front.sources(now: t0) == ["com.apple.keychainaccess"], "текущая программа — источник")
+    front.activated("com.apple.Safari", now: t0)
+    check(Set(front.sources(now: t0.addingTimeInterval(0.5))) == ["com.apple.keychainaccess", "com.apple.Safari"], "через 0,5 с ушедшая ещё источник")
+    check(front.sources(now: t0.addingTimeInterval(2)).contains("com.apple.keychainaccess"), "через 2 с ещё источник")
+    check(front.sources(now: t0.addingTimeInterval(2.01)) == ["com.apple.Safari"], "позже 2 с только текущая")
+    front.activated("com.apple.Safari", now: t0.addingTimeInterval(3))
+    check(front.sources(now: t0.addingTimeInterval(3)) == ["com.apple.Safari"], "повторная активация той же не делает её ушедшей")
+    front.activated(nil, now: t0.addingTimeInterval(4))
+    check(front.sources(now: t0.addingTimeInterval(4)) == ["com.apple.Safari"], "программа без bundle id ничего не добавляет")
+
+    let store = ClipboardStore(directory: root.appendingPathComponent("legacy-types"), key: key)
+    for type in ["com.agilebits.onepassword", "net.antelle.keeweb", "de.petermaurer.TransientPasteboardType",
+                 "Pasteboard generator type", "com.typeit4me.clipping"] {
+        check(!store.ingest(snap("секрет", types: ["public.utf8-plain-text", type])), "тип \(type) пропущен")
+    }
+    check(store.items.isEmpty, "после старых пометок история пуста")
+    check(store.ingest(snap("обычный текст")), "обычный текст сохраняется")
+}
+
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")
 exit(failures == 0 ? 0 : 1)

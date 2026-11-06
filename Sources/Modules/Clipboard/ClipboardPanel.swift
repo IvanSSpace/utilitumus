@@ -481,6 +481,8 @@ final class ClipboardPanelHost {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.appearance = NSAppearance(named: .darkAqua)
+        // Панель показывает содержимое буфера открытым текстом: при показе экрана её не видно.
+        panel.sharingType = .none
 
         let glass = NSVisualEffectView()
         glass.material = .hudWindow
