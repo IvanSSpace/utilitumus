@@ -16,7 +16,7 @@ final class PrimaryInputStore: ObservableObject {
     private var isDecided: Bool
 
     private init() {
-        if let saved = UserDefaults.standard.string(forKey: Self.key) {
+        if let saved = Kit.defaults.string(forKey: Self.key) {
             primaryUID = saved == Self.builtInValue ? nil : saved
             isDecided = true
         } else {
@@ -28,7 +28,7 @@ final class PrimaryInputStore: ObservableObject {
     func select(_ uid: String?) {
         primaryUID = uid
         isDecided = true
-        UserDefaults.standard.set(uid ?? Self.builtInValue, forKey: Self.key)
+        Kit.defaults.set(uid ?? Self.builtInValue, forKey: Self.key)
     }
 
     /// Звать ДО KnownDeviceStore.inputs.sync: пока список не дополнен живыми
@@ -36,7 +36,7 @@ final class PrimaryInputStore: ObservableObject {
     func migrateIfNeeded(connected: [AudioDeviceInfo], bluetoothLocked: Bool) {
         guard !isDecided else { return }
         let oldOrder = KnownDeviceStore.inputs.known.map(\.uid)
-        let disabled = Set((UserDefaults.standard.stringArray(forKey: Self.legacyDisabledKey) ?? [])
+        let disabled = Set((Kit.defaults.stringArray(forKey: Self.legacyDisabledKey) ?? [])
             .map(DeviceIdentity.stableKey))
         select(SoundPolicy.migratedPrimaryInput(oldOrder: oldOrder,
                                                 connected: connected,
@@ -58,7 +58,7 @@ final class PrimaryOutputStore: ObservableObject {
     @Published private(set) var choice: OutputChoice
 
     private init() {
-        let saved = UserDefaults.standard.string(forKey: Self.key)
+        let saved = Kit.defaults.string(forKey: Self.key)
         switch saved {
         case Self.systemValue: choice = .system
         case let value? where value.hasPrefix(Self.devicePrefix):
@@ -75,6 +75,6 @@ final class PrimaryOutputStore: ObservableObject {
         case .builtIn: value = Self.builtInValue
         case .device(let uid): value = Self.devicePrefix + uid
         }
-        UserDefaults.standard.set(value, forKey: Self.key)
+        Kit.defaults.set(value, forKey: Self.key)
     }
 }

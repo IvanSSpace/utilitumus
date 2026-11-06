@@ -45,7 +45,7 @@ final class MixerController: ObservableObject {
     /// Запущены и молчат, но звука от них не ждём (Finder, редакторы): прячутся под «Остальные».
     @Published private(set) var otherApps: [MixerApp] = []
     /// Кто хоть раз звучал: таких показываем в «Молчат сейчас», даже если они не из списка медиа.
-    private var heard: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "MixerHeard") ?? [])
+    private var heard: Set<String> = Set(Kit.defaults.stringArray(forKey: "MixerHeard") ?? [])
     /// Тап не получил данных или система отказала: почти всегда нет разрешения
     /// «Запись системного звука».
     @Published private(set) var permissionProblem = false
@@ -101,8 +101,8 @@ final class MixerController: ObservableObject {
     private var persistTask: Task<Void, Never>?
 
     private init() {
-        volumes = UserDefaults.standard.dictionary(forKey: Self.volumesKey) as? [String: Double] ?? [:]
-        muted = Set(UserDefaults.standard.stringArray(forKey: Self.mutedKey) ?? [])
+        volumes = Kit.defaults.dictionary(forKey: Self.volumesKey) as? [String: Double] ?? [:]
+        muted = Set(Kit.defaults.stringArray(forKey: Self.mutedKey) ?? [])
     }
 
     func start() {
@@ -229,8 +229,8 @@ final class MixerController: ObservableObject {
     private func persist() {
         persistTask?.cancel()
         persistTask = nil
-        UserDefaults.standard.set(volumes, forKey: Self.volumesKey)
-        UserDefaults.standard.set(Array(muted), forKey: Self.mutedKey)
+        Kit.defaults.set(volumes, forKey: Self.volumesKey)
+        Kit.defaults.set(Array(muted), forKey: Self.mutedKey)
     }
 
     /// Выключение модуля или выход: снести все тапы и агрегаты, чтобы звук
@@ -343,7 +343,7 @@ final class MixerController: ObservableObject {
             sessions[key] = session
             session.objectIDs = group.ids
             if group.playing, !key.hasPrefix("exe:"), heard.insert(key).inserted {
-                UserDefaults.standard.set(Array(heard).sorted(), forKey: "MixerHeard")
+                Kit.defaults.set(Array(heard).sorted(), forKey: "MixerHeard")
             }
             if group.playing { session.lastPlaying = now }
         }
