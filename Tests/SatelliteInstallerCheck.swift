@@ -285,7 +285,7 @@ func installChecks() async {
         check(s.noLitter, "\(fixture): ни скачанного, ни мусора")
     }
 
-    for fixture in ["traversal", "two", "renamed", "extra", "link-rel", "link-abs", "link-dangling", "link-top", "garbage"] {
+    for fixture in ["traversal", "two", "renamed", "extra", "link-rel", "link-inner", "link-abs", "link-dangling", "link-top", "garbage"] {
         let s = Stand("archive-" + fixture)
         let error = await s.install(fixture)
         check(isArchiveError(error), "\(fixture): отказ по архиву (\(String(describing: error)))")

@@ -20,7 +20,8 @@ forbid() {
   esac
 }
 # Ни один тест не имеет права дотянуться до настоящих путей и настоящей связи.
-forbid '\.live|live[A-Z]' 'настоящие замыкания и пути в тестах' -r Tests --include='*.swift'
+# Ищем настоящие `.live`, `Тип.live` и `liveИмя`; поле `state.live` и слова вроде keepalive сюда не попадают.
+forbid '(^|[^A-Za-z0-9_])\.live\b|[A-Z][A-Za-z0-9]*\.live\b|\blive[A-Z(]' 'настоящие замыкания и пути в тестах' -r Tests --include='*.swift'
 
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/fixture/Awake.app/Contents/MacOS"
