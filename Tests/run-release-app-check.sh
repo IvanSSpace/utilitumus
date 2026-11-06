@@ -461,7 +461,7 @@ ln -s /etc/hosts "$V/Contents/Resources/outlink"
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus.app.awake "$V" 2>/dev/null || true
 pack outlink
 catalog_for "$C" awake 1.2.3 "$OUT/v/outlink.zip"
-refused "ссылка за пределы бандла" "Подпись" inst "$C" awake --dry-run
+refused "ссылка за пределы бандла" "В архиве ссылка" inst "$C" awake --dry-run
 
 python3 -I -c '
 import sys, zipfile
