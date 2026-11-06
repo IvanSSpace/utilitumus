@@ -455,6 +455,8 @@ final class StoreModel: ObservableObject {
             return error.errorDescription ?? fallback
         case let error as KitSigning.Failure:
             return error.userMessage ?? fallback
+        case let error as ClipboardKeyReturnError:
+            return error.message
         case is LinkError:
             return "Модуль не ответил после запуска, прежняя версия возвращена"
         case is URLError:

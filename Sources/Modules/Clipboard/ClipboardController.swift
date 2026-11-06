@@ -1,3 +1,4 @@
+import CryptoKit
 import SwiftUI
 import AppKit
 import Carbon.HIToolbox

@@ -407,5 +407,200 @@ MainActor.assumeIsolated {
 
 }
 
+// 13. Удаление утилиты после передачи: ключ возвращается центру, и только потом утилита удаляет свою запись
+func returnRoute(_ ring: FakeKeyring, dir: URL) -> @Sendable (Data) async throws -> Data {
+    { data in
+        let resolver = ClipboardKeyResolver(keyring: ring, directory: dir)
+        guard let message = LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: data, limit: ClipboardKeyReturnMessage.limit) else {
+            return LinkWire.encoded(ClipboardKeyReturnReply(key: nil, error: "непонятно"))
+        }
+        switch message {
+        case .returnKey: return LinkWire.encoded(resolver.keyToReturn())
+        case .dropKey: return LinkWire.encoded(ClipboardKeyReturnReply(key: nil, error: resolver.dropOwn()))
+        }
+    }
+}
+
+func runReturn(_ ring: FakeKeyring, dir: URL, send: (@Sendable (Data) async throws -> Data)? = nil) async -> ClipboardKeyReturn.Result {
+    await ClipboardKeyReturn(keyring: ring, directory: dir, send: send ?? returnRoute(ring, dir: dir)).run()
+}
+
+/// Что видит встроенный модуль после удаления: прежняя запись из той же связки, создание нового ключа считается.
+func builtInKey(_ ring: FakeKeyring, dir: URL) -> (key: Data?, created: Bool, indexWithoutKey: Bool) {
+    var created = false
+    let keychain = ClipboardKeychain(
+        directory: dir,
+        copyItem: { _, out in
+            guard case .found(let data) = ring.read(.legacy) else { return errSecItemNotFound }
+            out?.pointee = data as CFData
+            return errSecSuccess
+        },
+        addItem: { _, _ in created = true; return errSecSuccess },
+        deleteItem: { _ in errSecSuccess })
+    do {
+        let key = try keychain.key()
+        return (keyData(key), created, false)
+    } catch {
+        return (nil, created, (error as? ClipboardKeychainError)?.indexWithoutKey == true)
+    }
+}
+
+sync {
+    // Успех: ключ вернулся, своя запись удалена после записи прежней, встроенный открывает ту же историю
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    let before = indexBytes(dir)
+    // Без возврата встроенный модуль нового ключа не создаёт (так было до исправления).
+    let blocked = builtInKey(ring, dir: dir)
+    check(blocked.key == nil && !blocked.created && blocked.indexWithoutKey, "после передачи без возврата: встроенный ключа не создаёт")
+    let result = await runReturn(ring, dir: dir)
+    check(result == .done, "возврат: готово")
+    check(ring.items[.legacy] == keyData(history) && ring.items[.own] == nil, "возврат: прежняя запись есть, своей нет")
+    let addAt = ring.events.firstIndex(of: "add-legacy"), delAt = ring.events.firstIndex(of: "delete-own")
+    check(addAt != nil && delAt != nil && addAt! < delAt!, "возврат: своя запись удалена после записи прежней")
+    check(ring.deletes == [.own] && ring.adds == [.legacy], "возврат: добавлена только прежняя, удалена только своя")
+    let opened = builtInKey(ring, dir: dir)
+    check(opened.key == keyData(history) && !opened.created, "после возврата: встроенный читает тот же ключ")
+    check(indexBytes(dir) == before && files(dir) == ["index.bin"], "возврат: индекс не тронут")
+}
+sync {
+    // Утилита не отвечает: ничего не тронуто
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    let result = await runReturn(ring, dir: dir, send: { _ in throw LinkError.timeout })
+    check(result == .unreachable && ring.adds.isEmpty && ring.deletes.isEmpty && ring.items[.own] != nil, "возврат: нет связи, связка не тронута")
+}
+sync {
+    // У утилиты своей записи нет
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    let result = await runReturn(ring, dir: dir)
+    check(result == .nothingToReturn && ring.adds.isEmpty && ring.deletes.isEmpty, "возврат: своей записи нет, возвращать нечего")
+}
+sync {
+    // Её ключ историю не открывает: прежняя запись не создаётся
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(stranger)
+    let result = await runReturn(ring, dir: dir)
+    if case .failed = result {} else { check(false, "возврат: чужой ключ утилиты — отказ") }
+    check(ring.adds.isEmpty && ring.deletes.isEmpty && ring.items[.own] == keyData(stranger), "возврат: чужой ключ, связка не тронута")
+}
+sync {
+    // Ответ утилиты с ключом, который историю не открывает (подмена на пути): центр его не кладёт
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    let result = await runReturn(ring, dir: dir, send: { _ in
+        LinkWire.encoded(ClipboardKeyReturnReply(key: keyData(stranger), error: nil))
+    })
+    if case .failed = result {} else { check(false, "возврат: ключ не от этой истории — отказ") }
+    check(ring.adds.isEmpty && ring.deletes.isEmpty, "возврат: ключ не от этой истории не записан")
+}
+sync {
+    // В прежней записи уже лежит другой ключ: не затираем, своя остаётся
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.items[.legacy] = keyData(stranger)
+    let result = await runReturn(ring, dir: dir)
+    if case .failed = result {} else { check(false, "возврат: другой ключ в прежней записи — отказ") }
+    check(ring.adds.isEmpty && ring.deletes.isEmpty && ring.items[.own] != nil && ring.items[.legacy] == keyData(stranger), "возврат: чужое не затёрто, своя запись цела")
+}
+sync {
+    // Прежняя уже есть с тем же ключом (прошлый возврат оборвался перед удалением): добивает удаление
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.items[.legacy] = keyData(history)
+    let result = await runReturn(ring, dir: dir)
+    check(result == .done && ring.adds.isEmpty && ring.items[.own] == nil && ring.items[.legacy] == keyData(history), "возврат: повтор после обрыва доводится до конца")
+}
+sync {
+    // Связка не приняла ключ
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.addFailure = errSecAuthFailed
+    let result = await runReturn(ring, dir: dir)
+    if case .failed = result {} else { check(false, "возврат: отказ записи — отказ") }
+    check(ring.deletes.isEmpty && ring.items[.own] != nil && ring.items[.legacy] == nil, "возврат: отказ записи, своя запись цела")
+}
+sync {
+    // Записанное не читается назад: прежняя убирается, своя остаётся
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.corruptsOnAdd = true
+    let result = await runReturn(ring, dir: dir)
+    if case .failed = result {} else { check(false, "возврат: запись не читается назад — отказ") }
+    check(ring.items[.own] == keyData(history) && ring.items[.legacy] == nil && !ring.deletes.contains(.own), "возврат: прочтение назад не сошлось, своя запись цела")
+}
+sync {
+    // Удалить свою запись не вышло: отказ, обе записи на месте
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.deleteFailure = errSecAuthFailed
+    let result = await runReturn(ring, dir: dir)
+    if case .failed = result {} else { check(false, "возврат: не удалось удалить свою запись — отказ") }
+    check(ring.items[.own] != nil && ring.items[.legacy] == keyData(history), "возврат: оба экземпляра ключа на месте")
+}
+sync {
+    // Утилита не удаляет свою запись, пока прежней нет
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    let error = ClipboardKeyResolver(keyring: ring, directory: dir).dropOwn()
+    check(error != nil && ring.deletes.isEmpty && ring.items[.own] != nil, "утилита: без прежней записи своя не удаляется")
+}
+sync {
+    // Нет связи на втором шаге: оба экземпляра остаются
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    let route = returnRoute(ring, dir: dir)
+    let result = await runReturn(ring, dir: dir, send: { data in
+        if LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: data, limit: 64) == .dropKey { throw LinkError.timeout }
+        return try await route(data)
+    })
+    if case .failed = result {} else { check(false, "возврат: обрыв перед удалением — отказ") }
+    check(ring.items[.own] != nil && ring.items[.legacy] == keyData(history) && ring.deletes.isEmpty, "возврат: обрыв перед удалением, ключ в двух местах")
+}
+
+do {
+    let message = ClipboardKeyReturnMessage.returnKey
+    check(LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: LinkWire.encoded(message), limit: 64) == .returnKey, "сообщение returnKey туда и обратно")
+    check(LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: LinkWire.encoded(ClipboardKeyReturnMessage.dropKey), limit: 64) == .dropKey, "сообщение dropKey туда и обратно")
+    check(LinkWire.decodeAction(ClipboardAction.self, from: LinkWire.encoded(message), limit: 4096) == nil, "returnKey не разбирается как действие экрана")
+    check(LinkWire.decodeAction(ClipboardKeyMessage.self, from: LinkWire.encoded(message), limit: 4096) == nil, "returnKey не разбирается как передача ключа")
+    check(LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: LinkWire.encoded(ClipboardAction.clearHistory), limit: 64) == nil, "действие экрана не разбирается как returnKey")
+    check(LinkWire.decodeAction(ClipboardKeyReturnMessage.self, from: Data(#"{"returnKey":{"x":1}}"#.utf8), limit: 64) == nil, "лишнее поле в returnKey отвергнуто")
+}
+
+MainActor.assumeIsolated {
+    // Затвор: просьбы центра принимает только соединение центра
+    let dir = makeDir(index: history)
+    let ring = FakeKeyring()
+    ring.items[.own] = keyData(history)
+    ring.items[.legacy] = keyData(history)
+    let module = ClipboardModule(keyring: ring, directory: dir)
+    for message in [ClipboardKeyReturnMessage.returnKey, .dropKey] {
+        let data = LinkWire.encoded(message)
+        for (name, caller) in [("копия утилиты или чужой", false as Bool?), ("вызов без пометки", nil)] {
+            let reply = caller.map { flag in LinkCaller.run(fromHub: flag) { module.handle(data) } } ?? module.handle(data)
+            let decoded = try? JSONDecoder().decode(ClipboardKeyReturnReply.self, from: reply)
+            check(decoded?.key == nil && decoded?.error != nil, "затвор возврата (\(name), \(message)): отказ")
+        }
+    }
+    check(ring.deletes.isEmpty && ring.items[.own] == keyData(history), "затвор возврата: своя запись цела")
+    let returned = try? JSONDecoder().decode(ClipboardKeyReturnReply.self, from: LinkCaller.run(fromHub: true) { module.handle(LinkWire.encoded(ClipboardKeyReturnMessage.returnKey)) })
+    check(returned?.key == keyData(history) && returned?.error == nil, "затвор возврата: от центра ключ отдан")
+    let dropped = try? JSONDecoder().decode(ClipboardKeyReturnReply.self, from: LinkCaller.run(fromHub: true) { module.handle(LinkWire.encoded(ClipboardKeyReturnMessage.dropKey)) })
+    check(dropped?.error == nil && ring.items[.own] == nil && ring.items[.legacy] != nil, "затвор возврата: от центра своя запись удалена")
+}
+
 print(failures == 0 ? "ВСЁ ПРОШЛО" : "ПРОВАЛОВ: \(failures)")
 exit(failures == 0 ? 0 : 1)

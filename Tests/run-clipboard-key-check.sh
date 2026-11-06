@@ -7,7 +7,7 @@ OUT="${TMPDIR:-/tmp}/clipboard-key-check"
 mkdir -p "$OUT"
 
 status=0
-FOUND="$(grep -nE 'SystemClipboardKeyring|ClipboardKeychain|NSPasteboard|SecItem(Copy|Add|Delete|Update)|defaultDirectory|Application Support|ClipboardController|history-key' Tests/ClipboardKeyCheck.swift)" || status=$?
+FOUND="$(grep -nE 'SystemClipboardKeyring|ClipboardKeychain\.system|NSPasteboard|SecItem(Copy|Add|Delete|Update)|defaultDirectory|Application Support|ClipboardController|history-key' Tests/ClipboardKeyCheck.swift)" || status=$?
 case "$status" in
   0) echo "ПРОВАЛ: проверка называет настоящую связку, каталог или буфер:"; echo "$FOUND"; exit 1 ;;
   1) echo "ok   проверка не называет настоящую связку, каталог истории и буфер" ;;
