@@ -85,7 +85,7 @@ final class VoiceModelStore: ObservableObject {
 
     /// Выбранная модель: UserDefaults "Voice.Model", по умолчанию GigaAM.
     @Published var selected: VoiceModel {
-        didSet { UserDefaults.standard.set(selected.rawValue, forKey: Self.selectedKey) }
+        didSet { Kit.defaults.set(selected.rawValue, forKey: Self.selectedKey) }
     }
 
     nonisolated static let selectedKey = "Voice.Model"
@@ -99,7 +99,7 @@ final class VoiceModelStore: ObservableObject {
     }
 
     private init() {
-        selected = UserDefaults.standard.string(forKey: Self.selectedKey)
+        selected = Kit.defaults.string(forKey: Self.selectedKey)
             .flatMap(VoiceModel.init(rawValue:)) ?? .gigaam
         cleanLeftovers()
         for model in VoiceModel.allCases {

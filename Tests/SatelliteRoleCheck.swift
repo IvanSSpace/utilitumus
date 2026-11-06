@@ -158,7 +158,7 @@ func watchStatus() -> Never {
         case "enable": try await link.setEnabled(true)
         case "disable": try await link.setEnabled(false)
         case "open": try await link.openWindow()
-        case "quit": try await link.quit()
+        case "quit": try await link.quit(.update)
         default:
             print("неизвестная команда: \(args[0])")
             return 2

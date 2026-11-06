@@ -33,17 +33,17 @@ enum SatelliteInstallError: LocalizedError, Equatable {
 struct SatelliteLink {
     /// Результат — выход процесса, а не ответ: ответа может и не быть, поэтому ошибок здесь нет.
     /// Не вышел — его снимет `bootout`.
-    var quit: (String) async -> Void
+    var quit: (String, LinkQuitReason) async -> Void
     var hello: (String) async throws -> Void
     /// launchd придерживает перезапуск процесса, прожившего меньше 10 с.
     var helloWindow: TimeInterval = 15
 
     static let live = SatelliteLink(
-        quit: { id in await liveQuit(id) },
+        quit: { id, reason in await liveQuit(id, reason) },
         hello: { id in try await liveHello(id) })
 
-    @MainActor private static func liveQuit(_ id: String) async {
-        try? await LinkClient(id: id).quit()
+    @MainActor private static func liveQuit(_ id: String, _ reason: LinkQuitReason) async {
+        try? await LinkClient(id: id).quit(reason)
     }
 
     @MainActor private static func liveHello(_ id: String) async throws {
@@ -75,7 +75,7 @@ final class SatelliteInstaller {
     }
 
     static let liveVerify: (URL, String) throws -> Void = {
-        try KitSigning.verifySignature(of: $0, identifier: $1, strict: true)
+        try KitSigning.verifyApp($0, identifier: $1)
     }
 
     init(
@@ -121,7 +121,7 @@ final class SatelliteInstaller {
         let oldBundle = work.appendingPathComponent("previous.app")
         if hadBundle { try fm.copyItem(at: bundle, to: oldBundle) }
 
-        if updating { await link.quit(app.id) }
+        if updating { await link.quit(app.id, .update) }
         var replaced = false
         do {
             try fm.createDirectory(at: paths.appsDir, withIntermediateDirectories: true)
@@ -157,7 +157,7 @@ final class SatelliteInstaller {
     func remove(id: String, name: String) async throws {
         try Self.check(id: id)
         try Self.check(name: name)
-        await link.quit(id)
+        await link.quit(id, .uninstall)
         try removeStaleAgent(id: id)
         let bundle = bundleURL(name)
         if fm.fileExists(atPath: bundle.path) { try fm.removeItem(at: bundle) }
