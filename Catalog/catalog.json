@@ -1,1 +1,126 @@
-{"schema":1,"apps":[]}
+{
+  "schema": 1,
+  "apps": [
+    {
+      "id": "awake",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.0.0/Awake.zip",
+      "sha256": "d8347ad33afb58d97d10e09eda469b7a53eec145996d58cdf70cb253084a1128",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "browser",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.0.0/Browser.zip",
+      "sha256": "c977f8d1c2a88ee9864f4831bb25b10e55e050e91cab0e7c89bb80082e97365c",
+      "sizeMB": 2,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "clipboard",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.0.0/Clipboard.zip",
+      "sha256": "1cf4e27b59231fbbfbf110c535bebb607c1b352ce63e82d2d4c4c3fa38da1d30",
+      "sizeMB": 2,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "fans",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.0.0/Fans.zip",
+      "sha256": "23dd410eac13f6dd35d5aed2281a69023297fb8e1880277eabb2784037b3a5be",
+      "sizeMB": 2,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "keyboard",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.0.0/Keyboard.zip",
+      "sha256": "ceb28a780f95a3e28f092e3564db1ff58e65133cb8868e23e4b1d6eca70e56eb",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "load",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.0.0/Load.zip",
+      "sha256": "369ab9a08057215f2928918522274ebd52c7ff8a0c3558f5a8bb999d9b0fb442",
+      "sizeMB": 2,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "mixer",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.0.0/Mixer.zip",
+      "sha256": "9861687b437d721904605ff4c7f8bf58fbb56b33c47d222c3673773b9b9dfd15",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "mouse",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.0.0/Mouse.zip",
+      "sha256": "9042883cf5e803fc45e47edd3bc08118ca3a9d48d823a3c8f92770b2e153b7b8",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "sound",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.0.0/Sound.zip",
+      "sha256": "80e50ca7bafca791643a1b655cd29eca593b63978ce4a1e198ed5173ae21c139",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "stash",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.0.0/Stash.zip",
+      "sha256": "60e8e2d53fa2a9c7814d2fe6f6c40a3768cf5db99d2e1bb659752febe32506f0",
+      "sizeMB": 1,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    },
+    {
+      "id": "voice",
+      "version": "1.0.0",
+      "minHub": "0.6.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.0.0/Voice.zip",
+      "sha256": "d88650c63190cf759b54c8662b5b62c6c6f651cc3a2cd2ea7b94730a192ff819",
+      "sizeMB": 9,
+      "notes": [
+        "Первая отдельная версия"
+      ]
+    }
+  ]
+}
