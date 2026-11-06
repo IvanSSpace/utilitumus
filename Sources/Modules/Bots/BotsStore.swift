@@ -25,6 +25,10 @@ final class BotsStore: ObservableObject, BotsModel {
     private let readLaunchd: @Sendable () -> [String: Int32?]
     private let probe: BotsMonitor.Probe
     private let execute: @Sendable (BotVerb, String, URL) throws -> String
+    private let discoveryRoots: @Sendable () -> BotsDiscovery.Roots
+    /// Найденные боты с путями и меткой: на связь уходит только id, имя и пояснение.
+    private var candidates: [String: BotsDiscovery.Candidate] = [:]
+    private var scanGeneration = 0
     private var pending: Plan?
     private var leases = 0
     private var loop: Task<Void, Never>?
@@ -38,7 +42,9 @@ final class BotsStore: ObservableObject, BotsModel {
     init(file: URL = BotRegistry.url,
          readLaunchd: @escaping @Sendable () -> [String: Int32?] = { BotsMonitor.readLaunchd() },
          probe: @escaping BotsMonitor.Probe = { BotsMonitor.liveProbe($0) },
-         execute: @escaping @Sendable (BotVerb, String, URL) throws -> String = { try BotRunner.run($0, id: $1, file: $2) }) {
+         execute: @escaping @Sendable (BotVerb, String, URL) throws -> String = { try BotRunner.run($0, id: $1, file: $2) },
+         discoveryRoots: @escaping @Sendable () -> BotsDiscovery.Roots = { BotsDiscovery.live }) {
+        self.discoveryRoots = discoveryRoots
         self.file = file
         self.readLaunchd = readLaunchd
         self.probe = probe
@@ -76,6 +82,9 @@ final class BotsStore: ObservableObject, BotsModel {
         loop = nil
         pending = nil
         state.prompt = nil
+        scanGeneration += 1
+        candidates = [:]
+        state.discovery = nil
     }
 
     // MARK: Замер
@@ -111,7 +120,8 @@ final class BotsStore: ObservableObject, BotsModel {
 
     nonisolated static func measure(file: URL, launchd: [String: Int32?], apps: [String: [Int32]], probe: BotsMonitor.Probe) -> (BotsFileState, [BotCard]) {
         let read = BotRegistry.read(file)
-        return (BotsMonitor.fileState(read), BotsMonitor.cards(read.bots, launchd: launchd, appPIDs: apps, probe: probe))
+        let dirs = BotsMonitor.pidsByDir(Set(read.bots.compactMap(\.watchDir)))
+        return (BotsMonitor.fileState(read), BotsMonitor.cards(read.bots, launchd: launchd, appPIDs: apps, dirPIDs: dirs, probe: probe))
     }
 
     private func apply(_ fresh: (BotsFileState, [BotCard])) {
@@ -209,6 +219,59 @@ final class BotsStore: ObservableObject, BotsModel {
         }
     }
 
+    // MARK: Поиск ботов
+
+    func findBots() { _ = handleFind() }
+    func addFound(_ id: String) { _ = handleAdd(id) }
+    func dismissFound() { _ = handleDismissFound() }
+
+    /// Поиск идёт по просьбе, в фоне, и ничего не меняет: только читает плисты и папки проектов.
+    fileprivate func handleFind() -> String? {
+        if state.discovery?.scanning == true { return "Поиск уже идёт" }
+        scanGeneration += 1
+        let generation = scanGeneration
+        candidates = [:]
+        state.discovery = .scanning
+        let roots = discoveryRoots(), file = file
+        Task {
+            let result = await Task.detached(priority: .utility) {
+                BotsDiscovery.scan(roots, known: BotsEntryWriter.known(BotRegistry.load(file), home: roots.home))
+            }.value
+            guard generation == scanGeneration else { return }
+            candidates = Dictionary(result.candidates.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            state.discovery = BotsDiscoveryState(scanning: false, found: result.candidates.map { c in
+                BotFound(id: c.id, name: c.name, place: c.place, why: c.why, possible: c.strength == .possible, monitorOnly: c.label == nil)
+            }, skipped: result.skipped)
+        }
+        return nil
+    }
+
+    fileprivate func handleDismissFound() -> String? {
+        scanGeneration += 1
+        candidates = [:]
+        state.discovery = nil
+        return nil
+    }
+
+    /// Добавление: по id из последнего поиска. Запись строит утилита, центр путей и команд не присылает.
+    fileprivate func handleAdd(_ id: String) -> String? {
+        guard id.utf8.count <= Self.maxIDBytes else { return "Непонятная команда" }
+        guard let candidate = candidates[id], state.discovery?.scanning == false else { return "Такого бота в результатах уже нет — найдите заново" }
+        let roots = discoveryRoots()
+        do {
+            let written = try BotsEntryWriter.append(BotsEntryWriter.entry(for: candidate, uid: roots.uid, home: roots.home), to: file)
+            candidates[id] = nil
+            state.discovery?.found.removeAll { $0.id == id }
+            state.notice = BotsNotice(text: "Добавлен: \(written.name). Он в bots.toml и на экране.", isError: false)
+            refresh()
+        } catch let e as BackgroundActionError {
+            state.notice = BotsNotice(text: e.message, isError: true)
+        } catch {
+            state.notice = BotsNotice(text: "Не удалось добавить", isError: true)
+        }
+        return nil
+    }
+
     // MARK: Связь
 
     func handle(_ data: Data) -> Data {
@@ -224,6 +287,9 @@ final class BotsStore: ObservableObject, BotsModel {
         case .confirm(let planID): return handleConfirm(planID)
         case .dismissNotice: dismissNotice()
         case .quick(let id, let verb): return handleQuick(id: id, verb: verb)
+        case .find: return handleFind()
+        case .add(let id): return handleAdd(id)
+        case .dismissFound: return handleDismissFound()
         }
         return nil
     }

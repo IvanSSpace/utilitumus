@@ -36,6 +36,17 @@ Sources/Modules/Keyboard/KeyboardController.swift|NSWorkspace.shared.open
 Sources/Modules/Keyboard/KeyboardLog.swift|homeDirectoryForCurrentUser
 Sources/Modules/Load/Native/Background/BackgroundActions.swift|launchctl
 Sources/Modules/Bots/BotsModel.swift|launchctl
+# Поиск ботов: "/Applications и "/Library — только список папок, которые поиск обходит стороной. NSHomeDirectory — корни поиска;
+# в стенде Kit.assertStandPath роняет процесс на настоящем доме, а процессы стенд не читает вовсе.
+Sources/Modules/Bots/BotsDiscovery.swift|"/Applications
+Sources/Modules/Bots/BotsDiscovery.swift|"/Library
+Sources/Modules/Bots/BotsDiscovery.swift|NSHomeDirectory
+# Запись найденного бота: "~/ — разбор пути в bots.toml без обращения к диску. launchctl — только строки команд для файла, запускает их
+# BotRunner, а он в стенде отказывает. removeItem — свой временный файл рядом с bots.toml (путь под Kit.assertStandPath). Домой по умолчанию.
+Sources/Modules/Bots/BotsEntryWriter.swift|"~/
+Sources/Modules/Bots/BotsEntryWriter.swift|NSHomeDirectory
+Sources/Modules/Bots/BotsEntryWriter.swift|launchctl
+Sources/Modules/Bots/BotsEntryWriter.swift|removeItem
 Sources/Modules/Bots/BotsMonitor.swift|launchctl
 Sources/Modules/Load/Native/Background/LaunchAgents.swift|"/Library
 Sources/Modules/Load/Native/Background/LaunchAgents.swift|NSHomeDirectory

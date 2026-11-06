@@ -14,18 +14,22 @@ enum BotsMonitor {
 
     /// Карточки по описанию в файле. `launchd` — разобранный `launchctl list`, `appPIDs` — pid запущенных приложений
     /// по bundle id. Чистая функция: проверка подставляет и то и другое.
-    static func cards(_ bots: [BotSpec], launchd: [String: Int32?], appPIDs: [String: [Int32]] = [:], now: Date = Date(),
+    static func cards(_ bots: [BotSpec], launchd: [String: Int32?], appPIDs: [String: [Int32]] = [:], dirPIDs: [String: [Int32]] = [:], now: Date = Date(),
                       probe: Probe, ports: (Set<Int32>) -> [String] = { BotRegistry.cachedListenPorts(of: $0) }) -> [BotCard] {
         bots.prefix(BotsState.maxBots).map { spec in
             let labelled = Set(spec.launchd.compactMap { launchd[$0] ?? nil })
             let apps = Set(spec.bundleIDs.flatMap { appPIDs[$0] ?? [] })
-            let mains = labelled.union(apps).sorted()
+            let byDir = Set(spec.watchDir.flatMap { dirPIDs[$0] } ?? [])
+            let mains = labelled.union(apps).union(byDir).sorted()
             var all = Set<Int32>()
             for root in mains { all.formUnion(subtree(of: root, probe: probe)) }
             let up: Int, total: Int
             if !spec.launchd.isEmpty {
                 up = spec.launchd.filter { (launchd[$0] ?? nil) != nil }.count
                 total = spec.launchd.count
+            } else if spec.bundleIDs.isEmpty, spec.watchDir != nil {
+                up = byDir.isEmpty ? 0 : 1
+                total = 1
             } else {
                 up = spec.bundleIDs.filter { !(appPIDs[$0] ?? []).isEmpty }.count
                 total = spec.bundleIDs.count
@@ -42,6 +46,21 @@ enum BotsMonitor {
                 note: state == .noConfig ? BotRegistry.noConfigNote(spec, missing: missing) : spec.note,
                 verbs: BotRegistry.offered(spec, state))
         }
+    }
+
+    /// Процессы бота без метки launchd: интерпретатор или сама программа с рабочей папкой `watch_dir`. Только чтение.
+    /// Стенд настоящие процессы не смотрит.
+    static func pidsByDir(_ dirs: Set<String>) -> [String: [Int32]] {
+        #if KIT_TEST_DEFAULTS
+        return [:]
+        #else
+        guard !dirs.isEmpty else { return [:] }
+        var out: [String: [Int32]] = [:]
+        for p in BotsDiscovery.liveProcesses() where dirs.contains(p.cwd) && BotsDiscovery.isRuntime(exe: p.exe, cwd: p.cwd) {
+            out[p.cwd, default: []].append(p.pid)
+        }
+        return out
+        #endif
     }
 
     /// Процесс и потомки. Предел на случай кольца в ответе.

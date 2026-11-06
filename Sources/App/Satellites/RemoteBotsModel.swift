@@ -12,6 +12,8 @@ final class RemoteBotsModel: RemoteModuleModel<BotsState, BotsAction>, BotsModel
                        switch action {
                        case .cancel: state.prompt = nil
                        case .dismissNotice: state.notice = nil
+                       case .dismissFound: state.discovery = nil
+                       case .find: if state.discovery?.scanning != true { state.discovery = .scanning }
                        default: break
                        }
                    })
@@ -24,4 +26,7 @@ final class RemoteBotsModel: RemoteModuleModel<BotsState, BotsAction>, BotsModel
     func confirm(_ planID: UUID) { send(.confirm(planID: planID)) }
     func dismissNotice() { send(.dismissNotice) }
     func refreshNow() { send(.refresh) }
+    func findBots() { send(.find) }
+    func addFound(_ id: String) { send(.add(id: id)) }
+    func dismissFound() { send(.dismissFound) }
 }

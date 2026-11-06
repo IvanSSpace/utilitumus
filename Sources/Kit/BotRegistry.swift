@@ -243,6 +243,8 @@ struct BotSpec: Sendable, Equatable {
     var requiresEnv: [String]
     var envFile: String?
     var note: String
+    /// Бот без метки launchd: работает ли он, видно по процессу интерпретатора (или самой программы) с этой рабочей папкой.
+    var watchDir: String?
 }
 
 enum BotRegistry {
@@ -336,7 +338,8 @@ enum BotRegistry {
         return BotSpec(id: id, name: name, project: project, url: t["url"]?.string,
                        launchd: t["launchd"]?.strings ?? [], bundleIDs: t["bundle_ids"]?.strings ?? [],
                        commands: commands, requiresEnv: t["requires_env"]?.strings ?? [],
-                       envFile: t["env_file"]?.string, note: t["note"]?.string ?? "")
+                       envFile: t["env_file"]?.string, note: t["note"]?.string ?? "",
+                       watchDir: t["watch_dir"]?.string)
     }
 
     // MARK: Процессы бота

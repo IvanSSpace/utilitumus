@@ -11,6 +11,8 @@ struct BotsView<Model: BotsModel>: View {
                primary: DSAction("Обновить", icon: "arrow.clockwise") { model.refreshNow() }) {
             if let notice = model.state.notice { noticeBanner(notice) }
             if model.state.file.kind == .unsafe { unsafeBanner }
+            findRow
+            if let found = model.state.discovery { foundSection(found) }
             if model.state.bots.isEmpty {
                 emptyState
             } else {
@@ -44,6 +46,46 @@ struct BotsView<Model: BotsModel>: View {
               systemImage: "lock.trianglebadge.exclamationmark.fill")
             .font(.callout).foregroundStyle(.orange)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Поиск ботов
+
+    private var scanning: Bool { model.state.discovery?.scanning == true }
+
+    /// Поиск только по нажатию. Про запрос доступа к «Документам» сказано до нажатия.
+    private var findRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            DSButton(scanning ? "Ищу…" : "Найти ботов", icon: "magnifyingglass", small: true) { model.findBots() }
+                .disabled(scanning)
+            Text("Смотрит LaunchAgents, процессы и папки проектов: токены не читает, в сеть не ходит. На папки в «Документах» macOS может спросить доступ.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private func foundSection(_ found: BotsDiscoveryState) -> some View {
+        let sure = found.found.filter { !$0.possible }, maybe = found.found.filter(\.possible)
+        DSSection("Найденные боты", trailing: found.scanning ? "ищу…" : nil) {
+            VStack(alignment: .leading, spacing: 10) {
+                if found.scanning {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Смотрю LaunchAgents и процессы…").font(.callout).foregroundStyle(.secondary) }
+                } else if found.found.isEmpty {
+                    Text("Ничего не нашлось. Новых ботов нет, или проекты лежат там, куда поиск не заглядывает (только LaunchAgents и процессы вашего пользователя).")
+                        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(sure) { bot in BotFoundRow(bot: bot, busy: model.state.running) { model.addFound(bot.id) } }
+                if !maybe.isEmpty {
+                    Text("Возможно, это боты").font(.caption.weight(.semibold)).foregroundStyle(.secondary).padding(.top, 4)
+                    ForEach(maybe) { bot in BotFoundRow(bot: bot, busy: model.state.running) { model.addFound(bot.id) } }
+                }
+                if found.skipped > 0 {
+                    Text("Пропущено из-за необычного имени метки: \(found.skipped).").font(.caption).foregroundStyle(.secondary)
+                }
+                if !found.scanning {
+                    HStack { Spacer(); DSButton("Закрыть", style: .plain, small: true) { model.dismissFound() } }
+                }
+            }
+            .padding(14)
+        }
     }
 
     @ViewBuilder private var emptyState: some View {
@@ -148,6 +190,34 @@ struct BotCardView: View {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(value).font(.caption.weight(.semibold)).monospacedDigit()
         }
+    }
+}
+
+/// Найденный бот: что это, где найден, почему похож. «Добавить» пишет запись в bots.toml, больше ничего не меняется.
+struct BotFoundRow: View {
+    let bot: BotFound
+    let busy: Bool
+    let onAdd: () -> Void
+    @Environment(\.dsTheme) private var theme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(bot.name).font(DS.rowTitle).lineLimit(1).truncationMode(.middle)
+                Text(bot.place).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(bot.why).font(.caption).fixedSize(horizontal: false, vertical: true)
+                if bot.monitorOnly {
+                    Label("Без launchd: бот только наблюдается, включить и выключить отсюда нельзя", systemImage: "eye")
+                        .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 8)
+            DSButton("Добавить", icon: "plus", small: true, action: onAdd).disabled(busy)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).fill(theme.group))
+        .overlay(RoundedRectangle(cornerRadius: DS.groupRadius, style: .continuous).stroke(.white.opacity(0.06), lineWidth: 0.7))
     }
 }
 

@@ -11,6 +11,9 @@ IDLE_PID=""
 satellite_check_extra_cleanup() {
   if [ -n "$IDLE_PID" ]; then kill -9 "$IDLE_PID" 2>/dev/null || true; fi
   rm -f "$(getconf DARWIN_USER_TEMP_DIR)utilitumus-test-bots-$SUITE.toml"
+  # Поддельные агенты и проекты для поиска ботов; одна из папок закрыта, снимаем запрет перед удалением.
+  chmod -R u+rwx "$STAND_HOME/proj" 2>/dev/null || true
+  rm -rf "$STAND_HOME/proj" "$STAND_HOME/Library/LaunchAgents"
 }
 
 forbid_timers Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModulePage.swift Sources/App/Satellites/RemoteBotsModel.swift Sources/App/Satellites/RemoteBotsPage.swift Sources/Modules/Bots/BotsView.swift Sources/Modules/Bots/BotsMonitor.swift Sources/Modules/Bots/BotsWire.swift
@@ -20,6 +23,21 @@ if grep -q 'Kit.standRefuses' Sources/Kit/BotExec.swift && ! grep -rn 'Exec.run'
   ok "команды ботов запускает только BotRunner, а он спрашивает Kit.standRefuses"
 else
   bad "в модуле «Боты» есть запуск команд мимо BotRunner или нет Kit.standRefuses"
+fi
+
+# Поиск ботов только читает: в его файле нет записи, запуска программ, сети и launchd.
+if /usr/bin/grep -nE 'O_WRONLY|O_RDWR|O_CREAT|FileHandle\(forW|\.write\(|createFile|createDirectory|removeItem|moveItem|copyItem|setAttributes|unlink\(|rename\(|chmod\(|Process\(|posix_spawn|Exec\.|system\(|URLSession|NWConnection|CFStream|socket\(|connect\(|NSWorkspace|kill\(|launchctl' Sources/Modules/Bots/BotsDiscovery.swift | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*//' | /usr/bin/grep -q .; then
+  bad "в BotsDiscovery.swift есть запись, запуск программ или сеть"
+else
+  ok "в BotsDiscovery.swift нет записи, запуска программ, сети и launchd"
+fi
+# Собирается отдельно, без остального кода: поиск ни от чего не зависит.
+mkdir -p "$OUT/probe-home/Library/LaunchAgents"
+if swiftc -parse-as-library -target "$TARGET" -o "$OUT/discovery-probe" Sources/Modules/Bots/BotsDiscovery.swift Tests/BotsDiscoveryProbe.swift 2>"$OUT/probe-build.log" \
+   && [ "$("$OUT/discovery-probe" --home "$OUT/probe-home" | head -1)" = "найдено: 0, пропущено: 0" ]; then
+  ok "поиск собирается один, без остального кода, и в пустом доме ничего не находит"
+else
+  bad "отдельная сборка поиска не удалась (см. $OUT/probe-build.log)"
 fi
 
 # `pure`: только логика и изоляция, без утилиты и launchd. Нужен для поломок проверки.

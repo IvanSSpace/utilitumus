@@ -11,6 +11,9 @@ protocol BotsModel: ObservableObject {
     func cancel()
     func confirm(_ planID: UUID)
     func dismissNotice()
+    func findBots()
+    func addFound(_ id: String)
+    func dismissFound()
 }
 
 enum BotsText {

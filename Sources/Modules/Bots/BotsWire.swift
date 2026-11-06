@@ -40,6 +40,29 @@ struct BotsFileState: Codable, Equatable, Sendable {
     static let ok = BotsFileState(kind: .ok, detail: "")
 }
 
+/// Найденный поиском бот, как его видит экран: имя, где найден, почему похож. Команд, путей к плисту и pid здесь нет:
+/// запись для bots.toml утилита строит сама по id кандидата.
+struct BotFound: Codable, Equatable, Identifiable, Sendable {
+    var id: String
+    var name: String
+    var place: String
+    var why: String
+    /// «Возможно»: уверенного признака нет, только название или закрытая папка.
+    var possible: Bool
+    /// Без launchd: бот только наблюдается, кнопок управления не будет.
+    var monitorOnly: Bool
+}
+
+/// Результат «Найти ботов». nil у состояния — поиска ещё не было.
+struct BotsDiscoveryState: Codable, Equatable, Sendable {
+    var scanning: Bool
+    var found: [BotFound]
+    /// Агенты с именем, которое не подставляется в команду: их не предлагаем.
+    var skipped: Int
+
+    static let scanning = BotsDiscoveryState(scanning: true, found: [], skipped: 0)
+}
+
 struct BotsState: Codable, Equatable, Sendable {
     /// Не больше стольких карточек: файл не должен раздувать ответ.
     static let maxBots = 64
@@ -49,6 +72,7 @@ struct BotsState: Codable, Equatable, Sendable {
     var prompt: BotsPrompt?
     var running: Bool
     var notice: BotsNotice?
+    var discovery: BotsDiscoveryState?
 
     static let empty = BotsState(file: BotsFileState(kind: .missing, detail: ""), bots: [], prompt: nil, running: false, notice: nil)
 }
@@ -63,6 +87,11 @@ enum BotsAction: Codable, Equatable {
     case dismissNotice
     /// Быстрое действие дашборда и меню: человека уже спросил центр.
     case quick(id: String, verb: BotVerb)
+    /// Поиск ботов на этом Mac. Идёт только по этой просьбе.
+    case find
+    /// Добавить найденного бота: только его id, запись строит утилита.
+    case add(id: String)
+    case dismissFound
 
     init(from decoder: Decoder) throws {
         let wire = try LinkActionFields(from: decoder)
@@ -70,6 +99,11 @@ enum BotsAction: Codable, Equatable {
         case "refresh": try wire.none(); self = .refresh
         case "cancel": try wire.none(); self = .cancel
         case "dismissNotice": try wire.none(); self = .dismissNotice
+        case "find": try wire.none(); self = .find
+        case "dismissFound": try wire.none(); self = .dismissFound
+        case "add":
+            try wire.fields("id")
+            self = .add(id: try wire.field("id"))
         case "request":
             try wire.fields("id", "verb")
             self = .request(id: try wire.field("id"), verb: try wire.field("verb"))
