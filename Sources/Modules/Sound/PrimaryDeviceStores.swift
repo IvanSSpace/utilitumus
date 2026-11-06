@@ -16,13 +16,19 @@ final class PrimaryInputStore: ObservableObject {
     private var isDecided: Bool
 
     private init() {
-        if let saved = Kit.defaults.string(forKey: Self.key) {
-            primaryUID = saved == Self.builtInValue ? nil : saved
-            isDecided = true
-        } else {
-            primaryUID = nil
-            isDecided = false
-        }
+        (primaryUID, isDecided) = Self.stored()
+    }
+
+    private static func stored() -> (uid: String?, decided: Bool) {
+        guard let saved = Kit.defaults.string(forKey: key) else { return (nil, false) }
+        return (saved == builtInValue ? nil : saved, true)
+    }
+
+    /// Пока модуль вёл другой процесс, выбор менялся там.
+    func reload() {
+        let (uid, decided) = Self.stored()
+        if uid != primaryUID { primaryUID = uid }
+        isDecided = decided
     }
 
     func select(_ uid: String?) {
@@ -58,13 +64,23 @@ final class PrimaryOutputStore: ObservableObject {
     @Published private(set) var choice: OutputChoice
 
     private init() {
-        let saved = Kit.defaults.string(forKey: Self.key)
+        choice = Self.stored()
+    }
+
+    private static func stored() -> OutputChoice {
+        let saved = Kit.defaults.string(forKey: key)
         switch saved {
-        case Self.systemValue: choice = .system
-        case let value? where value.hasPrefix(Self.devicePrefix):
-            choice = .device(String(value.dropFirst(Self.devicePrefix.count)))
-        default: choice = .builtIn
+        case systemValue: return .system
+        case let value? where value.hasPrefix(devicePrefix):
+            return .device(String(value.dropFirst(devicePrefix.count)))
+        default: return .builtIn
         }
+    }
+
+    /// Пока модуль вёл другой процесс, выбор менялся там.
+    func reload() {
+        let new = Self.stored()
+        if new != choice { choice = new }
     }
 
     func select(_ choice: OutputChoice) {

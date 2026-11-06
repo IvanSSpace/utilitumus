@@ -13,9 +13,19 @@ final class LockState: ObservableObject {
     var isUnlocked: Bool { !isLocked }
 
     private init() {
-        if Kit.defaults.object(forKey: Self.key) == nil {
-            Kit.defaults.set(true, forKey: Self.key)
+        isLocked = Self.stored()
+    }
+
+    private static func stored() -> Bool {
+        if Kit.defaults.object(forKey: key) == nil {
+            Kit.defaults.set(true, forKey: key)
         }
-        isLocked = Kit.defaults.bool(forKey: Self.key)
+        return Kit.defaults.bool(forKey: key)
+    }
+
+    /// Пока модуль вёл другой процесс, настройка менялась там.
+    func reload() {
+        let new = Self.stored()
+        if new != isLocked { isLocked = new }
     }
 }

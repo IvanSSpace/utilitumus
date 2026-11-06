@@ -1,6 +1,6 @@
 #!/bin/bash
 # Связь и экран «Звук»: кодирование, проверки действий, снимки экрана до и после переноса на модель.
-# Монитор не запускается, устройства не меняются, окно за экраном. Настройки — домен по имени файла стенда,
+# Устройства не меняются (в сборке со швом AudioMonitor ничего не пишет), окно за экраном; монитор запускается только в разделе жизненного цикла. Настройки — домен по имени файла стенда,
 # после перехода модуля на Kit.defaults — свой suite. Папка стенда: SOUND_WIRE_DIR, иначе $TMPDIR/sound-wire-check.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -27,7 +27,7 @@ mkdir -p "$OUT/src"
 grep -q '^struct LegacySoundView: View {' "$OUT/src/LegacySoundView.swift"
 
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SoundWireCheck -o "$OUT/$NAME" \
-  Tests/SoundWireCheck.swift "$OUT/src/LegacySoundView.swift" \
+  Tests/SoundWireCheck.swift "$OUT/src/LegacySoundView.swift" Sources/Apps/Sound/SoundModule.swift \
   $(find Sources/Kit Sources/Modules/Sound -name '*.swift') \
   -framework SwiftUI -framework AppKit -framework CoreAudio
 KIT_TEST_SUITE="$SUITE" "$OUT/$NAME"

@@ -340,6 +340,65 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     check(locked.contains(.setBluetoothLocked(false)), "нажатие: тумблер просит снять блокировку")
 }
 
+// MARK: - Жизненный цикл модуля утилиты
+
+func reply(_ data: Data) -> LinkReply<SoundState>? { try? JSONDecoder().decode(LinkReply<SoundState>.self, from: data) }
+
+/// Настоящий `SoundModule` с настоящим монитором: он слушает устройства и читает их, но в этой сборке ничего не пишет.
+@MainActor func lifecycle() async {
+    let module = SoundModule()
+    let monitor = AudioMonitor.shared
+    let lock = encoded(SoundAction.setBluetoothLocked(false))
+    LockState.shared.isLocked = true
+    check(!monitor.isActive, "init модуля монитор не запускает")
+
+    var answer = reply(module.handle(lock))
+    check(answer?.error != nil && LockState.shared.isLocked, "до start действие отвергнуто, настройка прежняя")
+
+    module.start()
+    check(monitor.isActive, "start: монитор работает")
+    answer = reply(module.handle(lock))
+    check(answer?.error == nil && answer?.state.isBluetoothLocked == false && !LockState.shared.isLocked, "работает: действие применено, ответ с новым состоянием")
+    for (name, payload) in [("мусор", "{не json"), ("чужой ключ", #"{"selectSystemOutput":{},"x":1}"#), ("два действия", #"{"selectSystemOutput":{},"setBluetoothLocked":{"_0":true}}"#),
+                            ("длинный uid", #"{"selectInput":{"_0":""#  + String(repeating: "a", count: 2000) + #""}}"#)] {
+        let bad = reply(module.handle(Data(payload.utf8)))
+        check(bad?.error != nil && bad?.state == module.state().decoded(), "\(name): отказ, состояние прежнее")
+    }
+    answer = reply(module.handle(encoded(SoundAction.selectInput("нет-такого"))))
+    check(answer?.error != nil, "неизвестный микрофон отвергнут: \(answer?.error ?? "нет")")
+    check(module.statusLine(passiveReason: nil) == (MonitorState.shared.currentInputName == "—" ? "слежу за микрофоном" : MonitorState.shared.currentInputName), "строка статуса как у карточки встроенного")
+
+    module.enterPassive()
+    check(!monitor.isActive, "пассивная: монитор остановлен, устройство никто не возвращает")
+    check(module.statusLine(passiveReason: "Ждём передачу от центра") == "Ждём передачу от центра", "пассивная: строка с причиной")
+    LockState.shared.isLocked = true
+    answer = reply(module.handle(lock))
+    check(answer?.error != nil && LockState.shared.isLocked, "пассивная: действие отвергнуто")
+
+    // Пока модуль стоял, центр поменял настройки: после start их видно.
+    Kit.defaults.set("system", forKey: "UtilitumusPrimaryOutput")
+    Kit.defaults.set(false, forKey: "MicGuardBluetoothLocked")
+    Kit.defaults.set("usb-mic", forKey: "UtilitumusPrimaryInput")
+    module.start()
+    check(monitor.isActive, "после пассивной start снова запускает монитор")
+    check(PrimaryOutputStore.shared.choice == .system && !LockState.shared.isLocked && PrimaryInputStore.shared.primaryUID == "usb-mic",
+          "start перечитал настройки, изменённые снаружи")
+
+    module.stopForUpdate()
+    check(!monitor.isActive, "stopForUpdate: монитор остановлен")
+    check(Kit.defaults.string(forKey: "UtilitumusPrimaryOutput") == "system", "stopForUpdate: выбор пользователя остался")
+    module.start()
+    module.stopForUninstall()
+    check(!monitor.isActive, "stopForUninstall: монитор остановлен")
+    module.stop()
+    module.stop()
+    check(!monitor.isActive, "повторный stop безвреден")
+}
+
+extension Data {
+    func decoded() -> SoundState? { try? JSONDecoder().decode(SoundState.self, from: self) }
+}
+
 // MARK: - Вход
 
 @main
@@ -361,6 +420,7 @@ enum Main {
             await pixels()
             await liveUpdates()
             await clicks()
+            await lifecycle()
             print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)
         }
