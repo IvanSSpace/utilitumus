@@ -224,7 +224,8 @@ agent() {
 }
 state() { launchctl print "$DOMAIN/$LABEL" | grep -m1 'state = ' | sed 's/.*state = //'; }
 expect_state() { [ "$(state)" = "$1" ] || fail "$2: состояние «$(state)», ждали «$1»"; ok "$2"; }
-role() { echo "== $1 $2"; "$OUT/$1" "$2"; }
+# shellcheck disable=SC2086
+role() { echo "== $1 $2"; "$OUT/$1" $2; }
 
 agent daemon
 expect_state "not running" "служба не запущена до первого подключения"
@@ -249,6 +250,31 @@ role hub silent
 
 agent daemon FAN_TEST_SMC_STUCK
 role hub stuck
+
+echo "== статус не поднимает службу без нужды"
+runs() { launchctl print "$DOMAIN/$LABEL" | grep -m1 'runs = ' | sed 's/.*runs = //'; }
+agent daemon
+role hub refresh-off
+expect_state "not running" "модуль выключен: refresh не поднял службу"
+[ "$(runs)" = 0 ] || fail "модуль выключен: launchd запускал службу, runs = $(runs)"
+ok "модуль выключен: launchd не запускал службу ни разу"
+role hub refresh-on
+[ "$(runs)" = 1 ] || fail "модуль включён: runs = $(runs)"
+ok "модуль включён: refresh поднял службу один раз"
+
+echo "== общий срок при выходе"
+agent daemon
+role hub "quit ok"
+agent daemon FAN_TEST_SILENT
+role hub "quit silent"
+agent daemon FAN_TEST_SMC_STUCK
+role hub "quit stuck"
+sleep 2
+[ "$(cat "$LOG")" = "F0Md=0
+F1Md=0" ] || fail "клиент вышел, служба не доделала команды: $(cat "$LOG")"
+ok "клиент вышел, служба доделала команды обоим вентиляторам"
+agent daemon
+role hub "quit busy"
 
 echo "== выход без подключений"
 agent daemon

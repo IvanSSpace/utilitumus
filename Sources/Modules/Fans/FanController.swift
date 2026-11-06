@@ -150,6 +150,8 @@ final class FanController: ObservableObject {
     func start() {
         guard let smc, !isRunning else { return }
         isRunning = true
+        FanHelperInstaller.shared.moduleRunning = true
+        FanHelperInstaller.shared.refresh()
         // Набор датчиков у каждого чипа свой — находим, какие есть, один раз.
         let suffixes = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         func discover(_ prefixes: [String]) -> [String] {
@@ -197,15 +199,13 @@ final class FanController: ObservableObject {
     }
 
     /// Вызывается при выходе из приложения: отдать вентиляторы системе.
-    /// Синхронно — иначе процесс завершится раньше помощника.
+    /// Синхронно — иначе процесс завершится раньше, чем команды уйдут, но не дольше `quitBudget` на все вентиляторы.
     func restoreAutoBlocking() {
         if pendingPersist != nil { persist() }
         guard FanHelperInstaller.shared.status == .ready, conflictingApp == nil, let smc else { return }
         let manual = fans.map(\.index).filter { smc.uint8("F\($0)Md") == 1 }
         // Через ту же очередь — после уже отправленных команд, а не наперегонки с ними.
-        Self.helperQueue.sync {
-            for index in manual { _ = Self.runHelper(.auto(index)) }
-        }
+        FanHelperClient.sendAll(manual.map { .auto($0) }, on: Self.helperQueue) { Self.logHelper($0, $1) }
     }
 
     /// Выключение модуля или выход: вентиляторы системе, опрос и управление
@@ -217,6 +217,7 @@ final class FanController: ObservableObject {
         // Сначала вернуть «Авто» (синхронно, после уже отправленных команд),
         // и только потом гасить цикл: иначе нечем будет проверить, что вернулось.
         restoreAutoBlocking()
+        FanHelperInstaller.shared.moduleRunning = false
         isRunning = false
         timer?.invalidate()
         timer = nil
@@ -436,8 +437,12 @@ final class FanController: ObservableObject {
     /// Возвращает текст ошибки или nil при успехе.
     private nonisolated static func runHelper(_ command: FanHelperClient.Command) -> String? {
         let error = FanHelperClient.send(command)
-        log("helper \(command) → \(error ?? "ok")")
+        logHelper(command, error)
         return error
+    }
+
+    private nonisolated static func logHelper(_ command: FanHelperClient.Command, _ error: String?) {
+        log("helper \(command) → \(error ?? "ok")")
     }
 
     /// Журнал управления вентиляторами: что и когда отправили, что увидели в SMC.

@@ -34,7 +34,9 @@ func pureChecks() {
         check(SecRequirementCreateWithString(text as CFString, [], &requirement) == errSecSuccess, "требование разбирается Security")
     }
 
+    check(FanHelperClient.quitBudget == 1.5, "выход ждёт не больше 1,5 с")
     statusChecks()
+    refreshChecks()
     plistChecks()
     scriptChecks()
 }
@@ -55,6 +57,95 @@ func statusChecks() {
     check(I.statusFromFiles(binary: (0, 0o775), plist: plist) == .outdated, "бинарник пишет группа — outdated")
     check(I.statusFromFiles(binary: (501, 0o755), plist: plist) == .notInstalled, "бинарник не root — notInstalled")
     check(I.statusFromFiles(binary: (501, 0o4755), plist: nil) == .notInstalled, "setuid не от root — notInstalled")
+}
+
+/// Даёт доехать задачам на главном акторе.
+func spin(_ seconds: TimeInterval = 0.2) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    func bump() { lock.lock(); value += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+}
+
+/// Когда статус спрашивает службу. Счётчик стоит на месте вызова XPC, настоящий launchd — в `refreshOffRole`.
+func refreshChecks() {
+    let good = (binary: (owner: 0, mode: 0o755) as FanHelperInstaller.FileInfo?, plist: (owner: 0, mode: 0o644) as FanHelperInstaller.FileInfo?)
+    MainActor.assumeIsolated {
+        let probes = Counter()
+        @MainActor func installer(version: String? = FanLink.helperVersion) -> FanHelperInstaller {
+            FanHelperInstaller(files: { good }, probeVersion: { probes.bump(); return version })
+        }
+
+        let off = installer()
+        off.refresh()
+        spin()
+        check(probes.count == 0, "модуль выключен, экран закрыт: XPC нет")
+        check(off.status == .installed, "модуль выключен: статус только по файлам")
+
+        off.moduleRunning = true
+        off.refresh()
+        spin()
+        check(probes.count == 1, "модуль включён: одна проверка XPC")
+        check(off.status == .ready, "модуль включён, версия совпала: ready")
+
+        off.moduleRunning = false
+        off.refresh()
+        spin()
+        check(probes.count == 1, "модуль снова выключен: XPC нет")
+        check(off.status == .installed, "модуль снова выключен: прежний ready не держится")
+
+        off.screenOpen = true
+        off.refresh()
+        spin()
+        check(probes.count == 2, "экран открыт: проверка XPC")
+        check(off.status == .ready, "экран открыт, версия совпала: ready")
+        off.screenOpen = false
+
+        off.refresh(afterInstall: true)
+        spin()
+        check(probes.count == 3, "сразу после установки: проверка XPC")
+        check(off.status == .ready, "после установки при выключенном модуле: ready")
+
+        let other = installer(version: "3")
+        other.moduleRunning = true
+        other.refresh()
+        spin()
+        check(other.status == .outdated, "другая версия: outdated")
+
+        let silent = installer(version: nil)
+        silent.moduleRunning = true
+        silent.refresh()
+        spin()
+        check(silent.status == .outdated, "служба не ответила: outdated")
+
+        let before = probes.count
+        let setuid = FanHelperInstaller(files: { ((0, 0o4750), nil) }, probeVersion: { probes.bump(); return nil })
+        setuid.moduleRunning = true
+        setuid.refresh()
+        spin()
+        check(setuid.status == .outdated && probes.count == before, "старый setuid: outdated без XPC, даже с модулем")
+
+        // Ответ пришёл после удаления: файлов уже нет, старый ответ не должен оживить статус.
+        let box = FilesBox(good)
+        let late = FanHelperInstaller(files: { box.value }, probeVersion: { usleep(100_000); return FanLink.helperVersion })
+        late.moduleRunning = true
+        late.refresh()
+        box.value = (nil, nil)
+        late.refresh()
+        spin(0.4)
+        check(late.status == .notInstalled, "запоздавший ответ не отменяет новый статус")
+    }
+
+    let source = (try? String(contentsOfFile: "Sources/Modules/Fans/FanHelperInstaller.swift", encoding: .utf8)) ?? ""
+    let install = source.components(separatedBy: "func install()").last?.components(separatedBy: "func uninstall()").first ?? ""
+    check(install.contains("refresh(afterInstall: true)"), "install() проверяет службу сразу после установки")
+}
+
+final class FilesBox {
+    var value: (binary: FanHelperInstaller.FileInfo?, plist: FanHelperInstaller.FileInfo?)
+    init(_ value: (binary: FanHelperInstaller.FileInfo?, plist: FanHelperInstaller.FileInfo?)) { self.value = value }
 }
 
 func plistChecks() {
@@ -202,7 +293,8 @@ func stuckRole() {
     let started = Date()
     check(FanHelperClient.send(.set(0, 2000)) != nil, "цель не применилась: ошибка")
     check(FanHelperClient.send(.auto(0)) != nil, "режим не применился: ошибка")
-    check(Date().timeIntervalSince(started) >= 1.9, "ожидание по секунде на команду")
+    let elapsed = Date().timeIntervalSince(started)
+    check(elapsed >= 1.9, "ожидание по секунде на команду: \(elapsed)")
 }
 
 /// Держит соединение открытым: служба не должна уйти, пока оно есть.
@@ -220,6 +312,56 @@ func holdRole(_ seconds: UInt32) {
     connection.invalidate()
 }
 
+/// Настоящий клиент и настоящий launchd: скрипт смотрит, запустилась ли служба.
+func refreshRole(moduleRunning: Bool) {
+    MainActor.assumeIsolated {
+        let installer = FanHelperInstaller(files: { ((0, 0o755), (0, 0o644)) })
+        installer.moduleRunning = moduleRunning
+        installer.refresh()
+        // Нечего возвращать в «Авто»: выход и сон не должны поднимать службу ради пустого списка.
+        FanHelperClient.sendAll([], on: DispatchQueue(label: "test.helper")) { _, _ in }
+        spin(1)
+        check(installer.status == (moduleRunning ? .ready : .installed), "статус при модуле \(moduleRunning ? "вкл" : "выкл"): \(installer.status)")
+    }
+}
+
+/// Общий срок на все вентиляторы, как при выходе из приложения.
+func quitRole(_ scenario: String) {
+    clearWrites()
+    let queue = DispatchQueue(label: "test.helper")
+    let results = NSLock()
+    var replies: [String?] = []
+    if scenario == "busy" {
+        queue.async { sleep(3) }
+    }
+    let started = Date()
+    FanHelperClient.sendAll([.auto(0), .auto(1)], on: queue) { _, error in
+        results.lock(); replies.append(error); results.unlock()
+    }
+    let elapsed = Date().timeIntervalSince(started)
+    switch scenario {
+    case "ok":
+        check(elapsed < 1, "обычный выход не ждёт срока: \(elapsed)")
+        check(writes() == ["F0Md=0", "F1Md=0"], "оба вентилятора в Авто: \(writes())")
+    case "silent":
+        check(elapsed > 1.3 && elapsed < 1.8, "молчащая служба: всего около 1,5 с, а не 3 с на вентилятор: \(elapsed)")
+        check(writes().isEmpty, "без рукопожатия команд нет: \(writes())")
+    case "stuck":
+        check(elapsed > 1.3 && elapsed < 1.8, "оба вентилятора зависли: всего около 1,5 с: \(elapsed)")
+        // Второй ждёт, пока служба отпустит первый: его запись проверяет скрипт, когда клиента уже нет.
+        check(writes().first == "F0Md=0", "первый вентилятор получил команду: \(writes())")
+    case "busy":
+        check(elapsed > 1.3 && elapsed < 1.8, "очередь занята: всего около 1,5 с: \(elapsed)")
+        spin(2.5)
+        check(writes().isEmpty, "после срока команды не уходят: \(writes())")
+        results.lock()
+        check(replies.count == 2 && replies.allSatisfy { $0 == FanHelperClient.Failure.timeout.localizedDescription }, "опоздавшие команды отмечены сроком: \(replies)")
+        results.unlock()
+    default:
+        fatalError("неизвестный сценарий")
+    }
+}
+
 // MARK: - Вход
 
 let args = Array(CommandLine.arguments.dropFirst())
@@ -233,6 +375,9 @@ case "spoofed": spoofedRole()
 case "silent": silentRole()
 case "stuck": stuckRole()
 case "hold": holdRole(UInt32(args[1]) ?? 1)
+case "refresh-off": refreshRole(moduleRunning: false)
+case "refresh-on": refreshRole(moduleRunning: true)
+case "quit": quitRole(args[1])
 default: fatalError("неизвестная роль")
 }
 finish()

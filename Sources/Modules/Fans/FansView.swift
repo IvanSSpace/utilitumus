@@ -557,7 +557,10 @@ struct FansView: View {
                 footer
             }
         }
-        .onPageActive { if $0 { installer.refresh() } }
+        .onPageActive {
+            installer.screenOpen = $0
+            if $0 { installer.refresh() }
+        }
     }
 
     @ViewBuilder private var banners: some View {

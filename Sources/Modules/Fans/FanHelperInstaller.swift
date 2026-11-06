@@ -10,8 +10,9 @@ final class FanHelperInstaller: ObservableObject {
 
     enum Status: Equatable {
         case notInstalled
-        /// Файлы на месте, ответа службы ещё нет: ни плашки, ни команд.
-        case checking
+        /// Файлы в порядке, служба не спрошена: она сейчас никому не нужна или ответ ещё не пришёл.
+        /// Ни плашки, ни команд.
+        case installed
         /// Прежний setuid-помощник, неполная установка или служба с другой версией либо без ответа.
         /// Команды не идут, плашка «Обновить доступ».
         case outdated
@@ -27,13 +28,39 @@ final class FanHelperInstaller: ObservableObject {
     @Published private(set) var status: Status = .notInstalled
     @Published private(set) var lastError: String?
 
-    private init() {
+    /// Модуль запущен: службу спрашиваем. Выставляет `FanController`.
+    var moduleRunning = false
+    /// Экран модуля открыт: службу спрашиваем ради плашки. Выставляет `FansView`.
+    var screenOpen = false
+
+    typealias FileInfo = (owner: Int, mode: Int)
+    private let files: () -> (binary: FileInfo?, plist: FileInfo?)
+    private let probeVersion: @Sendable () -> String?
+    /// Номер последнего `refresh`: ответ службы на более ранний уже не считается.
+    private var refreshID = 0
+
+    init(
+        files: @escaping () -> (binary: FileInfo?, plist: FileInfo?) = {
+            (FanHelperInstaller.fileInfo(FanHelperInstaller.installedPath), FanHelperInstaller.fileInfo(FanHelperInstaller.plistPath))
+        },
+        probeVersion: @escaping @Sendable () -> String? = { FanHelperClient.version() }
+    ) {
+        self.files = files
+        self.probeVersion = probeVersion
         refresh()
     }
 
-    func refresh() {
-        if let settled = Self.statusFromFiles(binary: Self.fileInfo(Self.installedPath), plist: Self.fileInfo(Self.plistPath)) {
+    /// Подключение запускает root-службу, поэтому XPC только когда она нужна: модуль запущен, экран
+    /// открыт или установка только что прошла. Иначе статус по одним файлам.
+    func refresh(afterInstall: Bool = false) {
+        refreshID += 1
+        let found = files()
+        if let settled = Self.statusFromFiles(binary: found.binary, plist: found.plist) {
             status = settled
+            return
+        }
+        guard afterInstall || moduleRunning || screenOpen else {
+            status = .installed
             return
         }
         // По номеру версии, а не побайтово: байты меняются при каждой сборке
@@ -43,16 +70,18 @@ final class FanHelperInstaller: ObservableObject {
         // В фоне, не на главном потоке: пока shared ещё создаётся, SwiftUI успевал
         // отрисовать FansView, тот лез в недосозданный shared — падение
         // «dispatch_once: lock recursively». До ответа плашки нет, но и команд нет.
-        if status == .notInstalled { status = .checking }
+        if status == .notInstalled { status = .installed }
+        let id = refreshID, probe = probeVersion
         Task { [weak self] in
-            let ready = await Task.detached { FanHelperClient.version() == FanLink.helperVersion }.value
-            self?.status = ready ? .ready : .outdated
+            let ready = await Task.detached { probe() == FanLink.helperVersion }.value
+            guard let self, self.refreshID == id else { return }
+            self.status = ready ? .ready : .outdated
         }
     }
 
     /// Что видно по файлам; nil — файлы в порядке, решает версия службы по XPC.
     /// Прежний setuid-помощник сюда попадает как `outdated`: запускать его незачем.
-    nonisolated static func statusFromFiles(binary: (owner: Int, mode: Int)?, plist: (owner: Int, mode: Int)?) -> Status? {
+    nonisolated static func statusFromFiles(binary: FileInfo?, plist: FileInfo?) -> Status? {
         guard binary != nil || plist != nil else { return .notInstalled }
         if let binary, binary.owner != 0 { return .notInstalled }
         // Ни setuid/setgid, ни записи для группы и остальных.
@@ -61,7 +90,7 @@ final class FanHelperInstaller: ObservableObject {
         return nil
     }
 
-    private nonisolated static func fileInfo(_ path: String) -> (owner: Int, mode: Int)? {
+    nonisolated static func fileInfo(_ path: String) -> FileInfo? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let owner = (attrs[.ownerAccountID] as? NSNumber)?.intValue,
               let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue else { return nil }
@@ -70,10 +99,12 @@ final class FanHelperInstaller: ObservableObject {
 
     func install() {
         run(admin: Self.installScript(source: Self.bundledPath))
+        refresh(afterInstall: true)
     }
 
     func uninstall() {
         run(admin: Self.uninstallScript)
+        refresh()
     }
 
     /// В одну строку: идёт внутрь строки AppleScript. Без `RunAtLoad` и `KeepAlive`: launchd поднимает службу по подключению.
@@ -147,6 +178,5 @@ final class FanHelperInstaller: ObservableObject {
         if let error, (error[NSAppleScript.errorNumber] as? Int) != -128 {
             lastError = error[NSAppleScript.errorMessage] as? String ?? "Не удалось"
         }
-        refresh()
     }
 }

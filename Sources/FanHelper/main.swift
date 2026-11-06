@@ -18,7 +18,7 @@ final class FakeSMC {
 
     init?() {
         // Завис в ручном режиме: и цель, и возврат в «Авто» не применяются.
-        if environment["FAN_TEST_SMC_STUCK"] != nil { bytes["F0Md"] = 1 }
+        if environment["FAN_TEST_SMC_STUCK"] != nil { bytes["F0Md"] = 1; bytes["F1Md"] = 1 }
     }
 
     func uint8(_ key: String) -> UInt8? { bytes[key] }
