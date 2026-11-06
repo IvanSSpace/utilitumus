@@ -116,10 +116,12 @@ struct Snapshot: Equatable {
     check(error != nil && snapshot(store, world) == before, "\(name): \(error ?? "отказа нет")")
 }
 
-/// Ждём конца долгого действия из связи.
+/// Ждём конца долгого действия из связи. Не дождались — провал, а не вечное ожидание: сломанная защита от второго
+/// действия оставляла `pendingBusy` навсегда.
 @MainActor func settle(_ store: StashStore) async {
     let deadline = Date().addingTimeInterval(StashStore.waitSeconds + 10)
     while store.pendingBusy != nil, Date() < deadline { await pause(0.05) }
+    check(store.pendingBusy == nil, "долгое действие закончилось за срок")
 }
 
 let scenarioID = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
@@ -328,6 +330,49 @@ let allActions: [StashAction] = [
     while store.usagePending, Date() < deadline { await pause(0.05) }
     check(!store.usagePending && (store.usage["test.self"]?.memoryMB ?? 0) > 0, "связь: замер не зависит от окна утилиты: \(String(describing: store.usage["test.self"]))")
     check(store.wireState.usage == store.usage, "замер виден в состоянии")
+    keys.forEach(UserDefaults(suiteName: suite)!.removeObject(forKey:))
+}
+
+/// Тот же путь, что у связи: байты в `handle(_ data:)`, ответ с состоянием.
+@MainActor func dataPath() async {
+    let world = World()
+    let quick = FakeApp("test.quick", name: "Быстрая")
+    let other = FakeApp("test.other", name: "Другая")
+    world.apps = [quick, other]
+    let store = makeStore(world)
+
+    func reply(_ raw: Data) -> LinkReply<StashState>? { try? JSONDecoder().decode(LinkReply<StashState>.self, from: store.handle(raw)) }
+    let id = "test.quick"
+    let broken: [(String, Data)] = [
+        ("чужой ключ рядом", Data(#"{"restore":{},"x":1}"#.utf8)),
+        ("чужой ключ внутри", Data(#"{"selectOnlyHeavy":{"x":1}}"#.utf8)),
+        ("два действия", Data(#"{"restore":{},"selectOnlyHeavy":{}}"#.utf8)),
+        ("повтор ключа", Data(#"{"setClosing":{"bundleID":"\#(id)","closing":true,"closing":false}}"#.utf8)),
+        ("pid вместо id", Data(#"{"forceTerminate":{"pid":1}}"#.utf8)),
+        ("путь вместо списка", Data(#"{"stash":{"bundleIDs":"/Applications/Safari.app"}}"#.utf8)),
+        ("лишнее поле у stash", Data(#"{"stash":{"bundleIDs":["\#(id)"],"force":true}}"#.utf8)),
+        ("не объект", Data("[]".utf8)),
+        ("пустой объект", Data("{}".utf8)),
+        ("мусор", Data([0xff, 0x00, 0x7b])),
+        ("огромный список", encoded(StashAction.stash(bundleIDs: (0..<20_000).map { "test.app\($0)" }))),
+    ]
+    for (name, raw) in broken {
+        let before = snapshot(store, world)
+        let answer = reply(raw)
+        check(answer?.error != nil && snapshot(store, world) == before, "по байтам: \(name) отвергнуто: \(answer?.error ?? "ответа нет")")
+    }
+    check(reply(encoded(StashAction.setClosing(bundleID: id, closing: false)))?.error == nil, "по байтам: верное действие принято")
+    check(reply(encoded(StashAction.setClosing(bundleID: id, closing: true)))?.state.running.first { $0.bundleID == id }?.closing == true,
+          "ответ несёт состояние после действия")
+
+    // Защита от второго действия работает и по байтам; ответ приходит сразу, а не после закрытия.
+    let first = reply(encoded(StashAction.stash(bundleIDs: [id])))
+    check(first?.error == nil && first?.state.busy == StashStore.closingText, "по байтам: stash отвечает сразу, занятость в ответе")
+    let second = reply(encoded(StashAction.stash(bundleIDs: ["test.other"])))
+    check(second?.error == "Стеш занят" && other.terminations == 0, "по байтам: второй stash до конца первого отвергнут")
+    check(reply(encoded(StashAction.restore))?.error == "Стеш занят", "по байтам: restore во время закрытия отвергнут")
+    await settle(store)
+    check(quick.terminations == 1 && other.terminations == 0, "закрыта только названная")
     keys.forEach(UserDefaults(suiteName: suite)!.removeObject(forKey:))
 }
 
@@ -542,11 +587,17 @@ enum Main {
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        // Любое зависание, в том числе сломанная защита от второго действия, — провал, а не вечное ожидание.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 150) {
+            print("FAIL проверка не уложилась в 150 с")
+            exit(2)
+        }
         Task { @MainActor in
             wire()
             stateContents()
             await usageRefresh()
             await validations()
+            await dataPath()
             #if !STASH_NO_SCREEN
             await screen(out: CommandLine.arguments[1])
             #endif
