@@ -30,13 +30,33 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.utilitumus</string>
 <key>CFBundleExecutable</key><string>Utilitumus</string>
 <key>CFBundleShortVersionString</key><string>9.9.9</string>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 </dict></plist>
 PLIST
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$APP"
 
+# Старые сборки автора: тот же identifier и сертификат, но без метки выпуска, с меткой 0 или без hardened runtime.
+# И будущая: метка 2 должна проходить, иначе центр не обновится до выпуска с поднятой меткой.
+variant() { # имя, метка («-» — без метки), «runtime» или «plain»
+  local dir="$OUT/variants/$1"
+  mkdir -p "$dir"
+  cp -R "$APP" "$dir/Utilitumus.app"
+  if [ "$2" = "-" ]; then
+    plutil -remove UtilitumusSecurityEpoch "$dir/Utilitumus.app/Contents/Info.plist"
+  else
+    plutil -replace UtilitumusSecurityEpoch -string "$2" "$dir/Utilitumus.app/Contents/Info.plist"
+  fi
+  local flags=(); [ "$3" = runtime ] && flags=(--options runtime)
+  codesign --force ${flags[@]+"${flags[@]}"} --sign "$SIGN_NAME" --identifier local.utilitumus "$dir/Utilitumus.app"
+}
+variant noepoch - runtime
+variant epoch0 0 runtime
+variant epoch2 2 runtime
+variant noruntime 1 plain
+
 cp Tests/UpdateBundleCheck.swift "$OUT/main.swift"
 swiftc -o "$OUT/check" "$OUT/main.swift" Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift
-"$OUT/check" "$APP" "$OUT/root"
+"$OUT/check" "$APP" "$OUT/root" "$OUT/variants"
 
 # install.sh, основной путь: архив подставляет curl-заглушка.
 cat >"$OUT/bin/curl" <<'STUB'
@@ -74,3 +94,17 @@ if run_install "$OUT/wide.zip" "$OUT/inst2"; then fail "install.sh постав�
 grep -q 'запись разрешена' "$OUT/install.log" || { cat "$OUT/install.log"; fail "install.sh: нет сообщения о режимах"; }
 [ -f "$OUT/inst2/Utilitumus.app/old.txt" ] || fail "install.sh: прежняя версия удалена до отказа"
 echo "ok   install.sh отказывается от файла 0777 и не трогает прежнюю версию"
+
+for name in noepoch epoch0 noruntime; do
+  ditto -c -k --keepParent "$OUT/variants/$name/Utilitumus.app" "$OUT/$name.zip"
+  mkdir -p "$OUT/inst-$name/Utilitumus.app"
+  echo старая >"$OUT/inst-$name/Utilitumus.app/old.txt"
+  if run_install "$OUT/$name.zip" "$OUT/inst-$name"; then fail "install.sh поставил сборку: $name"; fi
+  [ -f "$OUT/inst-$name/Utilitumus.app/old.txt" ] || fail "install.sh: прежняя версия удалена до отказа ($name)"
+done
+grep -q 'hardened runtime' "$OUT/install.log" || { cat "$OUT/install.log"; fail "install.sh: нет сообщения о runtime"; }
+echo "ok   install.sh отказывается от сборок без метки, с меткой 0 и без hardened runtime"
+ditto -c -k --keepParent "$OUT/variants/epoch2/Utilitumus.app" "$OUT/epoch2.zip"
+mkdir -p "$OUT/inst-epoch2"
+run_install "$OUT/epoch2.zip" "$OUT/inst-epoch2" || { cat "$OUT/install.log"; fail "install.sh не поставил сборку с меткой 2"; }
+echo "ok   install.sh ставит сборку с меткой новее своей"

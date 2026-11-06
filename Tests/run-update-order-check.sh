@@ -31,6 +31,7 @@ cat >"$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>local.utilitumus</string>
 <key>CFBundleExecutable</key><string>Utilitumus</string>
 <key>CFBundleShortVersionString</key><string>9.9.9</string>
+<key>UtilitumusSecurityEpoch</key><string>1</string>
 </dict></plist>
 PLIST
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$APP"

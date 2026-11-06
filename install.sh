@@ -67,6 +67,13 @@ epoch_ok() { # бандл
   matches "$FOUND" '^[0-9]{1,18}$' && [ "$FOUND" -ge "$SECURITY_EPOCH" ]
 }
 
+require_runtime() { # путь, как назвать в сообщении
+  # Через переменную: grep -q закрыл бы канал раньше времени, а при pipefail это выглядит как сбой.
+  local DETAILS
+  DETAILS="$(codesign -d --verbose=1 "$1" 2>&1)" || DETAILS=""
+  matches "$DETAILS" 'flags=0x[0-9a-f]+\([^)]*runtime' || fail "$2 собран без hardened runtime — ничего не установлено."
+}
+
 # Правила те же, что у KitSigning.verifyHelper.
 verify_helper() { # бандл, путь в нём, identifier
   local HELPER="$1/$2"
@@ -82,10 +89,7 @@ verify_helper() { # бандл, путь в нём, identifier
       codesign --verify -R="identifier \"$3\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$HELPER" >/dev/null 2>&1 || refuse "$2"
       ;;
   esac
-  # Через переменную: grep -q закрыл бы канал раньше времени, а при pipefail это выглядит как сбой.
-  local DETAILS
-  DETAILS="$(codesign -d --verbose=1 "$HELPER" 2>&1)" || DETAILS=""
-  matches "$DETAILS" 'flags=0x[0-9a-f]+\([^)]*runtime' || fail "Помощник $2 собран без hardened runtime — ничего не установлено."
+  require_runtime "$HELPER" "Помощник $2"
 }
 
 # launchd отпускает метку не сразу после bootout.
@@ -271,10 +275,16 @@ APP="$WORK/Utilitumus.app"
 
 echo "SHA-256 архива: $(shasum -a 256 "$WORK/Utilitumus.zip" | cut -d' ' -f1)"
 verify_signature "$APP" "local.utilitumus" || refuse "Utilitumus.app"
-LINKS="$APP/Contents/Helpers/Utilitumus Links.app"
-if [ -d "$LINKS" ]; then
-  verify_signature "$LINKS" "local.utilitumus.links" || refuse "Utilitumus Links.app"
-fi
+# Старые сборки автора (до 0.5) подписаны тем же ключом, но без метки выпуска и hardened runtime: подпись они проходят.
+epoch_ok "$APP" || fail "У Utilitumus.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+require_runtime "$APP" "Utilitumus.app"
+# Помощники, если они есть в архиве: те же правила, что у KitSigning.verifyHelper. Битая ссылка тоже «есть».
+for HELPER in 'Contents/Helpers/Utilitumus Links.app|local.utilitumus.links' \
+  'Contents/MacOS/utilitumus-fan|local.utilitumus.fan' 'Contents/MacOS/utilitumus-voice|local.utilitumus.voice'; do
+  if [ -e "$APP/${HELPER%%|*}" ] || [ -L "$APP/${HELPER%%|*}" ]; then
+    verify_helper "$APP" "${HELPER%%|*}" "${HELPER##*|}"
+  fi
+done
 # Режимы файлов подпись не запечатывает.
 WRITABLE="$(find "$APP" ! -type l \( -perm -020 -o -perm -002 \))"
 [ -z "$WRITABLE" ] || fail "В архиве запись разрешена группе или всем: ${WRITABLE}"

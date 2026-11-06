@@ -12,6 +12,7 @@ func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "")
 let fm = FileManager.default
 let good = URL(fileURLWithPath: CommandLine.arguments[1])
 let root = URL(fileURLWithPath: CommandLine.arguments[2])
+let variants = URL(fileURLWithPath: CommandLine.arguments[3])
 let version = "9.9.9"
 let staged = root.appendingPathComponent("Utilitumus.app.new")
 let target = root.appendingPathComponent("Utilitumus.app")
@@ -92,6 +93,20 @@ refused("подмена копии", copyOfGood("swap"), expected: "не от а
 }
 refused("права копии", copyOfGood("chmod"), expected: "запись разрешена") { copy in
     try fm.setAttributes([.posixPermissions: 0o777], ofItemAtPath: copy.appendingPathComponent(data).path)
+}
+
+// MARK: Метка выпуска и hardened runtime (Utilitumus 0.2.0–0.4.4 подписаны тем же ключом без них)
+
+func variant(_ name: String) -> URL { variants.appendingPathComponent(name).appendingPathComponent("Utilitumus.app") }
+refused("сборка автора без метки выпуска", variant("noepoch"), expected: "метки выпуска")
+refused("сборка автора с меткой 0", variant("epoch0"), expected: "метки выпуска")
+refused("сборка автора без hardened runtime", variant("noruntime"), expected: "hardened runtime")
+freshTarget()
+do {
+    try UpdateBundle.install(variant("epoch2"), expectedVersion: version, target: target)
+    check("метка новее своей проходит: будущий выпуск обновляется", true)
+} catch {
+    check("метка новее своей проходит: будущий выпуск обновляется", false, error.localizedDescription)
 }
 
 exit(failed ? 1 : 0)

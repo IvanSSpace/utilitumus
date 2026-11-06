@@ -83,15 +83,20 @@ enum KitSigning {
         }
         try verifySignature(of: url, identifier: helper.identifier, strict: helper.isBundle)
         if helper.isBundle { try checkEpoch(of: url) }
+        try requireRuntime(url, what: "Помощник \(url.lastPathComponent)")
+    }
+
+    /// Hardened runtime в подписи: без него в процесс внедряют код через DYLD_INSERT_LIBRARIES.
+    static func requireRuntime(_ url: URL, what: String) throws {
         let details = try run("/usr/bin/codesign", ["-d", "--verbose=1", url.path])
         guard details.range(of: #"flags=0x[0-9a-f]+\([^)]*\bruntime\b"#, options: .regularExpression) != nil else {
-            throw Failure("Помощник \(url.lastPathComponent) собран без hardened runtime")
+            throw Failure("\(what) собран без hardened runtime")
         }
     }
 
     /// Вызывать после проверки подписи: Info.plist запечатан ею. Метка может быть новее своей: иначе старая
     /// утилита не обновилась бы до выпуска с поднятой меткой. Старее нельзя: ради этого метку и поднимают.
-    private static func checkEpoch(of bundle: URL) throws {
+    static func checkEpoch(of bundle: URL) throws {
         let info = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
         guard let found = (info?[securityEpochKey] as? String).flatMap({ Int($0) }),
               let own = Int(securityEpoch), found >= own else {
