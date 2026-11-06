@@ -136,34 +136,36 @@ private struct OthersToggle: View {
     }
 }
 
-struct MixerView: View {
-    @ObservedObject private var controller = MixerController.shared
+struct MixerView<Model: MixerModel>: View {
+    @ObservedObject var model: Model
     @State private var showOthers = false
+
+    init(model: Model) { self.model = model }
 
     private func row(_ app: MixerApp) -> some View {
         let id = app.id
         return MixerRow(
             app: app,
-            onVolume: { controller.setVolume($0, for: id) },
-            onCommit: { controller.commitVolumes() },
-            onToggleMute: { controller.setMuted(!controller.isMuted(id), for: id) }
+            onVolume: { model.setVolume($0, for: id) },
+            onCommit: { model.commitVolumes() },
+            onToggleMute: { model.setMuted(!model.isMuted(id), for: id) }
         ).equatable()
     }
 
     private func idleSection() -> some View {
-        DSSection("Молчат сейчас", trailing: "\(controller.idleApps.count)") {
+        DSSection("Молчат сейчас", trailing: "\(model.idleApps.count)") {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(controller.idleApps) { app in row(app) }
+                ForEach(model.idleApps) { app in row(app) }
             }
         }
         .help("Настрой заранее: громкость запомнится и применится, когда приложение начнёт звучать")
     }
 
     private func presetSection() -> some View {
-        DSSection("Настроены заранее", trailing: "\(controller.presetApps.count)") {
-            ForEach(controller.presetApps) { app in
+        DSSection("Настроены заранее", trailing: "\(model.presetApps.count)") {
+            ForEach(model.presetApps) { app in
                 let id = app.id
-                PresetRow(app: app, onReset: { controller.reset(id) }).equatable()
+                PresetRow(app: app, onReset: { model.reset(id) }).equatable()
             }
         }
     }
@@ -174,14 +176,14 @@ struct MixerView: View {
             Button {
                 showOthers.toggle()
             } label: {
-                OthersToggle(expanded: showOthers, count: controller.otherApps.count)
+                OthersToggle(expanded: showOthers, count: model.otherApps.count)
             }
             .buttonStyle(.plain)
             .focusable(false)
             .help("Звука от них обычно нет. Зазвучат — переедут наверх")
             if showOthers {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(controller.otherApps) { app in row(app) }
+                    ForEach(model.otherApps) { app in row(app) }
                 }
             }
         }
@@ -190,9 +192,9 @@ struct MixerView: View {
     var body: some View {
         DSPage(
             module: .mixer,
-            subtitle: controller.apps.isEmpty ? "Сейчас ничего не играет" : "Играют: \(controller.apps.count)"
+            subtitle: model.apps.isEmpty ? "Сейчас ничего не играет" : "Играют: \(model.apps.count)"
         ) {
-            if controller.permissionProblem {
+            if model.permissionProblem {
                 DSSection("Нужно разрешение") {
                     DSRow(icon: "lock.shield", title: "Запись системного звука",
                           subtitle: "Без неё громкость не меняется. Включи Utilitumus в «Конфиденциальность и безопасность → Запись экрана и системного звука» и перезапусти приложение.") {
@@ -202,7 +204,7 @@ struct MixerView: View {
                             }
                         }
                     }
-                    if let error = controller.lastError {
+                    if let error = model.lastError {
                         DSRow(icon: "exclamationmark.triangle.fill", title: error)
                     }
                 }
@@ -210,22 +212,27 @@ struct MixerView: View {
 
             // Блоки ближе друг к другу, чем в остальных модулях: список здесь главное.
             VStack(alignment: .leading, spacing: 14) {
-                DSSection("Сейчас играют", trailing: controller.apps.isEmpty ? nil : "\(controller.apps.count)") {
-                    if controller.apps.isEmpty {
+                DSSection("Сейчас играют", trailing: model.apps.isEmpty ? nil : "\(model.apps.count)") {
+                    if model.apps.isEmpty {
                         Text("Сейчас ничего не играет").font(DS.rowTitle).foregroundStyle(.white.opacity(0.6))
                             .modifier(RowDivider())
                     }
-                    ForEach(controller.apps) { app in row(app) }
+                    ForEach(model.apps) { app in row(app) }
                 }
 
                 // Все секции на всю ширину и теми же строками: громкость молчащим ставят заранее.
-                if !controller.idleApps.isEmpty { idleSection() }
-                if !controller.presetApps.isEmpty { presetSection() }
-                if !controller.otherApps.isEmpty { othersSection() }
+                if !model.idleApps.isEmpty { idleSection() }
+                if !model.presetApps.isEmpty { presetSection() }
+                if !model.otherApps.isEmpty { othersSection() }
 
                 Note("Выше 100 % громкость не поднять. При выходе из Utilitumus всё возвращается как было.")
             }
         }
-        .onPageActive { controller.setScreenVisible($0) }
+        .onPageActive { model.setScreenVisible($0) }
     }
+}
+
+extension MixerView where Model == MixerController {
+    /// Встроенный модуль: экран работает с контроллером в этом же процессе.
+    init() { self.init(model: .shared) }
 }

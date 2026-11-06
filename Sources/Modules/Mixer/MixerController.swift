@@ -23,7 +23,7 @@ struct MixerApp: Identifiable, Equatable {
 /// пользуются, звук идёт мимо него. Состояние живёт на main thread, а обход
 /// процессов HAL (`MixerHAL.processes()`) считается в фоне; реалтайм-часть — в `ProcessTap`.
 @MainActor
-final class MixerController: ObservableObject {
+final class MixerController: MixerModel {
     static let shared = MixerController()
 
     /// Сколько приложение остаётся в списке после того, как замолчало: паузы
@@ -259,6 +259,23 @@ final class MixerController: ObservableObject {
         permissionProblem = false
         lastError = nil
     }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд: готовые списки вместо снимка HAL. `start()` стенд не зовёт, поэтому тапов нет.
+    func testPin(apps: [MixerApp] = [], idle: [MixerApp] = [], preset: [MixerApp] = [], other: [MixerApp] = [],
+                 permissionProblem: Bool = false, lastError: String? = nil) {
+        self.apps = apps
+        idleApps = idle
+        presetApps = preset
+        otherApps = other
+        self.permissionProblem = permissionProblem
+        self.lastError = lastError
+        let all = apps + idle + preset + other
+        volumes = [:]
+        for app in all where app.volume != 1 { volumes[app.id] = app.volume }
+        muted = Set(all.filter(\.muted).map(\.id))
+    }
+    #endif
 
     // MARK: - Обновление
 
