@@ -93,6 +93,8 @@ if ! codesign --verify --deep --strict \
   -R="identifier \"local.utilitumus.app.$ID\" and certificate leaf = H\"$TRUSTED_LEAF_HASH\"" "$APP" 2>/dev/null; then
   fail "Сборка не подписана сертификатом «Utilitumus Signing» — релиз не выкладываю."
 fi
+# Сборка со швом подписана тем же ключом и ушла бы к людям как настоящая: ищем следы шва в самом бандле.
+scripts/check-no-seam.sh "$APP" || fail "В сборке следы тестового шва — релиз не выкладываю."
 ZIP="$WORK/$NAME.zip"
 ditto -c -k --keepParent "$APP" "$ZIP"
 

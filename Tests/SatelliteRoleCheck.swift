@@ -113,7 +113,8 @@ func enabledChecks() {
 
 func requirementChecks() {
     let both = KitLink.requirement(identifiers: ["hub", "self"], hashes: ["aa"])
-    let marker = #"info["UtilitumusSecurityEpoch"] = "1""#
+    // Сборка со швом ждёт тестовую метку, боевая (в LinkCheck) — «1»: так стенд не пропускает боевых и наоборот.
+    let marker = #"info["UtilitumusSecurityEpoch"] = "test.1""#
     check(both == "(identifier \"hub\" and certificate leaf = H\"aa\" and \(marker)) or (identifier \"self\" and certificate leaf = H\"aa\" and \(marker))", "требование: центр или свой identifier, оба с меткой")
     check(KitLink.requirement(identifiers: ["x"], hashes: ["aa"]) == KitLink.requirement(identifier: "x", hashes: ["aa"]), "один identifier — то же требование")
 }

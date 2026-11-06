@@ -17,6 +17,7 @@ enum UpdateBundle {
         // Метка выпуска и hardened runtime: старые сборки автора с тем же identifier и сертификатом, но без них,
         // подпись проходят. Метка может быть новее своей (checkEpoch), поэтому будущие выпуски обновляются.
         try KitSigning.checkEpoch(of: app)
+        try KitSigning.rejectTestSeam(in: app)
         try KitSigning.requireRuntime(app, what: app.lastPathComponent)
         // Вложенные бинарники запечатаны подписью основного бандла, но личность их
         // подписанта отдельно не проверена — сверяем со своим identifier, меткой и runtime.

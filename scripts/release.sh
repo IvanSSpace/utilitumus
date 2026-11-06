@@ -50,6 +50,8 @@ if ! codesign -d -r- build/Utilitumus.app 2>&1 | grep -q "certificate leaf"; the
   echo "Сборка не подписана сертификатом «Utilitumus Signing» — релиз не выкладываю." >&2
   exit 1
 fi
+# Сборка со швом подписана тем же ключом и ушла бы к людям как настоящая: ищем следы шва в самом бандле.
+scripts/check-no-seam.sh build/Utilitumus.app || { echo "В сборке следы тестового шва — релиз не выкладываю." >&2; exit 1; }
 ditto -c -k --keepParent build/Utilitumus.app build/Utilitumus.zip
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag "$TAG"

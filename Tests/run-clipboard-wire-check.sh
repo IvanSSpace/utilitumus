@@ -33,5 +33,5 @@ swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name Cli
   "$OUT/src/ClipboardWireCheck.swift" "$OUT/src/LegacyClipboardView.swift" "$OUT/src/UtilitumusApp.swift" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/VoiceHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit \
-  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 "$OUT/check" "$OUT"

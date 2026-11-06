@@ -24,11 +24,14 @@ umask 022
 
 SWIFT_FLAGS=()
 TEST_ID=""
+SEAM=""
 if [ $# -eq 5 ] && [ "$5" = "--test-seam" ]; then
   SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS)
   TEST_ID=1
+  SEAM=1
 elif [ $# -eq 5 ] && [ "$5" = "--test-seam-real-id" ]; then
   SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS -D KIT_TEST_REAL_ID)
+  SEAM=1
 elif [ $# -ne 4 ]; then
   echo "Использование: scripts/build-app.sh <id> <Имя> <версия> <каталог-вывода> [--test-seam|--test-seam-real-id]" >&2
   exit 1
@@ -70,6 +73,13 @@ require_epoch() {
   [[ "$found" == *"<string>$EPOCH</string>"* ]] || fail "${1}: нет UtilitumusSecurityEpoch со значением ${EPOCH}"
 }
 require_epoch "Sources/Apps/$NAME/Info.plist"
+# Сборка со швом подписана боевым ключом, и от боевой её отличает только метка выпуска в Info.plist: боевые центр,
+# утилиты и служба вентиляторов её не пропустят (KitSigning.testPeerEpoch). Метка запечатана подписью.
+TEST_EPOCH="$(sed -n 's/.*static let testPeerEpoch = "\(.*\)".*/\1/p' Sources/Kit/KitSigning.swift)"
+[ -n "$TEST_EPOCH" ] || fail "Нет testPeerEpoch в Sources/Kit/KitSigning.swift"
+mark_seam() { # Info.plist
+  if [ -n "$SEAM" ]; then plutil -replace UtilitumusSecurityEpoch -string "$TEST_EPOCH" "$1"; fi
+}
 
 # --- Манифест. Только чтение через plutil: файл не исполняется.
 # plutil -lint понимает только plist, JSON читает лишь -p и -extract. Список или строка сверху прошли бы как пустой манифест.
@@ -271,6 +281,7 @@ build_helper() {
       plutil -replace CFBundleShortVersionString -string "$VERSION" "$info"
       plutil -replace CFBundleVersion -string "$VERSION" "$info"
       plutil -replace LSMinimumSystemVersion -string "$MIN_SYSTEM" "$info"
+      mark_seam "$info"
       if [ -f Resources/AppIcon.icns ]; then cp Resources/AppIcon.icns "$target/Contents/Resources/"; fi
       ;;
   esac
@@ -292,6 +303,7 @@ plutil -replace CFBundleExecutable -string "$NAME" "$INFO"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFO"
 plutil -replace CFBundleVersion -string "$VERSION" "$INFO"
 plutil -replace LSMinimumSystemVersion -string "$MIN_SYSTEM" "$INFO"
+mark_seam "$INFO"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/"
   plutil -replace CFBundleIconFile -string AppIcon "$INFO"
@@ -299,4 +311,6 @@ fi
 
 codesign --force --options runtime --sign "$SIGN_ID" --identifier "local.utilitumus.app.$ID" ${ENTITLEMENT_ARGS[@]+"${ENTITLEMENT_ARGS[@]}"} "$APP"
 
+# Боевая сборка без следов шва; сборка со швом, наоборот, обязана его нести (иначе защита ниже ничего не проверяет).
+if [ -z "$SEAM" ]; then scripts/check-no-seam.sh "$APP"; fi
 echo "Собрано: $APP"

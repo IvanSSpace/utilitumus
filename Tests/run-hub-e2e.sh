@@ -136,7 +136,7 @@ swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name HubE2E -o "$HUB" "$OU
   Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteAwakeModel.swift Sources/Modules/Awake/AwakeController.swift \
   Sources/Modules/Awake/AwakeModel.swift Sources/Modules/Awake/AwakeWire.swift \
   -framework SwiftUI -framework AppKit -framework Carbon \
-  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$HUB" 2>/dev/null
 
 echo "== установка"

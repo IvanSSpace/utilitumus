@@ -110,6 +110,14 @@ vet_archive() { # архив
   fi
 }
 
+# Сборка со стендовым швом подписана тем же ключом (KitSigning.testPeerEpoch) и не должна встать как настоящая.
+# Образец собран из частей: целиком он был бы строкой в самом скрипте.
+reject_seam() { # бандл
+  local NEEDLE="local.utilitumus.""test." FOUND
+  FOUND="$(find "$1/Contents" -type f \( -path '*/MacOS/*' -o -path '*/Helpers/*' -o -name Info.plist \) -exec grep -laF -e "$NEEDLE" {} + 2>/dev/null || true)"
+  [ -z "$FOUND" ] || fail "В сборке следы тестового шва — ничего не установлено."
+}
+
 # launchd отпускает метку не сразу после bootout.
 load_agent() {
   local ATTEMPT=1
@@ -178,6 +186,7 @@ install_app() {
 
   verify_signature "$APP" "$LABEL" || refuse "$NAME.app"
   epoch_ok "$APP" || fail "У ${NAME}.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
+  reject_seam "$APP"
   local HELPER_PATH HELPER_ID
   while IFS='|' read -r HELPER_PATH HELPER_ID; do
     [ -z "$HELPER_PATH" ] || verify_helper "$APP" "$HELPER_PATH" "$HELPER_ID"
@@ -290,6 +299,7 @@ verify_signature "$APP" "local.utilitumus" || refuse "Utilitumus.app"
 # Старые сборки автора (до 0.5) подписаны тем же ключом, но без метки выпуска и hardened runtime: подпись они проходят.
 epoch_ok "$APP" || fail "У Utilitumus.app нет метки выпуска ${SECURITY_EPOCH} или новее — ничего не установлено."
 require_runtime "$APP" "Utilitumus.app"
+reject_seam "$APP"
 # Помощники, если они есть в архиве: те же правила, что у KitSigning.verifyHelper. Битая ссылка тоже «есть».
 for HELPER in 'Contents/Helpers/Utilitumus Links.app|local.utilitumus.links' \
   'Contents/MacOS/utilitumus-fan|local.utilitumus.fan' 'Contents/MacOS/utilitumus-voice|local.utilitumus.voice'; do

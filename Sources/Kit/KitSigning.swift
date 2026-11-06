@@ -28,10 +28,19 @@ enum KitSigning {
     /// и identifier с сертификатом он всё равно проходит. Выпуск с уязвимостью отсекается повышением эпохи.
     static let securityEpochKey = "UtilitumusSecurityEpoch"
     static let securityEpoch = "1"
+    /// Метка сборок со швом `KIT_TEST_DEFAULTS` (стенды и проверки). Они подписаны тем же сертификатом и тем же
+    /// identifier, поэтому от боевых их отличает только метка: боевые требования ждут `securityEpoch` и стенд не пропускают,
+    /// а стенд ждёт эту и не пропускает боевых. Числом она не читается, значит и `checkEpoch` боевой сборки её отвергает.
+    static let testPeerEpoch = "test.1"
+    #if KIT_TEST_DEFAULTS
+    static let peerEpoch = testPeerEpoch
+    #else
+    static let peerEpoch = securityEpoch
+    #endif
 
     /// Требование к процессу-собеседнику по XPC: центру и утилите. Значение метки должно совпадать с их Info.plist.
     static func peerRequirement(identifier: String, leafHash: String) -> String {
-        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] = \"\(securityEpoch)\""
+        requirement(identifier: identifier, leafHash: leafHash) + " and info[\"\(securityEpochKey)\"] = \"\(peerEpoch)\""
     }
 
     /// Проходит `codesign --verify` хотя бы с одним доверенным хэшем. `-R=текст` —
@@ -66,6 +75,7 @@ enum KitSigning {
     static func verifyApp(_ app: URL, identifier: String) throws {
         try verifySignature(of: app, identifier: identifier, strict: true)
         try checkEpoch(of: app)
+        try rejectTestSeam(in: app)
         for helper in helpers[identifier] ?? [] {
             try verifyHelper(helper, in: app)
         }
@@ -98,10 +108,32 @@ enum KitSigning {
     /// утилита не обновилась бы до выпуска с поднятой меткой. Старее нельзя: ради этого метку и поднимают.
     static func checkEpoch(of bundle: URL) throws {
         let info = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
+        #if KIT_TEST_DEFAULTS
+        if info?[securityEpochKey] as? String == testPeerEpoch { return }
+        #endif
         guard let found = (info?[securityEpochKey] as? String).flatMap({ Int($0) }),
               let own = Int(securityEpoch), found >= own else {
             throw Failure("У \(bundle.lastPathComponent) нет метки выпуска \(securityEpoch) или новее")
         }
+    }
+
+    /// Сборка для проверок не должна попасть к человеку: она подписана боевым ключом, но несёт шов (SIGUSR, свой домен
+    /// настроек). Метка выпуска её и так не пропустит (`checkEpoch`); это вторая, независимая проверка по содержимому.
+    /// Образец собран из частей: целиком он был бы строкой в самом проверяющем и находил бы его.
+    static func rejectTestSeam(in bundle: URL) throws {
+        // Стенд сам собран со швом и ставит сборки со швом.
+        #if !KIT_TEST_DEFAULTS
+        let needle = Data(["local", "utilitumus", "test", ""].joined(separator: ".").utf8)
+        let walker = FileManager.default.enumerator(atPath: bundle.path)
+        while let relative = walker?.nextObject() as? String {
+            guard walker?.fileAttributes?[.type] as? FileAttributeType == .typeRegular,
+                  relative.hasSuffix("Info.plist") || relative.contains("Contents/MacOS/") || relative.contains("Contents/Helpers/"),
+                  let data = try? Data(contentsOf: bundle.appendingPathComponent(relative), options: .mappedIfSafe) else { continue }
+            if data.range(of: needle) != nil {
+                throw Failure("В сборке следы тестового шва: \(relative)")
+            }
+        }
+        #endif
     }
 
     /// Режимы файлов подпись не запечатывает: перепакованная настоящая сборка с правами 0777
