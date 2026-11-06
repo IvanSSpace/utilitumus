@@ -77,7 +77,7 @@ func pureChecks() {
     check((try? LinkClient.decodeStatus(Data("{не json".utf8))) == nil, "битый JSON в status — ошибка, не падение")
 
     let one = KitLink.requirement(identifier: "local.utilitumus")
-    let marker = #"info["UtilitumusSecurityEpoch"] >= "1""#
+    let marker = #"info["UtilitumusSecurityEpoch"] >= "1" and info["UtilitumusSecurityEpoch"] < "a""#
     check(one == "(identifier \"local.utilitumus\" and certificate leaf = H\"\(KitSigning.trustedLeafHashes[0])\" and \(marker))", "требование: точный identifier, leaf и метка выпуска")
     let two = KitLink.requirement(identifier: "x.y", hashes: ["aa", "bb"])
     check(two == "(identifier \"x.y\" and certificate leaf = H\"aa\" and \(marker)) or (identifier \"x.y\" and certificate leaf = H\"bb\" and \(marker))", "несколько хэшей — через or")
@@ -126,7 +126,7 @@ func pureChecks() {
         check(holds(#"info["CFBundleVersion"] >= "9""#), "сравнение метки числовое: \(number) >= 9")
         check(!holds(#"info["CFBundleVersion"] >= "\(number + 1)""#), "сравнение метки: \(number) >= \(number + 1) ложно")
     }
-    check(KitSigning.peerRequirement(identifier: "x", leafHash: "aa").hasSuffix(#"info["UtilitumusSecurityEpoch"] >= "1""#), "требование собеседника: метка своей или новее")
+    check(KitSigning.peerRequirement(identifier: "x", leafHash: "aa").hasSuffix(#"info["UtilitumusSecurityEpoch"] >= "1" and info["UtilitumusSecurityEpoch"] < "a""#), "требование собеседника: метка своей или новее")
 
     var parsed: SecRequirement?
     check(SecRequirementCreateWithString(KitLink.requirement(identifier: "x.y", hashes: [String(repeating: "a", count: 40), String(repeating: "b", count: 40)]) as CFString, [], &parsed) == errSecSuccess, "требование с двумя хэшами разбирается системой")

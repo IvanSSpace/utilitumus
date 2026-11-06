@@ -28,7 +28,7 @@ func pureChecks() {
     check(FanLink.connectionOptions == .privileged, "клиент ищет службу в системном домене")
     check(FanHelperClient.timeout == 3, "срок клиента 3 с")
 
-    let marker = "info[\"UtilitumusSecurityEpoch\"] >= \"1\""
+    let marker = "info[\"UtilitumusSecurityEpoch\"] >= \"1\" and info[\"UtilitumusSecurityEpoch\"] < \"a\""
     let listener = "(identifier \"local.utilitumus\" and certificate leaf = H\"\(leaf)\" and \(marker)) or (identifier \"local.utilitumus.app.fans\" and certificate leaf = H\"\(leaf)\" and \(marker))"
     check(FanLink.listenerRequirement == listener, "требование слушателя дословно")
     check(FanLink.serviceRequirement == "identifier \"local.utilitumus.fan\" and certificate leaf = H\"\(leaf)\"", "требование к службе дословно")
