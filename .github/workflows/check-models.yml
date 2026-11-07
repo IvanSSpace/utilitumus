@@ -1,0 +1,86 @@
+# Раз в день смотрит, не изменили ли авторы файлы моделей Голоса (sherpa-onnx) и только сообщает задачей в Issues.
+# Новую сумму не принимает и в репозиторий ничего не пишет: сверку и решение делает человек.
+# Секретов нет, только встроенный GITHUB_TOKEN с правом на чтение кода и на задачи.
+# Расписание GitHub запускает только с основной ветки; в репозитории без активности оно отключается через 60 дней.
+name: Check models
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-models
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Закреплён полным SHA коммита (v4.4.0), как в ci.yml.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Проверка файлов у авторов
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          events="$RUNNER_TEMP/model-events.tsv"
+          : > "$events"
+          set +e
+          MODEL_WATCH_EVENTS="$events" ./scripts/check-model-updates.sh --verify 2>&1 | tee "$RUNNER_TEMP/model-report.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          # 0 — всё совпало; 1 — изменилось или пропало (дальше задача); 2 и 3 — сбой сети, API или разбора:
+          # задачу не создаём, но запуск краснеет, чтобы сбой не остался незамеченным.
+          if [ "$code" != 0 ] && [ "$code" != 1 ]; then
+            echo "::error::Проверка не состоялась (код $code). Это не значит, что файл изменился."
+            exit "$code"
+          fi
+
+      - name: Задача в Issues
+        if: steps.check.outputs.code == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          report="$RUNNER_TEMP/model-report.txt"
+          existing="$RUNNER_TEMP/issues.json"
+          # Все задачи, и открытые, и закрытые: закрытую с той же суммой заново не заводим.
+          gh issue list --state all --limit 500 --json number,title,state > "$existing"
+          while IFS="$(printf '\t')" read -r kind folder digest; do
+            case "$kind" in
+              changed) title="Модель изменилась у авторов: $folder ($digest)" ;;
+              missing) title="Модель пропала у авторов: $folder" ;;
+              *) continue ;;
+            esac
+            number="$(jq -r --arg t "$title" '[.[] | select(.title == $t and .state == "OPEN")][0].number // empty' "$existing")"
+            seen="$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | length' "$existing")"
+            {
+              echo "Ежедневная проверка (workflow Check models) нашла расхождение с тем, что вшито в Sources/Modules/Voice/VoiceModels.swift."
+              echo "Сумму автоматически не меняли и не будем: сначала сверить файл с авторами, потом решать вручную."
+              echo
+              echo '```'
+              cat "$report"
+              echo '```'
+              echo
+              echo "Запуск: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            } > "$RUNNER_TEMP/body.md"
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body-file "$RUNNER_TEMP/body.md"
+            elif [ "$seen" = 0 ]; then
+              gh issue create --title "$title" --body-file "$RUNNER_TEMP/body.md"
+            else
+              echo "Задача «${title}» уже закрыта, новую не заводим."
+            fi
+          done < "$RUNNER_TEMP/model-events.tsv"
