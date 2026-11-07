@@ -1,7 +1,13 @@
-# Раз в день смотрит, не изменили ли авторы файлы моделей Голоса (sherpa-onnx) и только сообщает задачей в Issues.
-# Новую сумму не принимает и в репозиторий ничего не пишет: сверку и решение делает человек.
-# Секретов нет, только встроенный GITHUB_TOKEN с правом на чтение кода и на задачи.
-# Расписание GitHub запускает только с основной ветки; в репозитории без активности оно отключается через 60 дней.
+# Раз в день смотрит, не изменили ли авторы файлы моделей Голоса (sherpa-onnx).
+# Нашёл изменение суммы или размера: проверяет архив (digest, состав, .onnx по Hugging Face). Прошла — пушит ветку
+# model-update/<папка>-<сумма> с одним коммитом и заводит задачу со ссылкой на запрос слияния. Не прошла — только задача
+# с предупреждением. Файл пропал — задача.
+# Сумму в продукт сам не принимает: запрос на слияние (в репозитории запрещено создавать его из Actions), слияние и выпуск
+# делает человек. В main не пушит, ничего не сливает, релизы и выпуск не вызывает. Только встроенный GITHUB_TOKEN.
+# Права по заданиям: проверка читает код; ветка единственная пишет код (и читает задачи); задача единственная пишет задачи.
+# Ветка и задачи создаются только на запуске с основной ветки; расписание GitHub и так запускает только её.
+# Через 60 дней без активности GitHub отключает расписание.
+# Недоверенные данные (отчёт, события) между заданиями идут в base64 через outputs, в шелл попадают только через env.
 name: Check models
 
 on:
@@ -11,7 +17,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: check-models
@@ -21,6 +26,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.check.outputs.code }}
+      events: ${{ steps.check.outputs.events }}
+      report: ${{ steps.check.outputs.report }}
     steps:
       # Закреплён полным SHA коммита (v4.4.0), как в ci.yml.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -34,53 +45,82 @@ jobs:
         run: |
           set -u
           events="$RUNNER_TEMP/model-events.tsv"
+          report="$RUNNER_TEMP/model-report.txt"
           : > "$events"
           set +e
-          MODEL_WATCH_EVENTS="$events" ./scripts/check-model-updates.sh --verify 2>&1 | tee "$RUNNER_TEMP/model-report.txt"
+          MODEL_WATCH_EVENTS="$events" ./scripts/check-model-updates.sh --verify 2>&1 | tee "$report"
           code=${PIPESTATUS[0]}
           set -e
-          echo "code=$code" >> "$GITHUB_OUTPUT"
-          # 0 — всё совпало; 1 — изменилось или пропало (дальше задача); 2 и 3 — сбой сети, API или разбора:
-          # задачу не создаём, но запуск краснеет, чтобы сбой не остался незамеченным.
+          # 0 — всё совпало; 1 — изменилось или пропало (дальше ветка и задача); 2 и 3 — сбой сети, API или разбора:
+          # ни ветки, ни задачи, но запуск краснеет, чтобы сбой не остался незамеченным.
           if [ "$code" != 0 ] && [ "$code" != 1 ]; then
             echo "::error::Проверка не состоялась (код $code). Это не значит, что файл изменился."
             exit "$code"
           fi
+          {
+            echo "code=$code"
+            echo "events=$(head -c 20000 "$events" | iconv -c -f UTF-8 -t UTF-8 | base64 | tr -d '\n')"
+            echo "report=$(head -c 49152 "$report" | iconv -c -f UTF-8 -t UTF-8 | base64 | tr -d '\n')"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Задача в Issues
-        if: steps.check.outputs.code == '1'
+  branch:
+    needs: check
+    if: needs.check.outputs.code == '1' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: read
+    steps:
+      # Токен остаётся в настройках git этого задания для push; здесь исполняются только скрипты из основной ветки.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Ветка с правкой суммы
+        id: branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          MW_EVENTS_B64: ${{ needs.check.outputs.events }}
+          MW_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -eu
-          report="$RUNNER_TEMP/model-report.txt"
-          existing="$RUNNER_TEMP/issues.json"
-          # Все задачи, и открытые, и закрытые: закрытую с той же суммой заново не заводим.
-          gh issue list --state all --limit 500 --json number,title,state > "$existing"
-          while IFS="$(printf '\t')" read -r kind folder digest; do
-            case "$kind" in
-              changed) title="Модель изменилась у авторов: $folder ($digest)" ;;
-              missing) title="Модель пропала у авторов: $folder" ;;
-              *) continue ;;
-            esac
-            number="$(jq -r --arg t "$title" '[.[] | select(.title == $t and .state == "OPEN")][0].number // empty' "$existing")"
-            seen="$(jq -r --arg t "$title" '[.[] | select(.title == $t)] | length' "$existing")"
-            {
-              echo "Ежедневная проверка (workflow Check models) нашла расхождение с тем, что вшито в Sources/Modules/Voice/VoiceModels.swift."
-              echo "Сумму автоматически не меняли и не будем: сначала сверить файл с авторами, потом решать вручную."
-              echo
-              echo '```'
-              cat "$report"
-              echo '```'
-              echo
-              echo "Запуск: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-            } > "$RUNNER_TEMP/body.md"
-            if [ -n "$number" ]; then
-              gh issue comment "$number" --body-file "$RUNNER_TEMP/body.md"
-            elif [ "$seen" = 0 ]; then
-              gh issue create --title "$title" --body-file "$RUNNER_TEMP/body.md"
-            else
-              echo "Задача «${title}» уже закрыта, новую не заводим."
-            fi
-          done < "$RUNNER_TEMP/model-events.tsv"
+          printf '%s' "$MW_EVENTS_B64" | base64 -d > "$RUNNER_TEMP/events.tsv"
+          set +e
+          MW_EVENTS="$RUNNER_TEMP/events.tsv" MW_BRANCHES="$RUNNER_TEMP/branches.tsv" ./scripts/model-watch-publish.sh branch
+          code=$?
+          set -e
+          echo "branches=$(head -c 20000 "$RUNNER_TEMP/branches.tsv" | base64 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          exit "$code"
+    outputs:
+      branches: ${{ steps.branch.outputs.branches }}
+
+  issue:
+    needs: [check, branch]
+    if: ${{ !cancelled() && needs.check.outputs.code == '1' && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Задачи в Issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          MW_EVENTS_B64: ${{ needs.check.outputs.events }}
+          MW_REPORT_B64: ${{ needs.check.outputs.report }}
+          MW_BRANCHES_B64: ${{ needs.branch.outputs.branches }}
+          MW_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          printf '%s' "$MW_EVENTS_B64" | base64 -d > "$RUNNER_TEMP/events.tsv"
+          printf '%s' "$MW_REPORT_B64" | base64 -d > "$RUNNER_TEMP/report.txt"
+          printf '%s' "$MW_BRANCHES_B64" | base64 -d > "$RUNNER_TEMP/branches.tsv"
+          MW_EVENTS="$RUNNER_TEMP/events.tsv" MW_REPORT="$RUNNER_TEMP/report.txt" MW_BRANCHES="$RUNNER_TEMP/branches.tsv" \
+            ./scripts/model-watch-publish.sh issue
