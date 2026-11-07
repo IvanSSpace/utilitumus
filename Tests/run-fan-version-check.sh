@@ -24,7 +24,7 @@ cp Tests/FanVersionCheck.swift "$OUT/src/main.swift"
 # Со швом FAN_TEST_FAKE_SMC: метка службы тестовая, настоящая не ищется, даже если проверка ошибётся.
 swiftc -target "$TARGET" -D FAN_TEST_FAKE_SMC -module-name FanVersionCheck -o "$OUT/check" "$OUT/src/main.swift" \
   Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift \
-  Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift \
+  Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift Sources/Modules/Fans/UI/FanTypes.swift \
   -framework AppKit
 "$OUT/check" logic
 

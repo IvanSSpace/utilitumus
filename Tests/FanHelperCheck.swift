@@ -95,13 +95,13 @@ func legacyChecks() {
 
     func source(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
     let controller = source("Sources/Modules/Fans/FanController.swift")
-    let view = source("Sources/Modules/Fans/FansView.swift")
+    let view = source("Sources/Modules/Fans/UI/FansView.swift")
     let installer = source("Sources/Modules/Fans/FanHelperInstaller.swift")
     let restore = controller.components(separatedBy: "func restoreAutoBlocking()").last?.components(separatedBy: "func stop()").first ?? ""
     check(restore.contains("status != .notInstalled"), "выход отдаёт вентиляторы и при устаревшем помощнике")
     // Экран вызывает модель, а возврат «Авто» перед удалением доступа делает встроенная модель (и разбор действия со связи).
-    let model = source("Sources/Modules/Fans/FansModel.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
-    let wire = source("Sources/Modules/Fans/FansWire.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    let model = source("Sources/Modules/Fans/BuiltInFansModel.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    let wire = source("Sources/Modules/Fans/FanControllerWire.swift").split(whereSeparator: \.isWhitespace).joined(separator: " ")
     check(view.contains("model.uninstallHelper()") && model.contains("controller.restoreAutoBlocking() installer.uninstall()"), "«Забрать доступ» сперва отдаёт вентиляторы")
     check(wire.contains("restoreAutoBlocking() installer.uninstall()"), "«Забрать доступ» со связи сперва отдаёт вентиляторы")
     let wake = controller.components(separatedBy: "didWakeNotification").last?.components(separatedBy: "screensDidSleepNotification").first ?? ""

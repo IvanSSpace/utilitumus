@@ -283,10 +283,3 @@ private struct SpaceRow<Model: ClipboardModel>: View {
         .buttonStyle(.plain).disabled(disabled).help(help).accessibilityLabel(help)
     }
 }
-
-extension ClipboardView where Model == ClipboardController {
-    /// Встроенный модуль.
-    init() { self.init(model: .shared) }
-}
-
-extension ClipboardController: HotKeyTarget {}

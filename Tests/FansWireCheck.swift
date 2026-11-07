@@ -103,9 +103,8 @@ final class FanHelperInstaller: ObservableObject {
     func refresh(afterInstall: Bool = false) { refreshes += 1 }
     func install() { installs += 1 }
     func uninstall() { uninstalledAfter = Bench.shared.log }
-    nonisolated static func outdatedDetail(fanStuckManual: Bool) -> String {
-        fanStuckManual ? "Помощник устарел. Вентилятор может оставаться в ручном режиме." : "Помощник устарел."
-    }
+    // Старый экран берёт текст отсюда, новый из FansText: для сравнения пикселей текст должен быть один.
+    nonisolated static func outdatedDetail(fanStuckManual: Bool) -> String { FansText.outdatedDetail(fanStuckManual: fanStuckManual) }
 }
 
 enum ActionLog { static func preparePrivate(file: URL) {} }

@@ -9,8 +9,8 @@ import Carbon.HIToolbox
 final class ClipboardController: ObservableObject {
     static let shared = ClipboardController()
 
-    static let defaultKeyCode = UInt32(kVK_ANSI_V)
-    static let defaultModifiers = UInt32(cmdKey | shiftKey)
+    static let defaultKeyCode = ClipboardDefaults.keyCode
+    static let defaultModifiers = ClipboardDefaults.modifiers
 
     private enum Key {
         static let keyCode = "Clipboard.HotKeyCode"

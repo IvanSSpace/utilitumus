@@ -66,7 +66,7 @@ final class RemoteFansModel: RemoteModuleModel<FansState, FansAction>, FansModel
 
     private static func icon(forKey key: String) -> NSImage? {
         guard !key.hasPrefix("exe:"), let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: key) else { return nil }
-        return GameModeController.smallIcon(NSWorkspace.shared.icon(forFile: url.path))
+        return FansText.smallIcon(NSWorkspace.shared.icon(forFile: url.path))
     }
 
     // MARK: Дашборд

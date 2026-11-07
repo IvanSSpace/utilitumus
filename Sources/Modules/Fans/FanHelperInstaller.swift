@@ -123,11 +123,8 @@ final class FanHelperInstaller: ObservableObject {
         return .ready
     }
 
-    /// Текст плашки. О ручном режиме только когда так и есть: иначе это лишняя тревога.
-    nonisolated static func outdatedDetail(fanStuckManual: Bool) -> String {
-        let base = "Помощник устарел. macOS один раз спросит пароль администратора."
-        return fanStuckManual ? base + " Вентилятор может оставаться в ручном режиме, пока доступ не обновлён." : base
-    }
+    /// Текст плашки: его показывает экран, поэтому лежит рядом с ним.
+    nonisolated static func outdatedDetail(fanStuckManual: Bool) -> String { FansText.outdatedDetail(fanStuckManual: fanStuckManual) }
 
     /// Прежний setuid-файл ещё на месте. Убрать вместе с поддержкой setuid.
     var hasLegacySetuid: Bool { LegacyFanHelper.isSetuidRoot(files().binary) }

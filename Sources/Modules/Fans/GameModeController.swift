@@ -1,15 +1,6 @@
 import Foundation
 import AppKit
 
-struct RunningCandidate: Identifiable, Equatable {
-    let key: String
-    let name: String
-    let icon: NSImage?
-    var id: String { key }
-    // Иконка для сравнения не нужна: ключ и имя определяют строку меню.
-    static func == (a: RunningCandidate, b: RunningCandidate) -> Bool { a.key == b.key && a.name == b.name }
-}
-
 /// «Максимум в играх»: следит, какая программа на переднем плане, и решает,
 /// нужны ли вентиляторам максимум. Сами вентиляторы двигает `FanController`.
 @MainActor
@@ -211,7 +202,7 @@ final class GameModeController: ObservableObject {
         if let icon = running.first(where: { $0.key == entry.key })?.icon { return icon }
         guard !entry.key.hasPrefix("exe:"),
               let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: entry.key) else { return nil }
-        return Self.smallIcon(NSWorkspace.shared.icon(forFile: url.path))
+        return FansText.smallIcon(NSWorkspace.shared.icon(forFile: url.path))
     }
 
     func refreshRunning() {
@@ -220,7 +211,7 @@ final class GameModeController: ObservableObject {
                   !Kit.isOurs(app.bundleIdentifier) else { return nil }
             let info = Self.info(app)
             guard let key = info.key else { return nil }
-            let icon = Self.iconCache[key] ?? app.icon.map(Self.smallIcon)
+            let icon = Self.iconCache[key] ?? app.icon.map(FansText.smallIcon)
             if let icon { Self.iconCache[key] = icon }
             return RunningCandidate(key: key, name: info.name, icon: icon)
         }
@@ -264,12 +255,5 @@ final class GameModeController: ObservableObject {
         }
         let name = app.localizedName ?? exe ?? app.bundleIdentifier ?? "?"
         return AppInfo(bundleID: app.bundleIdentifier, executableName: exe, name: name, category: category)
-    }
-
-    /// Копия: иконка из `NSRunningApplication` общая, менять её размер нельзя.
-    static func smallIcon(_ image: NSImage) -> NSImage {
-        let copy = (image.copy() as? NSImage) ?? image
-        copy.size = NSSize(width: 16, height: 16)
-        return copy
     }
 }

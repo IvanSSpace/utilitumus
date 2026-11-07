@@ -21,7 +21,7 @@ trap 'for d in "$NAME" "$KIT_TEST_SUITE"; do defaults delete "$d" 2>/dev/null ||
 . Tests/lib/incremental-sync.sh
 cp Tests/FansWireCheck.swift "$OUT/src/main.swift"
 KIT="Sources/Kit/Components.swift Sources/Kit/KitDefaults.swift Sources/Kit/Module.swift Sources/Kit/ModuleCategory.swift Sources/Kit/ModuleControls.swift Sources/Kit/ModuleInfo.swift Sources/Kit/PageActive.swift Sources/Kit/PrivateLog.swift Sources/Kit/KitIdentity.swift Sources/Kit/Link/LinkProtocol.swift Sources/Kit/KitSigning.swift Sources/Kit/Link/LinkWire.swift Sources/Kit/ScrollThumb.swift Sources/Kit/SegmentedControl.swift Sources/Kit/Theme.swift Sources/App/Design/Pages.swift"
-FANS="Sources/Shared/FanLink.swift Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/GameDetection.swift Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift"
+FANS="Sources/Shared/FanLink.swift Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanControllerWire.swift Sources/Modules/Fans/BuiltInFansModel.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/UI/FanTypes.swift Sources/Modules/Fans/UI/GameDetection.swift Sources/Modules/Fans/UI/FansModel.swift Sources/Modules/Fans/UI/FansWire.swift"
 FLAGS=(-target "$TARGET" -D KIT_TEST_DEFAULTS -framework AppKit -framework SwiftUI)
 
 if [ -z "${FANS_SKIP_BASE:-}" ] || [ ! -f "$OUT/base/normal.rgba" ]; then
@@ -43,7 +43,7 @@ rm -f "$OUT/bin-new/$NAME"
 CACHE="$(incremental_cache fans-wire KIT_TEST_DEFAULTS)"
 incremental_sync "$OUT/src" "$CACHE/src"
 # shellcheck disable=SC2206
-FILES=("$CACHE/src/main.swift" Sources/Modules/Fans/FansView.swift $KIT $FANS)
+FILES=("$CACHE/src/main.swift" Sources/Modules/Fans/UI/FansView.swift Sources/Modules/Fans/BuiltInFansView.swift $KIT $FANS)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} "${FLAGS[@]}" -module-name FansWireCheck -o "$OUT/bin-new/$NAME" "${FILES[@]}"
 

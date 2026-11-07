@@ -562,7 +562,7 @@ struct FansView<Model: FansModel>: View {
         // «Нужен доступ» теперь на экране «Осталось дать доступ»; здесь только устаревший помощник и ошибка.
         if model.helperStatus == .outdated {
             Banner(icon: "lock.shield", color: .orange, text: "Доступ нужно обновить",
-                   detail: FanHelperInstaller.outdatedDetail(fanStuckManual: model.fans.contains(where: \.isManual))) {
+                   detail: FansText.outdatedDetail(fanStuckManual: model.fans.contains(where: \.isManual))) {
                 DSButton("Обновить доступ…", icon: "key.fill") { model.installHelper() }
             }
         }
@@ -580,8 +580,8 @@ struct FansView<Model: FansModel>: View {
 
         if model.safetyTripped && !model.fullPower && gameName == nil {
             Banner(icon: "flame.fill", color: .red,
-                   text: "Процессор горячее \(Int(FanController.safetyTrip)) °C",
-                   detail: "Вентиляторы отданы системе, пока не остынет ниже \(Int(FanController.safetyRelease)) °C.") {
+                   text: "Процессор горячее \(Int(FanLink.thermalTrip)) °C",
+                   detail: "Вентиляторы отданы системе, пока не остынет ниже \(Int(FanLink.thermalRelease)) °C.") {
                 EmptyView()
             }
         }
@@ -694,9 +694,4 @@ struct FansView<Model: FansModel>: View {
         }
         .padding(.horizontal, 6)
     }
-}
-
-extension FansView where Model == BuiltInFansModel {
-    /// Встроенный модуль: экран рисуется из настоящих контроллеров этого же процесса.
-    init() { self.init(model: BuiltInFansModel.shared) }
 }

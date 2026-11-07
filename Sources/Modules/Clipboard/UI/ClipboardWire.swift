@@ -217,10 +217,3 @@ extension ClipboardModel {
         return nil
     }
 }
-
-extension ClipboardController {
-    /// Записи программ из исключений наружу не идут, даже если попали в историю до включения исключения.
-    var wireState: ClipboardState {
-        ClipboardState(model: self, recent: ClipRecentRow.wireRows(from: items, hiding: excludedApps))
-    }
-}
