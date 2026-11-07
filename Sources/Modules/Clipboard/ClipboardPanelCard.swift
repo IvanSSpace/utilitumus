@@ -51,6 +51,9 @@ struct ClipCard: View {
     let spaces: [ClipSpace]
     let now: Date
     let model: ClipboardPanelModel
+    /// Вместо содержимого точки. Отдельно от модели, как и `spaces`: иначе карточка не перерисуется, когда скрытие сменится.
+    let concealed: Bool
+    var editingTitle = false
     /// Плавающая копия при перетаскивании: только сама карточка, без рамки выбора и без меню.
     var isDragPreview = false
 
@@ -101,7 +104,7 @@ struct ClipCard: View {
             model.dragProvider(for: item)
         } preview: {
             ClipCard(item: item, number: number, selected: false, searching: false, theme: theme, spaces: spaces, now: now,
-                     model: model, isDragPreview: true)
+                     model: model, concealed: ClipConcealment.isHidden(item, in: spaces), isDragPreview: true)
         }
         .contextMenu { menu }
     }
@@ -117,7 +120,7 @@ struct ClipCard: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
-                    Text(item.kind.title).font(.system(size: 15, weight: .semibold))
+                    titleLine
                     if let space = spaces.first(where: { $0.id == item.spaceID }) {
                         Circle().fill(ClipPalette.color(space.colorID)).frame(width: 9, height: 9)
                             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
@@ -125,7 +128,7 @@ struct ClipCard: View {
                             .transition(.scale(scale: 0.2).combined(with: .opacity))
                     }
                 }
-                Text(ClipPanelText.ago(item.date, now: now)).font(.system(size: 12))
+                Text(subtitle).font(.system(size: 12))
             }
             .foregroundStyle(.white)
             .padding(.leading, ClipboardPreview.textInset)
@@ -134,6 +137,26 @@ struct ClipCard: View {
         }
         .frame(height: Self.headerHeight)
         .clipped()
+    }
+
+    @ViewBuilder private var titleLine: some View {
+        if editingTitle {
+            ClipInlineField(placeholder: "Название", font: .system(size: 15, weight: .semibold),
+                            text: Binding(get: { model.titleEdit?.text ?? "" }, set: { model.titleEdit?.text = $0 }))
+                .padding(.horizontal, 4)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(.black.opacity(0.28)))
+                .padding(.horizontal, -4)
+        } else {
+            // Попасть можно только в сам текст: двойной клик по остальной шапке по-прежнему вставляет.
+            Text(item.title ?? item.kind.title).font(.system(size: 15, weight: .semibold))
+                .contentShape(Rectangle())
+                .onTapGesture { model.clickTitle(item) }
+        }
+    }
+
+    private var subtitle: String {
+        let ago = ClipPanelText.ago(item.date, now: now)
+        return item.title == nil ? ago : "\(item.kind.title) · \(ago)"
     }
 
     /// Значок заходит за правый верхний угол: края срезает скругление карточки.
@@ -152,6 +175,16 @@ struct ClipCard: View {
     // MARK: Содержимое
 
     @ViewBuilder private var content: some View {
+        if concealed {
+            Text(ClipConcealment.mask)
+                .font(.system(size: 22, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            revealedContent
+        }
+    }
+
+    @ViewBuilder private var revealedContent: some View {
         switch item.kind {
         case .text:
             Text(ClipboardPreview.shownText(item.text ?? ""))
@@ -204,13 +237,13 @@ struct ClipCard: View {
     private static let linkFooterHeight: CGFloat = 52
 
     @ViewBuilder private var footer: some View {
-        if item.kind == .link {
+        if item.kind == .link && !concealed {
             linkFooter
         } else {
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
                 // Подпись о скрытых строках нельзя обрезать: в конце самое важное. Номер не сжимается, подпись ужимается сама.
-                Text(caption).font(.system(size: Self.captionSize)).foregroundStyle(.white.opacity(0.55))
+                Text(concealed ? "" : caption).font(.system(size: Self.captionSize)).foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1).minimumScaleFactor(Self.captionMinScale)
                 Spacer(minLength: 0)
                 numberLabel
@@ -271,16 +304,45 @@ struct ClipCard: View {
 
     @ViewBuilder private var menu: some View {
         Button("Вставить") { model.onPaste(item) }
+        Button("Переименовать") { model.beginTitleEdit(item) }
+        if ClipConcealment.isHidden(item, in: spaces) {
+            if concealed {
+                Button("Показать") { model.reveal(item.id) }
+            } else {
+                Button("Скрыть") { model.conceal(item.id) }
+            }
+        }
         Menu("В пространство") {
             ForEach(spaces) { space in
-                Button(space.name) { model.onPin(item.id, space.id) }
+                Button(space.name) { model.pin(item.id, to: space.id) }
             }
             if spaces.isEmpty { Text("Пространств нет — создай кнопкой + вверху") }
         }
         if item.spaceID != nil {
-            Button("Убрать из пространства") { model.onPin(item.id, nil) }
+            Button("Убрать из пространства") { model.pin(item.id, to: nil) }
         }
         Divider()
         Button("Удалить", role: .destructive) { model.onDelete(item.id) }
+    }
+}
+
+/// Поле правки на месте: название карточки и имя категории. Клавиатуру забирает на время правки, текст при получении фокуса выделен.
+struct ClipInlineField: View {
+    let placeholder: String
+    let font: Font
+    @Binding var text: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .textFieldStyle(.plain)
+            .font(font)
+            .focused($focused)
+            .onAppear {
+                focused = true
+                DispatchQueue.main.async {
+                    for window in NSApp.windows { (window.firstResponder as? NSTextView)?.selectAll(nil) }
+                }
+            }
     }
 }

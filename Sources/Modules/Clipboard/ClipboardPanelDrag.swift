@@ -7,6 +7,8 @@ enum ClipDrag {
     /// Свой тип для броска на категорию. Динамический по расширению: объявленный идентификатор без записи в Info.plist
     /// SwiftUI при броске прочитать не может («Failed to instantiate a content type»), а этому объявление не нужно.
     static let recordType = UTType(filenameExtension: "utilitumus-clip-record", conformingTo: .data)!
+    /// Перенос категории: отдельный тип, запись на его месте не примут и наоборот.
+    static let spaceType = UTType(filenameExtension: "utilitumus-clip-space", conformingTo: .data)!
 
     /// Картинка отдаётся байт в байт и только когда программа попросила: `loadImage` до этого не зовётся.
     static func provider(for item: ClipItem, loadImage: @escaping @Sendable () -> Data?,
@@ -35,6 +37,17 @@ enum ClipDrag {
         let id = data(for: item.id)
         provider.registerDataRepresentation(forTypeIdentifier: recordType.identifier, visibility: .all) { done in
             done(id, nil)
+            return nil
+        }
+        return provider
+    }
+
+    /// Категория: только номер под своим типом. Другим программам взять нечего.
+    static func spaceProvider(for id: UUID) -> NSItemProvider {
+        let provider = NSItemProvider()
+        let bytes = data(for: id)
+        provider.registerDataRepresentation(forTypeIdentifier: spaceType.identifier, visibility: .all) { done in
+            done(bytes, nil)
             return nil
         }
         return provider

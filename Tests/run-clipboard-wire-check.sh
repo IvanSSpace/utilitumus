@@ -24,8 +24,11 @@ rm -rf "$OUT/src"
 mkdir -p "$OUT/src" "$OUT/png"
 cp Tests/ClipboardWireCheck.swift "$OUT/src/ClipboardWireCheck.swift"
 /usr/bin/git show "$BEFORE:Sources/Modules/Clipboard/ClipboardView.swift" \
-  | sed 's/ClipboardController\.shared/LegacyFakeController.shared/; s/ClipboardView/LegacyClipboardView/; s/SpaceRow/LegacySpaceRow/' \
+  | sed 's/ClipboardController\.shared/LegacyFakeController.shared/; s/ClipboardView/LegacyClipboardView/; s/SpaceRow/LegacySpaceRow/; /iconButton("chevron\./d' \
   > "$OUT/src/LegacyClipboardView.swift"
+# Кнопки ↑↓ из старого экрана убраны: порядок теперь перетаскиванием (сверка остальных пикселей та же), само перетаскивание проверяет checkSpaceDrag.
+grep -q 'iconButton("chevron' "$OUT/src/LegacyClipboardView.swift" \
+  && { echo "ПРОВАЛ: в старом экране остались кнопки порядка"; exit 1; }
 grep -q ClipboardController "$OUT/src/LegacyClipboardView.swift" \
   && { echo "ПРОВАЛ: старый экран всё ещё смотрит на настоящий контроллер"; exit 1; }
 sed '/^@main$/d' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"

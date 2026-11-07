@@ -36,6 +36,7 @@ absent "панель не активирует приложение и не от
   'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}" "$DROP"
 absent "выделение не ждёт двойного клика системы" 'onTapGesture\(count' "${PANEL[@]}"
 absent "у выбора нет масштаба: карточка не дрожит" 'scaleEffect' "${PANEL[@]}"
+absent "подсказки карточки не называют содержимое" 'help\(.*(item\.(text|filePaths|host|imageFile)|linkTitle|caption)' Sources/Modules/Clipboard/ClipboardPanelCard.swift
 absent "перетаскивание не пишет содержимое ни в буфер, ни во временные файлы" 'NSPasteboard|temporaryDirectory|NSTemporaryDirectory|\.write\(' Sources/Modules/Clipboard/ClipboardPanelDrag.swift
 # Кнопки только через clipPanelButton: иначе у новой кнопки вернётся системная рамка фокуса. Проверка по исходникам:
 # окно за экраном не ключевое и такого фокуса не показывает, обход клавиатуры в нём зелёный и без focusable(false).

@@ -445,6 +445,117 @@ func longFixture() -> Fixture {
     check(detector > 1000, "сравнение видит разницу: пустой и полный экран отличаются на \(detector) пикселей")
 }
 
+/// Настоящие события мыши в настоящем жесте экрана: окно за экраном, связка не нужна.
+@MainActor func checkSpaceDrag(out: String) async {
+    var fixture = fullFixture()
+    fixture.spaces = threeSpaces
+    let model = FakeClipboardModel(fixture)
+    let root = ClipboardView(model: model)
+        .environment(\.dsTheme, DSTheme.dusk)
+        .preferredColorScheme(.dark)
+        .frame(width: 738, height: 660)
+    let host = NSHostingView(rootView: root)
+    host.frame = NSRect(x: 0, y: 0, width: 738, height: 660)
+    Stand.window.contentView = host
+    defer { Stand.window.contentView = nil }
+    await pause(0.5)
+    host.layoutSubtreeIfNeeded()
+    func field(_ name: String) -> NSView? {
+        func walk(_ view: NSView) -> NSView? {
+            if let text = view as? NSTextField, text.stringValue == name { return text }
+            return view.subviews.lazy.compactMap(walk).first
+        }
+        return walk(host)
+    }
+    func center(_ name: String) -> NSPoint? {
+        field(name).map { $0.convert($0.bounds, to: nil) }.map { NSPoint(x: $0.minX + 30, y: $0.midY) }
+    }
+    func send(_ type: NSEvent.EventType, _ p: NSPoint) {
+        Stand.window.sendEvent(NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: Stand.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+    }
+    func names() -> [String] { model.spaces.map(\.name) }
+    func movesOnly() -> [String] { model.calls.filter { $0 == "moveSpace" } }
+    guard let start = center("Работа"), let last = center("Коды") else {
+        check(false, "строки пространств на экране (\(names()))")
+        return
+    }
+    let step = (start.y - last.y) / 2
+    check(abs(step - 40) < 1, "высота строки 40 точек, расчёт мест верен (\(step))")
+    let plain = snapshot(host)
+
+    // Вниз на две строки.
+    send(.leftMouseDown, start)
+    send(.leftMouseDragged, NSPoint(x: start.x, y: start.y - 10))
+    await pause(0.05)
+    send(.leftMouseDragged, NSPoint(x: start.x, y: last.y))
+    await pause(0.5)
+    let moving = snapshot(host)
+    try? moving.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(out)/png/spaces-dragging.png"))
+    check(differingPixels(plain, moving) > 500, "пока несут, соседи сдвинуты: на снимке другое")
+    check(movesOnly().isEmpty && names() == ["Работа", "Дом", "Коды"], "до отпускания действий нет")
+    send(.leftMouseUp, NSPoint(x: start.x, y: last.y))
+    await pause(0.5)
+    check(names() == ["Дом", "Коды", "Работа"], "отпустили: порядок сменился: \(names())")
+    check(movesOnly().count == 2, "ушло два шага прежним moveSpace: \(movesOnly().count)")
+
+    // Вверх на одну.
+    guard let lower = center("Работа"), let middle = center("Коды") else { return check(false, "строки после перестановки") }
+    send(.leftMouseDown, lower)
+    send(.leftMouseDragged, NSPoint(x: lower.x, y: lower.y + 10))
+    await pause(0.05)
+    send(.leftMouseDragged, middle)
+    await pause(0.1)
+    send(.leftMouseUp, middle)
+    await pause(0.5)
+    check(names() == ["Дом", "Работа", "Коды"], "вверх на одну: \(names())")
+
+    // Короткое движение ничего не двигает, за край встаёт на край.
+    let calls = movesOnly().count
+    guard let first = center("Дом") else { return check(false, "первая строка") }
+    send(.leftMouseDown, first)
+    send(.leftMouseDragged, NSPoint(x: first.x, y: first.y - 8))
+    await pause(0.05)
+    send(.leftMouseUp, NSPoint(x: first.x, y: first.y - 8))
+    await pause(0.3)
+    check(movesOnly().count == calls && names() == ["Дом", "Работа", "Коды"], "меньше половины строки: на месте")
+    guard let top = center("Дом") else { return check(false, "первая строка") }
+    send(.leftMouseDown, top)
+    send(.leftMouseDragged, NSPoint(x: top.x, y: top.y + 10))
+    await pause(0.05)
+    send(.leftMouseDragged, NSPoint(x: top.x, y: top.y + 300))
+    await pause(0.1)
+    send(.leftMouseUp, NSPoint(x: top.x, y: top.y + 300))
+    await pause(0.3)
+    check(movesOnly().count == calls && names() == ["Дом", "Работа", "Коды"], "первая вверх: шагов нет, край не нарушен")
+
+    // Клик по имени по-прежнему открывает правку. Настоящий фокус ставит сам вид.
+    guard let click = center("Работа") else { return check(false, "строка для клика") }
+    send(.leftMouseDown, click)
+    send(.leftMouseUp, click)
+    await pause(0.3)
+    check(Stand.window.firstResponder is NSTextView, "клик по имени открыл правку")
+    Stand.window.makeFirstResponder(nil)
+    await pause(0.1)
+
+    // Корзина и «Создать» на месте: кнопка, а не жест строки.
+    let before = model.calls.count
+    model.addSpace(name: "Новое", colorID: "teal")
+    check(model.calls.count == before + 1 && names().last == "Новое", "создание как раньше")
+    await pause(0.3)
+    let source = (try? String(contentsOfFile: "Sources/Modules/Clipboard/UI/ClipboardView.swift", encoding: .utf8)) ?? ""
+    check(!source.contains("chevron."), "кнопок ↑↓ на экране нет")
+    check(source.contains("accessibilityAction(named: \"Выше\")") && source.contains("accessibilityAction(named: \"Ниже\")"), "порядок доступен через действия доступности")
+}
+
+@MainActor func snapshot(_ host: NSView) -> NSBitmapImageRep {
+    let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+    host.cacheDisplay(in: host.bounds, to: bitmap)
+    return bitmap
+}
+
+func pause(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+
 @main
 enum Main {
     static func main() {
@@ -458,6 +569,7 @@ enum Main {
             checkRefusals()
             checkAccepted()
             await checkScreen(out: out)
+            await checkSpaceDrag(out: out)
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)
         }

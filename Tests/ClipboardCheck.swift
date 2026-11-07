@@ -657,5 +657,174 @@ do {
     check(limitStore.ingest(both) && limitStore.items.first?.kind == .text, "снимок с текстом и картинкой: запись-текст")
 }
 
+// 20. Порядок внутри категории: своё место, вставка и повтор его не меняют, история по времени
+do {
+    let orderDir = root.appendingPathComponent("order")
+    var store = ClipboardStore(directory: orderDir, key: key)
+    let space = store.addSpace(name: "Работа", colorID: "red")
+    let other = store.addSpace(name: "Другая", colorID: "blue")
+    for name in ["a", "b", "c", "d"] { store.ingest(snap(name)) }
+    func id(_ text: String) -> UUID { store.items.first { $0.text == text }!.id }
+    func order(_ query: String = "") -> [String] { store.items(in: space.id, query: query).compactMap(\.text) }
+    func history() -> [String] { store.items(in: nil, query: "").compactMap(\.text) }
+    for name in ["a", "b", "c"] { store.pin(id(name), to: space.id) }
+    check(order() == ["c", "b", "a"], "новая запись в категории первая слева: \(order())")
+    store.moveRecord(id("c"), to: 2)
+    check(order() == ["b", "a", "c"], "перестановка: \(order())")
+    store = ClipboardStore(directory: orderDir, key: key)
+    check(order() == ["b", "a", "c"], "порядок прочитан с диска: \(order())")
+    let times = history()
+    store.moveRecord(id("a"), to: 0)
+    check(order() == ["a", "b", "c"], "ещё перестановка: \(order())")
+    check(history() == times, "общая вкладка по времени, перестановка её не меняет: \(history())")
+    let before = store.items.first { $0.text == "c" }!.date
+    store.touch(id("c"), now: before.addingTimeInterval(60))
+    check(order() == ["a", "b", "c"], "вставка не меняет порядок внутри категории: \(order())")
+    check(history().first == "c", "вставка поднимает запись в общей вкладке")
+    store.ingest(snap("b"))
+    check(order() == ["a", "b", "c"], "повторное копирование не меняет порядок внутри категории: \(order())")
+    check(history().first == "b", "повтор поднимает запись в общей вкладке")
+    store.pin(id("c"), to: space.id)
+    check(order() == ["a", "b", "c"], "бросок на свою же категорию ничего не меняет: \(order())")
+    store.moveRecord(id("b"), to: 99)
+    check(order() == ["a", "c", "b"], "место за краем: запись последняя: \(order())")
+    store.moveRecord(id("b"), to: -5)
+    check(order() == ["b", "a", "c"], "место левее начала: запись первая: \(order())")
+    store.moveRecord(id("d"), to: 0)
+    check(store.items.first { $0.text == "d" }!.spaceRank == nil && order() == ["b", "a", "c"], "вне категории переставлять нечего")
+    check(store.items(in: space.id, query: "текст").compactMap(\.text) == order(), "поиск внутри категории идёт по тому же порядку")
+    store.ingest(snap("ba"))
+    store.pin(id("ba"), to: space.id)
+    check(order() == ["ba", "b", "a", "c"] && order("b") == ["ba", "b"], "выдача поиска в порядке категории: \(order("b"))")
+    store.pin(id("a"), to: nil)
+    check(store.items.first { $0.text == "a" }!.spaceRank == nil, "убранная из категории теряет своё место")
+    store.pin(id("a"), to: space.id)
+    check(order().first == "a", "вернулась: снова первая, прежнего места нет: \(order())")
+    store.pin(id("c"), to: other.id)
+    check(order().last == "b" && store.items(in: other.id, query: "").map(\.text) == ["c"], "перенос в другую категорию: там первая, тут ушла")
+    store.delete(id("a"))
+    check(order() == ["ba", "b"], "удаление записи: остальные на месте: \(order())")
+    store.deleteSpace(space.id)
+    check(store.items.filter { $0.spaceID == nil }.allSatisfy { $0.spaceRank == nil }, "удаление категории не оставляет мест у записей")
+}
+
+// 21. Название: чистится, ищется, вставляется содержимое
+do {
+    let store = ClipboardStore(directory: root.appendingPathComponent("title"), key: key)
+    store.ingest(snap("настоящее содержимое"))
+    let id = store.items[0].id
+    store.setTitle(id, "  Пароль   от\nпочты\t")
+    check(store.items[0].title == "Пароль от почты", "перевод строки и табуляция стали пробелами: «\(store.items[0].title ?? "")»")
+    check(ClipboardStore(directory: root.appendingPathComponent("title"), key: key).items[0].title == "Пароль от почты", "название прочитано с диска")
+    store.setTitle(id, String(repeating: "я", count: 200))
+    check(store.items[0].title?.count == 60, "предел 60 знаков: \(store.items[0].title?.count ?? 0)")
+    check(ClipboardStore.cleanTitle("a\u{0}b\u{202E}c\u{7}d") == "abcd", "управляющие символы и переворот текста отброшены")
+    check(ClipboardStore.cleanTitle(String(repeating: "\u{1F600}", count: 70))?.count == 60, "эмодзи считаются знаками, а не байтами")
+    check(ClipboardStore.cleanTitle("a" + String(repeating: "\u{301}", count: 40))?.unicodeScalars.count == 3, "диакритика ограничена")
+    store.setTitle(id, "Почта")
+    check(store.items(in: nil, query: "почт").count == 1, "поиск находит по названию")
+    check(store.items(in: nil, query: "настоящее").count == 1, "у обычной записи поиск по содержимому прежний")
+    store.touch(id)
+    store.ingest(snap("настоящее содержимое"))
+    check(store.items[0].title == "Почта", "вставка и повтор название не теряют")
+    let board = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.title.\(UUID().uuidString)"))
+    defer { board.releaseGlobally() }
+    _ = ClipboardPasteboard.write(store.items[0], imageData: nil, to: board)
+    check(board.string(forType: .string) == "настоящее содержимое", "вставка отдаёт содержимое, а не название")
+    store.setTitle(id, "   ")
+    check(store.items[0].title == nil, "пустое имя убирает название")
+    store.setTitle(id, "\u{7}\u{202E}")
+    check(store.items[0].title == nil, "имя из одних управляющих символов тоже")
+}
+
+// 22. Скрытие: поиск только по названию
+do {
+    let store = ClipboardStore(directory: root.appendingPathComponent("hidden"), key: key)
+    let space = store.addSpace(name: "Пароли", colorID: "red", hidesContent: true)
+    check(space.hidesContent == true, "настройка при создании")
+    check(store.addSpace(name: "Обычная", colorID: "blue").hidesContent == nil, "по умолчанию выключено и в файле не пишется")
+    store.ingest(ClipSnapshot(types: [], text: "qwerty-секрет", sourceBundleID: "com.apple.Notes", sourceName: "Заметки"))
+    let id = store.items[0].id
+    check(store.items(in: nil, query: "qwerty").count == 1, "до закрепления находится по содержимому")
+    store.pin(id, to: space.id)
+    for query in ["qwerty", "секрет", "q", "Заметки", "Текст"] {
+        check(store.items(in: nil, query: query).isEmpty && store.items(in: space.id, query: query).isEmpty, "скрытая запись не находится по «\(query)»")
+    }
+    check(store.items(in: space.id, query: "").count == 1 && store.items(in: nil, query: "").count == 1, "без запроса запись на месте")
+    store.setTitle(id, "Почта")
+    check(store.items(in: nil, query: "почта").count == 1, "находится по названию")
+    check(store.items(in: nil, query: "qwerty").isEmpty, "по содержимому по-прежнему нет")
+    store.setSpaceHidden(space.id, false)
+    check(store.items(in: nil, query: "qwerty").count == 1, "сняли скрытие: поиск снова по содержимому")
+    store.setSpaceHidden(space.id, true)
+    check(store.items(in: nil, query: "qwerty").isEmpty, "поставили: действует сразу")
+    let reread = ClipboardStore(directory: root.appendingPathComponent("hidden"), key: key)
+    check(reread.spaces[0].hidesContent == true && reread.items[0].title == "Почта", "скрытие прочитано с диска")
+    let rows = ClipConcealment.rowItems(store.items, spaces: store.spaces)
+    check(rows[0].text == "Почта" && rows[0].kind == .text && rows[0].filePaths == nil && rows[0].imageFile == nil, "строка скрытой записи: только название")
+    store.setTitle(id, nil)
+    check(ClipConcealment.rowItems(store.items, spaces: store.spaces)[0].text == "Скрыто", "без названия «Скрыто»")
+    let spacesJSON = String(data: try! JSONEncoder().encode(ClipConcealment.wireSpaces(store.spaces)), encoding: .utf8)!
+    check(!spacesJSON.contains("hidesContent"), "поле скрытия не уходит центру")
+}
+
+// 23. Старый индекс и откат на 1.3.x. Типы ниже — ровно те, что читает вышедшая версия.
+do {
+    struct OldItem: Codable { var id: UUID; var hash: String; var kind: ClipKind; var text: String?; var filePaths: [String]?; var imageFile: String?
+        var imageWidth: Int?; var imageHeight: Int?; var sourceBundleID: String?; var sourceName: String?; var date: Date; var spaceID: UUID? }
+    struct OldSpace: Codable { var id: UUID; var name: String; var colorID: String }
+    struct OldIndex: Codable { var items: [OldItem]; var spaces: [OldSpace] }
+    let oldDir = root.appendingPathComponent("old-index")
+    try! FileManager.default.createDirectory(at: oldDir, withIntermediateDirectories: true)
+    let s = UUID().uuidString, a = UUID(), b = UUID(), c = UUID(), d = UUID()
+    let json = """
+    {"items":[
+      {"id":"\(a.uuidString)","hash":"h1","kind":"text","text":"первая","sourceBundleID":"com.apple.Notes","sourceName":"Заметки","date":400},
+      {"id":"\(b.uuidString)","hash":"h2","kind":"image","imageFile":"img-x.bin","imageWidth":7,"imageHeight":5,"date":300,"spaceID":"\(s)"},
+      {"id":"\(c.uuidString)","hash":"h3","kind":"file","filePaths":["/tmp/a.txt","/tmp/b.txt"],"date":200,"spaceID":"\(s)"},
+      {"id":"\(d.uuidString)","hash":"h4","kind":"link","text":"https://example.com/x","date":100,"spaceID":"\(s)"}
+    ],"spaces":[{"id":"\(s)","name":"Работа","colorID":"red"}]}
+    """
+    func read(_ dir: URL) -> Data { try! AES.GCM.open(AES.GCM.SealedBox(combined: Data(contentsOf: dir.appendingPathComponent("index.bin"))), using: key) }
+    try! AES.GCM.seal(Data(json.utf8), using: key).combined!.write(to: oldDir.appendingPathComponent("index.bin"))
+    check(ClipboardStore.indexCheck(directory: oldDir, key: key) == .readable, "индекс старого формата открывается")
+    func same(_ store: ClipboardStore) -> Bool {
+        store.setAsideIndex == nil && store.items.map(\.id) == [a, b, c, d] && store.items.map(\.hash) == ["h1", "h2", "h3", "h4"]
+            && store.items[0].text == "первая" && store.items[0].sourceName == "Заметки" && store.items[0].sourceBundleID == "com.apple.Notes"
+            && store.items[1].imageFile == "img-x.bin" && store.items[1].imageWidth == 7 && store.items[1].imageHeight == 5
+            && store.items[2].filePaths == ["/tmp/a.txt", "/tmp/b.txt"] && store.items[3].kind == .link
+            && store.items.map(\.date.timeIntervalSinceReferenceDate) == [400, 300, 200, 100]
+            && store.items.map(\.spaceID?.uuidString) == [nil, s, s, s]
+            && store.spaces.count == 1 && store.spaces[0].name == "Работа" && store.spaces[0].colorID == "red"
+    }
+    var store = ClipboardStore(directory: oldDir, key: key)
+    check(same(store), "старый индекс прочитан без потерь")
+    let space = UUID(uuidString: s)!
+    check(store.items(in: space, query: "").map(\.id) == [b, c, d], "порядок в категории прежний: сначала новые")
+    check(store.items.allSatisfy { $0.title == nil } && store.spaces[0].hidesContent == nil, "названий и скрытия нет: вид прежний")
+    store.renameSpace(space, to: "Работа")
+    store = ClipboardStore(directory: oldDir, key: key)
+    check(same(store), "сохранён и прочитан снова, ничего не потеряно")
+    check(store.items(in: space, query: "").map(\.id) == [b, c, d], "после сохранения порядок тот же")
+    store.touch(d)
+    check(store.items(in: space, query: "").map(\.id) == [b, c, d], "вставка не меняет порядок и у записи из старого индекса")
+    // Откат: новый файл читает старая версия.
+    store.setTitle(b, "Снимок")
+    store.setSpaceHidden(space, true)
+    store.moveRecord(d, to: 0)
+    let old = try? JSONDecoder().decode(OldIndex.self, from: read(oldDir))
+    check(old?.items.count == 4 && old?.spaces.count == 1 && old?.items.first { $0.id == b }?.imageFile == "img-x.bin", "версия 1.3.x читает новый файл и ничего не теряет")
+    // Старая версия сохранила файл и вернулись на новую: мест нет, записи целы, всё снова размечено.
+    try! AES.GCM.seal(try! JSONEncoder().encode(old!), using: key).combined!.write(to: oldDir.appendingPathComponent("index.bin"))
+    store = ClipboardStore(directory: oldDir, key: key)
+    check(store.items.count == 4 && store.items.filter { $0.spaceID != nil }.allSatisfy { $0.spaceRank != nil }, "после отката и возврата записи целы и размечены")
+    // Старый индекс не должен менять своих полей ради новых: файл без новых данных не содержит новых ключей.
+    let fresh = ClipboardStore(directory: root.appendingPathComponent("no-new-keys"), key: key)
+    fresh.ingest(snap("x"))
+    _ = fresh.addSpace(name: "n", colorID: "red")
+    let plain = String(data: read(root.appendingPathComponent("no-new-keys")), encoding: .utf8)!
+    check(!plain.contains("title") && !plain.contains("spaceRank") && !plain.contains("hidesContent"), "пока новым нечего хранить, в файле нет новых полей")
+}
+
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")
 exit(failures == 0 ? 0 : 1)
