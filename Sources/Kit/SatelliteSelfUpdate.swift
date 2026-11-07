@@ -4,13 +4,19 @@ import Foundation
 /// Утилита обновляет себя, пока центра нет. Доверие держится на подписи, как у установщика центра,
 /// но ни плист, ни агента здесь не трогаем: меняется только бандл.
 enum SatelliteSelfUpdate {
+    /// Утилиты из `SatelliteCatalog.personOnly` каталог не читают вовсе: для них в нём нечего искать.
+    /// Запрет действует начиная с версии, где есть этот код. Уже выпущенные решают по-старому: ближайший выпуск
+    /// Вентиляторов и Буфера они могут поставить себе сами при закрытом центре, `minHub` и `manualUpdate` их не держат.
+    static func mayUpdateItself(id: String) -> Bool { !SatelliteCatalog.personOnly.contains(id) }
+
+    /// Отметка `manualUpdate` читается так же, как в автообновлении центра: остаётся кнопка.
     static func newer(in catalog: Catalog, id: String, than current: String) -> CatalogApp? {
-        catalog.apps.first { $0.id == id && Kit.isNewer($0.version, than: current) }
+        guard mayUpdateItself(id: id) else { return nil }
+        return catalog.apps.first { $0.id == id && !$0.manualUpdate && Kit.isNewer($0.version, than: current) }
     }
 
     /// Пока подпись и версия не проверены, `target` не тронут. Перезапуск — дело вызывающего.
-    /// `beforeReplace` идёт после всех проверок и прямо перед заменой: после неё сервис вентиляторов может уже
-    /// не принять этот процесс. Если он бросил, бандл остаётся прежним.
+    /// `beforeReplace` идёт после всех проверок и прямо перед заменой. Если он бросил, бандл остаётся прежним.
     static func install(_ app: CatalogApp, target: URL, beforeReplace: () async throws -> Void = {}) async throws {
         let fm = FileManager.default
         let (archive, response) = try await URLSession.shared.download(from: app.url)

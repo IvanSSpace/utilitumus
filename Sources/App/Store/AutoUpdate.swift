@@ -27,12 +27,8 @@ enum AutoUpdatePolicy {
     /// Таймер только сверяет часы и пробует занятых и отложенных заново; сеть он не трогает, пока не подошёл срок.
     static let tickInterval: TimeInterval = 30 * 60
 
-    /// Обновляются только по кнопке, что бы ни было в каталоге:
-    /// `fans` — центр не знает, поднята ли в выпуске версия службы; поднята — вентиляторы не работают, пока человек
-    /// не введёт пароль (`FanHelperInstaller`). Плюс выход утилиты снимает выбранные человеком обороты.
-    /// `clipboard` — ключ истории в файловой связке, подпись без Team ID: новый бинарник может вызвать окно пароля связки
-    /// (`ClipboardKeyring`), а проверить это на настоящей связке нельзя.
-    static let personOnly: Set<Module> = [.fans, .clipboard]
+    /// Обновляются только по кнопке, что бы ни было в каталоге. Список и причины в `SatelliteCatalog.personOnly`.
+    static let personOnly = Set(Module.allCases.filter { SatelliteCatalog.personOnly.contains($0.rawValue) })
 
     /// Срок проверки каталога. Часы могли уйти назад: тогда тоже пора, иначе проверка замрёт надолго.
     static func isDue(lastCheck: Date?, now: Date) -> Bool {

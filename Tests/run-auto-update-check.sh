@@ -48,6 +48,10 @@ same "AutoUpdate.swift сам не качает и не ставит" "$(grep -c
 same "окно пароля службы только по кнопке" \
   "$(grep -rlE 'installer\.install\(\)|FanHelperInstaller\.shared\.install\(\)' Sources | LC_ALL=C sort)" \
   "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift | LC_ALL=C sort)"
+# Второго списка нет: и центр, и утилита читают один (самой утилите проверка в run-satellite-role-check).
+same "в автообновлении нет своего списка «только по кнопке»" "$(grep -cE 'personOnly[^=]*=.*\.(fans|clipboard)|\[\.fans' Sources/App/Store/AutoUpdate.swift || true)" "0"
+grep -q 'static let personOnly = Set(Module.allCases.filter { SatelliteCatalog.personOnly' Sources/App/Store/AutoUpdate.swift || { echo "ПРОВАЛ: автообновление берёт список не из каталога"; exit 1; }
+echo "ok   список «только по кнопке» берётся из SatelliteCatalog"
 same "браузер по умолчанию меняют только кнопка и удаление" \
   "$(grep -rlE '\.setDefault\(|setDefaultApplication' Sources | LC_ALL=C sort)" \
   "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/BrowserLinkHandler.swift Sources/Modules/Browser/BrowserView.swift | LC_ALL=C sort)"
@@ -212,8 +216,12 @@ mutate "перезапуск при непонятном состоянии" Sou
   'if automatic, await satellites.stateUnreadable(module) {' \
   'if automatic, module.rawValue == "", await satellites.stateUnreadable(module) {' \
   "непонятное состояние"
-mutate "без защиты от пароля" Sources/App/Store/AutoUpdate.swift \
-  'static let personOnly: Set<Module> = [.fans, .clipboard]' \
+mutate "без защиты от пароля" Sources/Kit/SatelliteCatalog.swift \
+  'static let personOnly: Set<String> = ["fans", "clipboard"]' \
+  'static let personOnly: Set<String> = ["clipboard"]' \
+  "только по кнопке"
+mutate "автообновление не смотрит на общий список" Sources/App/Store/AutoUpdate.swift \
+  'static let personOnly = Set(Module.allCases.filter { SatelliteCatalog.personOnly.contains($0.rawValue) })' \
   'static let personOnly: Set<Module> = [.clipboard]' \
   "только по кнопке"
 mutate "с понижением версии" Sources/App/Satellites/SatelliteRegistry.swift \
