@@ -28,6 +28,36 @@ struct ClipClickTracker {
     mutating func reset() { last = nil }
 }
 
+/// Скорость появления и закрытия панели, настройка в меню «…». Читается при каждом показе и уходе, поэтому применяется сразу.
+/// Неизвестное значение и отсутствие ключа (старые настройки) — значение по умолчанию.
+enum ClipPanelSpeed: String, CaseIterable, Identifiable {
+    case instant, fast, normal, smooth
+
+    static let standard = ClipPanelSpeed.fast
+
+    var id: String { rawValue }
+
+    var duration: Double {
+        switch self {
+        case .instant: return 0
+        case .fast: return 0.08
+        case .normal: return 0.16
+        case .smooth: return 0.28
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .instant: return "Мгновенно"
+        case .fast: return "Быстро"
+        case .normal: return "Обычно"
+        case .smooth: return "Плавно"
+        }
+    }
+
+    static func parse(_ raw: String?) -> ClipPanelSpeed { raw.flatMap(ClipPanelSpeed.init(rawValue:)) ?? standard }
+}
+
 /// Выбор нескольких карточек. Пусто или одна — обычный выбор, его держит `selected` модели; номера здесь не годятся, порядок ленты решает она сама.
 struct ClipSelection: Equatable {
     private(set) var ids: Set<UUID> = []

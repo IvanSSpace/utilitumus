@@ -106,6 +106,9 @@ final class ClipboardPanelModel: ObservableObject {
     var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
     /// Клик по одной из выбранных: сбросить до неё, если второго клика не будет.
     private var pendingCollapse: UUID?
+    /// Скорости панели, для галочек в меню. Сама панель читает их из настроек при каждом показе и уходе.
+    @Published private(set) var showSpeed = ClipPanelSpeed.parse(Kit.defaults.string(forKey: ClipboardPanelHost.showSpeedKey))
+    @Published private(set) var hideSpeed = ClipPanelSpeed.parse(Kit.defaults.string(forKey: ClipboardPanelHost.hideSpeedKey))
     @Published var titleEdit: ClipTitleEdit?
     /// Записи скрытых категорий, открытые на время. Только до закрытия панели.
     @Published private(set) var revealed: Set<UUID> = []
@@ -158,6 +161,16 @@ final class ClipboardPanelModel: ObservableObject {
 
     /// В «Истории» видно всё, что есть; во вкладке пространства — только его записи.
     var visible: [ClipItem] { ClipboardStore.filter(allItems, space: tab, query: query, spaces: spaces) }
+
+    func setShowSpeed(_ speed: ClipPanelSpeed) {
+        showSpeed = speed
+        Kit.defaults.set(speed.rawValue, forKey: ClipboardPanelHost.showSpeedKey)
+    }
+
+    func setHideSpeed(_ speed: ClipPanelSpeed) {
+        hideSpeed = speed
+        Kit.defaults.set(speed.rawValue, forKey: ClipboardPanelHost.hideSpeedKey)
+    }
 
     /// Что показывает лента: вкладка и запрос.
     var stripIdentity: String { "\(tab?.uuidString ?? "")|\(query)" }
@@ -1022,12 +1035,23 @@ struct ClipboardPanelView: View {
         .help("Новое пространство")
     }
 
+    private func speedMenu(_ title: String, current: ClipPanelSpeed, set: @escaping (ClipPanelSpeed) -> Void) -> some View {
+        Menu(title) {
+            ForEach(ClipPanelSpeed.allCases) { speed in
+                Toggle(speed.title, isOn: Binding(get: { current == speed }, set: { if $0 { set(speed) } }))
+            }
+        }
+    }
+
     private var moreMenu: some View {
         Menu {
             if let open = model.onOpenSettings {
                 Button("Настройки Буфера…", action: open)
                 Divider()
             }
+            speedMenu("Появление", current: model.showSpeed, set: model.setShowSpeed)
+            speedMenu("Закрытие", current: model.hideSpeed, set: model.setHideSpeed)
+            Divider()
             ForEach(ClipPanelText.hints, id: \.key) { hint in
                 Text("\(hint.key) — \(hint.text)")
             }
@@ -1293,7 +1317,11 @@ final class ClipboardPanelHost {
     var panelMaker: (ClipboardPanelModel) -> NSPanel = { ClipboardPanelHost.makePanel($0) }
     var reducesMotion: () -> Bool = { ClipMotion.reduced }
 
-    static let slideDuration = 0.16
+    static let showSpeedKey = "Clipboard.ShowSpeed"
+    static let hideSpeedKey = "Clipboard.HideSpeed"
+    /// 0 — без анимации, как и при «Уменьшении движения», которое важнее настройки.
+    private var showDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.showSpeedKey)).duration }
+    private var hideDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.hideSpeedKey)).duration }
     static let slideDistance: CGFloat = 40
 
     private var panel: NSPanel?
@@ -1354,7 +1382,8 @@ final class ClipboardPanelHost {
         panel.makeKeyAndOrderFront(nil)
         // Первый показ рисуется долго: пусть это случится при нулевой альфе, отсчёт движения начнётся после.
         panel.displayIfNeeded()
-        if reducesMotion() {
+        let duration = showDuration
+        if duration == 0 {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
         } else {
@@ -1365,7 +1394,7 @@ final class ClipboardPanelHost {
                 MainActor.assumeIsolated {
                     guard let self, self.presentation == presentation, !self.isLeaving else { return }
                     NSAnimationContext.runAnimationGroup { context in
-                        context.duration = Self.slideDuration
+                        context.duration = duration
                         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
                         // Окно только едет: размер тот же, перерисовка и раскладка не нужны.
                         panel.animator().setFrame(frame, display: false)
@@ -1406,13 +1435,14 @@ final class ClipboardPanelHost {
         removeMonitors()
         // Второй клик по уезжающей карточке не должен вставить ещё раз. Клики за это время достаются программе под панелью.
         panel.ignoresMouseEvents = true
-        if reducesMotion() {
+        let duration = hideDuration
+        if duration == 0 {
             finishLeaving(panel)
             return
         }
         let presentation = self.presentation
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.slideDuration
+            context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
             panel.animator().alphaValue = 0
