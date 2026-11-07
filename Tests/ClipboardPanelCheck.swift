@@ -47,6 +47,8 @@ func checkTracker() {
 
 @MainActor func checkModelClicks() {
     let model = ClipboardPanelModel()
+    // Настоящие клавиши на этом Mac не должны влиять на проверку: автор может держать ⌘ в другой программе.
+    model.modifiers = { [] }
     model.allItems = ClipPanelFixture.items()
     var pasted: [UUID] = []
     model.onPaste = { pasted.append($0.id) }
@@ -686,6 +688,9 @@ final class StandPanel: NSPanel {
         let host = ClipboardPanelHost()
         self.host = host
         model = wired ? host.makeModel(ClipboardController.shared) : panelModel(theme: "vivid")
+        // Проверки хода анимации снимают кадры посреди движения: им нужна длительность, а скорость проверяет checkPanelSpeed.
+        Kit.defaults.set(ClipPanelSpeed.normal.rawValue, forKey: ClipboardPanelHost.showSpeedKey)
+        Kit.defaults.set(ClipPanelSpeed.normal.rawValue, forKey: ClipboardPanelHost.hideSpeedKey)
         host.hidesOnOutsideClick = false
         host.standFrame = frame
         host.reducesMotion = { false }
@@ -955,7 +960,7 @@ func waitUntil(_ timeout: Double = 3, _ test: () -> Bool) async -> Bool {
     if let mark = sent.first {
         check(!mark.visible && !mark.key, "к ⌘V окна нет на экране и оно не ключевое")
         check(mark.elapsed >= goneAt + ClipboardController.focusPause - 0.01, "⌘V через паузу после ухода: ушло в \(goneAt), ⌘V в \(mark.elapsed)")
-        check(mark.elapsed >= ClipboardPanelHost.slideDuration - 0.03 + ClipboardController.focusPause, "⌘V после анимации и паузы: \(mark.elapsed)")
+        check(mark.elapsed >= ClipPanelSpeed.normal.duration - 0.03 + ClipboardController.focusPause, "⌘V после анимации и паузы: \(mark.elapsed)")
     }
 
     // Открыли панель посреди ухода: ⌘V попал бы в неё саму.
@@ -1544,7 +1549,7 @@ func checkSelectionLogic() {
     await pause(0.4)
     check(finished && sent == items.compactMap(\.text), "порядок вставки слева направо: \(sent)")
     check(windowGone, "к каждому ⌘V окна уже нет")
-    check(total >= ClipboardPanelHost.slideDuration + ClipboardController.focusPause + 2 * ClipboardController.pasteGap - 0.05, "между записями пауза (\(total))")
+    check(total >= ClipPanelSpeed.normal.duration + ClipboardController.focusPause + 2 * ClipboardController.pasteGap - 0.05, "между записями пауза (\(total))")
     check(board.string(forType: .string) == items.last?.text, "в буфере последняя запись")
     check(store.items.map(\.id).sorted { $0.uuidString < $1.uuidString } == before, "новых записей в истории нет")
     check(items.allSatisfy { item in store.items.first { $0.id == item.id }?.sourceBundleID == item.sourceBundleID }, "опрос не принял записи за новые: источник прежний")
@@ -1589,9 +1594,96 @@ func checkSelectionLogic() {
     stand.close()
 }
 
+/// Скорость появления и закрытия: значения, старые настройки, настоящий ход окна, ⌘V после ухода и при нуле.
+@MainActor func checkPanelSpeed() async {
+    let showKey = ClipboardPanelHost.showSpeedKey, hideKey = ClipboardPanelHost.hideSpeedKey
+    check(ClipPanelSpeed.allCases.map(\.duration) == [0, 0.08, 0.16, 0.28], "четыре значения: 0, 0,08, 0,16, 0,28")
+    check(ClipPanelSpeed.allCases.map(\.title) == ["Мгновенно", "Быстро", "Обычно", "Плавно"], "названия пунктов")
+    check(ClipPanelSpeed.parse(nil) == .fast, "нет ключа (старые настройки): Быстро")
+    check(ClipPanelSpeed.parse("warp") == .fast && ClipPanelSpeed.parse("") == .fast, "неизвестное значение: Быстро")
+    Kit.defaults.removeObject(forKey: showKey)
+    Kit.defaults.removeObject(forKey: hideKey)
+    let fresh = ClipboardPanelModel()
+    check(fresh.showSpeed == .fast && fresh.hideSpeed == .fast, "без ключей в меню галочка на «Быстро»")
+    Kit.defaults.set(12345, forKey: showKey)
+    check(ClipboardPanelModel().showSpeed == .fast, "значение другого типа: Быстро")
+    fresh.setShowSpeed(.smooth)
+    fresh.setHideSpeed(.instant)
+    check(Kit.defaults.string(forKey: showKey) == "smooth" && Kit.defaults.string(forKey: hideKey) == "instant", "выбор сохранён")
+    check(ClipboardPanelModel().showSpeed == .smooth && ClipboardPanelModel().hideSpeed == .instant, "и прочитан заново")
+
+    /// Сколько окно реально шло: от вызова до конца. Показ и уход настоящие, окно стенда.
+    func measure(show: ClipPanelSpeed, hide: ClipPanelSpeed) async -> (show: Double, hide: Double, showAtOnce: Bool, hideAtOnce: Bool, gone: Bool) {
+        let stand = LeaveStand()
+        Kit.defaults.set(show.rawValue, forKey: showKey)
+        Kit.defaults.set(hide.rawValue, forKey: hideKey)
+        await pause(0.05)
+        stand.host.present(stand.model)
+        let showAtOnce = stand.panel?.alphaValue == 1 && stand.panel?.frame == stand.frame
+        let started = ProcessInfo.processInfo.systemUptime
+        _ = await waitUntil(2) { stand.panel?.alphaValue == 1 && stand.panel?.frame == stand.frame }
+        let shown = ProcessInfo.processInfo.systemUptime - started
+        await pause(0.05)
+        let left = ProcessInfo.processInfo.systemUptime
+        stand.host.hide()
+        let hideAtOnce = stand.panel?.isVisible == false
+        let gone = await waitUntil(2) { stand.settledGone }
+        let hidden = ProcessInfo.processInfo.systemUptime - left
+        stand.close()
+        return (shown, hidden, showAtOnce, hideAtOnce, gone)
+    }
+    for speed in ClipPanelSpeed.allCases {
+        let run = await measure(show: speed, hide: speed)
+        let d = speed.duration
+        check(run.gone, "\(speed.title): панель ушла до конца")
+        if d == 0 {
+            check(run.showAtOnce, "\(speed.title): появление без анимации, сразу на месте")
+            check(run.hideAtOnce, "\(speed.title): закрытие без анимации, окна уже нет")
+        } else {
+            check(!run.showAtOnce && !run.hideAtOnce, "\(speed.title): есть анимация")
+            // Запас сверху на нагрузку и шаг опроса; снизу ровно столько, чтобы соседнее значение не прошло.
+            check(run.show >= d * 0.7 && run.show <= d + 0.14, "\(speed.title): появление идёт \(d) с (замер \(run.show))")
+            check(run.hide >= d * 0.7 && run.hide <= d + 0.14, "\(speed.title): закрытие идёт \(d) с (замер \(run.hide))")
+        }
+    }
+    // Настройки независимы.
+    let mixed = await measure(show: .instant, hide: .smooth)
+    check(mixed.showAtOnce && !mixed.hideAtOnce && mixed.hide >= 0.2, "появление и закрытие настраиваются отдельно")
+    // Уменьшение движения важнее.
+    let reduced = LeaveStand()
+    Kit.defaults.set(ClipPanelSpeed.smooth.rawValue, forKey: showKey)
+    Kit.defaults.set(ClipPanelSpeed.smooth.rawValue, forKey: hideKey)
+    reduced.host.reducesMotion = { true }
+    reduced.host.present(reduced.model)
+    check(reduced.panel?.alphaValue == 1, "«Уменьшить движение» важнее: появление сразу")
+    reduced.host.hide()
+    check(reduced.panel?.isVisible == false, "и закрытие сразу")
+    reduced.close()
+    // ⌘V после ухода и при нуле.
+    let instant = LeaveStand()
+    Kit.defaults.set(ClipPanelSpeed.instant.rawValue, forKey: showKey)
+    Kit.defaults.set(ClipPanelSpeed.instant.rawValue, forKey: hideKey)
+    await instant.open()
+    var sends = 0
+    var sentWhileVisible = false
+    let began = ProcessInfo.processInfo.systemUptime
+    var sentAt = 0.0
+    ClipboardController.pasteAfterLeaving(instant.host) {
+        sends += 1
+        sentWhileVisible = instant.panel?.isVisible == true
+        sentAt = ProcessInfo.processInfo.systemUptime - began
+    }
+    check(sends == 0 && instant.panel?.isVisible == false, "при нуле панель ушла сразу, ⌘V ещё нет")
+    _ = await waitUntil { sends > 0 }
+    check(sends == 1 && !sentWhileVisible && sentAt >= ClipboardController.focusPause - 0.01, "⌘V после ухода и паузы для фокуса (\(sentAt))")
+    instant.close()
+    Kit.defaults.removeObject(forKey: showKey)
+    Kit.defaults.removeObject(forKey: hideKey)
+}
+
 /// Правила движения: короткие значения, выбор и смена вкладки не двигают ничего вокруг.
 @MainActor func checkMotionRules(out: String) async {
-    check((0.12...0.22).contains(ClipMotion.moveTime) && (0.12...0.22).contains(ClipMotion.fadeTime) && (0.12...0.22).contains(ClipboardPanelHost.slideDuration), "движения короткие: 0,12–0,22 с")
+    check((0.12...0.22).contains(ClipMotion.moveTime) && (0.12...0.22).contains(ClipMotion.fadeTime), "движения короткие: 0,12–0,22 с")
     let model = panelModel(theme: "vivid")
     let host = Stand.host(model, width: 1440)
     await pause(0.45)
@@ -2597,6 +2689,7 @@ enum Main {
             await checkPanelLeave()
             await checkPasteAfterLeaving()
             await checkDragPreview(out: out)
+            await checkPanelSpeed()
             checkSelectionLogic()
             await checkMultiSelect(out: out)
             await checkPasteMany()
