@@ -73,43 +73,60 @@ func wirePure() {
     await model.perform(.commitVolumes)
 }
 
+/// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.mixer), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .mixer) { MixerView(model: MixerController.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.mixer))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .mixer, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
 @MainActor func pixels() async {
     let model = RemoteMixerModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     let local = MixerController.shared
+    // Как `MixerModule.init` в утилите: два текста экрана зависят от этого.
+    local.runsInUtility = true
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
+        var shots: [NSBitmapImageRep] = []
         for variant in ["live", "volume"] {
-            if variant == "volume", let target = (model.state.idleApps + model.state.otherApps).first {
-                await model.perform(.setVolume(id: target.id, value: 0.4))
-                await model.perform(.commitVolumes)
-            }
+            let target = (model.state.idleApps + model.state.otherApps).first
+            await model.perform(.setVolume(id: target?.id ?? "", value: variant == "volume" ? 0.4 : 1))
+            await model.perform(.commitVolumes)
             await model.read()
             let known = model.state
-            modules.setExternal(.mixer, false)
             pinLocal(to: known)
-            // Два текста экрана про утилиту: у встроенного они другие, поэтому для сравнения включаем те же.
-            local.runsInUtility = true
-            let localShot = await Stand.open(theme)
-            local.runsInUtility = false
+            let localShot = await openLocal(theme)
             Stand.save(localShot, "\(themeName)-\(variant)-local")
 
-            modules.setExternal(.mixer, true)
+            // Контроллер пустой: экран, читающий его вместо утилиты, проверку не пройдёт.
+            local.testPin()
             await registry.update()
             let remoteShot = await Stand.open(theme)
             Stand.save(remoteShot, "\(themeName)-\(variant)-remote")
             check(model.state == known, "\(themeName) \(variant): за время снимка состояние утилиты не менялось")
             let diff = differingPixels(localShot, remoteShot)
             check(diff == 0, "\(themeName) \(variant): снимки совпали, разных пикселей \(diff) из \(localShot.pixelsWide * localShot.pixelsHigh)")
+            shots.append(remoteShot)
         }
+        check(differingPixels(shots[0], shots[1]) > 0, "\(themeName): громкость утилиты меняет снимок, он не пустой")
     }
-    // Встроенный экран и экран утилиты различаются только двумя текстами: это видно по снимку.
-    modules.setExternal(.mixer, false)
+    // Те же списки с другими двумя текстами: сверка видит и это.
+    local.runsInUtility = false
     pinLocal(to: model.state)
-    let builtIn = await Stand.open(.dusk)
-    modules.setExternal(.mixer, true)
-    check(differingPixels(builtIn, await Stand.open(.dusk)) > 0, "встроенный экран и экран утилиты различаются текстом про выход")
+    let otherTexts = await openLocal(.dusk)
+    local.runsInUtility = true
+    check(differingPixels(otherTexts, await Stand.open(.dusk)) > 0, "экран с текстами не утилиты и вкладка различаются")
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
     local.testPin()
 }
