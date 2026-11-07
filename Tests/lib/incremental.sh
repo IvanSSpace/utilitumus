@@ -13,6 +13,17 @@ incremental_cache() {
   echo "${INCREMENTAL_ROOT:-${TMPDIR:-/tmp}/utilitumus-inc}/$key/$name"
 }
 
+# Когда компилировать нечего, инкрементальный swiftc не компонует и оставляет файл как есть, даже если его собрали из другого
+# кэша: с другими -D или в другой копии проекта. Проверка запустила бы чужую программу, поэтому выход убирается заранее.
+# Цена — компоновка при каждом запуске. Tests/run-incremental-lib-check.sh ловит возврат этой ошибки.
+swiftc() {
+  local prev="" arg
+  case " $* " in
+    *" -incremental "*) for arg in "$@"; do [ "$prev" != "-o" ] || rm -f -- "$arg"; prev="$arg"; done ;;
+  esac
+  command swiftc "$@"
+}
+
 incremental_flags() {
   local cache="$1"; shift
   INC_FLAGS=()
