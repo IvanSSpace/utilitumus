@@ -120,9 +120,10 @@ func legacyChecks() {
 
     check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
     let updater = source("Sources/App/Updater.swift")
-    // Встроенного модуля нет: обновление центра вентиляторов не касается, их ведёт утилита (`FansModule.stopForUpdate`).
+    // Обновление центра вентиляторов не касается, их ведёт утилита (`FansModule.stopForUpdate`).
     check(!updater.contains("FanController"), "обновление центра не поднимает контроллер вентиляторов")
-    check(updater.contains("try await UpdateBundle.install(") && !updater.contains("UpdateBundle.commit"), "обновление идёт через install с шагами вокруг подмены")
+    check(updater.contains("try UpdateBundle.install(") && !updater.contains("UpdateBundle.commit"), "обновление идёт через install, без своих шагов вокруг подмены")
+    check(!updater.contains("beforeReplace") && !source("Sources/App/UpdateBundle.swift").contains("beforeReplace"), "вокруг подмены бандла центра шагов нет")
 }
 
 func statusChecks() {

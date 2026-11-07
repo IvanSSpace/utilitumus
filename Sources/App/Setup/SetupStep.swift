@@ -1,15 +1,13 @@
 import SwiftUI
-import AVFoundation
-import ApplicationServices
 import Combine
 
-/// Шаг настройки модуля: что нужно дать или сделать, чтобы он заработал. По шагам рисуются чек-лист,
-/// плашка на экране модуля, «Понадобится» у выключенного модуля и «Разрешения» в подробностях Стора.
+/// Шаг настройки модуля: что нужно дать или сделать, чтобы он заработал. Шаги описывает утилита в своём статусе, центр
+/// по ним рисует чек-лист, плашку на экране модуля, «Понадобится» у выключенного модуля и «Разрешения» в подробностях Стора.
 struct SetupStep: Identifiable {
     enum Kind {
         /// Разрешение, которое даёт человек: панель настроек или системный запрос.
         case permission
-        /// Системная настройка (или загрузка), которую делаем мы сами по кнопке «Сделать».
+        /// Системная настройка (или загрузка), которую утилита делает сама по кнопке «Сделать».
         case system
         /// Рекомендация: модуль работает и без неё.
         case recommendation
@@ -36,7 +34,7 @@ struct SetupStep: Identifiable {
     var required = true
     /// Можно ли проверить заранее; нет — шаг «спросит сама», пока не будет сбоя.
     var verifiable = true
-    /// Проверка вживую: опрашивает систему на месте.
+    /// Сделан ли шаг: по последнему статусу утилиты.
     let isDone: @MainActor () -> Bool
     let perform: @MainActor () -> Void
     /// Строка вместо «зачем», пока шаг выполняется (скачивание).
@@ -94,175 +92,19 @@ extension SetupStep {
 }
 
 extension Module {
-    /// Шаги из статуса утилиты, если она знает о модуле больше, чем центр: её ведёт утилита, или она стоит и отвечает
-    /// (чек-лист до передачи, Q1). nil — шаги встроенного модуля. Ведомый модуль без ответа — пустой список: что в нём
-    /// сделано, неизвестно, а вкладка и карточка скажут «не отвечает». Встроенные шаги вместо этого показали бы
-    /// разрешения центра как разрешения утилиты.
-    @MainActor var utilitySetupSteps: [SetupStep]? {
-        let registry = SatelliteRegistry.shared
-        let status = registry.entries[self]?.status
-        if let status {
-            return status.setupSteps.map { SetupStep($0, module: self, registry: registry) }
-        }
-        return ModuleManager.shared.isExternal(self) ? [] : nil
-    }
-}
-
-// MARK: - Шаги по модулям
-
-extension SetupStep {
-    /// «Универсальный доступ»: у «Стеша», «Мыши», «Голоса» и «Буфера» один пункт, запрос — свой у каждого контроллера.
-    @MainActor static func accessibility(id: String, why: String, required: Bool = true,
-                                         request: @escaping @MainActor () -> Void) -> SetupStep {
-        SetupStep(id: id, title: "Универсальный доступ", why: why, kind: .permission, icon: "lock.shield.fill",
-                  required: required, isDone: { Kit.accessTrusted() }, perform: request)
-    }
-
-    /// Браузер по умолчанию — наш помощник ссылок.
-    @MainActor static func isDefaultBrowser() -> Bool {
-        guard let probe = URL(string: "https://example.com"),
-              let url = NSWorkspace.shared.urlForApplication(toOpen: probe) else { return false }
-        return Bundle(url: url)?.bundleIdentifier == BrowserHelper.bundleID
-    }
-
-    /// Системный обработчик для обеих схем; macOS покажет своё подтверждение.
-    @MainActor static func makeDefaultBrowser() {
-        if Kit.standRefuses("браузер по умолчанию") { return }
-        let appURL = BrowserHelper.appURL
-        LSRegisterURL(appURL as CFURL, true)
-        Task {
-            for scheme in ["http", "https"] {
-                try? await NSWorkspace.shared.setDefaultApplication(at: appURL, toOpenURLsWithScheme: scheme)
-            }
-        }
-    }
-}
-
-extension KeyboardFeature {
-    /// Шаги настройки фишки. «Раскладке для каждого приложения» разрешения не нужны.
-    @MainActor var setupSteps: [SetupStep] {
-        switch self {
-        case .fnLanguage:
-            return [
-                // Tap только слушает, поэтому нужен именно «Мониторинг ввода».
-                SetupStep(id: "keyboard.input", title: "Мониторинг ввода",
-                          why: "Чтобы заметить тап по Fn/🌐; ничего не записывается",
-                          kind: .permission, icon: "keyboard.fill",
-                          isDone: { CGPreflightListenEventAccess() },
-                          perform: { KeyboardController.shared.requestAccess() }),
-                SetupStep(id: "keyboard.globe", title: "Отключить системное действие 🌐",
-                          why: "Иначе macOS тоже переключит язык, и он сменится дважды",
-                          kind: .system, icon: "globe", buttonTitle: "Сделать",
-                          isDone: { FnSystemAction.usage == 0 },
-                          perform: { KeyboardController.shared.disableSystemAction() }),
-                SetupStep(id: "keyboard.dictation", title: "Убрать диктовку с двойного Fn",
-                          why: "Иначе двойной тап Fn вызовет диктовку. Если macOS спросит «Включить диктовку?» — нажми «Не сейчас»",
-                          kind: .recommendation, icon: "mic.slash.fill", buttonTitle: "Сделать", required: false,
-                          isDone: { !FnSystemAction.dictationOnDoubleFn },
-                          perform: { KeyboardController.shared.disableDictationDoubleFn() }),
-            ]
-        case .perAppLayout, .capsLock:
-            return []
-        }
-    }
-}
-
-extension Module {
-    /// Шаги настройки по порядку: сначала разрешения, потом наши системные настройки, потом рекомендации.
+    /// Шаги из статуса утилиты. Утилиты нет или она не отвечает — пустой список: что в ней сделано, неизвестно,
+    /// а вкладка и карточка скажут об этом сами. Чек-лист бывает и до передачи, если утилита уже стоит и отвечает.
     @MainActor var setupSteps: [SetupStep] {
         if let steps = SetupFlow.overrides[self] { return steps }
-        if let steps = utilitySetupSteps { return steps }
-        switch self {
-        case .sound, .load, .awake, .bots:
-            return []
-        case .fans:
-            return [SetupStep(
-                id: "fans.helper", title: "Помощник для вентиляторов", why: "Пароль администратора, один раз",
-                kind: .permission, icon: "key.fill", buttonTitle: "Дать доступ…",
-                // Устаревший помощник команд не получает, но обновляется плашкой на экране модуля: без этого шага экран открыт.
-                isDone: { FanHelperInstaller.shared.status != .notInstalled },
-                perform: { FanHelperInstaller.shared.install() },
-                lastError: { FanHelperInstaller.shared.lastError })]
-        case .stash:
-            return [.accessibility(id: "stash.ax", why: "Чтобы вернуть окна на места",
-                                   request: { StashStore.shared.requestAccess() })]
-        case .mouse:
-            return [.accessibility(id: "mouse.ax", why: "Чтобы менять направление и плавность прокрутки",
-                                   request: { MouseController.shared.requestAccess() })]
-        case .keyboard:
-            // Шаги модуля — шаги включённых фишек.
-            return KeyboardFeature.allCases.filter { KeyboardController.shared.isOn($0) }.flatMap(\.setupSteps)
-        case .mixer:
-            return [SetupStep(
-                id: "mixer.capture", title: "Запись системного звука", why: "Система спросит при первом звуке",
-                kind: .permission, icon: "waveform.badge.mic", buttonTitle: "Открыть настройки…", verifiable: false,
-                isDone: { !MixerController.shared.permissionProblem },
-                perform: {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-                        if !Kit.standRefuses("системные настройки") { NSWorkspace.shared.open(url) }
-                    }
-                })]
-        case .clipboard:
-            return [.accessibility(id: "clipboard.ax", why: "Чтобы выбранная запись вставлялась сама, иначе останется нажать ⌘V",
-                                   required: false, request: { ClipboardController.shared.requestAccessibility() })]
-        case .browser:
-            return [SetupStep(
-                id: "browser.default", title: "Браузер по умолчанию",
-                why: "Чтобы ссылки шли через выбор браузера; macOS попросит подтвердить",
-                kind: .permission, icon: "globe", buttonTitle: "Сделать основным",
-                isDone: { SetupStep.isDefaultBrowser() },
-                perform: { SetupStep.makeDefaultBrowser() })]
-        case .voice:
-            return [
-                SetupStep(id: "voice.mic", title: "Микрофон", why: "Чтобы слышать тебя; звук остаётся на этом Mac",
-                          kind: .permission, icon: "mic.fill",
-                          isDone: { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized },
-                          perform: { VoiceController.shared.requestMic() }),
-                Self.voiceModelStep,
-                .accessibility(id: "voice.ax", why: "Чтобы текст вставлялся сам, иначе останется нажать ⌘V",
-                               required: false, request: { VoiceController.shared.requestAccessibility() }),
-            ]
-        }
-    }
-
-    @MainActor private static var voiceModelStep: SetupStep {
-        let store = VoiceModelStore.shared
-        let size = StoreCatalog.megabytes(store.selected)
-        return SetupStep(
-            id: "voice.model", title: "Модель распознавания скачана",
-            why: "Речь распознаётся на этом Mac, нужна модель (\(store.selected.title), \(size) МБ)",
-            kind: .system, icon: "arrow.down.circle.fill", buttonTitle: "Скачать",
-            isDone: { VoiceModel.allCases.contains { store.status($0) == .installed } },
-            perform: { store.download(store.selected) },
-            busy: {
-                switch store.status(store.selected) {
-                case .downloading(let p): return "Скачивается… \(Int(p * 100)) %"
-                case .verifying: return "Проверяю подпись…"
-                default: return nil
-                }
-            },
-            lastError: {
-                if case .failed(let message) = store.status(store.selected) { return message }
-                return nil
-            })
+        let registry = SatelliteRegistry.shared
+        return registry.entries[self]?.status?.setupSteps.map { SetupStep($0, module: self, registry: registry) } ?? []
     }
 
     @MainActor var setupProgress: SetupProgress { SetupProgress(setupSteps) }
 
-    /// Живое обновление того, что кешируют контроллеры, пока смотрят на чек-лист.
+    /// Статус утилиты заново, пока смотрят на чек-лист.
     @MainActor func refreshSetupSources() {
-        if utilitySetupSteps != nil {
-            SatelliteRegistry.shared.refresh(self)
-            return
-        }
-        switch self {
-        case .fans: FanHelperInstaller.shared.refresh()
-        case .keyboard:
-            KeyboardController.shared.refreshAccess()
-            KeyboardController.shared.refreshSystem()
-        case .voice: VoiceController.shared.refreshPermissions()
-        default: break
-        }
+        SatelliteRegistry.shared.refresh(self)
     }
 }
 
@@ -312,16 +154,13 @@ final class SetupFlow: ObservableObject {
     func doAll(_ module: Module) {
         let steps = module.setupSteps
         if module == .keyboard, ModuleManager.shared.isExternal(.keyboard) {
-            // Тот же один проход, что у встроенного: два шага по отдельности дёрнули бы настройки дважды.
+            // 🌐 и диктовка одним проходом утилиты: по шагу на каждое дёргало бы систему дважды,
+            // и macOS показывала окно «Включить диктовку?».
             let together = [KeyboardSetupID.globe, KeyboardSetupID.dictation]
             if steps.contains(where: { together.contains($0.id) && $0.isAutomatic && !$0.isDone() }) {
                 RemoteKeyboardModel.shared.send(.disableAllSystemActions)
             }
             for step in steps where !together.contains(step.id) && step.isAutomatic && !step.isDone() { step.perform() }
-        } else if module == .keyboard, module.utilitySetupSteps == nil, KeyboardController.shared.isOn(.fnLanguage) {
-            // 🌐 и диктовка — одной записью и одним применением: по шагу на каждое дёргало систему
-            // дважды, и macOS показывала окно «Включить диктовку?».
-            KeyboardController.shared.disableAllSystemActions()
         } else {
             for step in steps where step.isAutomatic && !step.isDone() { step.perform() }
         }

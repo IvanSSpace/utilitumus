@@ -6,8 +6,8 @@ extension Module {
     @MainActor var isBlocked: Bool { AccessState.shared.blocked.contains(self) }
 }
 
-/// Кеш «не хватает обязательного шага настройки». Систему опрашиваем по событиям: возврат в приложение, ответ помощника
-/// вентиляторов, действия на экране доступа. Публикуем только при реальной смене.
+/// Кеш «не хватает обязательного шага настройки». Читаем по событиям: возврат в приложение, новый статус утилиты,
+/// действия на экране доступа. Публикуем только при реальной смене.
 @MainActor
 final class AccessState: ObservableObject {
     static let shared = AccessState()
@@ -18,18 +18,8 @@ final class AccessState: ObservableObject {
     private init() {
         blocked = Self.compute()
         subs.append(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-            .sink { [weak self] _ in
-                // Помощника вентиляторов ведёт утилита, когда она владеет модулем: центр его не трогает.
-                if !ModuleManager.shared.isExternal(.fans) { FanHelperInstaller.shared.refresh() }
-                self?.refresh()
-            })
-        // Установка помощника кончается асинхронно: willChange приходит до смены значения, читаем со следующего витка.
-        if !ModuleManager.shared.isExternal(.fans) {
-            subs.append(FanHelperInstaller.shared.objectWillChange
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in self?.refresh() })
-        }
-        // Шаги ведомых модулей приходят в статусе утилиты.
+            .sink { [weak self] _ in self?.refresh() })
+        // Шаги приходят в статусе утилиты. willChange приходит до смены значения, читаем со следующего витка.
         subs.append(SatelliteRegistry.shared.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refresh() })

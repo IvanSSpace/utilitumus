@@ -47,14 +47,14 @@ same "AutoUpdate.swift сам не качает и не ставит" "$(grep -c
 # Каждый вызов, после которого система спрашивает человека. Новый вызов должен быть проверен глазами и дописан сюда.
 same "окно пароля службы только по кнопке" \
   "$(grep -rlE 'installer\.install\(\)|FanHelperInstaller\.shared\.install\(\)' Sources | LC_ALL=C sort)" \
-  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/BuiltInFansModel.swift Sources/Modules/Fans/FanControllerWire.swift | LC_ALL=C sort)"
+  "$(printf '%s\n' Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/BuiltInFansModel.swift Sources/Modules/Fans/FanControllerWire.swift | LC_ALL=C sort)"
 # Второго списка нет: и центр, и утилита читают один (самой утилите проверка в run-satellite-role-check).
 same "в автообновлении нет своего списка «только по кнопке»" "$(grep -cE 'personOnly[^=]*=.*\.(fans|clipboard)|\[\.fans' Sources/App/Store/AutoUpdate.swift || true)" "0"
 grep -q 'static let personOnly = Set(Module.allCases.filter { SatelliteCatalog.personOnly' Sources/App/Store/AutoUpdate.swift || { echo "ПРОВАЛ: автообновление берёт список не из каталога"; exit 1; }
 echo "ok   список «только по кнопке» берётся из SatelliteCatalog"
 same "браузер по умолчанию меняют только кнопка и удаление" \
   "$(grep -rlE '\.setDefault\(|setDefaultApplication' Sources | LC_ALL=C sort)" \
-  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/UI/BrowserLinkHandler.swift Sources/Modules/Browser/UI/BrowserView.swift | LC_ALL=C sort)"
+  "$(printf '%s\n' Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/UI/BrowserLinkHandler.swift Sources/Modules/Browser/UI/BrowserView.swift | LC_ALL=C sort)"
 same "установка и очередь ничего системного не просят" \
   "$(grep -lE 'FanHelperInstaller\.shared\.install|setDefaultApplication|AXIsProcessTrustedWithOptions|requestAccess|CGRequest|SecItem' Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteRegistry.swift Sources/App/Store/UpdateAll.swift Sources/App/Store/AutoUpdate.swift || true)" ""
 
