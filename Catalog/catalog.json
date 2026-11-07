@@ -3,123 +3,134 @@
   "apps": [
     {
       "id": "awake",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.0.0/Awake.zip",
-      "sha256": "d8347ad33afb58d97d10e09eda469b7a53eec145996d58cdf70cb253084a1128",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.1.0/Awake.zip",
+      "sha256": "5d981e84f01052763287c4c4df53b95f6f287671fa4c3ec427f6d5225b596bb5",
       "sizeMB": 1,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "browser",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.0.0/Browser.zip",
-      "sha256": "c977f8d1c2a88ee9864f4831bb25b10e55e050e91cab0e7c89bb80082e97365c",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.1.0/Browser.zip",
+      "sha256": "4688684048af3861360e0ce468bf4ccfc9341747bf98bcb72e0c3aaad8e6d256",
       "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "clipboard",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.0.0/Clipboard.zip",
-      "sha256": "1cf4e27b59231fbbfbf110c535bebb607c1b352ce63e82d2d4c4c3fa38da1d30",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.1.0/Clipboard.zip",
+      "sha256": "f529c684f60727ad2342f7d85af2e24c9fd7a751be3c65de2a6ee71739a1a38b",
       "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "fans",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.0.0/Fans.zip",
-      "sha256": "23dd410eac13f6dd35d5aed2281a69023297fb8e1880277eabb2784037b3a5be",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.1.0/Fans.zip",
+      "sha256": "eb36b562a4edaaf4490e1eb6deb830bc219bfea29c4440b69a08e4b78f385a9d",
       "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "keyboard",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.0.0/Keyboard.zip",
-      "sha256": "ceb28a780f95a3e28f092e3564db1ff58e65133cb8868e23e4b1d6eca70e56eb",
-      "sizeMB": 1,
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.1.0/Keyboard.zip",
+      "sha256": "0dbdc64405b7a7733a8ca26de6adbbda9a7a2812653014055b85fabb9fa4f804",
+      "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "При удалении клавиша 🌐 сразу возвращается к прежней настройке. Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "load",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.0.0/Load.zip",
-      "sha256": "369ab9a08057215f2928918522274ebd52c7ff8a0c3558f5a8bb999d9b0fb442",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.1.0/Load.zip",
+      "sha256": "162f48e0a3e49e2f317ca839d5ac863f271dad3d474054076977339c9a8c8791",
       "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню. Боты из поиска показывают верное состояние"
       ]
     },
     {
       "id": "mixer",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.0.0/Mixer.zip",
-      "sha256": "9861687b437d721904605ff4c7f8bf58fbb56b33c47d222c3673773b9b9dfd15",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.1.0/Mixer.zip",
+      "sha256": "5351091d1f0772f6826974b31e3f871b39af38331e753a0e0a993b1f0a9fd020",
       "sizeMB": 1,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "mouse",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.0.0/Mouse.zip",
-      "sha256": "9042883cf5e803fc45e47edd3bc08118ca3a9d48d823a3c8f92770b2e153b7b8",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.1.0/Mouse.zip",
+      "sha256": "fff3b0168b040a41866999a7f7b1c5fc299cb12c41bc99af60b076b7cbeec5ae",
       "sizeMB": 1,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "sound",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.0.0/Sound.zip",
-      "sha256": "80e50ca7bafca791643a1b655cd29eca593b63978ce4a1e198ed5173ae21c139",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.1.0/Sound.zip",
+      "sha256": "13f1198b52afb004da3357673392e9c4260488b05c44ffd4c2f2b176fc3ec101",
       "sizeMB": 1,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "stash",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.0.0/Stash.zip",
-      "sha256": "60e8e2d53fa2a9c7814d2fe6f6c40a3768cf5db99d2e1bb659752febe32506f0",
-      "sizeMB": 1,
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.1.0/Stash.zip",
+      "sha256": "90e6bf250766ef16171369bb306940a2a081045dea6fd0cfdb5206c46faa8667",
+      "sizeMB": 2,
       "notes": [
-        "Первая отдельная версия"
+        "Закреплённый модуль получает свой значок в строке меню"
       ]
     },
     {
       "id": "voice",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.0.0/Voice.zip",
-      "sha256": "d88650c63190cf759b54c8662b5b62c6c6f651cc3a2cd2ea7b94730a192ff819",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.1.0/Voice.zip",
+      "sha256": "d8c1070672283ba652657ffc72888754687ea3be88c6f70efbc41d772a5bb396",
       "sizeMB": 9,
       "notes": [
-        "Первая отдельная версия"
+        "Кнопка «Проверить» запускает запись. Закреплённый модуль получает свой значок в строке меню"
+      ]
+    },
+    {
+      "id": "bots",
+      "version": "1.1.0",
+      "minHub": "0.7.0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.1.0/Bots.zip",
+      "sha256": "dd06e5b02a9a1af01b961c4b1236108c99d3006b6764599a8b78a6ec7a7f80f4",
+      "sizeMB": 2,
+      "notes": [
+        "Первая версия: статус Telegram-ботов, включить, выключить, перезапустить, поиск ботов на этом Mac"
       ]
     }
   ]
