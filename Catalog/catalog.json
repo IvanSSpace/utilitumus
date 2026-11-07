@@ -113,13 +113,13 @@
     },
     {
       "id": "voice",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.1/Voice.zip",
-      "sha256": "b2fa3ec546ad4fbd802d80e6ecadc60ca370f5714cdd39df2e76eb38288c290b",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.2/Voice.zip",
+      "sha256": "67eeeb2249bef6fec46079ef51567b0a0f9c31324524e96754d76f9b37affd4b",
       "sizeMB": 9,
       "notes": [
-        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
+        "Parakeet v3 снова скачивается: авторы переиздали архив модели, новая сумма проверена"
       ]
     },
     {
