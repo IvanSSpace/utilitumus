@@ -77,9 +77,9 @@ extension BotRegistry {
         let starts = (labelled.isEmpty ? Set(mains) : labelled).compactMap { procs[$0]?.startTime }.filter { $0 > 0 }
         let ports = cachedListenPorts(of: all)
         return BotItem(
-            id: spec.id, name: spec.name, state: state, pids: mains,
+            id: spec.id, name: ScreenText.clean(spec.name, BotRunner.maxShown), state: state, pids: mains,
             memMB: Int(all.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()),
             uptime: starts.min().map { Date().timeIntervalSince1970 - $0 } ?? 0, ports: ports, url: spec.url,
-            note: note, actions: wanted, spec: spec)
+            note: ScreenText.clean(note, BotRunner.maxShown), actions: wanted, spec: spec)
     }
 }

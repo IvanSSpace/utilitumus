@@ -483,7 +483,111 @@ func realFileStamp(_ url: URL?) -> String {
         second.releaseWriter()
     }
 
+    await botCommandIsTheShownOne(engine)
+
     check(zip(realFiles, stamps).allSatisfy { realFileStamp($0) == $1 }, "настоящие load-history.json и actions.log не менялись")
+}
+
+/// Настоящий исполнитель и настоящий разбор файла, но файл из шва, а команды стенд не запускает: Kit отказывает прямо
+/// перед запуском («Стенд не запускает…»). Этот отказ и значит «сверка пройдена, дошло бы до запуска».
+@MainActor func botCommandIsTheShownOne(_ engine: FakeEngine) async {
+    // Файл шва один на домен настроек, а проверки идут одновременно: у процесса свой. Домен настроек уже выбран раньше.
+    _ = Kit.defaults
+    setenv("KIT_TEST_SUITE", "local.utilitumus.test.load-wire.\(getpid())", 1)
+    let file = BotRegistry.url
+    check(file.lastPathComponent.contains(".\(getpid()).") && !file.path.hasPrefix(Kit.realHome + "/"), "файл ботов свой и не в настоящем доме: \(file.path)")
+    defer { try? FileManager.default.removeItem(at: file) }
+    func put(_ start: String) {
+        let text = "[[bot]]\nid = \"filebot\"\nname = \"File bot\"\nproject = \"p\"\nlaunchd = [\"com.stand.filebot\"]\nstart = \(start)\n"
+        check(FileManager.default.createFile(atPath: file.path, contents: Data(text.utf8), attributes: [.posixPermissions: 0o600]), "файл ботов записан")
+    }
+    let reached = "Стенд не запускает команды ботов"
+    let shownA = #"["/nonexistent/stand-bot-a"]"#, shownB = #"["/nonexistent/stand-bot-b"]"#
+
+    put(shownA)
+    let background = BackgroundStore(collect: { s in
+        BackgroundData(bots: BotRegistry.load().map { BotRegistry.status($0, procs: s.procs, tree: s.tree, launchd: s.launchd) })
+    }, readJournal: { [] })
+    let store = LoadStore(engine: engine, background: background)
+
+    /// Как экран в центре: просьба и подтверждение через действия связи, на экране только то, что прислал модуль.
+    func ask() -> LoadBackgroundPrompt? {
+        check(store.handle(.requestBot(id: "filebot", verb: .start)) == nil, "просьба принята")
+        return store.background.prompt
+    }
+    func confirm(_ prompt: LoadBackgroundPrompt?) async -> LoadNotice? {
+        store.dismissNotice()
+        guard let prompt, store.handle(.confirmBackground(planID: prompt.id)) == nil else { check(false, "подтверждение принято"); return nil }
+        await until("итог действия") { !store.background.running && store.notice != nil }
+        return store.notice
+    }
+    func showing(_ command: BotCommand?) async {
+        store.apply(engine.snapshot, force: true)
+        await until("список по файлу") { background.data.bots.first?.spec.commands[.start] == command }
+    }
+
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let same = ask()
+    check(same?.command == "/nonexistent/stand-bot-a", "вопрос показывает команду из файла")
+    check(await confirm(same)?.text == reached, "файл тот же: сверка пройдена, дошло до запуска")
+
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let stale = ask()
+    put(shownB)
+    let refused = await confirm(stale)
+    check(refused?.text == BotRunner.changedMessage && refused?.isError == true, "файл изменили после вопроса: отказ «\(refused?.text ?? "нет")»")
+
+    await showing(.argv(["/nonexistent/stand-bot-b"]))
+    let again = ask()
+    check(again?.command == "/nonexistent/stand-bot-b", "повторный вопрос показывает новую команду")
+    check(await confirm(again)?.text == reached, "новую команду подтвердили: дошло до запуска")
+
+    // В файле была не команда: вопрос её не показал, значит и появившуюся без нового вопроса запускать нельзя.
+    put(#""не список строк""#)
+    await showing(.invalid)
+    let unseen = ask()
+    check(unseen?.command == "", "вопрос без команды")
+    check(await confirm(unseen)?.text.contains("не список строк") == true, "в файле всё ещё не команда: об этом и сообщение")
+    await showing(.invalid)
+    let unseenThenSet = ask()
+    put(shownA)
+    check(await confirm(unseenThenSet)?.text == BotRunner.changedMessage, "команда появилась после вопроса без команды: отказ")
+
+    // Смена направления в файле: вопрос её не показывает и команду не переставляет, а сверка идёт по настоящему argv.
+    let sly = "/nonexistent/bot\u{202E}gpj.exe", tricks: [UInt32] = [0x202E, 0x200F, 0x2066, 0x0A, 0x07]
+    put(#"["/nonexistent/bot\u202Egpj.exe", "a\u200Fb\u2066c\nd\u0007"]"#)
+    await showing(.argv([sly, "a\u{200F}b\u{2066}c\nd\u{7}"]))
+    let tricky = ask()
+    check(tricky?.command == "'/nonexistent/bot gpj.exe' 'a b c d '", "команда в вопросе читается как есть: \(tricky?.command ?? "нет")")
+    for (name, text) in [("command", tricky?.command), ("message", tricky?.message)] {
+        check(text?.unicodeScalars.contains { tricks.contains($0.value) } == false, "\(name) без смены направления и управляющих символов")
+    }
+    check(await confirm(tricky)?.text == reached, "очистка только для показа: настоящий argv прошёл сверку")
+
+    // Имя и пояснение из того же файла попадают в заголовок и текст вопроса.
+    let plain = FileManager.default.createFile(atPath: file.path, contents: Data(#"""
+    [[bot]]
+    id = "filebot"
+    name = "File\u202Ebot"
+    project = "p"
+    note = "note\u202Eover"
+    launchd = ["com.stand.filebot"]
+    start = ["/nonexistent/stand-bot-a"]
+
+    """#.utf8), attributes: [.posixPermissions: 0o600])
+    check(plain, "файл ботов записан")
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let named = ask()
+    check(named?.title == "Включить File bot", "заголовок без смены направления: \(named?.title ?? "нет")")
+    check(named?.message.unicodeScalars.contains { tricks.contains($0.value) } == false && named?.message.contains("note over") == true, "пояснение без смены направления")
+    check(store.handle(.cancelBackground) == nil, "отмена")
+
+    // Те же имя и пояснение в строке списка.
+    var dirty = BotSpec.none
+    dirty.name = "Row\u{202E}bot"
+    dirty.note = "note\u{202E}over"
+    let row = BotRegistry.status(dirty, procs: [:], tree: ProcessTree([:]), launchd: [:])
+    check(row.name == "Row bot" && !row.note.unicodeScalars.contains { $0.value == 0x202E }, "строка списка без смены направления: \(row.name)")
 }
 #endif
 

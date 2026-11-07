@@ -221,14 +221,22 @@ enum BotRunner {
     static let timeout: TimeInterval = 60
     static let changedMessage = "Команда в bots.toml изменилась после вопроса, ничего не запущено. Нажми кнопку ещё раз и проверь команду."
 
+    static let maxShown = 2000
+
+    /// Команда в вопросе: без управляющих символов и смены направления текста, которыми подпись можно выдать за другую.
+    /// Только для показа: сверяется и запускается настоящий argv.
+    static func shown(_ argv: [String]) -> String { ScreenText.clean(Exec.display(argv), maxShown) }
+
     /// Отпечаток команды для быстрого действия: сам argv в действие не влезает, а связь и не должна его присылать.
+    /// Перед каждой частью её длина: в TOML бывает `\u0000`, и разделитель не отличил бы ["a\0b"] от ["a", "b"].
     static func fingerprint(_ argv: [String]) -> String {
-        SHA256.hash(data: Data(argv.joined(separator: "\0").utf8)).map { String(format: "%02x", $0) }.joined()
+        let framed = argv.map { "\($0.utf8.count):\($0)" }.joined()
+        return SHA256.hash(data: Data(framed.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Текст результата для экрана; сбой — `BackgroundActionError`. `expected` — команда, которую человек подтвердил:
     /// файл успели поменять, значит подтверждал он другое.
-    static func run(_ verb: BotVerb, id: String, file: URL = BotRegistry.url, expected: [String]? = nil) throws -> String {
+    static func run(_ verb: BotVerb, id: String, file: URL = BotRegistry.url, expected: [String]) throws -> String {
         let loaded = BotRegistry.read(file)
         if case .unsafe(let why)? = loaded.problem { throw BackgroundActionError(message: "Не запускаю: \(why)") }
         guard let bot = loaded.bots.first(where: { $0.id == id }), let cmd = bot.commands[verb] else {
@@ -237,7 +245,7 @@ enum BotRunner {
         guard case .argv(let argv) = cmd else {
             throw BackgroundActionError(message: "В bots.toml команда \(verb.rawValue) бота \(bot.id) — не список строк")
         }
-        if let expected, expected != argv { throw BackgroundActionError(message: changedMessage) }
+        if expected != argv { throw BackgroundActionError(message: changedMessage) }
         let command = Exec.display(argv)
         // Стенд не запускает ничего из bots.toml: даже если файл подложили, настоящие боты ему не цель.
         if Kit.standRefuses("команда бота \(bot.id): \(verb.rawValue)") {

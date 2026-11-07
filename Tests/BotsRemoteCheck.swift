@@ -196,7 +196,7 @@ func isolationPure() {
     writeBots(fixtureTOML())
     try? fm.createDirectory(atPath: markerDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     do {
-        _ = try BotRunner.run(.start, id: "beta", file: BotRegistry.url)
+        _ = try BotRunner.run(.start, id: "beta", file: BotRegistry.url, expected: ["/usr/bin/touch", marker])
         check(false, "BotRunner в стенде запустил команду")
     } catch let e as BackgroundActionError {
         check(e.message.contains("Стенд не запускает"), "BotRunner в стенде отказал: «\(e.message)»")
@@ -208,24 +208,27 @@ func isolationPure() {
     } catch let e as BackgroundActionError {
         check(e.message == BotRunner.changedMessage, "подтверждали другую команду: «\(e.message)»")
     } catch {}
-    let tricky = BotsStore.shown(["/bin/x\u{202E}y", "a\u{200F}b\u{2066}c\nd\u{7}"])
+    let tricky = BotRunner.shown(["/bin/x\u{202E}y", "a\u{200F}b\u{2066}c\nd\u{7}"])
     check(!tricky.unicodeScalars.contains { [0x202E, 0x200F, 0x2066, 0x0A, 0x07].contains($0.value) }, "в показанной команде нет смены направления и управляющих символов: \(tricky)")
     check(tricky.contains("/bin/x"), "и сама команда видна")
+    check(BotRunner.fingerprint(["a\0b"]) != BotRunner.fingerprint(["a", "b"]), "отпечаток: ноль внутри части и две части различаются")
+    check(BotRunner.fingerprint(["ab"]) != BotRunner.fingerprint(["a", "b"]) && BotRunner.fingerprint(["1:a"]) != BotRunner.fingerprint(["a"]), "отпечаток: склейка и длина внутри части не совпадают с другой командой")
+    check(BotRunner.fingerprint(["a", "b"]) == BotRunner.fingerprint(["a", "b"]), "отпечаток: одна команда, один отпечаток")
     do {
-        _ = try BotRunner.run(.start, id: "nobody", file: BotRegistry.url)
+        _ = try BotRunner.run(.start, id: "nobody", file: BotRegistry.url, expected: [])
         check(false, "неизвестный бот принят")
     } catch let e as BackgroundActionError {
         check(e.message.contains("устарело"), "неизвестный бот: «\(e.message)»")
     } catch {}
     do {
-        _ = try BotRunner.run(.stop, id: "beta", file: BotRegistry.url)
+        _ = try BotRunner.run(.stop, id: "beta", file: BotRegistry.url, expected: [])
         check(false, "кнопка, которой нет в файле, принята")
     } catch let e as BackgroundActionError {
         check(e.message.contains("устарело"), "кнопки нет в файле: «\(e.message)»")
     } catch {}
     writeBots(fixtureTOML(), mode: 0o666)
     do {
-        _ = try BotRunner.run(.start, id: "beta", file: BotRegistry.url)
+        _ = try BotRunner.run(.start, id: "beta", file: BotRegistry.url, expected: ["/usr/bin/touch", marker])
         check(false, "команда из небезопасного файла принята")
     } catch let e as BackgroundActionError {
         check(e.message.contains("Не запускаю"), "небезопасный файл: команды не запускаются: «\(e.message)»")

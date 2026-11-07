@@ -162,12 +162,12 @@ final class BotsStore: ObservableObject, BotsModel {
         }
         var argv: [String] = []
         if case .argv(let list) = cmd { argv = list }
-        let command = Self.shown(argv)
+        let command = BotRunner.shown(argv)
         let plan = Plan(id: UUID(), botID: id, verb: verb, argv: argv)
         pending = plan
         state.prompt = BotsPrompt(
-            id: plan.id, title: BotsDiscovery.clean("\(verb.title) \(spec.name)", Self.maxShown),
-            message: BotsDiscovery.clean((command.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(command).") + (spec.note.isEmpty ? "" : " \(spec.note)"), Self.maxShown),
+            id: plan.id, title: ScreenText.clean("\(verb.title) \(spec.name)", BotRunner.maxShown),
+            message: ScreenText.clean((command.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(command).") + (spec.note.isEmpty ? "" : " \(spec.note)"), BotRunner.maxShown),
             command: command, confirmTitle: verb.title, destructive: verb == .stop)
         return nil
     }
@@ -200,10 +200,6 @@ final class BotsStore: ObservableObject, BotsModel {
 
     /// Описания из файла сейчас: вопрос быстрого действия показывает команду, а действие несёт её отпечаток.
     func specsNow() -> [BotSpec] { BotRegistry.load(file) }
-
-    /// Команда в вопросе: без управляющих символов и смены направления текста, которыми подпись можно выдать за другую.
-    nonisolated static func shown(_ argv: [String]) -> String { BotsDiscovery.clean(Exec.display(argv), maxShown) }
-    private nonisolated static let maxShown = 2000
 
     private func run(_ plan: Plan) {
         pending = nil

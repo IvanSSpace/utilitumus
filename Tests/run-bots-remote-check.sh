@@ -25,15 +25,15 @@ else
   bad "в модуле «Боты» есть запуск команд мимо BotRunner или нет Kit.standRefuses"
 fi
 
-# Поиск ботов только читает: в его файле нет записи, запуска программ, сети и launchd.
-if /usr/bin/grep -nE 'O_WRONLY|O_RDWR|O_CREAT|FileHandle\(forW|\.write\(|createFile|createDirectory|removeItem|moveItem|copyItem|setAttributes|unlink\(|rename\(|chmod\(|Process\(|posix_spawn|Exec\.|system\(|URLSession|NWConnection|CFStream|socket\(|connect\(|NSWorkspace|kill\(|launchctl' Sources/Modules/Bots/BotsDiscovery.swift | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*//' | /usr/bin/grep -q .; then
+# Поиск ботов только читает: в его файле и в очистке текста из Kit нет записи, запуска программ, сети и launchd.
+if /usr/bin/grep -nE 'O_WRONLY|O_RDWR|O_CREAT|FileHandle\(forW|\.write\(|createFile|createDirectory|removeItem|moveItem|copyItem|setAttributes|unlink\(|rename\(|chmod\(|Process\(|posix_spawn|Exec\.|system\(|URLSession|NWConnection|CFStream|socket\(|connect\(|NSWorkspace|kill\(|launchctl' Sources/Modules/Bots/BotsDiscovery.swift Sources/Kit/ScreenText.swift | /usr/bin/grep -vE '^[0-9]+:[[:space:]]*//' | /usr/bin/grep -q .; then
   bad "в BotsDiscovery.swift есть запись, запуск программ или сеть"
 else
   ok "в BotsDiscovery.swift нет записи, запуска программ, сети и launchd"
 fi
-# Собирается отдельно, без остального кода: поиск ни от чего не зависит.
+# Собирается отдельно, без остального кода: поиск зависит только от очистки текста, а она ни от чего.
 mkdir -p "$OUT/probe-home/Library/LaunchAgents"
-if swiftc -parse-as-library -target "$TARGET" -o "$OUT/discovery-probe" Sources/Modules/Bots/BotsDiscovery.swift Tests/BotsDiscoveryProbe.swift 2>"$OUT/probe-build.log" \
+if swiftc -parse-as-library -target "$TARGET" -o "$OUT/discovery-probe" Sources/Modules/Bots/BotsDiscovery.swift Sources/Kit/ScreenText.swift Tests/BotsDiscoveryProbe.swift 2>"$OUT/probe-build.log" \
    && [ "$("$OUT/discovery-probe" --home "$OUT/probe-home" | head -1)" = "найдено: 0, пропущено: 0" ]; then
   ok "поиск собирается один, без остального кода, и в пустом доме ничего не находит"
 else

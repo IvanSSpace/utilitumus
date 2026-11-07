@@ -118,7 +118,7 @@ enum BotsDiscovery {
                 }
             }
             let name = displayName(label: agent.label)
-            let place = "LaunchAgent " + clean(agent.label, 90) + (project.map { " · " + shown($0.dir, home: roots.home) } ?? "")
+            let place = "LaunchAgent " + ScreenText.clean(agent.label, 90) + (project.map { " · " + shown($0.dir, home: roots.home) } ?? "")
             let weakPaths = [project?.dir, agent.program].compactMap { $0 }.map { relative($0, home: roots.home) }
             if let candidate = classify(id: "launchd:" + agent.label, name: name, label: agent.label, plist: plist, project: project?.dir,
                                         place: place, reasons: reasons, weak: weakName(agent.label, weakPaths), denied: denied) {
@@ -139,7 +139,7 @@ enum BotsDiscovery {
             let weak = weakName("", [relative(dir, home: roots.home), relative(exe, home: roots.home)])
             // Без названия-подсказки закрытая папка случайного скрипта в «Документах» не интересна.
             if inspected.denied && !weak && inspected.reasons.isEmpty { continue }
-            let name = clean((dir as NSString).lastPathComponent, 60)
+            let name = ScreenText.clean((dir as NSString).lastPathComponent, 60)
             if let candidate = classify(id: "proc:" + dir, name: name, label: nil, plist: nil, project: dir,
                                         place: "Процесс · " + shown(dir, home: roots.home), reasons: inspected.reasons, weak: weak, denied: inspected.denied) {
                 found.append(candidate)
@@ -178,7 +178,7 @@ enum BotsDiscovery {
         var final = why
         if denied { final += (strength == .confirmed ? "; " : ". ") + "Нет доступа к папке: разрешите в «Конфиденциальность и безопасность»" }
         return Candidate(id: digest(id), name: name.isEmpty ? "бот" : name, label: label, plist: plist, project: project,
-                         strength: strength, why: clean(final, 240), place: clean(place, 220), noAccess: denied)
+                         strength: strength, why: ScreenText.clean(final, 240), place: ScreenText.clean(place, 220), noAccess: denied)
     }
 
     static func digest(_ s: String) -> String {
@@ -341,7 +341,7 @@ enum BotsDiscovery {
             for file in sources {
                 guard case .data(let data) = readBounded(dir + "/" + file, limit: sourceBytes) else { continue }
                 if let lib = importedLibrary(in: String(decoding: data, as: UTF8.self)) {
-                    add(Reason(text: "импорт \(lib) в \(clean(file, 60))", strong: true))
+                    add(Reason(text: "импорт \(lib) в \(ScreenText.clean(file, 60))", strong: true))
                     break
                 }
             }
@@ -482,7 +482,7 @@ enum BotsDiscovery {
 
     static func displayName(label: String) -> String {
         let last = label.split(separator: ".").last.map(String.init) ?? label
-        return clean(last.isEmpty ? label : last, 60)
+        return ScreenText.clean(last.isEmpty ? label : last, 60)
     }
 
     static func relative(_ path: String, home: String) -> String {
@@ -490,21 +490,6 @@ enum BotsDiscovery {
     }
 
     static func shown(_ path: String, home: String) -> String {
-        clean(path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path, 110)
-    }
-
-    /// Строка для экрана: без управляющих и невидимых символов, не длиннее `limit`.
-    static func clean(_ s: String, _ limit: Int) -> String {
-        var out = String.UnicodeScalarView()
-        for u in s.unicodeScalars {
-            let v = u.value
-            if v < 0x20 || (0x7f...0x9f).contains(v) || v == 0x2028 || v == 0x2029 || (0x202a...0x202e).contains(v) || (0x2066...0x2069).contains(v) || v == 0x200b || v == 0xfeff || v == 0x061c || v == 0x200e || v == 0x200f {
-                out.append(" ")
-            } else {
-                out.append(u)
-            }
-        }
-        let text = String(out).trimmingCharacters(in: .whitespaces)
-        return text.count <= limit ? text : String(text.prefix(limit - 1)) + "…"
+        ScreenText.clean(path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path, 110)
     }
 }
