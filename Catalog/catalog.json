@@ -25,13 +25,13 @@
     },
     {
       "id": "clipboard",
-      "version": "1.3.0",
+      "version": "1.3.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.3.0/Clipboard.zip",
-      "sha256": "1740d480cc6c57028a3ab9c21bf06cfb6c3ec38cd97ee3ccbd6ee2da49a514fe",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.3.1/Clipboard.zip",
+      "sha256": "1c065f5456a80f5f6605a2280708fe3cd02905013bfe79ee2fe8efe51a568742",
       "sizeMB": 2,
       "notes": [
-        "Новая панель: категории прямо в ней, вставка вторым кликом, перетаскивание содержимого в другие программы, картинки с адресом рядом больше не теряются"
+        "Перенос на категорию без значка «+» и с анимацией, панель закрывается плавно, вставка идёт после её ухода"
       ]
     },
     {
