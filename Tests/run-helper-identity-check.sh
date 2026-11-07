@@ -3,6 +3,7 @@
 # Внешняя подпись во всех отказах настоящая и бандл ею запечатан: отказать должна проверка помощника.
 # launchctl, download и связь подставные, все пути в папке стенда. Бинарники стенда пустые, ни один не запускается.
 # Папка стенда (удаляется): HELPER_IDENTITY_CHECK_DIR, иначе $TMPDIR/helper-identity-check.noindex. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

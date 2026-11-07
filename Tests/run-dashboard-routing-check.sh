@@ -2,6 +2,7 @@
 # Дашборд, меню-бар, чек-лист и остановка при передаче для модулей, которых ведёт утилита. Статус подставной, подпись не нужна,
 # окно за экраном (x: -10000). Настройки: Kit.defaults в своём suite, ModuleManager.shared — в домене бинарника, снят на выходе.
 # Папка: DASHBOARD_ROUTING_CHECK_DIR, иначе $TMPDIR/dashboard-routing-check. PNG остаются в png/.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

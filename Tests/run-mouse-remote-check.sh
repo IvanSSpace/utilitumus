@@ -1,6 +1,7 @@
 #!/bin/bash
 # Вкладка «Мышь» в лаунчере, работа в утилите. Настоящие подписанная утилита, launchd и связь; tap на прокрутку и
 # системный запрос доступа заглушены швом KIT_TEST_DEFAULTS. Папка стенда: SATELLITE_CHECK_DIR; снимки в mouse/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup mouse Mouse

@@ -2,6 +2,7 @@
 # Вкладка «Звук»: рисует центр, работает утилита. Настоящие подписанная утилита, launchd и связь.
 # Устройство по умолчанию у Mac не меняется: утилита собрана со швом, и её монитор ничего не пишет в CoreAudio.
 # Папка стенда: SATELLITE_CHECK_DIR; снимки в sound/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup sound Sound

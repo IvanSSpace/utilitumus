@@ -3,6 +3,7 @@
 # на тех же настройках, след в бинарнике для scripts/check-no-seam.sh. Подпись не нужна.
 # Настройки: Kit.defaults в своём suite, домен бинарника снят на выходе. Настоящих утилит и настроек стенд не видит.
 # Папка: DEV_SCOPE_CHECK_DIR, иначе $TMPDIR/dev-scope-check. Снимки остаются в png/. INCREMENTAL_OFF=1 — собрать целиком.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

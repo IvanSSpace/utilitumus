@@ -4,6 +4,7 @@
 # В сборке нет ни SMC.swift, ни FanHelperClient.swift, ни FanHelperInstaller.swift: дойти до настоящего SMC или службы ей нечем
 # (ниже проверяется по nm).
 # Папка стенда: UPDATE_ORDER_CHECK_DIR, иначе $TMPDIR/update-order-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${UPDATE_ORDER_CHECK_DIR:-${TMPDIR:-/tmp}/update-order-check}"

@@ -2,6 +2,7 @@
 # Модуль Стеша в утилите, без launchd и подписи: защита своих программ (Kit.isOurs), общий домен записи стеша,
 # один писатель, замер по аренде экрана. Все программы поддельные; настройки только в тестовом домене Kit.
 # Папка стенда: STASH_MODULE_DIR, иначе $TMPDIR/stash-module-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

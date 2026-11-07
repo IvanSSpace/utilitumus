@@ -3,6 +3,7 @@
 # Три мутации: каждая ломает код в копии, проверка обязана провалиться; исходник не меняется.
 # Папка: MODULE_MIGRATION_CHECK_DIR, иначе $TMPDIR/module-migration-check.
 # FnSystemAction собран со швом KIT_TEST_DEFAULTS: nm ниже проверяет, что записи в настоящий AppleFnUsageType нет.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

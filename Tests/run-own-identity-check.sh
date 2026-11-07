@@ -1,6 +1,7 @@
 #!/bin/bash
 # Kit.ownBundleIDs и Kit.isOurs: точный список, подделки не проходят; Стеш и Нагрузка не трогают наше.
 # Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

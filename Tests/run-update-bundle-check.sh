@@ -2,6 +2,7 @@
 # Обновление центра: режимы файлов и повторная проверка копии в UpdateBundle, режимы в основном пути install.sh.
 # curl, osascript и open в install.sh подменены, INSTALL_DIR в папке стенда: настоящее приложение не затрагивается.
 # Папка стенда: UPDATE_CHECK_DIR, иначе $TMPDIR/update-bundle-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${UPDATE_CHECK_DIR:-${TMPDIR:-/tmp}/update-bundle-check}"

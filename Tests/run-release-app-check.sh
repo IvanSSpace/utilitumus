@@ -3,6 +3,7 @@
 # только в папку стенда; подставные репозиторий со своим origin, gh и launchctl; настоящий каталог не трогается.
 # Sources/Apps/Awake — заготовка стенда, настоящая появится в следующей задаче.
 # Папка стенда: RELEASE_APP_CHECK_DIR, иначе $TMPDIR/release-app-check. Нужен сертификат «Utilitumus Signing».
+CHECK_LIMIT=3600 source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

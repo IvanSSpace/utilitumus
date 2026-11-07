@@ -1,6 +1,7 @@
 #!/bin/bash
 # Связь центра и утилиты: чистая логика, затем подписанные бинарники под launchd.
 # Папка стенда: LINK_CHECK_DIR, иначе $TMPDIR/link-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

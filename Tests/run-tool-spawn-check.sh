@@ -1,6 +1,7 @@
 #!/bin/bash
 # Запуск внешних программ в «Нагрузке»: снятие ответственности, вывод, сокет tmux.
 # Папка стенда: TOOL_CHECK_DIR, иначе $TMPDIR/tool-spawn-check. Настоящий tmux пользователя не трогается: у стенда свой сокет.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${TOOL_CHECK_DIR:-${TMPDIR:-/tmp}/tool-spawn-check}"

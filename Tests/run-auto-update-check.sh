@@ -4,6 +4,7 @@
 # Папка: AUTO_UPDATE_CHECK_DIR, иначе $TMPDIR/auto-update-check. Кэш сборки рядом, чтобы переживал очистку.
 # --build-only: только собрать. --mutations: собрать сломанные варианты и показать, что проверка на них краснеет.
 # Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

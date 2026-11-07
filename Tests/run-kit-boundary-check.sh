@@ -1,5 +1,6 @@
 #!/bin/bash
 # Граница Sources/Kit: компилируется сам по себе и не упоминает логику центра.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

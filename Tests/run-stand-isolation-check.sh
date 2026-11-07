@@ -7,6 +7,7 @@
 #      обязан попасть в Tests/stand-reviewed-paths.txt, то есть пройти разбор («шов есть» или «отказ в стенде»);
 #   3. снимок настоящих мест до и после (имена, размеры, mtime; содержимое не читается).
 # Не нужен сертификат: пробный процесс без подписи, меток Mach нет.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source Tests/stand-snapshot.sh

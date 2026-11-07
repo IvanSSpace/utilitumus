@@ -1,6 +1,7 @@
 #!/bin/bash
 # Каждая папка Sources/Modules/<X> компилируется с одним Sources/Kit и записанными здесь дополнительными исходниками.
 # Без аргументов — все модули; можно назвать отдельные: Tests/run-module-standalone-check.sh Fans Voice
+source "$(dirname "$0")/lib/check-limit.sh"
 set -uo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

@@ -1,5 +1,6 @@
 #!/bin/bash
 # Проверка хранения заголовков окон в стеше: собирает Tests/StashTitleCheck.swift с исходником стеша и запускает.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="$(mktemp -d)"

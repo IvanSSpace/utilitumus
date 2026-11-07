@@ -1,6 +1,7 @@
 #!/bin/bash
 # Голосовой ввод: подпись помощника при каждом запуске, запасная вставка не попадает в историю буфера.
 # Папка стенда: VOICE_CHECK_DIR, иначе $TMPDIR/voice-security-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${VOICE_CHECK_DIR:-${TMPDIR:-/tmp}/voice-security-check}"

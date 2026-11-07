@@ -2,6 +2,7 @@
 # `AwakeController.start()` читает настройки заново. Сборка со швом KIT_TEST_DEFAULTS, настоящие настройки не трогаются.
 # Не запускать вместе с run-awake-app-check.sh и run-awake-remote-check.sh: у них один suite.
 # Папка стенда: AWAKE_SETTINGS_DIR, иначе $TMPDIR/awake-settings-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

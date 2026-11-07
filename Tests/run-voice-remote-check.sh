@@ -1,6 +1,7 @@
 #!/bin/bash
 # «Голос»: настоящая подписанная утилита под launchd, чужая подпись, мусор, пассивная роль, смерть утилиты.
 # Нужен сертификат подписи. Микрофон и горячую клавишу сборка со швом не трогает: в ней start лишь пишет «голос: старт».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup voice Voice

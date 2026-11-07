@@ -1,6 +1,7 @@
 #!/bin/bash
 # Куда ведёт ссылку модуль «Браузер»: логика без настроек и LaunchServices, плюс подпись и расположение на бандлах стенда.
 # Бандлы не регистрируются в системе и не запускаются, браузер по умолчанию не меняется. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${BROWSER_CHECK_DIR:-${TMPDIR:-/tmp}/browser-routing-check}"

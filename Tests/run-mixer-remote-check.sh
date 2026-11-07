@@ -2,6 +2,7 @@
 # Вкладка «Микшер» в лаунчере, работа в утилите. Настоящие подписанная утилита, launchd и связь; звук не перехватывается:
 # утилита стенда собрана со швом (--test-seam), тапы в ней не создаются. Захват системного звука и разрешение — руками.
 # Папка стенда: SATELLITE_CHECK_DIR; снимки в mixer/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup mixer Mixer

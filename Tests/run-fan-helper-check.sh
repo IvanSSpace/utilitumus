@@ -3,6 +3,7 @@
 # бинарники под launchd в домене пользователя. Настоящий SMC не трогается: роли собраны со швом
 # FAN_TEST_FAKE_SMC, в такой сборке нет ни SMC.swift, ни IOKit. Пароль не спрашивается.
 # Папка стенда (удаляется до и после): FAN_HELPER_CHECK_DIR, иначе $TMPDIR/fan-helper-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

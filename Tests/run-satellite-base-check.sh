@@ -2,6 +2,7 @@
 # Основа модулей на утилите-пробе: модель, хост, протокол v3. Настоящие launchd, подпись и связь.
 # Имя пробы — аргумент: метка, домен и папка выводятся из него, поэтому две пробы идут одновременно.
 # Tests/run-satellite-base-check.sh [имя]   Папка стенда: SATELLITE_CHECK_DIR.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 umask 022
 source "$(dirname "$0")/satellite-check-lib.sh"

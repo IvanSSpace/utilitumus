@@ -3,6 +3,7 @@
 # настройки только в своём suite, настоящий стеш не читается и не пишется. Окно за экраном и прозрачное.
 # Экран «до» — StashView из коммита перед переходом на модель. Папка стенда: STASH_WIRE_DIR, иначе $TMPDIR/stash-wire-check.
 # STASH_WIRE_LOGIC=1: только разбор и проверки действий, без экрана, для контрольных поломок.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

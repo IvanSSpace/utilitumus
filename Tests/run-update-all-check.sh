@@ -4,6 +4,7 @@
 # /Applications, настоящие утилиты и их настройки не трогаются: всё в папке стенда, окна за экраном.
 # Папка: UPDATE_ALL_CHECK_DIR, иначе $TMPDIR/update-all-check. PNG в png/ (и в UPDATE_ALL_PNG_DIR, если задана).
 # Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

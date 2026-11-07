@@ -1,6 +1,7 @@
 #!/bin/bash
 # Обработчик ссылок «Браузера»: включённость, выбор копии, установка, обновление и удаление утилиты, шаг и статус.
 # Подставной LaunchServices; подпись не нужна. Настоящий local.utilitumus.links, http и https не трогаются.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Ключ «Буфера» и его передача центром. Связка в памяти, временный каталог, выдуманные ключи.
 # Настоящая Связка ключей, index.bin, img-*.bin и буфер обмена не трогаются: страж ниже не даёт проверке даже назвать их.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${TMPDIR:-/tmp}/clipboard-key-check"

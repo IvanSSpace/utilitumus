@@ -5,6 +5,7 @@
 # Настройки: Kit.defaults в своём suite, домен бинарника снят на выходе.
 # Папка: SIDEBAR_DRAG_CHECK_DIR, иначе $TMPDIR/sidebar-drag-check. Кадры перетаскивания: SIDEBAR_DRAG_PNG, иначе png/.
 # SIDEBAR_DRAG_ONLY=clicks,hidden — только эти сценарии (clicks, reorder, between, hidden, cancelling, scrolled).
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

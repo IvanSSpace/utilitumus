@@ -3,6 +3,7 @@
 # тестовая метка выпуска, поиск следов шва в бандле, scripts/check-no-seam.sh. Подписей не требует:
 # сборка утилиты может оборваться на codesign, до него бандл и метка уже готовы.
 # Папка стенда: SEAM_CHECK_DIR, иначе $TMPDIR/seam-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${SEAM_CHECK_DIR:-${TMPDIR:-/tmp}/seam-check}"

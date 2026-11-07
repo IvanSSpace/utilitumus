@@ -1,6 +1,7 @@
 #!/bin/bash
 # Сборка пилота и то, что обычная сборка от неё не зависит. /Applications только читается, ничего не запускается.
 # Папка: PILOT_CHECK_DIR, иначе $TMPDIR/pilot-build-check. Нужен сертификат «Utilitumus Signing».
+CHECK_LIMIT=3600 source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

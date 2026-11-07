@@ -3,6 +3,7 @@
 # launchctl, загрузка и связь подставные, пути в папке теста, настройки в своём suite. FnSystemAction настоящий, но со швом
 # KIT_TEST_DEFAULTS: AppleFnUsageType, горячие клавиши и применение настроек подменены, nm ниже проверяет, что записи в систему нет.
 # Папка: MODULE_HANDOVER_CHECK_DIR, иначе $TMPDIR/module-handover-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

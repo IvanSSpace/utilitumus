@@ -1,6 +1,7 @@
 #!/bin/bash
 # Пароль связки подписи не должен попадать в argv: `unlock-keychain -p` есть только в scripts/unlock-signing.sh
 # (там он уходит в `security -i` по stdin). Настоящую связку проверка не трогает.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 failures=0
