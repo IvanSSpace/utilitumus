@@ -203,6 +203,7 @@ cat > "$OUT/bin/gh" <<'GH'
 R="$FAKE_DIR/releases"
 mkdir -p "$R"
 event "gh $*"
+if [ "$1" != auth ] && [ "${GH_TOKEN:-}" != fake-token ]; then event "gh-no-token $*"; fi
 case "$1 ${2:-}" in
   "auth token") echo fake-token ;;
   "release view")
@@ -271,7 +272,7 @@ fresh() { # чистое начало: без тегов, релизов и жу
 ev() { grep -cE -- "$1" "$FAKE/events.log" || true; }
 first_ev() { grep -nE -- "$1" "$FAKE/events.log" | head -1 | cut -d: -f1; }
 last_ev() { grep -nE -- "$1" "$FAKE/events.log" | tail -1 | cut -d: -f1; }
-fake_env=(FAKE_DIR="$FAKE" FAKE_REAL_GIT="$REAL_GIT" FAKE_ORIGIN="$ORIGIN")
+fake_env=(FAKE_DIR="$FAKE" FAKE_REAL_GIT="$REAL_GIT" FAKE_ORIGIN="$ORIGIN" GH_TOKEN=)
 # --dry-run, без терминала. Вывод в файл $1.
 dry() { # файл, переменные...
   local f="$1"; shift
@@ -400,6 +401,14 @@ check "повтор: теги не создаются заново" test "$(ev '
 check "повтор: тег не пушится заново" test "$(ev 'git-push-tag')" -eq 0
 check "повтор: один коммит каталога и центр" test "$(commits_since_base)" -eq 1 -a "$(ev 'hub-release')" -eq 1
 check "повтор: суммы в каталоге от выложенных архивов" catalog_matches_assets
+check "повтор: gh всегда с токеном выпуска, и на чтении" test "$(ev 'gh-no-token')" -eq 0
+
+# Сбой между тегом и пушем: тег только здесь, он не создаётся заново, а пушится
+fresh
+git -C "$FX" tag awake-v1.0.0
+publish "$OUT/localtag.out" "$HUB"
+check "тег только локально: выпуск дошёл" test "$LAST" = 0
+check "тег только локально: не создаётся заново" test "$(ev 'git-tag awake')" -eq 0 -a "$(ev 'git-push-tag awake')" -eq 1
 
 # Проверки идут и по архиву с релиза: ненастоящий не попадёт в каталог
 fresh

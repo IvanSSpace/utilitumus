@@ -9,7 +9,7 @@
 # Заметка нужна каждой утилите, которой есть что выкладывать; заметки центра — Resources/WhatsNew.json.
 # Порядок выкладки: релизы утилит (--latest=false), один коммит каталога, центр с --latest=true последним:
 # старые центры берут /releases/latest, и пока в каталоге нет утилит, центр не должен стать «последним».
-# Сборки и релизы утилит идут параллельно (RELEASE_ALL_JOBS, по умолчанию 6), логи в <рабочая папка>/logs. Каталог и центр — только
+# Сборки и релизы утилит идут параллельно (RELEASE_ALL_JOBS, по умолчанию 5), логи в <рабочая папка>/logs. Каталог и центр — только
 # после всех релизов. Сорвалось — запусти ту же команду ещё раз: готовое не повторится, а в каталог попадёт сумма выложенного архива.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -66,9 +66,10 @@ EPOCH="$(sed -n 's/.*static let securityEpoch = "\(.*\)".*/\1/p' Sources/Kit/Kit
 [ -n "$LEAF" ] && [ -n "$EPOCH" ] || fail "В Sources/Kit/KitSigning.swift нет хэша сертификата или securityEpoch."
 HUB_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
 HUB_TAG="v$HUB_VERSION"
-JOBS="${RELEASE_ALL_JOBS:-6}"
+JOBS="${RELEASE_ALL_JOBS:-5}"
 [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || fail "RELEASE_ALL_JOBS: нужно целое больше нуля."
-# swiftc -O по умолчанию запускает компиляторов по числу ядер, на каждую из JOBS сборок: 6 x 10 не помещается в 16 ГБ.
+# swiftc без -j компилирует файлы по одному. 5 сборок по -j2 — это 10 компиляторов на 10 ядер, около 2 ГБ памяти: быстрее 6 по одному и
+# наравне с 6 по -j2, но без очереди на ядра (замер: 102, 67 и 66 с, пик загрузки 7, 10 и 22).
 SWIFT_JOBS=2
 
 # --- 1. Репозиторий
@@ -81,12 +82,13 @@ HEAD_SHA="$(git rev-parse HEAD)"
 REMOTE_TAGS="$(git ls-remote --tags origin)"
 
 # Без gh, пока тега нет ни здесь, ни в origin: релиз идёт только по готовому тегу (--verify-tag), а --dry-run первого выпуска обходится без gh.
+# Токен в основной оболочке: дальше им скачивают архив с релиза, а активный аккаунт gh на этом Mac другой.
+use_release_token() { [ -n "${GH_TOKEN:-}" ] || export GH_TOKEN="$(gh auth token --user IvanSSpace 2>/dev/null || true)"; }
 local_tag() { git rev-parse -q --verify "refs/tags/$1^{commit}" 2>/dev/null || true; }
 remote_tag() { LC_ALL=C awk -v ref="refs/tags/$1" '$2 == ref { print $1 }' <<<"$REMOTE_TAGS"; }
 # Что на GitHub по тегу: none, ready или broken (черновик или нет архива). Сбой сети не должен выглядеть как «релиза нет».
 release_state() { # тег, имя архива
   local out
-  [ -n "${GH_TOKEN:-}" ] || export GH_TOKEN="$(gh auth token --user IvanSSpace 2>/dev/null || true)"
   if ! out="$(gh release view "$1" -R "$REPO" --json isDraft,assets --jq '"\(.isDraft) " + ([.assets[].name] | join(","))' 2>&1)"; then
     [[ "$out" == *"release not found"* ]] || fail "gh не ответил про релиз ${1}: ${out}"
     echo none
@@ -147,6 +149,7 @@ for i in "${!IDS[@]}"; do
       if [ "${here:-$HEAD_SHA}" != "$HEAD_SHA" ] || [ "${there:-$HEAD_SHA}" != "$HEAD_SHA" ]; then
         fail "Тег $tag уже есть, а в каталоге записи нет — разберись вручную. Он не на текущем коммите ($HEAD_SHA)."
       fi
+      use_release_token
       state="$(release_state "$tag" "${NAMES[$i]}.zip")"
       case "$state" in
         none) action="продолжить $tag: тег уже есть" ;;
@@ -167,6 +170,7 @@ else
   # Центр сорвался после своего тега: release.sh продолжит. Выпущенный центр повторно не выйдет.
   here="$(local_tag "$HUB_TAG")"; there="$(remote_tag "$HUB_TAG")"
   if [ -n "$here$there" ]; then
+    use_release_token
     if [ "${here:-$HEAD_SHA}" != "$HEAD_SHA" ] || [ "${there:-$HEAD_SHA}" != "$HEAD_SHA" ] || [ "$(release_state "$HUB_TAG" Utilitumus.zip)" != none ]; then
       fail "Тег $HUB_TAG уже есть. Только утилиты, без центра: --utilities-only."
     fi
@@ -290,7 +294,7 @@ trap on_interrupt INT TERM
 echo "== 3. Сборка и проверка"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/release-all.XXXXXX")"
 echo "рабочая папка: $WORK"
-# Один раз и заранее: шесть одновременных unlock к связке, из которой тут же подписывают, ни к чему. Дальше связку держат открытой сами подписи.
+# Один раз и заранее: несколько одновременных unlock к связке, из которой тут же подписывают, ни к чему.
 NEED_BUILD=""
 for i in ${QUEUE[@]+"${QUEUE[@]}"}; do
   if [ "${STATES[$i]:-}" != ready ]; then NEED_BUILD=1; fi
@@ -438,7 +442,7 @@ else
 fi
 read -r typed
 [ "$typed" = "$EXPECTED" ] || fail "Версия не совпала, ничего не выложено."
-[ -n "${GH_TOKEN:-}" ] || export GH_TOKEN="$(gh auth token --user IvanSSpace 2>/dev/null || true)"
+use_release_token
 
 publish_job() { # индекс: шаги утилиты по порядку; первый сбой прерывает цепочку (set -e)
   local step
