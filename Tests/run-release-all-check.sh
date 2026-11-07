@@ -138,6 +138,22 @@ ARGS=(--only awake,fans)
 expect_refused "--only: заметка нужна каждой выбранной" "Нет заметок для awake"
 ARGS=(--only --note awake="Первая")
 expect_refused "--only без списка: отказ" "После --only нужен список"
+# После scripts/fix.sh каталог новее Info.plist утилиты, а старый тег уже есть: это не повод для отказа и не новый выпуск.
+KEEP_CATALOG="$(cat "$FX/Catalog/catalog.json")"
+printf '{"schema":1,"apps":[{"id":"awake","version":"1.0.1","minHub":"0.6.0","url":"u","sha256":"s","sizeMB":1,"notes":["x"]}]}\n' > "$FX/Catalog/catalog.json"
+git -C "$FX" tag awake-v1.0.0
+git -C "$FX" -c user.name=t -c user.email=t@t commit -q -am "после fix.sh"
+git -C "$FX" push -q origin main
+ARGS=(--only awake,fans --note fans="Вторая")
+status=0; run env > "$OUT/after-fix.out" || status=$?
+check "каталог новее Info.plist: выпуск идёт" test "$status" -eq 0
+check "каталог новее Info.plist: утилита уже в каталоге" has "$OUT/after-fix.out" "уже в каталоге"
+check "каталог новее Info.plist: старая версия не выпускается" lacks "$OUT/after-fix.out" "git tag awake-v"
+git -C "$FX" tag -d awake-v1.0.0 >/dev/null
+printf '%s\n' "$KEEP_CATALOG" > "$FX/Catalog/catalog.json"
+git -C "$FX" -c user.name=t -c user.email=t@t commit -q -am "назад"
+git -C "$FX" push -q origin main
+BEFORE="$(git -C "$FX" rev-parse HEAD)"
 ARGS=(--only awake,fans --note awake="Первая" --note fans="Вторая")
 git -C "$FX" -c user.name=t -c user.email=t@t commit -q --allow-empty -m ahead
 expect_refused "HEAD не совпадает с origin/main: отказ" "не совпадает с GitHub"
