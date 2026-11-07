@@ -36,7 +36,7 @@ let notOneAction: [(String, String)] = [
     await model.read()
 }
 
-/// Встроенные объекты в том же состоянии, что утилита.
+/// Объекты утилиты, собранные в стенд, в том же состоянии, что настоящая утилита.
 @MainActor func pinLocal(to state: SoundState) {
     let monitor = MonitorState.shared
     monitor.currentInputName = state.currentInputName
@@ -81,9 +81,25 @@ let notOneAction: [(String, String)] = [
     await model.perform(.setBluetoothLocked(true))
 }
 
+/// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme, @ViewBuilder _ content: @escaping () -> some View) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.sound), animated: false) { _, active in
+        AnyView(content()
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.sound))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .sound, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
 @MainActor func pixels() async {
     let model = RemoteSoundModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
@@ -91,12 +107,10 @@ let notOneAction: [(String, String)] = [
         for name in ["default", "unlocked", "system-output"] {
             await drive(name)
             check(model.responding, "\(themeName) \(name): утилита в нужном состоянии")
-            modules.setExternal(.sound, false)
             pinLocal(to: model.state)
-            let local = await Stand.open(theme)
+            let local = await openLocal(theme) { ModuleScreen(module: .sound) { SoundView(model: SoundController.shared) } }
             Stand.save(local, "\(themeName)-\(name)-local")
 
-            modules.setExternal(.sound, true)
             await registry.update()
             check(registry.isEnabled(.sound), "\(themeName) \(name): реестр видит утилиту включённой")
             let remote = await Stand.open(theme)
@@ -108,13 +122,11 @@ let notOneAction: [(String, String)] = [
         check(differingPixels(shots[0], shots[1]) > 0 && differingPixels(shots[0], shots[2]) > 0, "\(themeName): три состояния выглядят по-разному, снимки не пустые")
         await drive("default")
     }
+    // Выключенная утилита: тот самый экран «модуль выключен».
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
     let other = LinkClient(id: moduleID)
-    modules.setOn(.sound, false)
-    modules.setExternal(.sound, false)
-    let local = await Stand.open(.dusk)
-    modules.setOn(.sound, true)
-    modules.setExternal(.sound, true)
+    let local = await openLocal(.dusk) { ModuleOffView(module: .sound) {} more: {} }
+    Stand.save(local, "dusk-off-local")
     try? await other.setEnabled(false)
     await registry.update()
     let remote = await Stand.open(.dusk)

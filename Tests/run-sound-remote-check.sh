@@ -16,6 +16,9 @@ defaults write "$SUITE" "App.$ID.Enabled" -bool true
 start_agent
 PID="$(agent_pid)"
 
+# Монитор утилиты заполняет список устройств не сразу: «после отказа состояние то же» иначе сравнило бы пустой список с настоящим.
+for _ in $(seq 1 50); do [[ "$("$HUB" state)" == *'"uid"'* ]] && break; sleep 0.1; done
+
 echo "== чужая подпись"
 check_foreign_rejected
 
