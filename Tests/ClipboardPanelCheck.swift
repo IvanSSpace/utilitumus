@@ -137,7 +137,7 @@ let esc: UInt16 = 53, enter: UInt16 = 36, tab: UInt16 = 48, left: UInt16 = 123, 
     model.storeError = "нет хранилища"
     check(!model.canAddSpace, "без хранилища кнопка + не обещает создать")
     model.beginCreate()
-    check(model.editor == nil, "без хранилища окошко создания не открывается")
+    check(model.editor == nil && model.spaceNameEdit == nil, "без хранилища + ничего не открывает")
     model.storeError = nil
 
     check(Set(ClipPanelText.hints.map(\.key)).isSuperset(of: ["←→", "⏎", "⌘1–9", "⇥", "Esc"]), "подсказки ушли в меню, все на месте")
@@ -159,34 +159,78 @@ let esc: UInt16 = 53, enter: UInt16 = 36, tab: UInt16 = 48, left: UInt16 = 123, 
     let enterKey = ClipPanelKey(code: enter, text: "\r")
     let escKey = ClipPanelKey(code: esc, text: "\u{1b}")
 
+    // + создаёт сразу: окошка нет, поле имени в самом ряду.
+    check(ClipPalette.all.count == 9, "в палитре 9 цветов")
     model.beginCreate()
-    check(model.editor?.mode == .create, "+ открыл окошко")
-    check(ClipPalette.all.count == 9, "в окошке 9 цветов палитры")
-    check(model.handleKey(enterKey) && model.editor != nil && store.spaces.isEmpty, "пустое имя: Enter не создаёт, окошко открыто")
-    model.editor?.name = "   "
-    model.commitEditor()
-    check(model.editor != nil && store.spaces.isEmpty, "имя из пробелов не создаёт")
-    check(!model.handleKey(ClipPanelKey(code: 0, text: "a")), "буква в окошке идёт в его поле")
-    check(!model.handleKey(ClipPanelKey(code: right, text: "\u{F703}")), "стрелка в окошке двигает курсор, не карточку")
-    check(!model.handleKey(ClipPanelKey(code: 18, command: true, text: "1")), "⌘1 в окошке не вставляет запись")
-    check(model.handleKey(escKey) && model.editor == nil && closed == 0, "Esc закрыл окошко, а не панель")
-
+    check(model.editor == nil, "+ не открывает окошко")
+    check(store.spaces.map(\.name) == ["Без названия"] && model.spaces.count == 1, "категория появилась сразу")
+    check(model.spaceNameEdit?.id == store.spaces[0].id && model.spaceNameEdit?.text == "Без названия" && model.spaceNameEdit?.isNew == true, "сразу в правке, текст «Без названия»")
+    check(store.spaces[0].colorID == ClipPalette.all[0].id, "цвет первый незанятый")
+    check(model.tab == nil, "вкладка откроется только после ввода")
+    check(!model.handleKey(ClipPanelKey(code: 0, text: "a")) && !model.searchOpen && model.query.isEmpty, "буква идёт в поле имени, поиск не открылся")
+    check(!model.handleKey(ClipPanelKey(code: right, text: "\u{F703}")), "стрелка в поле двигает курсор, не карточку")
+    check(!model.handleKey(ClipPanelKey(code: 18, command: true, text: "1")), "⌘1 в поле не вставляет запись")
+    check(model.handleKey(escKey) && model.spaceNameEdit == nil && closed == 0, "Esc отменил создание, а не закрыл панель")
+    check(store.spaces.isEmpty && model.spaces.isEmpty, "Esc удалил новую пустую категорию")
     model.beginCreate()
-    model.editor?.name = "  пароли  "
-    model.editor?.colorID = "green"
-    check(model.handleKey(enterKey) && model.editor == nil, "Enter создал и закрыл окошко")
-    check(store.spaces.map(\.name) == ["пароли"] && store.spaces[0].colorID == "green", "пространство в хранилище, имя без пробелов, цвет выбранный")
-    check(model.spaces.map(\.name) == ["пароли"], "панель увидела новое пространство")
+    model.spaceNameEdit?.text = "   "
+    check(model.handleKey(enterKey) && model.spaceNameEdit == nil, "Enter закрыл поле")
+    check(store.spaces.map(\.name) == ["Без названия"] && model.tab == store.spaces[0].id, "пустое имя оставило «Без названия», вкладка открылась")
+    model.onDeleteSpace(store.spaces[0].id)
+    model.selectTab(nil)
+    model.beginCreate()
+    model.spaceNameEdit?.text = "  пароли  "
+    check(model.handleKey(enterKey) && model.spaceNameEdit == nil, "Enter сохранил")
+    check(store.spaces.map(\.name) == ["пароли"] && model.spaces.map(\.name) == ["пароли"], "имя без пробелов в хранилище и панели")
+    check(model.tab == store.spaces[0].id, "после ввода открыта вкладка новой категории")
+    model.selectTab(nil)
     let id = store.spaces[0].id
+    // Цвета: занятый пропускается, заняты все — по очереди.
+    store.setColor(id, ClipPalette.all[0].id)
+    controller.attach(store)
+    model.spaces = controller.spaces
+    model.beginCreate()
+    check(store.spaces.last?.colorID == ClipPalette.all[1].id, "занятый цвет пропущен")
+    model.cancelInlineEdit()
+    let colorStore = (0..<ClipPalette.all.count).map { ClipSpace(id: UUID(), name: "\($0)", colorID: ClipPalette.all[$0].id) }
+    let colorModel = ClipboardPanelModel()
+    colorModel.spaces = colorStore
+    var picked: String?
+    colorModel.onAddSpace = { _, color, _ in
+        picked = color
+        colorModel.spaces.append(ClipSpace(id: UUID(), name: "x", colorID: color))
+    }
+    colorModel.beginCreate()
+    check(picked == ClipPalette.nextID(after: colorStore.count), "заняты все: по очереди (\(picked ?? ""))")
+    let lockedModel = ClipboardPanelModel()
+    lockedModel.storeError = "нет хранилища"
+    var added = 0
+    lockedModel.onAddSpace = { _, _, _ in added += 1 }
+    lockedModel.beginCreate()
+    check(!lockedModel.canAddSpace && added == 0 && lockedModel.spaceNameEdit == nil, "без хранилища + ничего не делает")
 
+    // Переименовать в том же поле: Esc не удаляет, пустое имя оставляет прежнее, вкладка не меняется.
+    model.beginRename(model.spaces[0])
+    check(model.spaceNameEdit?.isNew == false && model.spaceNameEdit?.text == "пароли", "«Переименовать» в том же поле")
+    model.spaceNameEdit?.text = "другое"
+    check(model.handleKey(escKey) && store.spaces[0].name == "пароли" && closed == 0, "Esc отменил только правку имени")
+    model.beginRename(model.spaces[0])
+    model.spaceNameEdit?.text = "  "
+    model.commitInlineEdit()
+    check(store.spaces[0].name == "пароли", "пустое имя оставило прежнее")
+    model.beginRename(model.spaces[0])
+    model.spaceNameEdit?.text = "коды"
+    model.commitInlineEdit()
+    check(store.spaces[0].name == "коды" && model.spaces[0].name == "коды" && model.tab == nil, "переименовано, вкладка не сменилась")
+
+    // Окошко теперь только настройки: цвет и скрытие, букв не принимает.
     model.beginEdit(model.spaces[0])
-    model.editor?.name = "коды"
-    model.commitEditor()
-    check(store.spaces[0].name == "коды" && store.spaces[0].colorID == "green" && model.spaces[0].name == "коды", "переименовано, цвет прежний")
-    model.beginEdit(model.spaces[0])
+    check(model.handleKey(ClipPanelKey(code: 0, text: "a")) && model.query.isEmpty, "в окошке букв нет: не уходят в поиск за его спиной")
     model.editor?.colorID = "purple"
     model.commitEditor()
     check(store.spaces[0].colorID == "purple" && store.spaces[0].name == "коды" && model.spaces[0].colorID == "purple", "цвет сменён, имя прежнее")
+    model.beginEdit(model.spaces[0])
+    check(model.handleKey(escKey) && model.editor == nil && closed == 0, "Esc закрыл окошко, а не панель")
 
     let reread = ClipboardStore(directory: dir, key: key, limit: 10)
     check(reread.spaces == store.spaces, "формат прежний: хранилище открывается заново, пространство на месте")
@@ -443,11 +487,22 @@ final class FakeDrag: NSObject, NSDraggingInfo {
 
 /// Цели SwiftUI: у каждой категории свой вид, слева направо. Отличаются от поля ввода типами: поле поиска тоже принимает брошенное.
 /// Какую категорию выбрать, решает AppKit по виду, поэтому координата сеанса здесь ни на что не влияет.
+/// Лента (порядок карточек) тоже цель, но лежит ниже ряда. Все цели SwiftUI регистрируют один `public.data`: своё содержимое отличает сам приёмник.
 @MainActor func dropTargets(in view: NSView) -> [NSView] {
+    allPanelTargets(in: view).filter { isInTopBar($0) }
+}
+
+@MainActor func allPanelTargets(in view: NSView) -> [NSView] {
     func targets(_ view: NSView) -> [NSView] { (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets) }
     return targets(view).filter { $0.registeredDraggedTypes.map(\.rawValue).contains("public.data") }
         .sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
 }
+
+@MainActor func isInTopBar(_ view: NSView) -> Bool {
+    view.convert(view.bounds, to: nil).minY > ClipPanelMetrics.panelHeight - ClipPanelMetrics.topPadding - ClipPanelMetrics.barHeight - 1
+}
+
+@MainActor func stripTarget(in view: NSView) -> NSView? { allPanelTargets(in: view).first { !isInTopBar($0) } }
 
 /// Где на снимке лежит цель: от левого верхнего угла, как у снимков.
 @MainActor func shotRect(_ target: NSView, in host: NSView, margin: CGFloat = 0) -> CGRect {
@@ -941,7 +996,7 @@ func waitUntil(_ timeout: Double = 3, _ test: () -> Bool) async -> Bool {
         let root = ZStack(alignment: .topLeading) {
             Color(red: 0, green: 1, blue: 0)
             ClipCard(item: item, number: 2, selected: true, searching: false, theme: model.theme, spaces: [], now: Date(),
-                     model: model, isDragPreview: true)
+                     model: model, concealed: false, isDragPreview: true)
                 .offset(x: margin, y: margin)
         }
         .frame(width: ClipCard.width + margin * 2, height: ClipCard.height + margin * 2)
@@ -1204,8 +1259,6 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
         _ = await Stand.render(empty, "\(suffix)-store-error", out: out)
 
         let editors = panelModel(theme: theme)
-        editors.beginCreate()
-        _ = await Stand.render(editors, "\(suffix)-editor-create", out: out)
         editors.beginEdit(ClipPanelFixture.spaces[0])
         _ = await Stand.render(editors, "\(suffix)-editor-edit", out: out)
         editors.limit = 5
@@ -1271,13 +1324,952 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
     await key("к")
     check(model.query == "тек", "после клика по карточке буквы идут в поле (запрос «\(model.query)»)")
     // Окошко забирало фокус и вернуло: при возврате поле выделяет весь текст, следующая буква не должна его стереть.
-    model.beginCreate()
+    model.beginEdit(ClipPanelFixture.spaces[0])
     try? await Task.sleep(nanoseconds: 200_000_000)
     model.closeEditor()
     try? await Task.sleep(nanoseconds: 200_000_000)
     await key("с")
     check(model.query == "текс", "после окошка буква дописалась к запросу (запрос «\(model.query)»)")
     Stand.window.contentView = nil
+}
+
+// MARK: - Перестановка
+
+@MainActor func checkReorderLogic() {
+    let panelFrame = CGRect(x: -1000, y: 300, width: 1440, height: 334)
+    check(ClipboardPanelHost.pointInPanel(CGPoint(x: -900, y: 584), frame: panelFrame) == CGPoint(x: 100, y: 50), "курсор экрана в координатах панели, и на втором экране левее основного")
+    check(ClipReorder.shift(0, from: 0, to: 2) == 2 && ClipReorder.shift(1, from: 0, to: 2) == -1 && ClipReorder.shift(2, from: 0, to: 2) == -1 && ClipReorder.shift(3, from: 0, to: 2) == 0, "сдвиги вправо")
+    check(ClipReorder.shift(3, from: 3, to: 1) == -2 && ClipReorder.shift(1, from: 3, to: 1) == 1 && ClipReorder.shift(0, from: 3, to: 1) == 0, "сдвиги влево")
+    let w = 100.0, gap = 10.0
+    let others = [w, w, w]
+    check(ClipReorder.slot(x: -500, others: others, dragged: w, gap: gap) == 0, "курсор левее ряда: первое место")
+    check(ClipReorder.slot(x: 50, others: others, dragged: w, gap: gap) == 0, "над первым местом")
+    check(ClipReorder.slot(x: 170, others: others, dragged: w, gap: gap) == 1, "над вторым местом")
+    check(ClipReorder.slot(x: 5000, others: others, dragged: w, gap: gap) == 3, "правее ряда: последнее место")
+    check(ClipReorder.slot(x: 10, others: [], dragged: w, gap: gap) == 0, "соседей нет")
+    // Разная ширина: широкая рядом с узкой. Ответ зависит только от курсора, поэтому ряд не раскачивается: за один проход место только растёт.
+    let wide = 300.0, narrow = [40.0, 40.0, 200.0]
+    var last = 0
+    var monotone = true
+    for x in stride(from: 0.0, to: 800.0, by: 1.0) {
+        let slot = ClipReorder.slot(x: x, others: narrow, dragged: wide, gap: gap)
+        if slot < last { monotone = false }
+        last = slot
+    }
+    check(monotone && last == 3, "широкая среди узких: место только растёт с курсором")
+    let a = UUID(), b = UUID(), c = UUID()
+    check(ClipReorder.moved([a, b, c], a, to: 2) == [b, c, a], "в конец")
+    check(ClipReorder.moved([a, b, c], c, to: 0) == [c, a, b], "в начало")
+    check(ClipReorder.moved([a, b], UUID(), to: 0) == [a, b], "чужой номер ничего не меняет")
+}
+
+/// Настоящие контроллер и хранилище во временной папке: то, что бросок делает до диска.
+@MainActor final class OrderStand {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-order-\(UUID().uuidString)")
+    let key = SymmetricKey(size: .bits256)
+    let store: ClipboardStore
+    let model: ClipboardPanelModel
+    let boards = (0..<2).map { _ in NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)")) }
+    var pasted: [UUID] = []
+
+    init(theme: String = "vivid") {
+        Kit.defaults.set(theme, forKey: DSTheme.storageKey)
+        store = ClipboardStore(directory: dir, key: key, limit: 100)
+        ClipboardController.shared.attach(store)
+        model = ClipboardPanelHost.shared.makeModel(ClipboardController.shared)
+        model.refreshTheme()
+        model.imageLoader = ClipPanelFixture.image
+        model.onPaste = { [unowned self] in pasted.append($0.id) }
+    }
+
+    func sync() {
+        model.allItems = ClipboardController.shared.items
+        model.spaces = ClipboardController.shared.spaces
+    }
+
+    func drag(_ type: UTType, _ id: UUID) -> FakeDrag {
+        let board = boards[type == ClipDrag.spaceType ? 1 : 0]
+        let item = NSPasteboardItem()
+        item.setData(ClipDrag.data(for: id), forType: NSPasteboard.PasteboardType(type.identifier))
+        board.clearContents(); board.writeObjects([item])
+        return FakeDrag(board, Stand.window)
+    }
+
+    func foreign() -> FakeDrag {
+        let board = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)"))
+        let item = NSPasteboardItem()
+        item.setString("посторонний текст", forType: .string)
+        board.clearContents(); board.writeObjects([item])
+        return FakeDrag(board, Stand.window)
+    }
+
+    func close() {
+        Stand.window.contentView = nil
+        boards.forEach { $0.releaseGlobally() }
+        ClipboardController.shared.detachStore()
+        try? FileManager.default.removeItem(at: dir)
+    }
+}
+
+/// Точка окна над местом в ленте: от левого нижнего угла окна, как у настоящего сеанса.
+func stripPoint(slot: Int) -> NSPoint {
+    let o = cardOrigin(slot)
+    return NSPoint(x: o.x + ClipCard.width / 2, y: ClipPanelMetrics.panelHeight - o.y - ClipCard.height / 2)
+}
+
+@MainActor func windowClick(_ p: NSPoint, count: Int = 1) async {
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+        let event = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                       windowNumber: Stand.window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1)
+        Stand.window.sendEvent(event!)
+    }
+    await pause(0.06)
+}
+
+/// Кого выберет сам AppKit под этой точкой. Настоящего сеанса на стенде нет, но выбор цели идёт через этот метод окна:
+/// подставной сеанс, отправленный прямо в нужный вид, этого не показывал. Типы: приёмники SwiftUI регистрируют только `public.data`.
+@MainActor func appKitTarget(_ host: NSView, _ point: NSPoint) -> NSView? {
+    let selector = NSSelectorFromString("_hitTest:dragTypes:")
+    guard host.responds(to: selector) else { return nil }
+    typealias Hit = @convention(c) (AnyObject, Selector, UnsafePointer<NSPoint>, AnyObject) -> AnyObject?
+    var at = point
+    return unsafeBitCast(host.method(for: selector), to: Hit.self)(host, selector, &at, NSSet(array: ["public.data"])) as? NSView
+}
+
+@MainActor func checkRecordOrder(out: String) async {
+    let stand = OrderStand()
+    defer { stand.close() }
+    let store = stand.store, model = stand.model
+    let space = store.addSpace(name: "работа", colorID: "red")
+    let other = store.addSpace(name: "другая", colorID: "blue")
+    for name in ["один", "два", "три", "четыре", "вне категории"] { store.ingest(ClipSnapshot(types: [], text: name, sourceName: "Заметки")) }
+    func id(_ text: String) -> UUID { store.items.first { $0.text == text }!.id }
+    for name in ["четыре", "три", "два", "один"] { store.pin(id(name), to: space.id) }
+    ClipboardController.shared.attach(store)
+    stand.sync()
+    func saved() -> [String] { store.items(in: space.id, query: "").compactMap(\.text) }
+    func shown() -> [String] { model.visible.compactMap(\.text) }
+    check(saved() == ["один", "два", "три", "четыре"], "в категории четыре записи, новая первая: \(saved())")
+
+    // Курсор и кнопка подставные, всё остальное настоящее: таймер модели идёт сам.
+    var cursor: CGPoint?
+    var down = true
+    model.pointer = { cursor }
+    model.isMouseDown = { down }
+    func over(_ slot: Int) -> CGPoint { CGPoint(x: cardOrigin(slot).x + ClipCard.width / 2, y: cardOrigin(slot).y + ClipCard.height / 2) }
+
+    model.selectTab(space.id)
+    let host = Stand.host(model, width: 1440)
+    await pause(0.45)
+    host.layoutSubtreeIfNeeded()
+    check(model.stripFrames[ClipStripKey.strip] != nil && model.stripFrames[ClipStripKey.content] != nil, "панель знает, где лента")
+
+    // Наведение: соседи расступаются, порядок и хранилище не меняются, выбор на той же записи.
+    model.selected = 1
+    let chosen = model.selectedItem?.id
+    let carried = model.visible[0]
+    let plain = snapshot(host, out: out)
+    cursor = over(0)
+    _ = model.dragProvider(for: carried)
+    check(model.isTrackingDrag && model.draggedRecord == carried.id, "onDrag начал отслеживание: больше от источника ничего не нужно")
+    cursor = over(2)
+    await pause(0.1)
+    check(model.recordSlot == 2, "таймер сам увидел курсор над третьим местом (\(String(describing: model.recordSlot)))")
+    check(saved() == ["один", "два", "три", "четыре"] && shown() == saved(), "пока только наведение: порядок прежний")
+    check(model.selectedItem?.id == chosen && model.selected == 1, "выбор на той же записи")
+    cursor = over(1)
+    let trackingEnd = Date().addingTimeInterval(0.1)
+    while Date() < trackingEnd { RunLoop.main.run(mode: .eventTracking, before: trackingEnd) }
+    check(model.recordSlot == 1, "таймер идёт и в режиме слежения за мышью")
+    cursor = over(2)
+    await pause(0.03)
+    let moving = snapshot(host, "color-reorder-moving", out: out)
+    await pause(0.6)
+    let settled = snapshot(host, "color-reorder-hover", out: out)
+    let wholeStrip = CGRect(x: 0, y: cardOrigin(0).y, width: 1200, height: ClipCard.height)
+    let firstBody = CGRect(x: cardOrigin(0).x, y: cardOrigin(0).y + 60, width: ClipCard.width, height: 100)
+    check(changed(plain, settled, in: firstBody) > 100, "на снимке соседи сдвинуты")
+    check(ClipMotion.reduced || changed(moving, settled, in: wholeStrip) > 50, "через 0,03 с карточки ещё едут: движение, а не скачок")
+    cursor = over(3)
+    await pause(0.1)
+    check(model.recordSlot == 3, "дальше: ещё сосед расступился")
+    check(model.recordShift(at: 0, draggedAt: 0) == 3 * (ClipCard.width + ClipPanelMetrics.cardGap) && model.recordShift(at: 2, draggedAt: 0) == -(ClipCard.width + ClipPanelMetrics.cardGap), "сдвиги: сама на три места, сосед на одно")
+
+    // Ушёл с ленты: на ряд категорий, в другую программу.
+    cursor = CGPoint(x: 400, y: 5)
+    await pause(0.1)
+    check(model.recordSlot == nil, "ушёл с ленты: соседи вернулись")
+    check(model.isTrackingDrag, "но перенос ещё идёт")
+    cursor = CGPoint(x: -500, y: -500)
+    down = false
+    await pause(0.1)
+    check(!model.isTrackingDrag && model.draggedRecord == nil, "кнопку отпустили снаружи: перенос окончен")
+    check(saved() == ["один", "два", "три", "четыре"], "вынос наружу порядок не меняет")
+    check(model.selectedItem?.id == chosen, "и выбор на той же записи")
+
+    // Настоящий бросок: кнопку отпустили над лентой, сам приёмник мог и не отозваться.
+    down = true
+    cursor = over(0)
+    _ = model.dragProvider(for: carried)
+    cursor = over(2)
+    await pause(0.1)
+    down = false
+    await pause(0.1)
+    check(saved() == ["два", "три", "один", "четыре"], "отпустили над лентой: порядок сохранён: \(saved())")
+    check(ClipboardStore(directory: stand.dir, key: stand.key, limit: 100).items(in: space.id, query: "").compactMap(\.text) == saved(), "порядок прочитан с диска")
+    check(shown() == saved() && model.recordSlot == nil, "панель показывает новый порядок")
+    check(model.selectedItem?.id == chosen, "после броска выбор на той же записи: \(model.selectedItem?.text ?? "")")
+    await pause(0.5)
+    let landed = snapshot(host, "color-reorder-landed", out: out)
+    check(changed(plain, landed, in: firstBody) > 100, "на снимке новый порядок")
+
+    // Цель броска: что выберет сам AppKit, и что она ответит на настоящую цепочку вызовов.
+    host.layoutSubtreeIfNeeded()
+    let dropPoint = NSPoint(x: over(1).x, y: ClipPanelMetrics.panelHeight - over(1).y)
+    let picked = appKitTarget(host, dropPoint)
+    check(picked != nil && !isInTopBar(picked!), "AppKit под карточкой выбирает её приёмник")
+    let gapPoint = NSPoint(x: cardOrigin(1).x - ClipPanelMetrics.cardGap / 2 + 1, y: dropPoint.y)
+    check(appKitTarget(host, gapPoint) != nil, "и в зазоре между карточками есть приёмник")
+    let tabRect = dropTargets(in: host)[0].convert(dropTargets(in: host)[0].bounds, to: nil)
+    let tabPick = appKitTarget(host, NSPoint(x: tabRect.midX, y: tabRect.midY))
+    check(tabPick.map(isInTopBar) == true, "AppKit над категорией выбирает её приёмник, а не ленту")
+    if let picked {
+        down = true
+        cursor = over(1)
+        let dragged = model.visible[2]
+        _ = model.dragProvider(for: dragged)
+        let drag = stand.drag(ClipDrag.recordType, dragged.id)
+        drag.location = dropPoint
+        check(picked.draggingEntered(drag) == .move, "над карточкой перенос, значка «+» нет")
+        check(picked.draggingUpdated(drag) == .move && model.recordSlot == 1, "и при движении: место то же, что под курсором")
+        check(picked.prepareForDragOperation(drag) && picked.performDragOperation(drag), "бросок на карточку принят: копия не поедет обратно")
+        picked.concludeDragOperation(drag)
+        check(!model.isTrackingDrag, "бросок закончил перенос сразу")
+        down = false
+        await pause(0.1)
+        check(saved() == ["два", "один", "три", "четыре"], "приёмник и таймер не сделали перестановку дважды: \(saved())")
+    }
+
+    // Клик и вставка вторым кликом.
+    await pause(0.5)
+    let target = stripPoint(slot: 2)
+    await windowClick(target)
+    check(model.selected == 2 && stand.pasted.isEmpty, "настоящий клик выделил карточку и не вставил")
+    await windowClick(target)
+    check(stand.pasted.first == model.visible[2].id, "второй клик вставил запись с нового места")
+    await pause(0.5)
+    model.move(-1)
+    check(model.selected == 1 && model.selectedItem?.id == model.visible[1].id, "стрелка идёт по новому порядку")
+
+    // Вставка и повтор не меняют порядок.
+    let order = saved()
+    store.touch(id("один"))
+    store.ingest(ClipSnapshot(types: [], text: "три"))
+    check(saved() == order, "вставка и повтор не меняют порядок: \(saved())")
+
+    // Бросок на другую категорию закрепляет туда, порядок ленты не трогает.
+    stand.sync()
+    await pause(0.2)
+    down = true
+    cursor = over(0)
+    let tabs = dropTargets(in: host)
+    check(tabs.count == 2, "у обеих категорий свой приёмник (\(tabs.count))")
+    if tabs.count == 2 {
+        let two = model.visible.first { $0.text == "два" }!
+        _ = model.dragProvider(for: two)
+        cursor = CGPoint(x: tabs[1].convert(tabs[1].bounds, to: nil).midX, y: 20)
+        await pause(0.05)
+        check(model.recordSlot == nil, "над вкладкой лента не расступается")
+        let carriedAway = stand.drag(ClipDrag.recordType, two.id)
+        check(tabs[1].draggingEntered(carriedAway) == .move, "над другой категорией перенос")
+        check(tabs[1].performDragOperation(carriedAway), "бросок на другую категорию")
+        tabs[1].concludeDragOperation(carriedAway)
+        down = false
+        await pause(0.3)
+        check(store.items.first { $0.text == "два" }!.spaceID == other.id && !saved().contains("два"), "запись закрепилась в другой категории: \(saved())")
+    }
+
+    // Наружу отдаётся содержимое.
+    down = false
+    let outward = model.visible[0]
+    let provider = model.dragProvider(for: outward)
+    let text = await loaded(provider, "public.utf8-plain-text")
+    await pause(0.1)
+    check(text.flatMap { String(data: $0, encoding: .utf8) } == outward.text, "вынос наружу отдаёт содержимое")
+    check(saved() == model.visible.compactMap(\.text), "и не меняет порядок")
+
+    // Чужой тип, поиск, общая вкладка.
+    host.layoutSubtreeIfNeeded()
+    let before = saved()
+    guard let strip = appKitTarget(host, dropPoint) else { return check(false, "приёмник карточки") }
+    let foreign = stand.foreign()
+    foreign.location = dropPoint
+    check(strip.draggingEntered(foreign) == [], "посторонний текст лента не принимает")
+    _ = strip.performDragOperation(foreign)
+    strip.draggingExited(foreign)
+    let spaceDrag = stand.drag(ClipDrag.spaceType, space.id)
+    spaceDrag.location = dropPoint
+    check(strip.draggingEntered(spaceDrag) == [], "категорию нельзя бросить на карточку")
+    _ = strip.performDragOperation(spaceDrag)
+    strip.draggingExited(spaceDrag)
+    await pause(0.15)
+    check(saved() == before && store.spaces.first?.id == space.id, "чужие типы ничего не поменяли")
+
+    model.openSearch()
+    await pause(0.1)
+    down = true
+    cursor = over(0)
+    _ = model.dragProvider(for: model.visible[0])
+    let inSearch = stand.drag(ClipDrag.recordType, model.visible[0].id)
+    inSearch.location = dropPoint
+    check(!model.canReorderRecords && !model.isTrackingDrag && strip.draggingEntered(inSearch) == [], "при поиске перестановки нет")
+    cursor = over(1)
+    await pause(0.05)
+    check(model.recordSlot == nil, "и соседи не расступаются")
+    model.query = "ч"
+    check(model.visible.compactMap(\.text) == before.filter { $0.contains("ч") }, "выдача в порядке категории")
+    _ = strip.performDragOperation(inSearch)
+    down = false
+    await pause(0.15)
+    check(saved() == before, "бросок в поиске ничего не поменял")
+    model.closeSearch()
+
+    model.selectTab(nil)
+    await pause(0.2)
+    host.layoutSubtreeIfNeeded()
+    down = true
+    cursor = over(0)
+    _ = model.dragProvider(for: model.visible[0])
+    check(!model.isTrackingDrag, "в общей вкладке перестановка не начинается")
+    if let any = appKitTarget(host, dropPoint) {
+        let inHistory = stand.drag(ClipDrag.recordType, model.visible[0].id)
+        inHistory.location = dropPoint
+        check(any.draggingEntered(inHistory) == [], "приёмник в общей вкладке отвергает")
+        _ = any.performDragOperation(inHistory)
+    }
+    down = false
+    await pause(0.15)
+    check(model.visible.map(\.id) == store.items.map(\.id), "общая вкладка по времени")
+    check(saved() == before, "порядок категории не тронут")
+}
+
+// MARK: - Порядок категорий
+
+@MainActor func checkSpaceOrder(out: String) async {
+    let stand = OrderStand()
+    defer { stand.close() }
+    let store = stand.store, model = stand.model
+    let a = store.addSpace(name: "работа", colorID: "red")
+    _ = store.addSpace(name: "дом и очень длинное имя", colorID: "green")
+    let c = store.addSpace(name: "код", colorID: "blue")
+    ClipboardController.shared.attach(store)
+    stand.sync()
+    var cursor: CGPoint?
+    var down = true
+    model.pointer = { cursor }
+    model.isMouseDown = { down }
+    let host = Stand.host(model, width: 1440)
+    await pause(0.45)
+    host.layoutSubtreeIfNeeded()
+    func names() -> [String] { store.spaces.map(\.name) }
+    let tabs = dropTargets(in: host)
+    guard tabs.count == 3 else { return check(false, "у каждой категории приёмник (\(tabs.count))") }
+    func rect(_ view: NSView) -> CGRect { view.convert(view.bounds, to: nil) }
+    let y = rect(tabs[0]).midY
+    let top = ClipPanelMetrics.panelHeight - y
+    let rowMin = rect(tabs[0]).minX, rowMax = rect(tabs[2]).maxX
+    for i in 0..<2 { check(abs(rect(tabs[i]).maxX - rect(tabs[i + 1]).minX) < 0.6, "приёмники соседних вкладок смыкаются") }
+    check(appKitTarget(host, NSPoint(x: rect(tabs[1]).midX, y: y)) === tabs[1], "AppKit над вкладкой выбирает её приёмник")
+
+    // «Буфер обмена» стоит левее ряда, приёмника на нём нет.
+    let plain = snapshot(host, "color-spaces-plain", out: out)
+    let bufferLabel = CGRect(x: rowMin - 110, y: top - 15, width: 60, height: 30)
+    check(plain.count(in: bufferLabel) { min($0.r, $0.g, $0.b) > 0.5 } > 30, "«Буфер обмена» слева от ряда категорий")
+    check(appKitTarget(host, NSPoint(x: bufferLabel.midX, y: y)) == nil, "на «Буфере обмена» приёмника нет: бросить левее него нельзя")
+
+    let provider = ClipDrag.spaceProvider(for: a.id)
+    check(provider.registeredTypeIdentifiers == [ClipDrag.spaceType.identifier], "наружу нести нечего: только свой тип (\(provider.registeredTypeIdentifiers))")
+    check(ClipDrag.spaceType != ClipDrag.recordType && !ClipDrag.spaceType.conforms(to: ClipDrag.recordType) && !ClipDrag.recordType.conforms(to: ClipDrag.spaceType), "тип категории отдельный от типа записи")
+
+    // Первая вкладка в конец: соседи расступаются, таймер идёт сам.
+    cursor = CGPoint(x: rect(tabs[0]).midX, y: top)
+    _ = model.spaceDragProvider(for: a.id)
+    check(model.isTrackingDrag, "onDrag начал отслеживание")
+    cursor = CGPoint(x: rowMax - 2, y: top)
+    await pause(0.1)
+    check(model.spaceSlot == 2, "над краем ряда: последнее место (\(String(describing: model.spaceSlot)))")
+    check(names() == ["работа", "дом и очень длинное имя", "код"] && model.spaces.map(\.name) == names(), "на диск пока ничего")
+    await pause(0.5)
+    let right = snapshot(host, "color-spaces-hover-right", out: out)
+    check(changed(plain, right, in: CGRect(x: rowMin, y: top - 15, width: rowMax - rowMin, height: 30)) > 100, "на снимке вкладки сдвинуты")
+    check(model.spaceShift(c.id) < 0 && model.spaceShift(a.id) > 0, "соседи влево, несомая вправо")
+    cursor = CGPoint(x: rect(tabs[0]).minX + 1, y: 200)
+    await pause(0.1)
+    check(model.spaceSlot == nil, "ушёл с ряда на ленту: вкладки вернулись")
+    // Над «Буфером» тоже мимо, и отпускание там ничего не меняет.
+    cursor = CGPoint(x: bufferLabel.midX, y: top)
+    await pause(0.1)
+    check(model.spaceSlot == nil, "над «Буфером обмена» места нет")
+    down = false
+    await pause(0.1)
+    check(!model.isTrackingDrag && names() == ["работа", "дом и очень длинное имя", "код"], "бросок над «Буфером» порядок не меняет")
+
+    // В начало ряда: первое место среди категорий, «Буфер обмена» на месте.
+    down = true
+    cursor = CGPoint(x: rowMax - 10, y: top)
+    _ = model.spaceDragProvider(for: c.id)
+    cursor = CGPoint(x: rowMin + 2, y: top)
+    await pause(0.6)
+    check(model.spaceSlot == 0, "в начало ряда: первое место (\(String(describing: model.spaceSlot)))")
+    let left = snapshot(host, "color-spaces-hover", out: out)
+    check(left.count(in: bufferLabel) { min($0.r, $0.g, $0.b) > 0.5 } > 30, "«Буфер обмена» остался на месте")
+    // Место зависит только от курсора: вкладки сдвинуты, а ответ тот же.
+    await pause(0.2)
+    check(model.spaceSlot == 0, "ряд не раскачивается")
+    // Цель броска: приёмник под курсором принимает, порядок один раз.
+    let under = appKitTarget(host, NSPoint(x: rowMin + 2, y: y))
+    check(under != nil, "под курсором есть приёмник")
+    let drag = stand.drag(ClipDrag.spaceType, c.id)
+    if let under {
+        check(under.draggingEntered(drag) == .move, "над вкладкой перенос")
+        check(under.draggingUpdated(drag) == .move, "и при движении")
+        check(under.prepareForDragOperation(drag) && under.performDragOperation(drag), "бросок выполнен")
+        under.concludeDragOperation(drag)
+    }
+    down = false
+    await pause(0.3)
+    check(names() == ["код", "работа", "дом и очень длинное имя"], "порядок сохранён: \(names())")
+    check(ClipboardStore(directory: stand.dir, key: stand.key, limit: 100).spaces.map(\.name) == names(), "порядок прочитан с диска")
+    check(model.spaces.map(\.name) == names() && model.spaceSlot == nil, "панель показывает новый порядок")
+    // Без отзыва приёмника: кнопку отпустили над рядом.
+    await pause(0.3)
+    host.layoutSubtreeIfNeeded()
+    down = true
+    cursor = CGPoint(x: rowMin + 2, y: top)
+    _ = model.spaceDragProvider(for: c.id)
+    cursor = CGPoint(x: rowMax + 30, y: top)
+    await pause(0.1)
+    down = false
+    await pause(0.2)
+    check(names() == ["работа", "дом и очень длинное имя", "код"], "отпустили правее ряда: последнее место: \(names())")
+
+    // Общее с кнопками ↑↓.
+    ClipboardController.shared.moveSpace(c.id, by: -1)
+    check(names() == ["работа", "код", "дом и очень длинное имя"], "кнопка ↑ двигает тот же порядок")
+    store.moveSpace(c.id, to: -5)
+    check(names().first == "код", "место левее начала: первая категория")
+    store.moveSpace(c.id, to: 99)
+    check(names().last == "код", "место за краем: последняя")
+    stand.sync()
+    await pause(0.3)
+    host.layoutSubtreeIfNeeded()
+
+    // Посторонний текст вкладка не принимает, запись по-прежнему закрепляется.
+    let tabsNow = dropTargets(in: host)
+    let order = names()
+    let foreign = stand.foreign()
+    check(tabsNow[0].draggingEntered(foreign) == [], "посторонний текст вкладка не принимает")
+    tabsNow[0].draggingExited(foreign)
+    store.ingest(ClipSnapshot(types: [], text: "запись"))
+    ClipboardController.shared.attach(store)
+    stand.sync()
+    await pause(0.3)
+    host.layoutSubtreeIfNeeded()
+    let carry = stand.drag(ClipDrag.recordType, store.items[0].id)
+    let onTab = dropTargets(in: host)[0]
+    check(onTab.draggingEntered(carry) == .move && onTab.performDragOperation(carry), "запись на категорию бросается как раньше")
+    onTab.concludeDragOperation(carry)
+    await pause(0.3)
+    check(store.items[0].spaceID == store.spaces[0].id && names() == order, "запись закрепилась, порядок категорий не тронут")
+
+    // Настоящий клик по вкладке: без `Button` он всё равно выбирает её.
+    await windowClick(NSPoint(x: rect(dropTargets(in: host)[0]).minX + 20, y: y))
+    check(model.tab == store.spaces[0].id, "клик по категории открыл её вкладку")
+    model.selectTab(nil)
+    await pause(0.1)
+
+    // Настоящие клики в поле новой категории и + в ряду.
+    // При поиске, где категории сжаты до точек, перестановки нет.
+    model.openSearch()
+    await pause(0.4)
+    host.layoutSubtreeIfNeeded()
+    let dots = dropTargets(in: host)
+    check(dots.count == 3, "точки принимают записи (\(dots.count))")
+    if let dot = dots.first {
+        down = true
+        cursor = CGPoint(x: rect(dot).midX, y: top)
+        _ = model.spaceDragProvider(for: a.id)
+        check(!model.canReorderSpaces && !model.isTrackingDrag, "при поиске перестановка категорий не начинается")
+        let inSearch = stand.drag(ClipDrag.spaceType, a.id)
+        check(dot.draggingEntered(inSearch) == [], "и приёмник отвергает")
+        _ = dot.performDragOperation(inSearch)
+        down = false
+        await pause(0.15)
+        check(names() == order, "бросок при поиске ничего не поменял")
+        await windowClick(NSPoint(x: rect(dot).midX, y: rect(dot).midY))
+        check(model.tab == store.spaces[0].id, "клик по точке категории работает")
+    }
+    model.closeSearch()
+    model.selectTab(nil)
+    await pause(0.3)
+
+    // Кнопка +: настоящее поле в ряду, снимки, Esc.
+    host.layoutSubtreeIfNeeded()
+    model.beginCreate()
+    await pause(0.4)
+    check(Stand.window.firstResponder is NSTextView, "поле новой категории взяло клавиатуру")
+    let field = Stand.window.firstResponder as? NSTextView
+    check(field?.selectedRange() == NSRange(location: 0, length: 12), "«Без названия» выделено: \(String(describing: field?.selectedRange()))")
+    _ = snapshot(host, "color-new-space", out: out)
+    field?.insertText("Пароли", replacementRange: field?.selectedRange() ?? NSRange())
+    check(model.spaceNameEdit?.text == "Пароли" && !model.searchOpen && model.query.isEmpty, "буквы идут в поле, поиск не открылся")
+    model.commitInlineEdit()
+    await pause(0.2)
+    check(model.tab == store.spaces.last?.id && store.spaces.last?.name == "Пароли", "после ввода открыта вкладка новой категории")
+    check(Stand.window.firstResponder is NSTextView, "клавиатура вернулась в поле поиска")
+    model.selectTab(nil)
+    model.beginCreate()
+    await pause(0.2)
+    let count = store.spaces.count
+    check(model.handleKey(ClipPanelKey(code: esc, text: "\u{1b}")) && store.spaces.count == count - 1, "Esc убрал новую категорию из настоящего ряда")
+    await pause(0.2)
+    Kit.defaults.set("graphite", forKey: DSTheme.storageKey)
+    model.refreshTheme()
+    model.beginCreate()
+    await pause(0.4)
+    _ = snapshot(host, "graphite-new-space", out: out)
+    model.cancelInlineEdit()
+    await pause(0.1)
+    Kit.defaults.set("vivid", forKey: DSTheme.storageKey)
+    model.refreshTheme()
+}
+
+// MARK: - Название
+
+/// Заголовок карточки на снимке: левый край текста, от левого нижнего угла окна.
+func titlePoint(card: Int) -> NSPoint {
+    let o = cardOrigin(card)
+    return NSPoint(x: o.x + ClipboardPreview.textInset + 12, y: ClipPanelMetrics.panelHeight - o.y - 14)
+}
+
+@MainActor func checkTitle(out: String) async {
+    // Клавиши и логика клика.
+    do {
+        let model = panelModel(theme: "vivid")
+        var pasted = 0, closed = 0
+        var titles: [UUID: String?] = [:]
+        model.onPaste = { _ in pasted += 1 }
+        model.onClose = { closed += 1 }
+        model.onSetTitle = { id, title in titles[id] = title }
+        let list = model.visible
+        let t: TimeInterval = 1000
+        model.clickTitle(list[2], time: t)
+        check(model.selected == 2 && model.titleEdit == nil && pasted == 0, "клик по заголовку невыбранной просто выбирает её")
+        model.clickTitle(list[2], time: t + 0.1)
+        check(model.titleEdit?.id == list[2].id && pasted == 0, "второй клик в заголовок выбранной: правка, а не вставка")
+        model.cancelTitleEdit()
+        model.click(list[2], at: 2, time: t + 0.2)
+        check(pasted == 0, "после заголовка отсчёт сброшен: следующий клик по карточке не вставляет")
+        model.clickTitle(list[2], time: t + 0.25)
+        check(pasted == 0 && model.titleEdit != nil, "клик по телу и сразу по заголовку не вставил")
+        model.cancelTitleEdit()
+
+        // Правка забирает клавиши.
+        model.beginTitleEdit(list[2])
+        check(!model.handleKey(ClipPanelKey(code: 0, text: "п")) && !model.searchOpen && model.query.isEmpty, "буква идёт в поле названия, поиск не открылся")
+        check(!model.handleKey(ClipPanelKey(code: right, text: "\u{F703}")) && model.selected == 2, "стрелка двигает курсор в поле, а не выбор")
+        check(!model.handleKey(ClipPanelKey(code: 18, command: true, text: "1")) && pasted == 0, "⌘1 не вставляет")
+        check(!model.handleKey(ClipPanelKey(code: del, command: true, text: "\u{7f}")), "⌘⌫ не удаляет запись")
+        check(model.handleKey(ClipPanelKey(code: esc, text: "\u{1b}")) && model.titleEdit == nil && closed == 0, "Esc отменил правку, а не закрыл панель")
+        check(titles.isEmpty, "отмена ничего не сохранила")
+        check(!model.handleKey(ClipPanelKey(code: 0, text: "п")) && model.searchOpen, "после правки буква снова открывает поиск")
+        model.closeSearch()
+        model.beginTitleEdit(list[2])
+        model.titleEdit?.text = "  Имя \n записи "
+        check(model.handleKey(ClipPanelKey(code: enter, text: "\r")) && model.titleEdit == nil, "Enter сохранил и закрыл поле")
+        check(titles[list[2].id] == .some("Имя записи") && pasted == 0, "сохранено очищенное имя, вставки нет")
+        titles = [:]
+        model.allItems[model.allItems.firstIndex { $0.id == list[2].id }!].title = "Имя"
+        model.beginTitleEdit(model.visible[2])
+        check(model.titleEdit?.text == "Имя", "в поле текущее название")
+        model.titleEdit?.text = "   "
+        model.commitTitleEdit()
+        check(titles[list[2].id] == .some(nil), "пустое имя убирает название")
+        titles = [:]
+        model.beginTitleEdit(model.visible[2])
+        model.commitTitleEdit()
+        // Название в модели подставное и после уборки осталось прежним: то же имя второй раз не пишется.
+        check(titles.isEmpty, "имя не менялось: записи нет")
+    }
+
+    // Поиск и перенос: через настоящее хранилище.
+    do {
+        let stand = OrderStand()
+        defer { stand.close() }
+        stand.store.ingest(ClipSnapshot(types: [], text: "настоящий текст записи", sourceName: "Заметки"))
+        ClipboardController.shared.attach(stand.store)
+        stand.sync()
+        let model = stand.model
+        model.beginTitleEdit(model.visible[0])
+        model.titleEdit?.text = "Важная"
+        model.commitTitleEdit()
+        check(stand.store.items[0].title == "Важная" && model.allItems[0].title == "Важная", "название дошло до хранилища и панели")
+        model.query = "важн"
+        check(model.visible.count == 1, "поиск находит по названию")
+        model.closeSearch()
+        let provider = model.dragProvider(for: model.visible[0])
+        let text = await loaded(provider, "public.utf8-plain-text")
+        check(text.flatMap { String(data: $0, encoding: .utf8) } == "настоящий текст записи", "перенос наружу отдаёт содержимое, а не название")
+        check(!provider.registeredTypeIdentifiers.contains("public.url"), "название не становится адресом")
+    }
+
+    // Настоящие клики: заголовок выбранной и невыбранной. Снимки в обеих темах.
+    for theme in ["graphite", "vivid"] {
+        let suffix = theme == "graphite" ? "graphite" : "color"
+        let now = Date()
+        var items = ClipPanelFixture.items(now: now)
+        items[0].title = "Приглашение в команду"
+        items[1].title = "Очень длинное название карточки, которое обязательно обрежется"
+        let model = panelModel(theme: theme, items: items)
+        var pasted = 0
+        model.onPaste = { _ in pasted += 1 }
+        var saved: String?
+        model.onSetTitle = { [weak model] id, title in
+            saved = title
+            if let index = model?.allItems.firstIndex(where: { $0.id == id }) { model?.allItems[index].title = title }
+        }
+        let host = Stand.host(model, width: 1440)
+        await pause(0.45)
+        host.layoutSubtreeIfNeeded()
+        _ = snapshot(host, "\(suffix)-title", out: out)
+        if theme == "vivid" {
+            await windowClick(titlePoint(card: 2))
+            check(model.selected == 2 && model.titleEdit == nil && pasted == 0, "настоящий клик по заголовку невыбранной выбрал её")
+            await windowClick(titlePoint(card: 2))
+            check(model.titleEdit?.id == items[2].id && pasted == 0, "настоящий клик по заголовку выбранной открыл правку и не вставил")
+            await pause(0.2)
+            check(Stand.window.firstResponder is NSTextView, "поле названия взяло клавиатуру")
+            let editor = Stand.window.firstResponder as? NSTextView
+            editor?.insertText("Имя", replacementRange: editor?.selectedRange() ?? NSRange())
+            check(model.titleEdit?.text == "Имя", "буквы идут в поле названия: «\(model.titleEdit?.text ?? "")»")
+            check(!model.searchOpen && model.query.isEmpty, "поиск не открылся")
+            model.commitTitleEdit()
+            await pause(0.15)
+            check(saved == "Имя" && pasted == 0, "сохранено без вставки")
+            check(Stand.window.firstResponder is NSTextView, "клавиатура вернулась в поле поиска")
+
+            // Уже с названием: текст в поле выделен целиком.
+            await windowClick(titlePoint(card: 2))
+            await pause(0.25)
+            let field = Stand.window.firstResponder as? NSTextView
+            check(field?.selectedRange() == NSRange(location: 0, length: 3), "при правке текст выделен: \(String(describing: field?.selectedRange()))")
+            model.cancelTitleEdit()
+            await pause(0.1)
+            await windowClick(titlePoint(card: 0))
+            await pause(0.1)
+            // Обычный двойной клик ниже заголовка у той же карточки работает как раньше.
+            let body = NSPoint(x: cardOrigin(0).x + 100, y: ClipPanelMetrics.panelHeight - cardOrigin(0).y - 120)
+            await pause(0.5)
+            await windowClick(body)
+            await windowClick(body)
+            check(pasted == 1 && model.titleEdit == nil, "двойной клик по телу карточки вставляет как раньше")
+        }
+        model.selected = 0
+        model.beginTitleEdit(model.visible[0])
+        await pause(0.25)
+        _ = snapshot(host, "\(suffix)-title-edit", out: out)
+        model.cancelTitleEdit()
+        Stand.window.contentView = nil
+    }
+
+    // Клик мимо и закрытие: на настоящем мониторе, события приходят через приложение.
+    let stand = LeaveStand()
+    stand.model.onRenameSpace = { [weak model = stand.model] id, name in
+        if let index = model?.spaces.firstIndex(where: { $0.id == id }) { model?.spaces[index].name = name }
+    }
+    stand.model.onSetTitle = { [weak model = stand.model] id, title in
+        if let index = model?.allItems.firstIndex(where: { $0.id == id }) { model?.allItems[index].title = title }
+    }
+    await stand.open()
+    func panelClick(_ p: NSPoint) async {
+        func event(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: stand.panel!.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        // Отпускание заранее в очереди своего процесса: поле ввода при нажатии само ждёт его во вложенном цикле.
+        NSApp.postEvent(event(.leftMouseUp), atStart: false)
+        NSApp.sendEvent(event(.leftMouseDown))
+        await pause(0.08)
+    }
+    let first = stand.model.visible[0]
+    stand.model.beginTitleEdit(first)
+    await pause(0.25)
+    check(stand.panel?.firstResponder is NSTextView, "на стенде панели поле взяло клавиатуру")
+    stand.model.titleEdit?.text = "В самом поле"
+    await panelClick(titlePoint(card: 0))
+    check(stand.model.titleEdit != nil, "клик в самом поле правку не закрывает")
+    stand.model.titleEdit?.text = "Клик мимо"
+    await panelClick(NSPoint(x: 1400, y: 20))
+    check(stand.model.titleEdit == nil && stand.model.allItems.first { $0.id == first.id }?.title == "Клик мимо", "клик мимо сохранил правку")
+    stand.model.beginTitleEdit(first)
+    stand.model.titleEdit?.text = "Закрытие"
+    stand.host.hide()
+    check(stand.model.titleEdit == nil && stand.model.allItems.first { $0.id == first.id }?.title == "Закрытие", "закрытие панели сохранило правку")
+    _ = await waitUntil { stand.settledGone }
+    await stand.open()
+    // Имя категории: клик мимо сохраняет, как и название.
+    stand.model.beginRename(stand.model.spaces[0])
+    await pause(0.25)
+    stand.model.spaceNameEdit?.text = "Новое имя"
+    await panelClick(NSPoint(x: 1400, y: 20))
+    check(stand.model.spaceNameEdit == nil && stand.model.spaces[0].name == "Новое имя", "клик мимо сохранил имя категории")
+    stand.close()
+}
+
+// MARK: - Скрытие
+
+/// Снимок одной карточки на подложке: точно то, что рисует панель или копия при переносе.
+@MainActor func cardShot(_ item: ClipItem, spaces: [ClipSpace], model: ClipboardPanelModel, concealed: Bool, preview: Bool, now: Date) async -> (Shot, [String]) {
+    let root = ZStack(alignment: .topLeading) {
+        Color(red: 0.13, green: 0.14, blue: 0.16)
+        ClipCard(item: item, number: 1, selected: false, searching: false, theme: model.theme, spaces: spaces, now: now,
+                 model: model, concealed: concealed, isDragPreview: preview)
+    }
+    .frame(width: ClipCard.width, height: ClipCard.height)
+    let host = NSHostingView(rootView: root)
+    host.frame = NSRect(x: 0, y: 0, width: ClipCard.width, height: ClipCard.height)
+    Stand.window.setContentSize(host.frame.size)
+    Stand.window.contentView = host
+    await pause(0.25)
+    let shot = snapshot(host, out: "")
+    Stand.window.contentView = nil
+    return (shot, viewTexts(ClipCard(item: item, number: 1, selected: false, searching: false, theme: model.theme, spaces: spaces, now: now,
+                                     model: model, concealed: concealed, isDragPreview: preview)))
+}
+
+/// Весь текст дерева вида: подписи, заголовки и `.help` хранятся в нём значениями. Сверка на настоящем `body`, отражением.
+/// Только строки `Text`: копия при переносе лежит в дереве значением вместе со своей записью, но показывает её только свой `body`, а его отдельно проверяет `preview: true`.
+@MainActor func viewTexts(_ card: ClipCard) -> [String] {
+    var out = ""
+    dump(card.body, to: &out, maxDepth: 80)
+    return out.split(separator: "\n").map(String.init).filter { $0.contains("verbatim:") }
+}
+
+@MainActor func identicalPixels(_ a: Shot, _ b: Shot) -> Bool {
+    guard a.bitmap.pixelsWide == b.bitmap.pixelsWide, a.bitmap.pixelsHigh == b.bitmap.pixelsHigh,
+          let p = a.bitmap.bitmapData, let q = b.bitmap.bitmapData, a.bitmap.bytesPerRow == b.bitmap.bytesPerRow else { return false }
+    return memcmp(p, q, a.bitmap.bytesPerRow * a.bitmap.pixelsHigh) == 0
+}
+
+@MainActor func checkConcealment(out: String) async {
+    let now = Date()
+    let hidden = ClipSpace(id: UUID(), name: "пароли", colorID: "red", hidesContent: true)
+    let open = ClipSpace(id: UUID(), name: "открытая", colorID: "blue")
+    let spaces = [hidden, open]
+    func entry(_ kind: ClipKind, _ text: String?, paths: [String]? = nil, size: (Int, Int)? = nil, in space: UUID? = hidden.id) -> ClipItem {
+        ClipPanelFixture.entry(kind, text, source: "com.apple.Notes", ago: 240, now: now, paths: paths, size: size, space: space)
+    }
+    // Пары одного вида с разным содержимым: у скрытых карточек пиксели обязаны совпасть до байта, что бы ни лежало внутри.
+    let pairs: [(String, ClipItem, ClipItem, String)] = [
+        ("текст", entry(.text, "пароль-секрет-1"), entry(.text, "другое содержимое\nдругой длины и из нескольких строк\nещё строка"), "пароль-секрет-1"),
+        ("ссылка", entry(.link, "https://secret.example.com/a"), entry(.link, "https://other.example.org/bbb"), "secret.example.com"),
+        ("картинка", entry(.image, nil, size: (1600, 900)), entry(.image, nil, size: (10, 20)), "1600"),
+        ("файлы", entry(.file, nil, paths: ["/tmp/секретный отчёт.pdf"]), entry(.file, nil, paths: ["/tmp/другой.txt", "/tmp/третий.txt"]), "секретный отчёт"),
+    ]
+    let model = panelModel(theme: "vivid")
+    var imageCalls = 0
+    model.imageLoader = { imageCalls += 1; return ClipPanelFixture.image($0) }
+    for (name, a, b, secret) in pairs {
+        for preview in [false, true] {
+            let what = preview ? "копия при переносе" : "карточка"
+            let (shotA, textsA) = await cardShot(a, spaces: spaces, model: model, concealed: true, preview: preview, now: now)
+            let (shotB, _) = await cardShot(b, spaces: spaces, model: model, concealed: true, preview: preview, now: now)
+            check(identicalPixels(shotA, shotB), "\(name), \(what): пиксели не зависят от содержимого")
+            check(!textsA.contains { $0.contains(secret) }, "\(name), \(what): содержимого нет в тексте вида")
+            check(textsA.contains { $0.contains(ClipConcealment.mask) }, "\(name), \(what): вместо него точки (\(textsA))")
+            check(!textsA.contains { $0.contains("символ") || $0.contains("×") || $0.contains("файл ") }, "\(name), \(what): подписи о размере нет")
+            // Та же пара открытая расходится: сверка выше чего-то стоит.
+            let (openA, openTexts) = await cardShot(a, spaces: spaces, model: model, concealed: false, preview: preview, now: now)
+            let (openB, _) = await cardShot(b, spaces: spaces, model: model, concealed: false, preview: preview, now: now)
+            check(!identicalPixels(openA, openB), "\(name), \(what): открытые карточки разные, сверка не пустая")
+            if a.kind == .text || a.kind == .link { check(openTexts.contains { $0.contains(secret) }, "\(name), \(what): у открытой текст виден (текстовая сверка не пустая)") }
+        }
+    }
+    check(imageCalls > 0, "открытая картинка загружается")
+    imageCalls = 0
+    _ = await cardShot(pairs[2].1, spaces: spaces, model: model, concealed: true, preview: false, now: now)
+    check(imageCalls == 0, "у скрытой картинка даже не расшифровывается")
+
+    // Копия при переносе скрыта и у записи, открытой на время: настоящий путь, тело `onDrag` собирается из того же условия.
+    check(ClipConcealment.isHidden(pairs[0].1, in: spaces), "запись категории со скрытием скрыта")
+    check(!ClipConcealment.isHidden(entry(.text, "x", in: open.id), in: spaces), "у обычной категории нет")
+    check(!ClipConcealment.isHidden(entry(.text, "x", in: nil), in: spaces), "у записи без категории нет")
+
+    // Название и точки, в общей вкладке и во вкладке категории: снимки и обе темы.
+    for theme in ["graphite", "vivid"] {
+        let suffix = theme == "graphite" ? "graphite" : "color"
+        var titled = pairs[0].1
+        titled.title = "Пароль от почты"
+        let items = [titled, pairs[0].2, pairs[1].1, pairs[2].1, pairs[3].1, entry(.text, "обычная запись", in: nil)]
+        let panel = panelModel(theme: theme, items: items)
+        panel.spaces = spaces
+        _ = await Stand.render(panel, "\(suffix)-hidden-history", out: out)
+        panel.selectTab(hidden.id)
+        let tab = await Stand.render(panel, "\(suffix)-hidden", out: out)
+        // Шапка с названием своя, тело без текста: кроме точек по центру ничего яркого.
+        let o = cardOrigin(1)
+        let body = CGRect(x: o.x, y: o.y + ClipCard.headerHeight, width: ClipCard.width, height: 30)
+        check(tab.count(in: body) { min($0.r, $0.g, $0.b) > 0.5 } == 0, "\(suffix): там, где начинался текст, пусто")
+
+        let editors = panelModel(theme: theme)
+        editors.spaces = spaces
+        editors.beginEdit(hidden)
+        check(editors.editor?.hidesContent == true, "окошко правки показывает настройку категории")
+        _ = await Stand.render(editors, "\(suffix)-editor-hide", out: out)
+        editors.beginEdit(open)
+        check(editors.editor?.hidesContent == false, "по умолчанию без скрытия")
+        _ = await Stand.render(editors, "\(suffix)-editor-hide-off", out: out)
+    }
+
+    // В общей вкладке и в категории одна и та же карточка, сверка настоящей панели: другое содержимое даёт тот же кадр.
+    for tabID in [nil, hidden.id] as [UUID?] {
+        var shots: [Shot] = []
+        for content in ["первый-секрет", "совсем другой текст другой длины"] {
+            let item = ClipPanelFixture.entry(.text, content, source: "com.apple.Notes", ago: 240, now: now, space: hidden.id)
+            let panel = panelModel(theme: "vivid", items: [item])
+            panel.spaces = spaces
+            panel.selectTab(tabID)
+            shots.append(await Stand.render(panel, "color-hidden-compare", out: out))
+        }
+        let rect = CGRect(x: cardOrigin(0).x, y: cardOrigin(0).y, width: ClipCard.width, height: ClipCard.height)
+        check(changed(shots[0], shots[1], in: rect) == 0, "\(tabID == nil ? "общая вкладка" : "вкладка категории"): настоящая панель не показывает содержимое")
+    }
+
+    // Весь путь на настоящем контроллере и хранилище: настройка, поиск, открытие, закрытие, вставка, перенос.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-conceal-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    let controller = ClipboardController.shared
+    controller.attach(store)
+    store.ingest(ClipSnapshot(types: [], text: "пароль-qwerty", sourceBundleID: "com.apple.Notes", sourceName: "Заметки"))
+    let id = store.items[0].id
+    controller.attach(store)
+    let stand = LeaveStand(wired: true)
+    defer { stand.close(); controller.detachStore() }
+    let wired = stand.model
+    wired.allItems = controller.items
+    await stand.open()
+    wired.allItems = controller.items
+    wired.spaces = controller.spaces
+    wired.beginCreate()
+    wired.spaceNameEdit?.text = "пароли"
+    wired.commitInlineEdit()
+    let spaceID = store.spaces[0].id
+    check(store.spaces[0].hidesContent == nil, "создана без скрытия")
+    wired.selectTab(nil)
+    wired.pin(id, to: spaceID)
+    check(!wired.isConcealed(wired.allItems[0]), "пока без скрытия карточка открыта")
+    wired.query = "qwerty"
+    check(wired.visible.count == 1, "поиск находит по содержимому, пока скрытия нет")
+    wired.closeSearch()
+    wired.beginEdit(wired.spaces[0])
+    wired.editor?.hidesContent = true
+    wired.commitEditor()
+    check(store.spaces[0].hidesContent == true && wired.spaces[0].hidesContent == true, "настройка из окошка дошла до хранилища и панели")
+    check(wired.isConcealed(wired.allItems[0]), "поставили скрытие на категорию с записями: действует сразу")
+    wired.query = "qwerty"
+    check(wired.visible.isEmpty, "скрытая запись не находится поиском по содержимому")
+    wired.query = "заметки"
+    check(wired.visible.isEmpty, "и по программе, откуда скопирована")
+    wired.closeSearch()
+    wired.beginEdit(wired.spaces[0])
+    wired.editor?.hidesContent = false
+    wired.commitEditor()
+    check(!wired.isConcealed(wired.allItems[0]), "сняли: сразу видно")
+    wired.beginEdit(wired.spaces[0])
+    wired.editor?.hidesContent = true
+    wired.commitEditor()
+
+    wired.reveal(id)
+    check(!wired.isConcealed(wired.allItems[0]) && ClipConcealment.isHidden(wired.allItems[0], in: wired.spaces), "«Показать» открывает только на время")
+    wired.query = "qwerty"
+    check(wired.visible.isEmpty, "открытая на время запись поиском по содержимому всё равно не находится")
+    wired.closeSearch()
+    // Открытая и снятая-поставленная настройка: открытие не переживает смену.
+    wired.beginEdit(wired.spaces[0])
+    wired.editor?.hidesContent = false
+    wired.commitEditor()
+    wired.beginEdit(wired.spaces[0])
+    wired.editor?.hidesContent = true
+    wired.commitEditor()
+    check(wired.isConcealed(wired.allItems[0]), "сняли и поставили снова: снова скрыта")
+    wired.reveal(id)
+    stand.host.hide()
+    check(wired.revealed.isEmpty && wired.isConcealed(wired.allItems[0]), "при закрытии панели всё скрывается сразу, ещё во время ухода")
+    _ = await waitUntil { stand.settledGone }
+    await stand.open()
+    check(wired.isConcealed(controller.items[0]), "при новом показе запись снова скрыта")
+    wired.allItems = controller.items
+    wired.spaces = controller.spaces
+    wired.reveal(id)
+    wired.reset()
+    check(wired.revealed.isEmpty, "сброс показа тоже закрывает")
+
+    // Вставка и перенос отдают настоящее.
+    let board = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.conceal.\(UUID().uuidString)"))
+    defer { board.releaseGlobally() }
+    _ = ClipboardPasteboard.write(controller.items[0], imageData: nil, to: board)
+    check(board.string(forType: .string) == "пароль-qwerty", "вставка скрытой записи отдаёт настоящее")
+    let provider = wired.dragProvider(for: controller.items[0])
+    let carried = await loaded(provider, "public.utf8-plain-text")
+    check(carried.flatMap { String(data: $0, encoding: .utf8) } == "пароль-qwerty", "перенос скрытой записи отдаёт настоящее")
+    var pastedText: String?
+    wired.onPaste = { pastedText = $0.text }
+    wired.selectTab(spaceID)
+    wired.quickPick(1)
+    check(pastedText == "пароль-qwerty", "⌘1 у скрытой отдаёт настоящую запись")
+}
+
+/// Что утилита отправляет центру: строгая сверка ключей, содержимого скрытых записей там нет.
+@MainActor func checkConcealedWire() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-wire-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    let controller = ClipboardController.shared
+    defer { controller.detachStore() }
+    let space = store.addSpace(name: "пароли", colorID: "red", hidesContent: true)
+    let secret = "секрет-в-буфере"
+    store.ingest(ClipSnapshot(types: [], filePaths: ["/tmp/секретный-файл.pdf"], sourceBundleID: "com.apple.finder"))
+    store.pin(store.items[0].id, to: space.id)
+    store.ingest(ClipSnapshot(types: [], text: "https://secret.example.com/x"))
+    store.pin(store.items[0].id, to: space.id)
+    store.ingest(ClipSnapshot(types: [], text: secret, sourceBundleID: "com.apple.Notes", sourceName: "Заметки"))
+    store.pin(store.items[0].id, to: space.id)
+    store.setTitle(store.items[0].id, "Пароль от почты")
+    store.ingest(ClipSnapshot(types: [], text: "обычная запись"))
+    controller.attach(store)
+
+    let state = controller.wireState
+    let data = LinkWire.encoded(state)
+    let json = String(data: data, encoding: .utf8) ?? ""
+    let titles = state.recent.map(\.title)
+    check(titles == ["обычная запись", "Пароль от почты", "Скрыто", "Скрыто"], "строки: название или «Скрыто», у обычной текст: \(titles)")
+    for leak in [secret, "secret.example", "секретный-файл", "hidesContent", "spaceRank"] {
+        check(!json.contains(leak), "в состоянии для центра нет «\(leak)»")
+    }
+    // Договор связи прежний: те же ключи в тех же местах, что читает вышедший центр.
+    let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    let spaceKeys = ((object?["spaces"] as? [[String: Any]])?.first?.keys).map(Set.init)
+    check(spaceKeys == ["id", "name", "colorID"], "ключи пространства прежние: \(String(describing: spaceKeys))")
+    let rowKeys = (object?["recent"] as? [[String: Any]])?.map { Set($0.keys) }
+    check(rowKeys?.allSatisfy { $0.isSubset(of: ["title", "sourceBundleID", "date"]) } == true, "ключи строки прежние: \(String(describing: rowKeys))")
+    let decoded = try? JSONDecoder().decode(ClipboardState.self, from: data)
+    check(decoded?.recent.map(\.title) == titles && decoded?.spaces.first?.hidesContent == nil, "состояние читается обратно")
+    check(controller.recent.map(\.title) == titles, "экран утилиты показывает те же строки, а не текст")
+    check(state.recent[1].sourceBundleID == "com.apple.Notes", "значок программы на месте")
+    store.setSpaceHidden(space.id, false)
+    controller.attach(store)
+    check(controller.wireState.recent.map(\.title).contains(secret), "сняли скрытие: строка снова с текстом")
 }
 
 @main
@@ -1303,7 +2295,12 @@ enum Main {
             await checkPanelLeave()
             await checkPasteAfterLeaving()
             await checkDragPreview(out: out)
-            await checkScreens(out: out)
+            checkReorderLogic()
+            await checkRecordOrder(out: out)
+            await checkSpaceOrder(out: out)
+            await checkTitle(out: out)
+            await checkConcealment(out: out)
+            await checkConcealedWire()
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)
         }

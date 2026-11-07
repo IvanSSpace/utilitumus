@@ -32,6 +32,10 @@ struct ClipItem: Codable, Identifiable, Equatable {
     var date: Date
     /// Пространство, в которое запись закреплена; nil — только история.
     var spaceID: UUID?
+    /// Своё название. Поиск его находит, вставка и перенос наружу отдают содержимое.
+    var title: String?
+    /// Место внутри пространства: чем меньше, тем левее. Вне пространства его нет.
+    var spaceRank: Int?
 
     var host: String? {
         guard kind == .link, let text, let host = URL(string: text)?.host else { return nil }
@@ -44,6 +48,8 @@ struct ClipSpace: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
     var colorID: String
+    /// Карточки записей не показывают содержимое. Только на диске: центру это поле не отправляется.
+    var hidesContent: Bool?
 }
 
 /// То, что лежало в буфере в момент опроса. Без AppKit: так логику можно проверить отдельно.

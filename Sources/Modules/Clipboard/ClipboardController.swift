@@ -276,7 +276,16 @@ final class ClipboardController: ObservableObject {
     func delete(_ id: UUID) { store?.delete(id); sync() }
     func pin(_ id: UUID, to space: UUID?) { store?.pin(id, to: space); sync() }
 
-    func addSpace(name: String, colorID: String) { store?.addSpace(name: name, colorID: colorID); sync() }
+    func setTitle(_ id: UUID, _ title: String?) { store?.setTitle(id, title); sync() }
+    func moveRecord(_ id: UUID, to position: Int) { store?.moveRecord(id, to: position); sync() }
+
+    func addSpace(name: String, colorID: String) { addSpace(name: name, colorID: colorID, hidesContent: false) }
+    func addSpace(name: String, colorID: String, hidesContent: Bool) {
+        store?.addSpace(name: name, colorID: colorID, hidesContent: hidesContent)
+        sync()
+    }
+    func setSpaceHidden(_ id: UUID, _ hidden: Bool) { store?.setSpaceHidden(id, hidden); sync() }
+    func moveSpace(_ id: UUID, to position: Int) { store?.moveSpace(id, to: position); sync() }
     func renameSpace(_ id: UUID, to name: String) { store?.renameSpace(id, to: name); sync() }
     func setColor(_ id: UUID, _ colorID: String) { store?.setColor(id, colorID); sync() }
     func moveSpace(_ id: UUID, by offset: Int) { store?.moveSpace(id, by: offset); sync() }

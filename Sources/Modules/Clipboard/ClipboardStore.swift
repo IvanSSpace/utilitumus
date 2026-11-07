@@ -70,6 +70,68 @@ struct ClipboardKeychain {
     }
 }
 
+/// Скрытие содержимого у пространства. Касается записи, а не вкладки: в истории её карточка тоже скрыта.
+enum ClipConcealment {
+    /// Что видно в «Последних записях» вместо содержимого, если у записи нет названия.
+    static let placeholder = "Скрыто"
+    static let mask = "••••••"
+
+    static func isHidden(_ item: ClipItem, in spaces: [ClipSpace]) -> Bool {
+        guard let id = item.spaceID else { return false }
+        return spaces.contains { $0.id == id && $0.hidesContent == true }
+    }
+
+    /// Записи для строк «Последних записей»: они идут и на экран утилиты, и центру. Формат строки прежний,
+    /// поэтому скрытая запись подменяется текстом: название или «Скрыто», без содержимого, вида и размеров.
+    static func rowItems(_ items: [ClipItem], spaces: [ClipSpace]) -> [ClipItem] {
+        items.map { item in
+            guard isHidden(item, in: spaces) else { return item }
+            return ClipItem(id: item.id, hash: "", kind: .text, text: item.title ?? placeholder,
+                            sourceBundleID: item.sourceBundleID, date: item.date)
+        }
+    }
+
+    /// Пространства для состояния, которое читает центр: договор связи прежний, поля скрытия в нём нет.
+    static func wireSpaces(_ spaces: [ClipSpace]) -> [ClipSpace] {
+        spaces.map { ClipSpace(id: $0.id, name: $0.name, colorID: $0.colorID) }
+    }
+}
+
+/// Перестановка переносом: одна на карточки и категории. Без вида и без событий, поэтому проверяется отдельно.
+enum ClipReorder {
+    /// Куда встанет переносимый: то место, чья середина ближе к курсору. `others` — ширины остальных по порядку.
+    /// Считается только по ним, ответ не зависит от текущего порядка: разная ширина соседей не раскачивает ряд.
+    static func slot(x: Double, others: [Double], dragged: Double, gap: Double) -> Int {
+        var best = 0
+        var distance = Double.infinity
+        var start = 0.0
+        for index in 0...others.count {
+            let middle = abs(x - (start + dragged / 2))
+            if middle < distance {
+                best = index
+                distance = middle
+            }
+            if index < others.count { start += others[index] + gap }
+        }
+        return best
+    }
+
+    /// На сколько мест сдвинут элемент, пока переносимый стоит над местом `to`: соседи уступают одно место, сам он проходит весь путь.
+    static func shift(_ index: Int, from: Int, to: Int) -> Int {
+        if index == from { return to - from }
+        if from < index, index <= to { return -1 }
+        if to <= index, index < from { return 1 }
+        return 0
+    }
+
+    static func moved(_ order: [UUID], _ id: UUID, to position: Int) -> [UUID] {
+        guard order.contains(id) else { return order }
+        var moved = order.filter { $0 != id }
+        moved.insert(id, at: min(max(position, 0), moved.count))
+        return moved
+    }
+}
+
 /// История буфера и пространства. Всё на диске зашифровано AES-GCM; без ключа из Keychain это шум.
 ///
 /// Индекс (`index.bin`) — JSON со всеми записями, картинки — отдельные файлы `img-<id>.bin`.
@@ -234,17 +296,75 @@ final class ClipboardStore {
     func pin(_ id: UUID, to space: UUID?) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         if let space, !spaces.contains(where: { $0.id == space }) { return }
+        // Бросок на свою же категорию ничего не меняет, иначе запись потеряла бы своё место.
+        guard items[index].spaceID != space else { return }
+        // Новая запись первая слева, убранная теряет место.
+        items[index].spaceRank = space.map(firstRank)
         items[index].spaceID = space
         // Открепили — запись снова под лимитом истории.
         if space == nil { trim() }
         save()
     }
 
+    /// Записать название. Пустое или из одних управляющих символов название убирает.
+    func setTitle(_ id: UUID, _ title: String?) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].title = title.flatMap(Self.cleanTitle)
+        save()
+    }
+
+    /// Предел длины названия: одна строка в шапке карточки.
+    static let maxTitleLength = 60
+
+    /// Одна строка без управляющих символов, по образцу `SatelliteCatalog.cleanNotes`: они ломают строку и переворачивают текст (U+202E).
+    static func cleanTitle(_ title: String) -> String? {
+        var kept = String.UnicodeScalarView()
+        var marks = 0
+        var space = false
+        for scalar in title.unicodeScalars {
+            if scalar.properties.isWhitespace {
+                space = !kept.isEmpty
+                continue
+            }
+            switch scalar.properties.generalCategory {
+            case .control, .format, .privateUse, .surrogate, .unassigned:
+                continue
+            case .nonspacingMark, .enclosingMark:
+                marks += 1
+                if marks > 2 { continue }
+            default:
+                marks = 0
+            }
+            if space { kept.append(" ") }
+            space = false
+            kept.append(scalar)
+        }
+        let clean = String(String(kept).prefix(maxTitleLength))
+        return clean.isEmpty ? nil : clean
+    }
+
+    /// Левее всех в пространстве.
+    private func firstRank(in space: UUID) -> Int {
+        (items.filter { $0.spaceID == space }.compactMap(\.spaceRank).min() ?? 1) - 1
+    }
+
+    /// Поставить запись на место внутри её пространства. На список истории это не влияет: он по времени.
+    func moveRecord(_ id: UUID, to position: Int) {
+        guard let space = items.first(where: { $0.id == id })?.spaceID else { return }
+        let order = Self.filter(items, space: space, query: "", spaces: []).map(\.id)
+        let moved = ClipReorder.moved(order, id, to: position)
+        guard moved != order else { return }
+        for index in items.indices where items[index].spaceID == space {
+            items[index].spaceRank = moved.firstIndex(of: items[index].id)
+        }
+        save()
+    }
+
     // MARK: Пространства
 
     @discardableResult
-    func addSpace(name: String, colorID: String) -> ClipSpace {
-        let space = ClipSpace(id: UUID(), name: name, colorID: colorID)
+    func addSpace(name: String, colorID: String, hidesContent: Bool = false) -> ClipSpace {
+        let space = ClipSpace(id: UUID(), name: name, colorID: colorID, hidesContent: hidesContent ? true : nil)
         spaces.append(space)
         save()
         return space
@@ -262,6 +382,12 @@ final class ClipboardStore {
         save()
     }
 
+    func setSpaceHidden(_ id: UUID, _ hidden: Bool) {
+        guard let index = spaces.firstIndex(where: { $0.id == id }) else { return }
+        spaces[index].hidesContent = hidden ? true : nil
+        save()
+    }
+
     func moveSpace(_ id: UUID, by offset: Int) {
         guard let from = spaces.firstIndex(where: { $0.id == id }) else { return }
         let to = from + offset
@@ -270,10 +396,22 @@ final class ClipboardStore {
         save()
     }
 
+    /// Точное место для переноса мышью: тот же порядок, что у кнопок ↑↓.
+    func moveSpace(_ id: UUID, to position: Int) {
+        let order = spaces.map(\.id)
+        let moved = ClipReorder.moved(order, id, to: position)
+        guard moved != order else { return }
+        spaces = moved.compactMap { id in spaces.first { $0.id == id } }
+        save()
+    }
+
     /// Записи удалённого пространства возвращаются в историю и дальше живут по её лимиту.
     func deleteSpace(_ id: UUID) {
         spaces.removeAll { $0.id == id }
-        for index in items.indices where items[index].spaceID == id { items[index].spaceID = nil }
+        for index in items.indices where items[index].spaceID == id {
+            items[index].spaceID = nil
+            items[index].spaceRank = nil
+        }
         trim()
         save()
     }
@@ -281,18 +419,24 @@ final class ClipboardStore {
     // MARK: Поиск
 
     func items(in space: UUID?, query: String) -> [ClipItem] {
-        Self.filter(items, space: space, query: query)
+        Self.filter(items, space: space, query: query, spaces: spaces)
     }
 
-    static func filter(_ items: [ClipItem], space: UUID?, query: String) -> [ClipItem] {
+    /// `spaces` без умолчания: забытый аргумент раскрывал бы скрытые записи подбором букв.
+    /// История идёт по времени, как лежит в списке, пространство по своему порядку.
+    static func filter(_ items: [ClipItem], space: UUID?, query: String, spaces: [ClipSpace]) -> [ClipItem] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return items.filter { item in
+        let found = items.filter { item in
             if let space, item.spaceID != space { return false }
             guard !q.isEmpty else { return true }
+            // Скрытая запись находится только по названию: иначе поиск раскрывает её содержимое подбором, и вид записи и программа тоже о нём говорят.
+            if ClipConcealment.isHidden(item, in: spaces) { return item.title?.lowercased().contains(q) == true }
             let names = item.filePaths?.map { ($0 as NSString).lastPathComponent }.joined(separator: " ")
-            let haystack = [item.text, item.host, item.sourceName, item.kind.title, names]
+            let haystack = [item.title, item.text, item.host, item.sourceName, item.kind.title, names]
             return haystack.contains { $0?.lowercased().contains(q) == true }
         }
+        guard space != nil else { return found }
+        return found.sorted { ($0.spaceRank ?? .min) < ($1.spaceRank ?? .min) }
     }
 
     func imageData(_ item: ClipItem) -> Data? {
@@ -327,6 +471,19 @@ final class ClipboardStore {
         }
         items = index.items
         spaces = index.spaces
+        settleRanks()
+    }
+
+    /// Индекс старого формата мест не знает. Закреплённые встают левее уже размеченных, в порядке списка: сначала новые.
+    /// Иначе порядок в пространстве менялся бы вместе со списком при каждой вставке.
+    private func settleRanks() {
+        for index in items.indices.reversed() {
+            guard let space = items[index].spaceID else {
+                items[index].spaceRank = nil
+                continue
+            }
+            if items[index].spaceRank == nil { items[index].spaceRank = firstRank(in: space) }
+        }
     }
 
     /// Индекс, который не открылся, не затираем: со старым ключом его ещё можно прочитать.

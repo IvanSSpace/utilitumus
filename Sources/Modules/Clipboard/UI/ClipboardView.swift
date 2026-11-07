@@ -8,6 +8,10 @@ struct ClipboardView<Model: ClipboardModel>: View {
     @State private var newName = ""
     @State private var confirmClear = false
     @State private var spaceToDelete: ClipSpace?
+    /// Какую строку несут и на сколько точек. Порядок до отпускания не меняется, соседи только сдвинуты.
+    @State private var spaceDrag: (id: UUID, y: CGFloat)?
+    /// Порядок после броска, пока не придёт новое состояние: вкладка центра узнаёт его по связи и иначе дёрнулась бы назад.
+    @State private var droppedOrder: [UUID]?
 
     init(model: Model) { self.model = model }
 
@@ -101,14 +105,20 @@ struct ClipboardView<Model: ClipboardModel>: View {
             DSSection("Пространства", trailing: model.spaces.isEmpty ? nil : "\(model.spaces.count)") {
                 DSScroll(inset: 6) {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(model.spaces) { space in
+                        ForEach(orderedSpaces) { space in
                             SpaceRow(model: model, space: space,
                                      count: model.count(inSpace: space.id),
                                      isFirst: space.id == model.spaces.first?.id,
                                      isLast: space.id == model.spaces.last?.id,
+                                     shift: spaceShift(space.id),
+                                     isDragged: spaceDrag?.id == space.id,
+                                     moves: spaceSlot,
+                                     onDrag: { spaceDrag = (space.id, $0) },
+                                     onDrop: dropSpace,
                                      onDelete: { spaceToDelete = space })
                         }
                     }
+                    .onChange(of: model.spaces.map(\.id)) { droppedOrder = nil }
                 }
                 .frame(maxHeight: 170)
                 .fixedSize(horizontal: false, vertical: true)
@@ -122,6 +132,41 @@ struct ClipboardView<Model: ClipboardModel>: View {
             }
             caption("Записи в пространствах не вытесняются лимитом истории. Закрепляй правым кликом по карточке.")
         }
+    }
+
+    private var orderedSpaces: [ClipSpace] {
+        guard let droppedOrder, droppedOrder.count == model.spaces.count else { return model.spaces }
+        return droppedOrder.compactMap { id in model.spaces.first { $0.id == id } }
+    }
+
+    /// Куда встанет несомая строка.
+    private var spaceSlot: Int? {
+        guard let spaceDrag, let from = orderedSpaces.firstIndex(where: { $0.id == spaceDrag.id }) else { return nil }
+        return min(max(from + Int((spaceDrag.y / SpaceRowHeight.value).rounded()), 0), orderedSpaces.count - 1)
+    }
+
+    private func spaceShift(_ id: UUID) -> CGFloat {
+        guard let spaceDrag, let to = spaceSlot, let from = orderedSpaces.firstIndex(where: { $0.id == spaceDrag.id }),
+              let index = orderedSpaces.firstIndex(where: { $0.id == id }) else { return 0 }
+        if index == from { return spaceDrag.y }
+        if from < index, index <= to { return -SpaceRowHeight.value }
+        if to <= index, index < from { return SpaceRowHeight.value }
+        return 0
+    }
+
+    /// Порядок уходит прежним действием `moveSpace` по одному шагу: формат связи тот же, работает и со старой утилитой.
+    /// Шаги одной строки в одну сторону перестановочны, порядок их прихода неважен.
+    private func dropSpace() {
+        guard let spaceDrag, let to = spaceSlot, let from = orderedSpaces.firstIndex(where: { $0.id == spaceDrag.id }) else { return }
+        var order = orderedSpaces.map(\.id)
+        order.insert(order.remove(at: from), at: to)
+        withAnimation(SpaceRowHeight.spring) {
+            if to != from { droppedOrder = order }
+            self.spaceDrag = nil
+        }
+        for _ in 0..<abs(to - from) { model.moveSpace(spaceDrag.id, by: to > from ? 1 : -1) }
+        // Утилита отказала или молчит: новое состояние не придёт, экран возвращается к тому, что знает модель.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { droppedOrder = nil }
     }
 
     private func createSpace() {
@@ -211,32 +256,79 @@ struct ClipboardView<Model: ClipboardModel>: View {
     }
 }
 
-/// Строка пространства: цвет, имя (правится на месте), число записей, порядок, удаление.
+/// Высота строки и пружина: одна на расчёт мест и движение соседей.
+private enum SpaceRowHeight {
+    static let value: CGFloat = 40
+    static var spring: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)
+    }
+}
+
+/// Строка пространства: цвет, имя (правится на месте), число записей, удаление. Порядок — перетаскиванием всей строки.
 private struct SpaceRow<Model: ClipboardModel>: View {
     @ObservedObject var model: Model
     let space: ClipSpace
     let count: Int
     let isFirst: Bool
     let isLast: Bool
+    let shift: CGFloat
+    let isDragged: Bool
+    /// Меняется, когда несомая строка проходит следующее место: от этого едут соседи, но не она сама.
+    let moves: Int?
+    let onDrag: (CGFloat) -> Void
+    let onDrop: () -> Void
     let onDelete: () -> Void
     @State private var name = ""
     @State private var picking = false
+    @State private var hovering = false
+    @State private var grabbing = false
     @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             colorMenu
+            // Поле берёт мышь только в правке: иначе строку нельзя было бы взять за имя, а оно занимает почти всю ширину.
             TextField("Название", text: $name)
                 .textFieldStyle(.plain).font(DS.rowTitle)
                 .focused($focused)
                 .onSubmit(commit)
+                .allowsHitTesting(focused)
+                .contentShape(Rectangle())
+                .onTapGesture { focused = true }
             Text("\(count)").font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4))
-            iconButton("chevron.up", help: "Выше", disabled: isFirst) { model.moveSpace(space.id, by: -1) }
-            iconButton("chevron.down", help: "Ниже", disabled: isLast) { model.moveSpace(space.id, by: 1) }
             iconButton("trash", help: "Удалить пространство", disabled: false, action: onDelete)
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
-        .frame(minHeight: 40)
+        .frame(minHeight: SpaceRowHeight.value)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(isDragged ? 0.12 : 0)))
+        .contentShape(Rectangle())
+        .shadow(color: .black.opacity(isDragged ? 0.35 : 0), radius: 8, y: 3)
+        .offset(y: shift)
+        .animation(isDragged ? nil : SpaceRowHeight.spring, value: moves)
+        .zIndex(isDragged ? 1 : 0)
+        // Глобальные координаты: строка едет вслед за курсором, в своих смещение было бы от самой себя.
+        .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
+            .onChanged { value in
+                if !grabbing {
+                    grabbing = true
+                    NSCursor.closedHand.push()
+                }
+                onDrag(value.translation.height)
+            }
+            .onEnded { _ in
+                grabbing = false
+                NSCursor.pop()
+                onDrop()
+            })
+        .onHover { inside in
+            guard inside != hovering else { return }
+            hovering = inside
+            if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear { if hovering { NSCursor.pop() } }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: "Выше") { if !isFirst { model.moveSpace(space.id, by: -1) } }
+        .accessibilityAction(named: "Ниже") { if !isLast { model.moveSpace(space.id, by: 1) } }
         .onAppear { name = space.name }
         .onChange(of: space.name) { name = space.name }
         .onChange(of: focused) { if !focused { commit() } }

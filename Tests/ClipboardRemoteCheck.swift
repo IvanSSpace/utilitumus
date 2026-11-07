@@ -126,11 +126,59 @@ func wirePure() {
     let emptied = await openLocal(.dusk)
     Stand.save(emptied, "dusk-empty-local")
     check(differingPixels(emptied, shots[0]) > 0, "контроллер без записей сверка замечает: разных пикселей \(differingPixels(emptied, shots[0]))")
+    await dragSpacesOnTab()
     // Записи утилиты с другим пространством выглядят иначе: сравнение что-то различает.
     await model.perform(.deleteSpace(id: model.spaces[0].id))
     await model.read()
     let changed = await Stand.open(.dusk)
     check(differingPixels(shots[0], changed) > 0, "после удаления пространства экран утилиты другой")
+}
+
+/// Строка вкладки центра, настоящие события мыши, настоящая связка: бросок доходит до утилиты прежним `moveSpace`.
+@MainActor func dragSpacesOnTab() async {
+    let model = RemoteClipboardModel.shared
+    await model.read()
+    let names = model.spaces.map(\.name)
+    guard names.count >= 2 else { return check(false, "у утилиты два пространства (\(names))") }
+    let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 738, height: 660), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.alphaValue = 0
+    window.isReleasedWhenClosed = false
+    let host = NSHostingView(rootView: ClipboardView(model: model).environment(\.dsTheme, DSTheme.dusk).frame(width: 738, height: 660))
+    host.frame = NSRect(x: 0, y: 0, width: 738, height: 660)
+    window.contentView = host
+    window.orderBack(nil)
+    defer { window.orderOut(nil); window.contentView = nil }
+    await pause(0.5)
+    host.layoutSubtreeIfNeeded()
+    func field(_ name: String) -> NSRect? {
+        func walk(_ view: NSView) -> NSRect? {
+            if let text = view as? NSTextField, text.stringValue == name { return text.convert(text.bounds, to: nil) }
+            return view.subviews.lazy.compactMap(walk).first
+        }
+        return walk(host)
+    }
+    guard let a = field(names[0]), let b = field(names[1]) else { return check(false, "строки пространств на вкладке") }
+    func send(_ type: NSEvent.EventType, _ p: NSPoint) {
+        window.sendEvent(NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+    }
+    let start = NSPoint(x: a.minX + 30, y: a.midY), end = NSPoint(x: a.minX + 30, y: b.midY)
+    send(.leftMouseDown, start)
+    send(.leftMouseDragged, NSPoint(x: start.x, y: start.y - 10))
+    await pause(0.05)
+    send(.leftMouseDragged, end)
+    await pause(0.2)
+    send(.leftMouseUp, end)
+    let expected = [names[1], names[0]] + names.dropFirst(2)
+    for _ in 0..<50 where model.spaces.map(\.name) != expected {
+        await model.read()
+        await pause(0.1)
+    }
+    check(model.spaces.map(\.name) == expected, "вкладка центра: перенос строки дошёл до утилиты: \(model.spaces.map(\.name))")
+    await pause(0.3)
+    // Обратно, чтобы дальше сверка шла как раньше.
+    await model.perform(.moveSpace(id: model.spaces[0].id, by: 1))
+    await model.read()
 }
 
 /// Утилита умерла: центр это видит, запасной экран, процесс не поднимается заново сам (KeepAlive выключен).

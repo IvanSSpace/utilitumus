@@ -75,8 +75,29 @@ enum PreviewApp {
             model.allItems.removeAll { $0.id == id }
             model.selected = min(model.selected, max(0, model.visible.count - 1))
         }
-        model.onAddSpace = { [weak model] name, color in
-            model?.spaces.append(ClipSpace(id: UUID(), name: name, colorID: color))
+        model.onAddSpace = { [weak model] name, color, hidden in
+            model?.spaces.append(ClipSpace(id: UUID(), name: name, colorID: color, hidesContent: hidden ? true : nil))
+        }
+        model.onSetSpaceHidden = { [weak model] id, hidden in
+            guard let model, let index = model.spaces.firstIndex(where: { $0.id == id }) else { return }
+            model.spaces[index].hidesContent = hidden ? true : nil
+        }
+        model.onSetTitle = { [weak model] id, title in
+            guard let model, let index = model.allItems.firstIndex(where: { $0.id == id }) else { return }
+            model.allItems[index].title = title
+        }
+        model.onMoveSpace = { [weak model] id, position in
+            guard let model else { return }
+            let moved = ClipReorder.moved(model.spaces.map(\.id), id, to: position)
+            model.spaces = moved.compactMap { id in model.spaces.first { $0.id == id } }
+        }
+        model.onMoveRecord = { [weak model] id, position in
+            guard let model, let space = model.allItems.first(where: { $0.id == id })?.spaceID else { return }
+            let order = ClipboardStore.filter(model.allItems, space: space, query: "", spaces: []).map(\.id)
+            let moved = ClipReorder.moved(order, id, to: position)
+            for index in model.allItems.indices where model.allItems[index].spaceID == space {
+                model.allItems[index].spaceRank = moved.firstIndex(of: model.allItems[index].id)
+            }
         }
         model.onRenameSpace = { [weak model] id, name in
             guard let model, let index = model.spaces.firstIndex(where: { $0.id == id }) else { return }
