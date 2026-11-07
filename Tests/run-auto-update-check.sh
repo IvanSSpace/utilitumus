@@ -11,7 +11,7 @@ ROOT="$PWD"
 
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 OUT="${AUTO_UPDATE_CHECK_DIR:-${TMPDIR:-/tmp}/auto-update-check}"
-CACHE="$OUT-cache"
+CACHE="$(incremental_cache auto-update "$TARGET")"
 BIN="auto-update-stand"
 SUITE="local.utilitumus.test.kit.autoupdate"
 SIGN_NAME="Utilitumus Signing"

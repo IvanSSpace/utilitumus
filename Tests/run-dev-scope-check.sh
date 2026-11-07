@@ -16,7 +16,7 @@ ok() { echo "ok   $1"; }
 same() { [ "$2" = "$3" ] && ok "$1" || fail "$1: ждал «$3», вышло «$2»"; }
 
 . Tests/lib/incremental.sh
-CACHE="${DEV_SCOPE_CACHE:-$OUT-cache}"
+CACHE="${DEV_SCOPE_CACHE:-$(incremental_cache dev-scope "$TARGET")}"
 rm -rf "$OUT"
 mkdir -p "$OUT/png" "$OUT/work" "$CACHE/src" "$CACHE/scoped" "$CACHE/plain"
 
