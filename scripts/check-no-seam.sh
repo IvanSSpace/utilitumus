@@ -13,6 +13,10 @@ EPOCH="$(sed -n 's/.*static let testPeerEpoch = "\(.*\)".*/\1/p' "$(dirname "$0"
 while IFS= read -r PLIST; do
   [ "$(plutil -extract UtilitumusSecurityEpoch raw -o - "$PLIST" 2>/dev/null || true)" != "$EPOCH" ] || FOUND="${FOUND}"$'\n'"$PLIST"
 done < <(find "$APP/Contents" -name Info.plist -type f)
+# Сборка scripts/dev.sh (-Onone, свой каталог) помечена в Info.plist: в выпуск она не годится.
+while IFS= read -r PLIST; do
+  [ -z "$(plutil -extract UtilitumusDevBuild raw -o - "$PLIST" 2>/dev/null || true)" ] || FOUND="${FOUND}"$'\n'"$PLIST (сборка для разработки)"
+done < <(find "$APP/Contents" -name Info.plist -type f)
 if [ -n "$FOUND" ]; then
   echo "В сборке следы тестового шва — выкладывать нельзя:" >&2
   echo "$FOUND" >&2

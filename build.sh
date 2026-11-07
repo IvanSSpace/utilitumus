@@ -43,6 +43,7 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
+# Быстрая сборка без оптимизации — scripts/dev.sh; здесь всегда -O.
 swiftc -O -parse-as-library -target "$TARGET" ${PILOT_ARGS[@]+"${PILOT_ARGS[@]}"} \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
   $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*') \

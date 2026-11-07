@@ -4,6 +4,10 @@
 # Пятый аргумент только для стендов: --test-seam — настройки в своём suite, состояние центра подставное;
 # --test-seam-real-id — то же, но с настоящими id и меткой launchd (Tests/run-hub-e2e.sh).
 #
+# Режим разработки (только scripts/dev.sh): UTILITUMUS_DEV_CACHE=<папка> включает -Onone и инкрементальную сборку с кэшем
+# в этой папке, помощники берутся из кэша, пока не менялись их исходники. Бандл несёт метку UtilitumusDevBuild, и
+# scripts/check-no-seam.sh не пропустит его ни в один выпуск. Без переменной флаги те же, что всегда: -O и без кэша.
+#
 # Всё особое для утилиты лежит в Sources/Apps/<Имя>/manifest.json, сам скрипт при новом модуле не меняется.
 # Все ключи необязательны, неизвестный ключ — ошибка. Пути от корня репозитория.
 #   sources       файлы и папки (из папки берутся *.swift) сверх трёх папок выше
@@ -22,6 +26,11 @@ set -euo pipefail
 # Установщик отвергает архив с файлами, доступными на запись группе или всем.
 umask 022
 
+DEV_CACHE="${UTILITUMUS_DEV_CACHE:-}"
+case "$DEV_CACHE" in
+  "" | /*) ;;
+  *) echo "UTILITUMUS_DEV_CACHE: нужен абсолютный путь" >&2; exit 1 ;;
+esac
 SWIFT_FLAGS=()
 TEST_ID=""
 SEAM=""
@@ -243,15 +252,52 @@ rm -rf -- "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Без -parse-as-library: точка входа утилиты — Sources/Apps/<Имя>/main.swift.
-swiftc -O -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} \
+APP_SOURCES=($(find "Sources/Apps/$NAME" "Sources/Modules/$NAME" Sources/Kit -name '*.swift') ${EXTRA_SOURCES[@]+"${EXTRA_SOURCES[@]}"})
+OPT_FLAGS=(-O)
+if [ -n "$DEV_CACHE" ]; then
+  mkdir -p "$DEV_CACHE"
+  # Карта объектных файлов: имя от пути файла, чтобы перестановка списка не сбрасывала кэш.
+  /usr/bin/python3 -I - "$DEV_CACHE" "${APP_SOURCES[@]}" <<'PY'
+import hashlib, json, sys
+cache = sys.argv[1]
+out = {"": {"swift-dependencies": cache + "/master.swiftdeps"}}
+for f in sys.argv[2:]:
+    b = cache + "/o" + hashlib.md5(f.encode()).hexdigest()[:12]
+    out[f] = {"object": b + ".o", "swift-dependencies": b + ".swiftdeps", "dependencies": b + ".d"}
+json.dump(out, open(cache + "/map.json", "w"))
+PY
+  OPT_FLAGS=(-Onone -incremental -enable-batch-mode -j8 -output-file-map "$DEV_CACHE/map.json" -module-name "$NAME")
+fi
+swiftc ${OPT_FLAGS[@]+"${OPT_FLAGS[@]}"} -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} \
   -o "$APP/Contents/MacOS/$NAME" \
-  $(find "Sources/Apps/$NAME" "Sources/Modules/$NAME" Sources/Kit -name '*.swift') \
-  ${EXTRA_SOURCES[@]+"${EXTRA_SOURCES[@]}"} \
+  "${APP_SOURCES[@]}" \
   -framework SwiftUI -framework AppKit ${EXTRA_LINK[@]+"${EXTRA_LINK[@]}"}
+
+# Режим разработки: помощник пересобирается, только если изменились его исходники, флаги или цель.
+HELPER_INDEX=0
+dev_cached() { # <выходной файл> <команда компиляции...>
+  local out="$1"; shift
+  if [ -z "$DEV_CACHE" ]; then "$@"; return; fi
+  local stamp f cached="$DEV_CACHE/helper-$HELPER_INDEX"
+  stamp="$({
+    printf '%s\n' "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} "$@"
+    for f in "${FILES[@]}"; do
+      if [[ "$f" == *.a ]]; then stat -f '%N %z %m' "$f"; else cat "$f"; fi
+    done
+  } | shasum -a 256)"
+  if [ -f "$cached.bin" ] && [ -f "$cached.stamp" ] && [ "$(<"$cached.stamp")" = "$stamp" ]; then
+    cp "$cached.bin" "$out"
+  else
+    "$@"
+    cp "$out" "$cached.bin"
+    printf '%s\n' "$stamp" > "$cached.stamp"
+  fi
+}
 
 # Бинарник и Info.plist на месте; подпись — последней, после неё помощник ставить нельзя.
 build_helper() {
   local h="helpers.$1" kind path identifier target
+  HELPER_INDEX="$1"
   kind="$(mf "$h.kind")"
   path="$(mf "$h.path")"
   identifier="$(mf "$h.identifier")"
@@ -262,21 +308,21 @@ build_helper() {
     swift-tool)
       mkdir -p "$(dirname "$target")"
       # -wmo убирает всё, что не вызывается: помощнику не нужно лишнее из общих файлов.
-      swiftc -O -wmo -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} -o "$target" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
+      dev_cached "$target" swiftc -O -wmo -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} -o "$target" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
       ;;
     c-tool)
       mkdir -p "$(dirname "$target")"
       read_list "$h.includes"
       local includes=() item
       for item in ${LIST[@]+"${LIST[@]}"}; do includes+=(-I "$item"); done
-      clang -O2 -Wall -target "$TARGET" ${includes[@]+"${includes[@]}"} -o "$target" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
+      dev_cached "$target" clang -O2 -Wall -target "$TARGET" ${includes[@]+"${includes[@]}"} -o "$target" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
       ;;
     swift-app)
       local executable info
       executable="$(mf "$h.executable")"
       info="$target/Contents/Info.plist"
       mkdir -p "$target/Contents/MacOS" "$target/Contents/Resources"
-      swiftc -O -wmo -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} -o "$target/Contents/MacOS/$executable" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
+      dev_cached "$target/Contents/MacOS/$executable" swiftc -O -wmo -target "$TARGET" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"} -o "$target/Contents/MacOS/$executable" "${FILES[@]}" ${ARGS[@]+"${ARGS[@]}"}
       cp "$(mf "$h.info")" "$info"
       plutil -replace CFBundleShortVersionString -string "$VERSION" "$info"
       plutil -replace CFBundleVersion -string "$VERSION" "$info"
@@ -304,6 +350,7 @@ plutil -replace CFBundleShortVersionString -string "$VERSION" "$INFO"
 plutil -replace CFBundleVersion -string "$VERSION" "$INFO"
 plutil -replace LSMinimumSystemVersion -string "$MIN_SYSTEM" "$INFO"
 mark_seam "$INFO"
+if [ -n "$DEV_CACHE" ]; then plutil -replace UtilitumusDevBuild -bool true "$INFO"; fi
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/"
   plutil -replace CFBundleIconFile -string AppIcon "$INFO"
@@ -312,5 +359,5 @@ fi
 codesign --force --options runtime --sign "$SIGN_ID" --identifier "local.utilitumus.app.$ID" ${ENTITLEMENT_ARGS[@]+"${ENTITLEMENT_ARGS[@]}"} "$APP"
 
 # Боевая сборка без следов шва; сборка со швом, наоборот, обязана его нести (иначе защита ниже ничего не проверяет).
-if [ -z "$SEAM" ]; then scripts/check-no-seam.sh "$APP"; fi
+if [ -z "$SEAM" ] && [ -z "$DEV_CACHE" ]; then scripts/check-no-seam.sh "$APP"; fi
 echo "Собрано: $APP"

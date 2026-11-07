@@ -5,6 +5,7 @@
 #   ./scripts/release.sh 0.2.2
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[ -z "${UTILITUMUS_DEV_CACHE:-}" ] || { echo "UTILITUMUS_DEV_CACHE задан: выпуск только из обычной сборки (-O)." >&2; exit 1; }
 
 VERSION="${1:?Укажи версию: ./scripts/release.sh 0.2.2}"
 TAG="v$VERSION"
