@@ -4,6 +4,7 @@
 #   scripts/dev.sh mixer load browser     ровно эти утилиты и центр
 #   scripts/dev.sh --hub                  только центр, ни один модуль не показан
 #   scripts/dev.sh --all                  только центр, видны все модули: для правок самой панели
+#   scripts/dev.sh --alone mouse          только экран этой утилиты в своём окне, без центра (см. dev_alone ниже)
 # Центр показывает только свой набор: боковая панель, дашборд, Стор, обновления, меню, значки, «О проекте».
 # Набор — то, что собирается, плюс модули, чей экран в центре менялся (Sources/App/Satellites/Remote<Имя>*): такой модуль
 # виден, а его утилита не пересобирается, если её файлы не менялись. Правка Sources/Kit набор не расширяет.
@@ -43,6 +44,38 @@ ALL_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load 
 APPS=""
 for pair in $ALL_APPS; do [ -d "Sources/Apps/${pair##*:}" ] && APPS="$APPS $pair"; done
 . scripts/dev-scope.sh
+
+# Одна утилита со своим окном. Запускается рядом с настоящей: id local.utilitumus.app.<id>.dev, свой домен настроек и подставной
+# дом, служб launchd и XPC нет, значка в строке меню нет. Настоящее закрывает шов стендов (KIT_TEST_DEFAULTS): нет перехвата
+# и горячих клавиш, нет настоящего буфера, связки, службы вентиляторов и настоящих файлов утилиты. Помощников в бандле нет,
+# подпись ad-hoc. Что от них зависит, экран показывает как недоступное: модель не скачана, службы вентиляторов нет.
+dev_alone() {
+  local id="$1" name copy root home suite exe t
+  name="$(name_of "$id")" || fail "Нет такой утилиты: ${id}. Есть:$(for p in $APPS; do printf ' %s' "${p%%:*}"; done)"
+  # Своя папка и домен у каждой копии проекта: пути в кэше относительные, а общий кэш подмешал бы объекты чужой ветки.
+  copy="$(printf '%s\n' "$(pwd -P)" "$DEV" | shasum -a 256 | cut -c1-12)"
+  root="$DEV/alone/$copy"
+  # Дом только во временной папке: Kit.assertStandPath закрывает весь настоящий дом, и папку разработки тоже.
+  home="${TMPDIR:-/tmp}"
+  home="${home%/}/utilitumus-dev-alone/$copy/$id/home"
+  suite="local.utilitumus.test.dev.$copy.$id"
+  mkdir -p "$root/app" "$root/log" "$home/Library"
+  t="$(now)"
+  if ! UTILITUMUS_DEV_CACHE="$root/cache/$id" scripts/build-app.sh "$id.dev" "$name" 0.0.1 "$root/app" --dev-alone > "$root/log/$id.log" 2>&1; then
+    grep -E 'error:' "$root/log/$id.log" | head -20 >&2 || tail -20 "$root/log/$id.log" >&2
+    fail "${name}: сборка упала (полный лог: $root/log/$id.log)"
+  fi
+  exe="$root/app/$name.app/Contents/MacOS/$name"
+  echo "Собрано за $(perl -e 'printf "%.1f", $ARGV[0]-$ARGV[1]' "$(now)" "$t") с, ничего не запущено. Настройки дев-копии: домен $suite."
+  echo
+  echo "Запуск:"
+  echo "  env KIT_TEST_SUITE=$suite CFFIXED_USER_HOME=$home HOME=$home $exe"
+}
+if [ "${1:-}" = "--alone" ]; then
+  [ $# -eq 2 ] || fail "Использование: scripts/dev.sh --alone <id>"
+  dev_alone "$2"
+  exit 0
+fi
 
 # --- Что собирать
 PICK=()

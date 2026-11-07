@@ -2,11 +2,16 @@
 # Собирает отдельную утилиту из Sources/Apps/<Имя>, Sources/Modules/<Имя> и Sources/Kit.
 #   scripts/build-app.sh awake Awake 1.0.0 build/apps
 # Пятый аргумент только для стендов: --test-seam — настройки в своём suite, состояние центра подставное;
-# --test-seam-real-id — то же, но с настоящими id и меткой launchd (Tests/run-hub-e2e.sh).
+# --test-seam-real-id — то же, но с настоящими id и меткой launchd (Tests/run-hub-e2e.sh);
+# --dev-alone — только с UTILITUMUS_DEV_CACHE и id вида <id>.dev (scripts/dev.sh --alone): шов плюс своё окно, без помощников
+# и подписи автора (ad-hoc).
 #
 # Режим разработки (только scripts/dev.sh): UTILITUMUS_DEV_CACHE=<папка> включает -Onone и инкрементальную сборку с кэшем
 # в этой папке, помощники берутся из кэша, пока не менялись их исходники. Бандл несёт метку UtilitumusDevBuild, и
 # scripts/check-no-seam.sh не пропустит его ни в один выпуск. Без переменной флаги те же, что всегда: -O и без кэша.
+#
+# Только для сборок со швом: UTILITUMUS_BUILD_CACHE=<папка> (своя у каждой копии проекта, Tests/lib/incremental.sh).
+# Те же входы сборки и готовый бандл с верной подписью: копия бандла вместо компиляции. Входы считает сам этот скрипт.
 #
 # Всё особое для утилиты лежит в Sources/Apps/<Имя>/manifest.json, сам скрипт при новом модуле не меняется.
 # Все ключи необязательны, неизвестный ключ — ошибка. Пути от корня репозитория.
@@ -34,7 +39,13 @@ esac
 SWIFT_FLAGS=()
 TEST_ID=""
 SEAM=""
-if [ $# -eq 5 ] && [ "$5" = "--test-seam" ]; then
+ALONE=""
+if [ $# -eq 5 ] && [ "$5" = "--dev-alone" ]; then
+  SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS -D KIT_DEV_ALONE)
+  TEST_ID=1
+  SEAM=1
+  ALONE=1
+elif [ $# -eq 5 ] && [ "$5" = "--test-seam" ]; then
   SWIFT_FLAGS=(-D KIT_TEST_DEFAULTS)
   TEST_ID=1
   SEAM=1
@@ -59,6 +70,15 @@ matches "$ID" '^[a-z0-9][a-z0-9.-]*$' || fail "Недопустимый id: ${ID
 matches "$VERSION" '^[0-9]{1,18}(\.[0-9]{1,18})*$' || fail "Недопустимая версия: ${VERSION}"
 # Имя становится именем модуля swiftc, путём и именем ассета: GitHub заменяет в нём пробелы и не-ASCII.
 matches "$NAME" '^[A-Za-z][A-Za-z0-9]*$' || fail "Недопустимое имя: ${NAME}"
+
+[ -z "$ALONE" ] || { [ -n "$DEV_CACHE" ] && [[ "$ID" == *.dev ]]; } || fail "--dev-alone: нужны UTILITUMUS_DEV_CACHE и id вида <id>.dev"
+BUILD_CACHE="${UTILITUMUS_BUILD_CACHE:-}"
+case "$BUILD_CACHE" in
+  "" | /*) ;;
+  *) fail "UTILITUMUS_BUILD_CACHE: нужен абсолютный путь" ;;
+esac
+# Выпуск и сборка для разработки собираются всегда: готовый бандл берут только стенды.
+[ -z "$BUILD_CACHE" ] || { [ -n "$SEAM" ] && [ -z "$DEV_CACHE" ]; } || fail "UTILITUMUS_BUILD_CACHE только для сборок со швом"
 
 # Относительный путь — от папки вызывающего, а не от корня репозитория.
 case "$OUT_DIR" in
@@ -173,6 +193,9 @@ fi
 
 HELPER_COUNT="$(mf helpers || echo 0)"
 matches "$HELPER_COUNT" '^[0-9]+$' || fail "${MANIFEST}: helpers — не список"
+# Дев-копии нужен экран. Без помощников у неё нет ни службы вентиляторов, ни распознавания, ни Links с настоящим id,
+# который LaunchServices мог бы сделать браузером.
+[ -z "$ALONE" ] || HELPER_COUNT=0
 
 check_helper() {
   local h="helpers.$1" kind path identifier allowed="kind path identifier sources frameworks linkerFlags prepare" prepare
@@ -208,16 +231,23 @@ check_helper() {
     check_path "$prepare"
     "./$prepare"
   fi
+  [ -z "${prepare:-}" ] || INPUTS+=("$prepare")
+  [ "$kind" != swift-app ] || INPUTS+=("$info")
   source_files "$h.sources"
   [ "${#FILES[@]}" -gt 0 ] || fail "${MANIFEST}: ${h}: нет sources"
+  INPUTS+=("${FILES[@]}")
   read_list "$h.includes"
   local item
-  for item in ${LIST[@]+"${LIST[@]}"}; do check_path "$item"; done
+  for item in ${LIST[@]+"${LIST[@]}"}; do check_path "$item"; INPUTS+=("$item"); done
   framework_args "$h.frameworks" "$h.linkerFlags"
   DECLARED="${DECLARED}${path}|${identifier}"$'\n'
 }
 
 DECLARED=""
+# Файлы и папки, от которых зависит бандл, сверх исходников самой утилиты: для UTILITUMUS_BUILD_CACHE.
+INPUTS=(scripts/build-app.sh "$MANIFEST" "Sources/Apps/$NAME/Info.plist" Info.plist ${EXTRA_SOURCES[@]+"${EXTRA_SOURCES[@]}"})
+[ -z "${ENTITLEMENTS:-}" ] || INPUTS+=("$ENTITLEMENTS")
+[ ! -f Resources/AppIcon.icns ] || INPUTS+=(Resources/AppIcon.icns)
 i=0
 while [ "$i" -lt "$HELPER_COUNT" ]; do
   check_helper "$i"
@@ -239,8 +269,11 @@ TARGET="arm64-apple-macos$MIN_SYSTEM"
 # Подпись как в build.sh: нет сертификата (CI) — ad-hoc. Выкладывать такое не даст release-app.sh.
 SIGN_NAME="Utilitumus Signing"
 # Общий выпуск собирает параллельно и открывает связку заранее один раз (scripts/release-all.sh).
-[ -n "${UTILITUMUS_SIGNING_UNLOCKED:-}" ] || scripts/unlock-signing.sh
-if [[ "$(security find-identity -p codesigning)" == *"\"$SIGN_NAME\""* ]]; then
+# Подпись автора дев-копии не нужна, и связка не разблокируется: ни один настоящий компонент такую копию не примет.
+[ -n "$ALONE" ] || [ -n "${UTILITUMUS_SIGNING_UNLOCKED:-}" ] || scripts/unlock-signing.sh
+if [ -n "$ALONE" ]; then
+  SIGN_ID="-"
+elif [[ "$(security find-identity -p codesigning)" == *"\"$SIGN_NAME\""* ]]; then
   SIGN_ID="$SIGN_NAME"
 else
   SIGN_ID="-"
@@ -254,6 +287,48 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 # Без -parse-as-library: точка входа утилиты — Sources/Apps/<Имя>/main.swift.
 APP_SOURCES=($(find "Sources/Apps/$NAME" "Sources/Modules/$NAME" Sources/Kit -name '*.swift') ${EXTRA_SOURCES[@]+"${EXTRA_SOURCES[@]}"})
+
+# --- Готовый бандл стенда. Копия, а не сам бандл: проверка вольна менять свой, кэш от этого не портится.
+# Отпечаток — от содержимого файлов, поэтому смена ветки с теми же файлами его не сбрасывает. .a сверяются по размеру и
+# времени, как у помощников ниже: их сотни мегабайт. Без сертификата кэша нет: проверять нечем.
+BUILD_KEY=""
+if [ -n "$BUILD_CACHE" ] && [ "$SIGN_ID" != "-" ]; then
+  SIGN_HASH="$(security find-identity -p codesigning | sed -n "s/.*) \([0-9A-F]\{40\}\) \"$SIGN_NAME\".*/\1/p" | head -1)"
+  build_key() {
+    local file
+    pwd -P
+    printf '%s\n' "$ID" "$NAME" "$VERSION" "$TARGET" "$SIGN_HASH" ${SWIFT_FLAGS[@]+"${SWIFT_FLAGS[@]}"}
+    swiftc --version 2>&1
+    xcrun --show-sdk-path
+    xcrun --show-sdk-version
+    while IFS= read -r file; do
+      case "$file" in
+        *.a) stat -f '%N %z %m' "$file" ;;
+        *) shasum -a 256 "$file" ;;
+      esac
+    done < <(find "${INPUTS[@]}" "${APP_SOURCES[@]}" -type f | LC_ALL=C sort -u)
+  }
+  # Подпись верна, сертификат тот, метка стенда на месте, и это тот самый бандл, что положили (CDHash).
+  bundle_seal() {
+    codesign --verify --deep --strict \
+      -R="identifier \"local.utilitumus.app.$ID\" and certificate leaf = H\"$SIGN_HASH\" and info[\"UtilitumusSecurityEpoch\"] = \"$TEST_EPOCH\"" "$1" 2>/dev/null \
+      && codesign -dvvv "$1" 2>&1 | sed -n 's/^CDHash=//p'
+  }
+  BUILD_KEY="$(build_key | shasum -a 256 | cut -d' ' -f1)"
+  CACHED="$BUILD_CACHE/$NAME.app"
+  if [ -f "$BUILD_CACHE/key" ] && [ -d "$CACHED" ] && [ "$(sed -n 1p "$BUILD_CACHE/key")" = "$BUILD_KEY" ]; then
+    rm -rf -- "$APP"
+    cp -cR "$CACHED" "$APP"
+    if SEAL="$(bundle_seal "$APP")" && [ -n "$SEAL" ] && [ "$SEAL" = "$(sed -n 2p "$BUILD_CACHE/key")" ]; then
+      echo "Собрано: $APP (входы те же, компиляции не было)"
+      exit 0
+    fi
+    echo "Готовый бандл не прошёл проверку подписи: собираю заново." >&2
+    rm -rf -- "$APP"
+    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+  fi
+fi
+
 OPT_FLAGS=(-O)
 # Предел компиляторов на одну сборку, когда сборок несколько разом (scripts/release-all.sh). На результат не влияет.
 SWIFT_JOBS="${UTILITUMUS_SWIFT_JOBS:-}"
@@ -358,6 +433,8 @@ plutil -replace CFBundleVersion -string "$VERSION" "$INFO"
 plutil -replace LSMinimumSystemVersion -string "$MIN_SYSTEM" "$INFO"
 mark_seam "$INFO"
 if [ -n "$DEV_CACHE" ]; then plutil -replace UtilitumusDevBuild -bool true "$INFO"; fi
+# Копию видно в Dock и в списке программ.
+[ -z "$ALONE" ] || plutil -replace CFBundleName -string "$NAME dev" "$INFO"
 if [ -f Resources/AppIcon.icns ]; then
   cp Resources/AppIcon.icns "$APP/Contents/Resources/"
   plutil -replace CFBundleIconFile -string AppIcon "$INFO"
@@ -367,4 +444,12 @@ codesign --force --options runtime --sign "$SIGN_ID" --identifier "local.utilitu
 
 # Боевая сборка без следов шва; сборка со швом, наоборот, обязана его нести (иначе защита ниже ничего не проверяет).
 if [ -z "$SEAM" ] && [ -z "$DEV_CACHE" ]; then scripts/check-no-seam.sh "$APP"; fi
+if [ -n "$BUILD_KEY" ]; then
+  SEAL="$(bundle_seal "$APP")" || fail "Подпись свежей сборки не сходится: $APP"
+  mkdir -p "$BUILD_CACHE"
+  rm -f "$BUILD_CACHE/key"
+  rm -rf -- "$CACHED"
+  cp -cR "$APP" "$CACHED"
+  printf '%s\n%s\n' "$BUILD_KEY" "$SEAL" > "$BUILD_CACHE/key"
+fi
 echo "Собрано: $APP"

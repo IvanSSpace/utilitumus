@@ -46,3 +46,11 @@ if not same:
 PY
   INC_FLAGS=(-incremental -enable-batch-mode -j8 -output-file-map "$cache/map.json")
 }
+
+# Утилита со швом для стенда: аргументы как у scripts/build-app.sh. Входы те же и подпись верна — копия готового бандла вместо
+# компиляции с -O. Кэш свой у каждой копии проекта и флага. INCREMENTAL_OFF=1 — собрать заново. Вызывать из корня проекта.
+build_seam_utility() {
+  local cache=""
+  [ -n "${INCREMENTAL_OFF:-}" ] || cache="$(incremental_cache "utility-$1" "$5")"
+  UTILITUMUS_BUILD_CACHE="$cache" scripts/build-app.sh "$@"
+}

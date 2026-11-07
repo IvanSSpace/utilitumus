@@ -14,12 +14,38 @@ enum Kit {
     static let defaults: UserDefaults = {
         let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
         precondition(suite.hasPrefix("local.utilitumus.test."), "Стенд пишет только в тестовый домен")
+        #if KIT_DEV_ALONE
+        requireDevAloneEnvironment(suite: suite)
+        #endif
         return UserDefaults(suiteName: suite)!
     }()
     #else
     static let defaults: UserDefaults = Bundle.main.bundleIdentifier == hubBundleID
         ? .standard
         : UserDefaults(suiteName: hubBundleID)!
+    #endif
+
+    #if KIT_TEST_DEFAULTS
+    /// Окно за экраном и без Dock. Дев-копию так запускает только проверка, человеку окно видно.
+    static var standWindowHidden: Bool {
+        #if KIT_DEV_ALONE
+        ProcessInfo.processInfo.environment["KIT_DEV_ALONE_OFFSCREEN"] != nil
+        #else
+        true
+        #endif
+    }
+    #endif
+
+    #if KIT_DEV_ALONE
+    /// Запуск из Finder или без переменных дал бы настоящий дом и общий suite стендов. Лучше не открыться.
+    private static func requireDevAloneEnvironment(suite: String) {
+        let env = ProcessInfo.processInfo.environment
+        guard suite.hasPrefix("local.utilitumus.test.dev."), let home = env["CFFIXED_USER_HOME"], env["HOME"] == home,
+              standForbiddenRoot(of: home) == nil else {
+            fputs("Дев-копия запускается только командой, которую печатает scripts/dev.sh --alone: нужны свой домен настроек и подставной дом.\n", stderr)
+            exit(2)
+        }
+    }
     #endif
 
     /// Сборка со швом не должна касаться ничего настоящего. Стенд под launchd живёт с настоящим домом, поэтому
