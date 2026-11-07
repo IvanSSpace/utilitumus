@@ -26,7 +26,15 @@ FANS="Sources/Shared/FanLink.swift Sources/Modules/Fans/FanController.swift Sour
 FLAGS=(-target "$TARGET" -D KIT_TEST_DEFAULTS -framework AppKit -framework SwiftUI)
 
 if [ -z "${FANS_SKIP_BASE:-}" ] || [ ! -f "$OUT/base/normal.rgba" ]; then
-  /usr/bin/git show "$BASE_REF:Sources/Modules/Fans/FansView.swift" > "$OUT/src/OldFansView.swift"
+  # Два текста базы устарели: окно утилиты и вкладка центра пишут про утилиту «Вентиляторы», а не про выход из Utilitumus.
+  # Подменяется только слово в этих двух строках, остальное в базе прежнее, и пиксели сверяются до единого.
+  /usr/bin/git show "$BASE_REF:Sources/Modules/Fans/FansView.swift" \
+    | sed -e 's/Пока она открыта, Utilitumus не вмешивается\./Пока она открыта, утилита «Вентиляторы» не вмешивается./' \
+          -e 's/При выходе из Utilitumus вентиляторы возвращаются в «Авто»\./Когда утилита «Вентиляторы» останавливается, вентиляторы возвращаются в «Авто»./' \
+    > "$OUT/src/OldFansView.swift"
+  /usr/bin/grep -q 'утилита «Вентиляторы» не вмешивается' "$OUT/src/OldFansView.swift" \
+    && /usr/bin/grep -q 'Когда утилита «Вентиляторы» останавливается' "$OUT/src/OldFansView.swift" \
+    || { echo "ПРОВАЛ: в базе нет двух старых текстов, подмена не сработала"; exit 1; }
   mkdir -p "$OUT/bin-base"
   rm -f "$OUT/bin-base/$NAME"
   CACHE="$(incremental_cache fans-wire-base KIT_TEST_DEFAULTS FANS_BASELINE)"
