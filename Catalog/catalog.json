@@ -80,13 +80,13 @@
     },
     {
       "id": "mouse",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.2.0/Mouse.zip",
-      "sha256": "f9a39552faefda804ccaf95edf8d0c32705071ff158c98e8e1b21d8b97cb916a",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.2.1/Mouse.zip",
+      "sha256": "2535272af768fb1a831841a98dea42d2c315fe154ab2f120f7d3ec6cedd97544",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
