@@ -24,9 +24,10 @@ sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$CACHE/src/UtilitumusApp.sw
 cmp -s "$CACHE/src/UtilitumusApp.swift.new" "$CACHE/src/UtilitumusApp.swift" || mv "$CACHE/src/UtilitumusApp.swift.new" "$CACHE/src/UtilitumusApp.swift"
 rm -f "$CACHE/src/UtilitumusApp.swift.new"
 cmp -s Tests/SidebarDragCheck.swift "$CACHE/src/main.swift" || cp Tests/SidebarDragCheck.swift "$CACHE/src/main.swift"
+# UtilitumusApp.swift у стенда свой, без @main.
+HUB_LIST="$(scripts/hub-sources.sh)"
 FILES=("$CACHE/src/main.swift" "$CACHE/src/UtilitumusApp.swift")
-while IFS= read -r f; do FILES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
-  -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift | sort)
+while IFS= read -r f; do case "$f" in */UtilitumusApp.swift) ;; *) FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SidebarDragStand -o "$OUT/$BIN" \
   "${FILES[@]}" \

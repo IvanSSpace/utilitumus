@@ -53,10 +53,11 @@ build() {
   fi
   # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
   for f in main.swift KitDefaults.swift UtilitumusApp.swift; do cmp -s "$to/src/$f" "$cache/src/$f" || cp "$to/src/$f" "$cache/src/$f"; done
-  # shellcheck disable=SC2046
+  # В копии BASE только Sources: скрипт из корня, а список из той папки, где он запущен. KitDefaults.swift и UtilitumusApp.swift у стенда свои.
   (cd "$from"
-    FILES=("$cache/src/main.swift" "$cache/src/KitDefaults.swift" "$cache/src/UtilitumusApp.swift" $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-      -not -name KitDefaults.swift -not -name UtilitumusApp.swift | sort))
+    HUB_LIST="$("$ROOT/scripts/hub-sources.sh")"
+    FILES=("$cache/src/main.swift" "$cache/src/KitDefaults.swift" "$cache/src/UtilitumusApp.swift")
+    while IFS= read -r f; do case "$f" in */KitDefaults.swift | */UtilitumusApp.swift) ;; *) FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
     incremental_flags "$cache" "${FILES[@]}"
     swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name StoreNotesStand -o "$to/$BIN" "$@" \
       "${FILES[@]}" \

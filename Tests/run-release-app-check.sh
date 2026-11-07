@@ -18,7 +18,7 @@ LAUNCHCTL_LOG="$OUT/launchctl.log"
 SIGN_NAME="Utilitumus Signing"
 LEAF="$(grep -oE '"[0-9a-f]{40}"' Sources/Kit/KitSigning.swift | head -1 | tr -d '"')"
 RAW_CATALOG="$(grep -oE 'https://raw[^"]+catalog\.json' Sources/Kit/SatelliteCatalog.swift)"
-SCRIPTS=(build.sh install.sh scripts/release.sh scripts/build-app.sh scripts/build-pilot.sh scripts/release-app.sh Tests/run-release-app-check.sh Tests/run-pilot-build-check.sh)
+SCRIPTS=(build.sh scripts/hub-sources.sh install.sh scripts/release.sh scripts/build-app.sh scripts/build-pilot.sh scripts/release-app.sh Tests/run-release-app-check.sh Tests/run-pilot-build-check.sh)
 
 fails=0
 pass() { echo "ok   $1"; }
@@ -75,7 +75,10 @@ check "release.sh передаёт --latest=true" has scripts/release.sh '--late
 HUB_VERSION="$(plutil -extract CFBundleShortVersionString raw -o - Info.plist)"
 ARBITER="$(sed -n 's/.*arbiterVersion = "\(.*\)".*/\1/p' Sources/Kit/SatelliteRole.swift)"
 same "версия центра не младше версии арбитра ${ARBITER}" "$(printf '%s\n%s\n' "$ARBITER" "$HUB_VERSION" | sort -V | head -1)" "$ARBITER"
-check "сборка центра не берёт Sources/Apps" has build.sh "-not -path 'Sources/Apps/*'"
+# Сверка по самому списку, а не по тексту скрипта: шаг разделения лаунчера перепишет его условия.
+HUB_LIST="$(scripts/hub-sources.sh)"
+check "build.sh берёт список центра из scripts/hub-sources.sh" has build.sh 'HUB_LIST="$(scripts/hub-sources.sh)"'
+same "сборка центра не берёт Sources/Apps и помощников" "$(grep -E '^Sources/(Apps|FanHelper|LinkHelper)/' <<<"$HUB_LIST" || true)" ""
 check "install.sh: хэш тот же, что в KitSigning" has install.sh "$LEAF"
 check "install.sh: адрес каталога тот же, что в SatelliteCatalog" has install.sh "$RAW_CATALOG"
 if [ ! -f scripts/build-app.sh ] || [ ! -f scripts/release-app.sh ]; then

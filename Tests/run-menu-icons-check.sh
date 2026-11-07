@@ -27,9 +27,10 @@ cp Tests/MenuBarIconCheck.swift "$OUT/src/main.swift"
 # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
 mkdir -p "$CACHE/src"
 for f in main.swift UtilitumusApp.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
-# shellcheck disable=SC2046
-FILES=("$CACHE/src/main.swift" "$CACHE/src/UtilitumusApp.swift" $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-  -not -name UtilitumusApp.swift | sort))
+# UtilitumusApp.swift у стенда свой, без @main.
+HUB_LIST="$(scripts/hub-sources.sh)"
+FILES=("$CACHE/src/main.swift" "$CACHE/src/UtilitumusApp.swift")
+while IFS= read -r f; do case "$f" in */UtilitumusApp.swift) ;; *) FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name MenuIconsStand -o "$OUT/$BIN" \
   "${FILES[@]}" \

@@ -240,8 +240,9 @@ step "помощники центра (пересобрано:${HELPER_NOTE:- н
 
 # Инкрементальная компиляция центра. Карта объектов по хэшу пути, как у утилит (scripts/build-app.sh).
 T="$(now)"
+HUB_LIST="$(scripts/hub-sources.sh)"
 HUB_FILES=()
-while IFS= read -r f; do HUB_FILES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' | sort)
+while IFS= read -r f; do HUB_FILES+=("$f"); done <<<"$HUB_LIST"
 HUB_FILES+=("$SOURCE" "$SCOPE_SOURCE")
 /usr/bin/python3 -I - "$HC" "${HUB_FILES[@]}" <<'PY'
 import hashlib, json, sys

@@ -130,8 +130,11 @@ mkdir -p "$OUT/src"
 cp Tests/HubE2E.swift "$OUT/src/main.swift"
 # Центр целиком, как в проверках модулей: модель «Не спать» тянет за собой дашборд, а он весь центр. Точка входа у стенда своя.
 sed '/^@main$/d' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
+HUB_LIST="$(scripts/hub-sources.sh)"
+HUB_FILES=()
+while IFS= read -r f; do case "$f" in */UtilitumusApp.swift) ;; *) HUB_FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name HubE2E -o "$HUB" "$OUT/src/main.swift" "$OUT/src/UtilitumusApp.swift" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/VoiceHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
+  "${HUB_FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework Carbon -framework Charts -framework CoreAudio -framework AudioToolbox -framework IOKit \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$HUB" 2>/dev/null

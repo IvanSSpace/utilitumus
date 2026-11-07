@@ -35,6 +35,11 @@ else
   echo "⚠️  Сертификата «${SIGN_NAME}» нет — подпись ad-hoc, разрешения macOS слетят после пересборки."
 fi
 
+# Список исходников центра, до чистки папки: если scripts/hub-sources.sh упал, сборка останавливается здесь и прошлая сборка цела.
+HUB_LIST="$(scripts/hub-sources.sh)"
+HUB_FILES=()
+while IFS= read -r f; do HUB_FILES+=("$f"); done <<<"$HUB_LIST"
+
 # Движок голосового ввода (sherpa-onnx, статически): скачивается один раз, хэши сверяются.
 # Без интернета и без Vendor/ сборка останавливается здесь с понятной ошибкой.
 scripts/fetch-sherpa.sh
@@ -46,7 +51,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 # Быстрая сборка без оптимизации — scripts/dev.sh; здесь всегда -O.
 swiftc -O -parse-as-library -target "$TARGET" ${PILOT_ARGS[@]+"${PILOT_ARGS[@]}"} \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*') \
+  "${HUB_FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 # Root-служба вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ». Только Foundation и IOKit;
