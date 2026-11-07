@@ -151,7 +151,7 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         announceStatus()
     }
 
-    /// Значок по сохранённой настройке: без неё он есть, пока центра нет, как и было. Читается при запуске и при смене роли.
+    /// Значок по сохранённой настройке: без неё его нет. Читается при запуске и при смене роли.
     private func applyMenuIcon() {
         let setting = MenuBarIcon.setting(module.module)
         let shows = MenuBarIcon.utilityShows(setting: setting, hubRunning: hubRunning, active: mode == .active)

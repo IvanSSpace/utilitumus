@@ -223,7 +223,7 @@ func pure() {
     check(model.send(.awake, to: .pinned) && defaults.bool(forKey: MenuBarIcon.key(.awake)) && icons.isOn(.awake), "закрепление включает MenuBarIcon.<id> сразу")
     check(icons.wanted.contains(.awake), "значок в строке меню появился без перезапуска")
     check(model.send(.awake, to: .list) && defaults.object(forKey: MenuBarIcon.key(.awake)) == nil && !icons.wanted.contains(.awake), "открепление снимает ключ и убирает значок сразу")
-    check(MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления запасной значок утилиты без центра остаётся")
+    check(!MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления значка утилиты нет и без центра")
     check(model.send(.sound, to: .hidden) && modules.isHidden(.sound) && defaults.object(forKey: MenuBarIcon.key(.sound)) == nil, "перенос закреплённого в скрытые снимает ключ")
     icons.set(.awake, false)
     check(defaults.object(forKey: MenuBarIcon.key(.awake)) as? Bool == false, "явное «Скрыть значок» пишет false")

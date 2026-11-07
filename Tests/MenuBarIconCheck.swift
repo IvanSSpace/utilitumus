@@ -77,7 +77,7 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
     check(MenuBarIcon.setting(.fans) == false, "выключено сохраняется явным false")
     defaults.removeObject(forKey: MenuBarIcon.key(.fans))
 
-    check(MenuBarIcon.utilityShows(setting: nil, hubRunning: false, active: true), "утилита по умолчанию: центра нет — значок есть")
+    check(!MenuBarIcon.utilityShows(setting: nil, hubRunning: false, active: true), "утилита не закреплена, центр закрыт: значка нет, в строке меню только закреплённые")
     check(!MenuBarIcon.utilityShows(setting: nil, hubRunning: true, active: true), "утилита по умолчанию: центр запущен — значка нет")
     check(!MenuBarIcon.utilityShows(setting: nil, hubRunning: true, active: false), "утилита по умолчанию: пассивная при центре — нет")
     check(MenuBarIcon.utilityShows(setting: true, hubRunning: true, active: true), "«да»: значок есть и при центре")
