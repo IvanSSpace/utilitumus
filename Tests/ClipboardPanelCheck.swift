@@ -605,6 +605,8 @@ func pause(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(
 /// Окно панели на стенде: за экраном и без настоящей клавиатуры, чтобы не забрать её у программы автора. Ключевым оно притворяется.
 final class StandPanel: NSPanel {
     var fakeKey = false
+    /// Точный момент ухода: опрос из проверки опаздывает на свой шаг.
+    var orderedOutAt = 0.0
     override var canBecomeKey: Bool { false }
     override var isKeyWindow: Bool { fakeKey }
     override func makeKeyAndOrderFront(_ sender: Any?) {
@@ -613,6 +615,7 @@ final class StandPanel: NSPanel {
     }
     override func orderOut(_ sender: Any?) {
         fakeKey = false
+        orderedOutAt = ProcessInfo.processInfo.systemUptime
         super.orderOut(sender)
     }
 }
@@ -769,6 +772,20 @@ func waitUntil(_ timeout: Double = 3, _ test: () -> Bool) async -> Bool {
     await pause(0.3)
     check(afterDone && after == 1 && stale == 0 && stand.settledGone, "следующий уход после отмены обычный (\(after), старый \(stale))")
 
+    // Открыли и снова закрыли, пока старая анимация не кончилась: её завершение не обрывает новый уход.
+    await stand.open()
+    var oldLeave = 0, newLeave = 0
+    stand.host.hide { oldLeave += 1 }
+    await pause(0.12)
+    stand.host.present(stand.model)
+    let secondBegan = clock()
+    var secondElapsed = 0.0
+    stand.host.hide { newLeave += 1; secondElapsed = clock() - secondBegan }
+    let secondDone = await waitUntil { newLeave > 0 }
+    check(secondDone && secondElapsed >= 0.13 && oldLeave == 0 && newLeave == 1, "завершение старого ухода не оборвало новый: прошло \(secondElapsed), колбэки \(oldLeave) и \(newLeave)")
+    await pause(0.3)
+    check(stand.settledGone && oldLeave == 0 && newLeave == 1, "после нового ухода панель скрыта, колбэк один")
+
     // Открытие посреди ухода на другом экране: панель уходит с прежнего места и приезжает на новое целиком.
     await stand.open()
     var moved = 0
@@ -875,7 +892,7 @@ func waitUntil(_ timeout: Double = 3, _ test: () -> Bool) async -> Bool {
     ClipboardController.pasteAfterLeaving(stand.host, send: send)
     check(sent.isEmpty && panel.isVisible, "⌘V не уходит сразу")
     let goneFirst = await waitUntil { !panel.isVisible }
-    let goneAt = clock() - began
+    let goneAt = panel.orderedOutAt - began
     check(goneFirst && sent.isEmpty, "⌘V не уходит вместе с orderOut: нужна пауза для фокуса")
     let arrived = await waitUntil { !sent.isEmpty }
     await pause(0.3)
