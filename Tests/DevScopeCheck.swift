@@ -4,7 +4,7 @@ import SwiftUI
 
 // Набор модулей дев-сборки на стенде за экраном: что видно и что осталось нетронутым в настройках.
 // Запуск: Tests/run-dev-scope-check.sh. Аргументы: рабочая папка, папка PNG, ожидаемый набор (`awake,load`, пусто или `*`),
-// шаг: `seed` (записать настройки), `scoped` (суженная сборка), `plain` (обычная сборка на тех же настройках).
+// шаг: `seed` (записать настройки), `scoped` (суженная сборка), `model` (она же без окон), `plain` (обычная сборка на тех же настройках).
 // Стенд настроек не чистит между запусками: обычная сборка должна увидеть ровно то, что было до дев-сборки.
 
 let workRoot = URL(fileURLWithPath: CommandLine.arguments[1])
@@ -240,7 +240,7 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
     }
     await common(expected: expected, label: label)
     // Дальше настоящие виды: без фильтра они открыли бы экраны утилит вне набора и пошли бы к настоящим утилитам.
-    guard failures == 0 else { return }
+    guard failures == 0, stepName != "model" else { return }
 
     print("== \(label): разбор строки")
     let mark = "local.utilitumus.dev-" + "scope"
