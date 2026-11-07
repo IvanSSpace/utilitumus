@@ -129,6 +129,8 @@ func installedVersion(_ name: String) -> String? {
 let awakeOn = LinkWire.encoded(AwakeState(isActive: true, endDate: nil, keepDisplay: false, duration: .forever, canStart: true))
 let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDisplay: false, duration: .forever, canStart: true))
 
+/// `NSApp.delegate` слабая ссылка, а `runAll` закончится раньше выхода.
+@MainActor var quitDelegate: AppDelegate?
 @MainActor var fakeNow = Date(timeIntervalSince1970: 2_000_000_000)
 
 @MainActor func waitUntil(_ what: String, seconds: Double = 40, _ condition: () -> Bool) async {
@@ -378,7 +380,7 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
         } else { check(false, "подмена (\(what)): ждали сбой, \(String(describing: phase(.sound)))") }
     }
     await refused("хэш", [entry("sound", brokenSha: true)], "контрольная сумма")
-    await refused("подпись", [entry("sound", file: "sound-adhoc-2.0.0")], "")
+    await refused("подпись", [entry("sound", file: "sound-adhoc-2.0.0")], "не от автора")
     await refused("метка выпуска", [entry("sound", file: "sound-noepoch-2.0.0")], "метки выпуска")
     await refused("версия в каталоге не та, что в файле", [entry("sound", version: "3.0.0")], "версия 2.0.0, в каталоге 3.0.0")
 
@@ -416,7 +418,7 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
         attempts = stage.downloads.count
         advance(AutoUpdatePolicy.tickInterval)
     }
-    check(attempts == 3, "пауза: сутки витков, скачано \(attempts) раза (сразу, через 1 ч, через 5 ч; следующая через 16 ч)")
+    check(attempts == 4, "пауза: сутки витков, скачано \(attempts) раза (сразу, через 1 ч, 5 ч и 21 ч: паузы 1, 4 и 16 ч)")
     if case .failed? = phase(.sound) {
         check(noticeModules() == [.sound] && noticeHeight() > 0, "сбой виден на плашке, кнопка повторить есть")
     } else { check(false, "сбой: ждали строку") }
@@ -484,8 +486,8 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
     await auto.tick()
     await waitUntil("остановки утилиты") { stage.reached }
     check(stage.down == ["sound"], "утилита остановлена, очередь в опасном месте")
-    let delegate = AppDelegate()
-    NSApp.delegate = delegate
+    quitDelegate = AppDelegate()
+    NSApp.delegate = quitDelegate
     NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { _ in
         check(stage.down.isEmpty, "выход: утилита снова запущена, а не осталась остановленной")
         check(installedVersion("Sound") != nil, "выход: бандл на месте (\(installedVersion("Sound") ?? "нет"))")
