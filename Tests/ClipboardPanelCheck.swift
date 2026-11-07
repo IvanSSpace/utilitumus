@@ -1335,7 +1335,11 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
 
 // MARK: - Перестановка
 
-func checkReorderLogic() {
+@MainActor func checkReorderLogic() {
+    let panelFrame = CGRect(x: -1000, y: 300, width: 1440, height: 334)
+    check(ClipboardPanelHost.pointInPanel(CGPoint(x: -900, y: 584), frame: panelFrame) == CGPoint(x: 100, y: 50), "курсор экрана в координатах панели, и на втором экране левее основного")
+    check(ClipReorder.shift(0, from: 0, to: 2) == 2 && ClipReorder.shift(1, from: 0, to: 2) == -1 && ClipReorder.shift(2, from: 0, to: 2) == -1 && ClipReorder.shift(3, from: 0, to: 2) == 0, "сдвиги вправо")
+    check(ClipReorder.shift(3, from: 3, to: 1) == -2 && ClipReorder.shift(1, from: 3, to: 1) == 1 && ClipReorder.shift(0, from: 3, to: 1) == 0, "сдвиги влево")
     let w = 100.0, gap = 10.0
     let others = [w, w, w]
     check(ClipReorder.slot(x: -500, others: others, dragged: w, gap: gap) == 0, "курсор левее ряда: первое место")

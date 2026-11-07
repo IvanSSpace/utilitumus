@@ -170,10 +170,11 @@ func wirePure() {
     await pause(0.2)
     send(.leftMouseUp, end)
     let expected = [names[1], names[0]] + names.dropFirst(2)
-    check(await until(5) {
+    for _ in 0..<50 where model.spaces.map(\.name) != expected {
         await model.read()
-        return model.spaces.map(\.name) == expected
-    }, "вкладка центра: перенос строки дошёл до утилиты: \(model.spaces.map(\.name))")
+        await pause(0.1)
+    }
+    check(model.spaces.map(\.name) == expected, "вкладка центра: перенос строки дошёл до утилиты: \(model.spaces.map(\.name))")
     await pause(0.3)
     // Обратно, чтобы дальше сверка шла как раньше.
     await model.perform(.moveSpace(id: model.spaces[0].id, by: 1))

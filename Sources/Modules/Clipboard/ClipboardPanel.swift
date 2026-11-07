@@ -54,8 +54,6 @@ struct ClipSpaceEditor: Equatable {
     var name = ""
     var colorID = ClipPalette.all[0].id
     var hidesContent = false
-
-    var cleanName: String? { ClipboardWireRules.cleanName(name) }
 }
 
 /// Правка названия карточки: что правим и текущий текст.
@@ -298,8 +296,8 @@ final class ClipboardPanelModel: ObservableObject {
         if let id, let index = visible.firstIndex(where: { $0.id == id }) { selected = index }
     }
 
-    // Перестановка идёт по самому курсору и кнопке, как боковая панель лаунчера, а не по событиям приёмника SwiftUI: на настоящем сеансе
-    // перенос внутри ленты они не дали, хотя цель видна и подставной сеанс её проходит. Приёмник только говорит системе «сюда можно».
+    // Перестановка идёт по самому курсору и кнопке, как боковая панель лаунчера, а не по событиям приёмника SwiftUI: на настоящей панели
+    // перенос внутри ленты через них не заработал, хотя подставной сеанс проходил. Приёмник только говорит системе «сюда можно».
     // От источника нужен один `onDrag`, а он работает: бросок на категорию идёт через него же.
 
     private func startDragTracking() {
@@ -576,11 +574,10 @@ final class ClipboardPanelModel: ObservableObject {
     /// Сохранить настройки категории.
     /// Удаление здесь не идёт: Enter не должен подтверждать его случайно, только кнопка `confirmDelete`.
     func commitEditor() {
-        guard let editor, let name = editor.cleanName else { return }
+        guard let editor else { return }
         switch editor.mode {
         case .edit(let id):
             guard let space = spaces.first(where: { $0.id == id }) else { break }
-            if space.name != name { onRenameSpace(id, name) }
             if space.colorID != editor.colorID { onSetSpaceColor(id, editor.colorID) }
             if (space.hidesContent == true) != editor.hidesContent {
                 onSetSpaceHidden(id, editor.hidesContent)
@@ -1170,11 +1167,7 @@ final class ClipboardPanelHost {
 
         let panel = self.panel ?? panelMaker(model)
         self.panel = panel
-        model.pointer = { [weak panel] in
-            guard let panel else { return nil }
-            let point = panel.convertPoint(fromScreen: NSEvent.mouseLocation)
-            return CGPoint(x: point.x, y: panel.frame.height - point.y)
-        }
+        model.pointer = { [weak panel] in panel.map { Self.pointInPanel(NSEvent.mouseLocation, frame: $0.frame) } }
         let frame = standFrame ?? Self.frameOnCursorScreen()
         // Открыли посреди ухода на том же экране: панель едет обратно с того места, где она сейчас, без скачка.
         let resuming = isLeaving && frame == shownFrame
@@ -1201,6 +1194,11 @@ final class ClipboardPanelHost {
         }
         installMonitors()
         return panel
+    }
+
+    /// Точка экрана в координатах панели: от её левого верхнего угла, как у видов внутри.
+    static func pointInPanel(_ screen: CGPoint, frame: CGRect) -> CGPoint {
+        CGPoint(x: screen.x - frame.minX, y: frame.maxY - screen.y)
     }
 
     /// Экран, где сейчас курсор; панель во всю его ширину над Dock.

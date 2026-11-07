@@ -281,6 +281,7 @@ private struct SpaceRow<Model: ClipboardModel>: View {
     @State private var name = ""
     @State private var picking = false
     @State private var hovering = false
+    @State private var grabbing = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -308,10 +309,14 @@ private struct SpaceRow<Model: ClipboardModel>: View {
         // Глобальные координаты: строка едет вслед за курсором, в своих смещение было бы от самой себя.
         .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .global)
             .onChanged { value in
-                if !isDragged { NSCursor.closedHand.push() }
+                if !grabbing {
+                    grabbing = true
+                    NSCursor.closedHand.push()
+                }
                 onDrag(value.translation.height)
             }
             .onEnded { _ in
+                grabbing = false
                 NSCursor.pop()
                 onDrop()
             })
