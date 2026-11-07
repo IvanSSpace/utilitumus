@@ -185,6 +185,12 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         return UpdateBusy.reason(module, state: state)
     }
 
+    /// Утилита ответила, но её состояние этому центру непонятно. Не ответила — обрывать нечего, как и в `busyReason`.
+    func stateUnreadable(_ module: Module) async -> Bool {
+        guard let state = try? await environment.commands.moduleState(module.rawValue) else { return false }
+        return !UpdateBusy.readable(module, state: state)
+    }
+
     func isEnabled(_ module: Module) -> Bool {
         entries[module]?.status?.enabled ?? false
     }

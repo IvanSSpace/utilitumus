@@ -327,6 +327,15 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
     worst = max(worst, noticeHeight())
     check(worst == 0 && installedVersion("Sound") == "2.0.0", "до самого конца и после плашки не было (\(worst))")
 
+    // MARK: Состояние не разобрать
+    await fresh([entry("awake")])
+    stage.setState("awake", Data(#"{"из будущей версии":true}"#.utf8))
+    await tick()
+    check(!stage.quits.contains("awake") && stage.downloads.isEmpty, "непонятное состояние: не скачана и не остановлена: \(stage.quits)")
+    check(defaults.string(forKey: AutoUpdatePolicy.manualVersionKey("awake")) == "2.0.0" && noticeModules() == [.awake],
+          "непонятное состояние: осталась на плашке для кнопки")
+    check(defaults.object(forKey: AutoUpdatePolicy.failuresKey("awake")) == nil, "непонятное состояние не считается сбоем")
+
     // MARK: Занятые
     var botsBusy = BotsState.empty
     botsBusy.running = true

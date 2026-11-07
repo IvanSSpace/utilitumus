@@ -208,6 +208,10 @@ mutate "без пропуска занятых" Sources/App/Satellites/Satellite
   'guard let state = try? await environment.commands.moduleState(module.rawValue) else { return nil }' \
   'if module.rawValue != "" { return nil }; guard let state = try? await environment.commands.moduleState(module.rawValue) else { return nil }' \
   "занятые"
+mutate "перезапуск при непонятном состоянии" Sources/App/Store/UpdateAll.swift \
+  'if automatic, await satellites.stateUnreadable(module) {' \
+  'if automatic, module.rawValue == "", await satellites.stateUnreadable(module) {' \
+  "непонятное состояние"
 mutate "без защиты от пароля" Sources/App/Store/AutoUpdate.swift \
   'static let personOnly: Set<Module> = [.fans, .clipboard]' \
   'static let personOnly: Set<Module> = [.clipboard]' \

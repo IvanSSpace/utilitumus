@@ -223,6 +223,13 @@ final class AutoUpdate: ObservableObject {
         }
     }
 
+    /// Эта версия больше не обновляется сама и остаётся на плашке для кнопки.
+    func leaveForPerson(_ module: Module, version: String) {
+        NSLog("Utilitumus: состояние %@ не разобрать, %@ обновится по кнопке", module.rawValue, version)
+        defaults.set(version, forKey: AutoUpdatePolicy.manualVersionKey(module.rawValue))
+        objectWillChange.send()
+    }
+
     /// Пауза как у перехода на утилиту: 1 ч, 4 ч, 16 ч, 64 ч, дальше раз в неделю. Новая версия начинает заново.
     func noteFailure(_ module: Module, version: String) {
         let id = module.rawValue

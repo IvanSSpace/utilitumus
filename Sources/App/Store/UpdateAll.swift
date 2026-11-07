@@ -3,8 +3,22 @@ import Foundation
 
 /// Занята ли утилита работой, которую перезапуск оборвал бы. Утилита решает это сама в `mayRestart`, но наружу не сообщает;
 /// то же самое центр читает из её состояния на экране. Новый вид занятости в `mayRestart` надо добавить и сюда.
-/// Не разобралось (чужая версия) — считается свободной: иначе такую утилиту не обновить никогда.
+/// Не разобралось (чужая версия) — считается свободной: иначе такую утилиту не обновить никогда. Без человека такую не
+/// перезапускают, см. `readable`.
 enum UpdateBusy {
+    /// Центр понял состояние этой утилиты, то есть ответ `reason` чего-то стоит.
+    static func readable(_ module: Module, state: Data) -> Bool {
+        func can<T: Decodable>(_ type: T.Type) -> Bool { (try? JSONDecoder().decode(type, from: state)) != nil }
+        switch module {
+        case .voice: return can(VoiceState.self)
+        case .awake: return can(AwakeState.self)
+        case .load: return can(LoadState.self)
+        case .stash: return can(StashState.self)
+        case .bots: return can(BotsState.self)
+        case .sound, .fans, .mixer, .mouse, .browser, .clipboard, .keyboard: return true
+        }
+    }
+
     static func reason(_ module: Module, state: Data) -> String? {
         func read<T: Decodable>(_ type: T.Type) -> T? { try? JSONDecoder().decode(type, from: state) }
         switch module {
@@ -279,6 +293,11 @@ final class UpdateAll: ObservableObject {
         let automatic = silent.contains(module)
         // Настройку могли выключить, а человек мог успеть обновить кнопкой, пока шла очередь.
         if automatic, !auto.willHandle(module) { return }
+        // Занята она или нет, не понять: перезапустить такую может только человек.
+        if automatic, await satellites.stateUnreadable(module) {
+            auto.leaveForPerson(module, version: app.version)
+            return
+        }
         // Скачивать незачем, если всё равно ждать. Перед самой остановкой установщик спросит ещё раз.
         if let reason = await satellites.busyReason(module) {
             if !automatic { wait(module, reason) }
