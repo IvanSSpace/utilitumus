@@ -58,8 +58,9 @@ build_logic() { # папка модуля Load, выход
   local load="$1" exe="$2" L="$1/Native"
   rm -f "$exe"
   cp Tests/LoadWireCheck.swift "$OUT/LoadWireCheck-logic.swift"
+  # Команды ботов и ответ утилиты живут в Kit: логика без него не собирается, поломки его не копируют.
   swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -D LOAD_LOGIC_ONLY -o "$exe" "$OUT/LoadWireCheck-logic.swift" \
-    $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
+    $(kit_sources . "$OUT/logic-kit") $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
     "$L/Background/LaunchAgents.swift" "$L/Background/BackgroundStore.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
     "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" "$L/Sessions/SessionStop.swift" "$L/LoadStore.swift" \
     "$L/LoadSnapshotKey.swift" "$L/LoadPalette.swift" "$load/LoadModel.swift" "$load/LoadWire.swift" -framework SwiftUI -framework AppKit 2>&1 | grep -E 'error' || true
