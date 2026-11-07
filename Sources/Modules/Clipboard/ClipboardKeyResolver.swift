@@ -131,7 +131,7 @@ struct ClipboardKeyReturnReply: Codable, Equatable {
 }
 
 #if KIT_TEST_DEFAULTS
-/// Одни и те же выдуманные записи для утилиты и для встроенного экрана стенда: снимки сравниваются по пикселям.
+/// Одни и те же выдуманные записи для утилиты и для экрана стенда на своём контроллере: снимки сравниваются по пикселям.
 enum ClipboardStandFixture {
     static func seed(_ store: ClipboardStore) {
         let work = store.addSpace(name: "Работа", colorID: "teal")

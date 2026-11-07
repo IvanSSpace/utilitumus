@@ -192,7 +192,7 @@ func mentioned(_ text: String) -> Set<Module> {
     let updatable = want.subtracting(withoutUtility)
     check(Set(UpdateAll.shared.rows.map(\.module)) == updatable, "обновления: только набор, \(UpdateAll.shared.rows.map(\.module.rawValue))")
     check(Set(UpdateAll.shared.startable) == updatable, "«Обновить всё»: только набор")
-    check(Set(StoreModel.shared.buildModules) == want, "полоса Стора: только набор")
+    check(Set(StoreModel.shared.buildModules) == updatable, "полоса Стора: только набор, и без модулей, у которых нет утилиты")
     check(icons.wanted == want.intersection(pinned).intersection(withoutUtility), "значки центра: только набор, \(icons.wanted.map(\.rawValue))")
     check(icons.waitingForUpdate.allSatisfy(want.contains), "тихая строка о значках: только набор")
     #if KIT_TEST_DEFAULTS
