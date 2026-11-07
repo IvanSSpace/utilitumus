@@ -75,23 +75,37 @@ func wirePure() {
     check(await until(3) { model.stashedPrograms.map(\.name) == [seededProgram] }, "утилита снова включена: запись прочитана заново")
 }
 
+/// Вид на сторе утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.stash), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .stash) { StashView(store: StashStore.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.stash))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .stash, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
 @MainActor func pixels() async {
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
+    let model = RemoteStashModel.shared
+    let store = StashStore.shared
     var shots: [NSBitmapImageRep] = []
-    // Шаги настройки у встроенного экрана свои (доступ центра), у утилиты свои (доступ утилиты), а на стенде доступа нет ни у кого:
-    // у одного экран был бы чек-листом, у другого нет. Подмена шагов (для стенда снимков) убирает эту разницу, сравнивается сам экран Стеша.
-    SetupFlow.overrides[.stash] = []
+    await registry.update()
+    await model.read()
+    // Доступа на стенде нет ни у кого: шаги настройки отложены, и сравнивается сам экран Стеша, а не чек-лист.
+    SetupFlow.shared.postpone(.stash)
+    check(store.wireState.stashed == model.state.stashed && store.wireState.scenarios == model.state.scenarios, "стор стенда в том же состоянии, что утилита: \(store.wireState.stashed.map(\.name))")
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        modules.setExternal(.stash, false)
-        AccessState.shared.refresh()
-        let local = await Stand.open(theme)
+        let local = await openLocal(theme)
         Stand.save(local, "\(themeName)-local")
-        modules.setExternal(.stash, true)
-        await registry.update()
-        await RemoteStashModel.shared.read()
-        AccessState.shared.refresh()
         let remote = await Stand.open(theme)
         Stand.save(remote, "\(themeName)-remote")
         let diff = differingPixels(local, remote)
@@ -99,7 +113,31 @@ func wirePure() {
         shots.append(remote)
     }
     check(differingPixels(shots[0], shots[1]) > 0, "темы различаются, снимки не пустые")
+    // Выключенная утилита: тот самый экран «модуль выключен».
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
+    let other = LinkClient(id: moduleID)
+    let container = Stand.container()
+    container.show(.module(.stash), animated: false) { _, active in
+        AnyView(ModuleOffView(module: .stash) {} more: {}
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, DSTheme.dusk.accent(.stash))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .stash, neutral: false); DSTheme.dusk.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    let localOff = Stand.snapshot(container)
+    Stand.save(localOff, "dusk-off-local")
+    try? await other.setEnabled(false)
+    await registry.update()
+    let remoteOff = await Stand.open(.dusk)
+    Stand.save(remoteOff, "dusk-off-remote")
+    let diff = differingPixels(localOff, remoteOff)
+    check(diff == 0, "выключенный модуль: снимки совпали, разных пикселей \(diff)")
+    try? await other.setEnabled(true)
+    await registry.update()
+    check(await until(3) { model.stashedPrograms.map(\.name) == [seededProgram] }, "утилита снова включена: запись на месте")
 }
 
 /// Возврат отвечает сразу, ход виден в `busy`. Запуск у утилиты стенда всегда неудачный: ни одна программа не откроется.

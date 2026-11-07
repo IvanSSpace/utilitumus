@@ -25,7 +25,7 @@ defaults write "$SUITE" "ModuleOn.$ID" -bool true
 defaults write "$SUITE" "App.$ID.Enabled" -bool true
 start_agent
 sleep 1
-if grep -q "голос: старт" "$LOG"; then bad "рядом с работающим встроенным модулем утилита запустила работу"; else ok "пассивная утилита не запускала работу"; fi
+if grep -q "голос: старт" "$LOG"; then bad "пассивная утилита запустила работу"; else ok "пассивная утилита не запускала работу"; fi
 
 echo "== активная"
 defaults write "$SUITE" Test.HubRunning -bool false
@@ -40,6 +40,7 @@ check_foreign_rejected
 
 echo "== вкладка, мусор, смерть утилиты"
 "$HUB" run "$OUT" "$PID"
+echo "     снимки: $OUT/png"
 
 [ "$BEFORE" = "$(real_snapshot)" ] && ok "папка настоящих моделей не менялась" || bad "папка настоящих моделей изменилась"
 
