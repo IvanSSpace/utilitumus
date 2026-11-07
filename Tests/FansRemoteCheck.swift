@@ -40,37 +40,89 @@ func wirePure() {
     await checkBadActions(FansState.self, id: moduleID, extra: badFansActions.map { ($0.0, Data($0.1.utf8)) })
 }
 
-/// Встроенные контроллеры в том же состоянии, что показала утилита.
+/// Контроллер утилиты, собранный в стенд, в том же состоянии, что показала утилита. Такта и SMC у него нет: он не запущен.
 @MainActor func pinLocal(to state: FansState) {
     FanController.shared.configs = state.configs
     FanController.shared.testPin(fans: state.fans, cpu: state.cpuSensors, gpu: state.gpuSensors, conflict: nil,
                                  safetyTripped: state.safetyTripped, lastError: state.lastError)
 }
 
+/// Экран утилиты на её контроллере в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.fans), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .fans) { FansView(model: BuiltInFansModel.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.fans))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .fans, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
+/// Строки снимка, где есть хоть один разный пиксель: первая и последняя. nil — снимки совпали или размер другой.
+func differingRowBand(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> ClosedRange<Int>? {
+    guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh, a.bytesPerRow == b.bytesPerRow,
+          let pa = a.bitmapData, let pb = b.bitmapData else { return nil }
+    let rows = (0..<a.pixelsHigh).filter { memcmp(pa + $0 * a.bytesPerRow, pb + $0 * a.bytesPerRow, a.bytesPerRow) != 0 }
+    guard let first = rows.first, let last = rows.last else { return nil }
+    return first...last
+}
+
+/// Два текста внешнего модуля отличаются по замыслу (Q2): только одна строка внизу, не выше строки текста. Всё, что выше, совпадает до пикселя.
+let footerRowsLimit = 40
+
+/// Служба в стенде не стоит: без «Позже» на месте экрана чек-лист, и сверялись бы два чек-листа.
+@MainActor func showModuleScreen() async {
+    let registry = SatelliteRegistry.shared
+    await registry.update()
+    check(await until(3) { AccessState.shared.blocked.contains(.fans) }, "доступа нет: центр показывает чек-лист")
+    let checklist = await Stand.open(.dusk)
+    Stand.save(checklist, "dusk-setup")
+    SetupFlow.shared.postpone(.fans)
+    let screen = await Stand.open(.dusk)
+    check(differingPixels(checklist, screen) > 0, "«Позже»: вместо чек-листа экран модуля")
+}
+
 @MainActor func pixels() async {
     let model = RemoteFansModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     await model.read()
     check(model.responding, "утилита ответила")
     check(!model.cpuSensors.isEmpty, "утилита работает: датчики прочитаны")
+    await showModuleScreen()
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        await model.read()
-        modules.setExternal(.fans, false)
-        pinLocal(to: model.state)
-        let local = await Stand.open(theme)
-        Stand.save(local, "\(themeName)-local")
-        modules.setExternal(.fans, true)
         await registry.update()
-        let remote = await Stand.open(theme)
+        check(registry.isEnabled(.fans), "\(themeName): реестр видит утилиту включённой")
+        // Датчики настоящие, такт утилиты меняет обороты и градусы, пока вкладка открыта. Контроллер закрепляется на том,
+        // что вкладка показала в момент снимка; такт мог попасть между ними, поэтому до трёх попыток. Подделка красна в каждой.
+        var band: ClosedRange<Int>?, local: NSBitmapImageRep!, remote: NSBitmapImageRep!, shown = model.state
+        for _ in 0..<3 {
+            remote = await Stand.open(theme)
+            shown = model.state
+            pinLocal(to: shown)
+            local = await openLocal(theme)
+            band = differingRowBand(local, remote)
+            if let band, band.count <= footerRowsLimit { break }
+        }
+        Stand.save(local, "\(themeName)-local")
         Stand.save(remote, "\(themeName)-remote")
-        // Два текста внешнего модуля отличаются по замыслу (Q2): строка внизу и, при конфликте, плашка.
-        let diff = differingPixels(local, remote)
-        let footerRows = 40 * local.pixelsWide
-        check(diff <= footerRows, "\(themeName): снимки совпали вне нижней строки, разных пикселей \(diff) (допуск \(footerRows))")
+        let rows = band?.count ?? 0
+        check(band != nil && rows <= footerRowsLimit, "\(themeName): вне нижней строки снимки совпали, разные строки пикселей \(band.map { "\($0)" } ?? "нет") (допуск \(footerRowsLimit))")
         check(RemoteFansModel.shared.isExternal && !BuiltInFansModel.shared.isExternal, "\(themeName): тексты внешнего модуля только у внешнего")
+        // Сверка видит значения: контроллер с другими градусами на тот же снимок уже не похож.
+        FanController.shared.testPin(fans: shown.fans, cpu: shown.cpuSensors.map { SensorReading(key: $0.key, value: $0.value + 10) }, gpu: shown.gpuSensors,
+                                     conflict: nil, safetyTripped: shown.safetyTripped, lastError: shown.lastError)
+        let changed = await openLocal(theme)
+        let changedRows = differingRowBand(changed, remote)?.count ?? 0
+        check(changedRows > footerRowsLimit, "\(themeName): другие градусы сверка замечает, разные строки \(changedRows)")
     }
+    Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
 }
 
 @MainActor func actions() async {
@@ -106,8 +158,9 @@ enum Main {
             ModuleCheck.main(.fans, foreignAction: LinkWire.encoded(FansAction.setFullPower(true))) { utility in
                 wirePure()
                 await garbage()
-                await actions()
+                // Раньше действий: отвергнутое оставляет на вкладке текст ошибки, а на экране утилиты его нет.
                 await pixels()
+                await actions()
                 await death(utility: utility)
             }
         }
