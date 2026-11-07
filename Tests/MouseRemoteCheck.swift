@@ -71,60 +71,72 @@ let scenes: [MouseCase] = [
     await drive(MouseSettings())
 }
 
+/// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка. При открытии экран просит свежий доступ, поэтому состояние ставится после.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme, pin: () -> Void) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.mouse), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .mouse) { MouseView(model: MouseController.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.mouse))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .mouse, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.4)
+    pin()
+    await pause(0.2)
+    return Stand.snapshot(container)
+}
+
 @MainActor func pixels() async {
     let model = RemoteMouseModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     let controller = MouseController.shared
-
-    /// Страница как первое открытие вкладки; при открытии экран просит свежий доступ, поэтому состояние ставится после.
-    func shot(_ theme: DSTheme, pin: (() -> Void)?) async -> NSBitmapImageRep {
-        let container = Stand.container()
-        container.show(.module(.mouse), animated: false, make: Stand.page(theme))
-        await pause(0.4)
-        pin?()
-        await pause(0.2)
-        return Stand.snapshot(container)
-    }
+    let flow = SetupFlow.shared
 
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        // Экран доступа вместо настроек: у него от настроек ничего не зависит, два таких снимка совпадают.
-        var shots: [(image: NSBitmapImageRep, checklist: Bool)] = []
+        var shots: [NSBitmapImageRep] = []
         for scene in scenes {
             await drive(scene.settings)
             check(model.responding && model.settings == scene.settings, "\(themeName) \(scene.name): утилита в нужном состоянии")
-            let ax = model.axTrusted
-
-            modules.setExternal(.mouse, false)
-            controller.settings = scene.settings
-            // Шаг доступа у встроенного модуля читает права самого центра, у утилиты — её права: на стенде они разные.
-            // Подменяем шаг тем, что описал бы модуль утилиты: обязателен при перехвате, готов по закреплённому доступу.
-            SetupFlow.overrides[.mouse] = [SetupStep(id: "mouse.ax", title: "Универсальный доступ",
-                                                     why: "Чтобы менять направление и плавность прокрутки",
-                                                     kind: .permission, icon: "lock.shield.fill",
-                                                     required: scene.settings.needsTap, isDone: { ax }, perform: {})]
-            AccessState.shared.refresh()
-            let local = await shot(theme) { controller.testPin(axTrusted: ax, tapActive: false) }
-            SetupFlow.overrides[.mouse] = nil
-            AccessState.shared.refresh()
-            Stand.save(local, "\(themeName)-\(scene.name)-local")
-
-            modules.setExternal(.mouse, true)
             await registry.update()
             check(registry.isEnabled(.mouse), "\(themeName) \(scene.name): реестр видит утилиту включённой")
-            let remote = await shot(theme, pin: nil)
-            Stand.save(remote, "\(themeName)-\(scene.name)-remote")
+            AccessState.shared.refresh()
+            controller.settings = scene.settings
+            let pin = { controller.testPin(axTrusted: model.axTrusted, tapActive: model.tapActive) }
 
+            // Без доступа у утилиты при перехвате вкладка показывает шаги настройки. Шаги приходят от утилиты, рамка одна.
+            if scene.settings.needsTap && !model.axTrusted {
+                check(AccessState.shared.blocked.contains(.mouse), "\(themeName) \(scene.name): доступа нет, модуль ждёт настройки")
+                let local = await openLocal(theme, pin: pin)
+                Stand.save(local, "\(themeName)-\(scene.name)-steps-local")
+                let remote = await Stand.open(theme)
+                Stand.save(remote, "\(themeName)-\(scene.name)-steps-remote")
+                let diff = differingPixels(local, remote)
+                check(diff == 0, "\(themeName) \(scene.name), шаги настройки: снимки совпали, разных пикселей \(diff)")
+            }
+
+            // Настройка отложена: сам экран настроек, у него снимок зависит от состояния в любом сценарии.
+            flow.postpone(.mouse)
+            let local = await openLocal(theme, pin: pin)
+            Stand.save(local, "\(themeName)-\(scene.name)-local")
+            let remote = await Stand.open(theme)
+            Stand.save(remote, "\(themeName)-\(scene.name)-remote")
             let diff = differingPixels(local, remote)
             check(diff == 0, "\(themeName) \(scene.name): снимки совпали, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
-            shots.append((remote, scene.settings.needsTap && !ax))
+            shots.append(remote)
+            // `show` снимает отложенность, `finish` закрывает принудительный показ: как было до сценария.
+            flow.show(.mouse)
+            flow.finish(.mouse)
         }
-        check(zip(shots, shots.dropFirst()).allSatisfy { ($0.checklist && $1.checklist) || differingPixels($0.image, $1.image) > 0 },
-              "\(themeName): состояния выглядят по-разному, снимки не пустые")
+        check(zip(shots, shots.dropFirst()).allSatisfy { differingPixels($0, $1) > 0 }, "\(themeName): состояния выглядят по-разному, снимки не пустые")
         await drive(MouseSettings())
     }
     controller.settings = MouseSettings()
+    Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
 }
 
 /// Статус и шаг доступа утилиты видит центр без экрана модуля.
@@ -185,7 +197,7 @@ enum Main {
                 await status()
                 await hung(utility: utility)
                 await died(utility: utility)
-                check(!MouseController.shared.testIsRunning, "за весь прогон встроенный контроллер у центра не запускался")
+                check(!MouseController.shared.testIsRunning, "за весь прогон контроллер у стенда не запускался")
             }
         }
     }
