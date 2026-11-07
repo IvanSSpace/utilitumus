@@ -25,13 +25,13 @@
     },
     {
       "id": "clipboard",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.4.0/Clipboard.zip",
-      "sha256": "ad39b99b5b3f3571f13b5c000032f4a665c13262ec4d0c0592a594280668c068",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.4.1/Clipboard.zip",
+      "sha256": "c454f03d956b51e3e01ac59dd7c0a568c9816f453285a5cf99f3b74ae30643d0",
       "sizeMB": 2,
       "notes": [
-        "Порядок карточек и категорий перетаскиванием, названия карточек, скрытие содержимого у категории, выбор нескольких карточек через Shift и ⌘, новые анимации"
+        "Панель открывается быстрее. В меню «…» настраивается скорость появления и закрытия: Мгновенно, Быстро, Обычно, Плавно"
       ]
     },
     {
