@@ -47,6 +47,8 @@ func checkTracker() {
 
 @MainActor func checkModelClicks() {
     let model = ClipboardPanelModel()
+    // Настоящие клавиши на этом Mac не должны влиять на проверку: автор может держать ⌘ в другой программе.
+    model.modifiers = { [] }
     model.allItems = ClipPanelFixture.items()
     var pasted: [UUID] = []
     model.onPaste = { pasted.append($0.id) }
