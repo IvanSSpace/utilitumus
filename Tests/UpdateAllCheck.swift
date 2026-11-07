@@ -396,7 +396,7 @@ struct StoreWithSidebar: View {
     let migration = ModuleMigrationEnvironment(
         defaults: Kit.defaults, hubVersion: "0.6.0",
         loadCatalog: { stage.catalog },
-        isBuiltInOn: { $0 == .stash },
+        wantsUtility: { $0 == .stash },
         hasBundle: { fm.fileExists(atPath: paths.appsDir.appendingPathComponent(SatelliteRegistry.bundleName($0) + ".app").path) },
         install: { module, app in try await SatelliteRegistry.shared.install(module, app: app) })
     stage.hold("load")

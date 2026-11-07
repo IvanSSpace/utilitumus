@@ -171,31 +171,6 @@ final class WireBox: @unchecked Sendable {
     check(MenuQuickActions.sections(order: order, modules: modules, entries: off).isEmpty, "выключенного модуля в меню нет")
     for m in [Module.sound, .load, .awake] { modules.setExternal(m, false) }
 
-    // MARK: Остановка при передаче
-    print("== остановка при передаче")
-    let hookJournal = Journal()
-    let defaults = UserDefaults(suiteName: "dashboard-routing-stand-manager")!
-    defaults.removePersistentDomain(forName: "dashboard-routing-stand-manager")
-    defaults.set(true, forKey: ModuleReset.flagKey)
-    defaults.set(true, forKey: ModuleManager.onKey(.keyboard))
-    defaults.set(true, forKey: ModuleManager.onKey(.sound))
-    let manager = ModuleManager(defaults: defaults) { (module: Module) -> ModuleHooks in
-        var hooks = ModuleHooks(start: { hookJournal.add("start \(module.rawValue)") },
-                                stop: { hookJournal.add("stop \(module.rawValue)") })
-        if module == .keyboard { hooks.quit = { hookJournal.add("quit \(module.rawValue)") } }
-        return hooks
-    }
-    manager.startEnabled()
-    manager.setExternal(.keyboard, true)
-    manager.setExternal(.sound, true)
-    check(Set(hookJournal.all) == ["start keyboard", "start sound", "quit keyboard", "stop sound"],
-          "передача: Клавиатура останавливается выходом (🌐 остаётся), остальные обычно: \(hookJournal.all)")
-    hookJournal.clear()
-    manager.setExternal(.keyboard, false)
-    manager.setOn(.keyboard, false)
-    check(hookJournal.all == ["start keyboard", "stop keyboard"], "выключил человек: обычная остановка, 🌐 возвращается: \(hookJournal.all)")
-    defaults.removePersistentDomain(forName: "dashboard-routing-stand-manager")
-
     // MARK: Сброс
     print("== сброс")
     let snapshotKeys: [String: Any] = ["ModuleOn.keyboard": true, "Keyboard.KeepSystemFnOff": true, "App.keyboard.HandedOver": true]
@@ -217,10 +192,10 @@ final class WireBox: @unchecked Sendable {
     box.set("keyboard", nil)
     modules.setOn(.mouse, true)
     await registry.update()
-    // Утилита стоит и отвечает, но встроенный ещё ведёт модуль (нужен шаг): экран показывает шаги утилиты.
-    check(!modules.isExternal(.mouse), "до передачи встроенный остаётся (нужен шаг)")
+    // Утилита стоит, шаг не сделан: передача всё равно состоялась, чек-лист — шаги утилиты.
+    check(modules.isExternal(.mouse), "шаг не сделан: модуль передан")
     let shown = Module.mouse.setupSteps
-    check(shown.map(\.id) == ["mouse.ax", "mouse.opt", "mouse.capture"], "до передачи чек-лист — шаги утилиты")
+    check(shown.map(\.id) == ["mouse.ax", "mouse.opt", "mouse.capture"], "чек-лист — шаги утилиты")
     check(shown.map(\.status) == [.needed, .optional, .onDemand], "статусы: нужен, необязательный, непроверяемый не считается готовым")
     check(Module.mouse.setupProgress.done == 0 && Module.mouse.setupProgress.total == 2, "непроверяемый шаг не идёт в счёт готовых")
     AccessState.shared.refresh()

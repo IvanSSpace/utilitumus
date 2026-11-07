@@ -5,18 +5,18 @@ struct ModuleMigrationEnvironment: @unchecked Sendable {
     var defaults: UserDefaults
     var hubVersion: String
     var loadCatalog: @Sendable () async throws -> Data
-    /// Встроенный модуль включён и ещё не передан утилите.
-    var isBuiltInOn: @Sendable (Module) async -> Bool
+    /// Модуль включён, а утилита его не ведёт.
+    var wantsUtility: @Sendable (Module) async -> Bool
     var hasBundle: @Sendable (Module) -> Bool
     var install: @Sendable (Module, CatalogApp) async throws -> Void
     var now: @Sendable () -> Date = { Date() }
 }
 
-/// После обновления центра включённый встроенный модуль сам ставит свою утилиту. Передачу и разрешения ведёт
-/// `ModuleHandover`: пока обязательные шаги утилиты не сделаны, встроенный работает. Выключенные не ставятся.
+/// Включённый модуль без утилиты сам её ставит: работать за неё в центре нечему. Передачу ведёт `ModuleHandover`, разрешения
+/// просит сама утилита. Выключенные не ставятся. Не вышло — страница модуля говорит об этом и даёт кнопку (`ModuleMissingPage`).
 /// Пароль службы вентиляторов и смену браузера по умолчанию здесь не просят: это шаги утилиты, их делает человек.
 enum ModuleMigration {
-    /// Человек убрал утилиту сам: больше не ставить. Пишут `SatelliteRegistry.uninstall` и возврат при удалении руками;
+    /// Человек убрал утилиту сам: больше не ставить. Пишут `SatelliteRegistry.uninstall` и опрос при удалении руками;
     /// снимает успешная установка.
     static func removedKey(_ id: String) -> String { "ModuleMigration.Removed.\(id)" }
     /// Версия центра, на которой модуль уже перешёл.
@@ -41,7 +41,7 @@ enum ModuleMigration {
                   env.defaults.string(forKey: doneKey(id)) != env.hubVersion,
                   env.now().timeIntervalSince1970 >= env.defaults.double(forKey: retryAfterKey(id)),
                   !env.hasBundle(module),
-                  await env.isBuiltInOn(module) else { continue }
+                  await env.wantsUtility(module) else { continue }
             do {
                 try await env.install(module, app)
                 // `install` молча выходит, если модуль занят другой операцией: без бандла это не переход.
@@ -73,11 +73,15 @@ extension SatelliteRegistry {
         #endif
     }
 
-    /// Запуск центра, после `start()`. Вне главного потока: каталог и скачивание не должны его занимать.
+    /// Запуск центра, после `start()`, и каждый возврат в приложение: иначе модуль без утилиты ждал бы следующего запуска,
+    /// хотя отступ после сбоя уже вышел. Вне главного потока: каталог и скачивание не должны его занимать.
     func startMigration() {
-        guard Self.installsOnItsOwn else { return }
+        guard Self.installsOnItsOwn, migration == nil, Module.allCases.contains(where: environment.modules.wantsUtility) else { return }
         let env = ModuleMigrationEnvironment.live(self)
-        Task.detached(priority: .utility) { await ModuleMigration.run(env) }
+        migration = Task.detached(priority: .utility) {
+            await ModuleMigration.run(env)
+            await MainActor.run { self.migration = nil }
+        }
     }
 }
 
@@ -89,7 +93,7 @@ extension ModuleMigrationEnvironment {
             defaults: source.defaults,
             hubVersion: source.hubVersion,
             loadCatalog: source.loadCatalog,
-            isBuiltInOn: { module in await MainActor.run { source.modules.runsBuiltIn(module) } },
+            wantsUtility: { module in await MainActor.run { source.modules.wantsUtility(module) } },
             hasBundle: { module in
                 FileManager.default.fileExists(
                     atPath: appsDir.appendingPathComponent(SatelliteRegistry.bundleName(module) + ".app").path)

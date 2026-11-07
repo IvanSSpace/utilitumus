@@ -1,5 +1,5 @@
 #!/bin/bash
-# Возврат системного действия 🌐 «Клавиатурой» (настоящий FnSystemAction.swift со швом). Система не трогается:
+# Возврат системного действия 🌐 утилитой «Клавиатура» и центром, когда утилиты нет (настоящий FnSystemAction.swift со швом). Система не трогается:
 # AppleFnUsageType и горячие клавиши подменены ключами Test.* тестового домена.
 # FN_RESTORE_OLD=<коммит> собирает проверку со старым InputSources.swift, где тогда лежал FnSystemAction (показать, что она падала).
 set -euo pipefail
@@ -22,4 +22,5 @@ else
 fi
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" \
   "$OUT/src/main.swift" "$OUT/src/FnSystemAction.swift" Sources/Kit/KitDefaults.swift -framework AppKit -framework Carbon
+if [ -z "${FN_RESTORE_OLD:-}" ] && nm -u "$OUT/check" | grep -E '_CFPreferencesSetAppValue'; then echo "ПРОВАЛ: проверка умеет менять систему"; exit 1; fi
 "$OUT/check"

@@ -1,12 +1,20 @@
 #!/bin/bash
 # Передача модуля от центра утилите: таблица решений, ModuleManager, опрос и очередь установщика в SatelliteRegistry.
-# launchctl, загрузка и связь подставные, пути в папке теста, настройки в своём suite.
+# launchctl, загрузка и связь подставные, пути в папке теста, настройки в своём suite. FnSystemAction настоящий, но со швом
+# KIT_TEST_DEFAULTS: AppleFnUsageType, горячие клавиши и применение настроек подменены, nm ниже проверяет, что записи в систему нет.
 # Папка: MODULE_HANDOVER_CHECK_DIR, иначе $TMPDIR/module-handover-check.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 OUT="${MODULE_HANDOVER_CHECK_DIR:-${TMPDIR:-/tmp}/module-handover-check}"
+export KIT_TEST_SUITE="local.utilitumus.test.kit.module-handover"
+cleanup() {
+  defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true
+  rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"
+}
+trap cleanup EXIT
+cleanup
 
 # Ни один тест не имеет права дотянуться до настоящих путей и настоящей связи.
 status=0
@@ -21,28 +29,25 @@ esac
 
 # Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh
-CACHE="$(incremental_cache module-handover "$TARGET")"
+CACHE="$(incremental_cache module-handover "$TARGET" KIT_TEST_DEFAULTS)"
 rm -rf "$OUT"
 mkdir -p "$OUT/src"
-
-# Код Kit вне центра читал бы настоящий домен local.utilitumus: здесь Kit.defaults — домен самого бинарника.
-sed 's/Bundle\.main\.bundleIdentifier == hubBundleID/true/' Sources/Kit/KitDefaults.swift > "$OUT/src/KitDefaults.swift"
-if ! grep -q 'UserDefaults = true' "$OUT/src/KitDefaults.swift"; then
-  echo "ПРОВАЛ: подмена Kit.defaults не сработала"
-  exit 1
-fi
 
 cp Tests/ModuleHandoverCheck.swift "$OUT/src/main.swift"
 # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
 mkdir -p "$CACHE/src"
-for f in main.swift KitDefaults.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
-FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift | sort) \
+cmp -s "$OUT/src/main.swift" "$CACHE/src/main.swift" || cp "$OUT/src/main.swift" "$CACHE/src/main.swift"
+FILES=("$CACHE/src/main.swift" $(find Sources/Kit -name '*.swift' | sort) \
   Sources/App/ModuleManager.swift Sources/App/ModuleScope.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/UI/FnSystemAction.swift \
   Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
-swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" \
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" \
   "${FILES[@]}" -framework SwiftUI -framework AppKit -framework Carbon
+
+# Настоящий AppleFnUsageType не должен быть достижим ни из одного сценария.
+if nm -u "$OUT/module-handover-check" | grep -E '_CFPreferencesSetAppValue'; then echo "ПРОВАЛ: проверка умеет менять систему"; exit 1; fi
+echo "ok   запись настроек системы в бинарнике: нет"
 
 "$OUT/module-handover-check" "$OUT/work"

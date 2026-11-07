@@ -69,19 +69,11 @@ struct AppMenuBarScene: Scene {
                 }
             }
 
-            // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.
-            // Контроллер создаётся только внутри вида, который есть, пока модуль встроенный.
-            if ModuleScope.shows(.fans) {
-                if modules.runsBuiltIn(.fans) { FansMenuSection() }
-                if modules.isExternal(.fans) { RemoteFansMenuSection() }
-            }
+            if ModuleScope.shows(.fans), modules.isExternal(.fans) { RemoteFansMenuSection() }
 
             if ModuleScope.shows(.awake) { AwakeMenuItem() }
 
-            if ModuleScope.shows(.stash) {
-                if modules.runsBuiltIn(.stash) { StashMenuSection() }
-                if modules.isExternal(.stash) { RemoteStashMenuSection() }
-            }
+            if ModuleScope.shows(.stash), modules.isExternal(.stash) { RemoteStashMenuSection() }
 
             // Ведомые модули: быстрые действия приходят в статусе утилиты.
             ForEach(MenuQuickActions.sections(order: modules.order, modules: modules, entries: satellites.entries), id: \.module) { section in
@@ -217,8 +209,6 @@ struct AwakeMenuItem: View {
             case .notResponding: Button("Не спать: не отвечает") {}.disabled(true)
             case .off: EmptyView()
             }
-        } else if modules.runsBuiltIn(.awake) {
-            AwakeMenuToggle(model: AwakeController.shared)
         }
     }
 }

@@ -1,7 +1,8 @@
 import Foundation
 
 // Передача модуля от центра утилите и опрос утилит. Запуск: Tests/run-module-handover-check.sh
-// Настоящий установщик в папке теста, подставные launchctl, загрузка и связь. Настройки — свой suite.
+// Настоящий установщик в папке теста, подставные launchctl, загрузка и связь. Настройки — свой suite. Настоящий FnSystemAction
+// собран со швом: AppleFnUsageType живёт в ключе Test.FnUsage домена Kit.
 
 let workRoot = URL(fileURLWithPath: CommandLine.arguments[1])
 nonisolated(unsafe) let fm = FileManager.default
@@ -57,8 +58,10 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
     let box = RigBox()
     let modules: ModuleManager
     let registry: SatelliteRegistry
+    let module: Module
 
-    init(_ name: String, moduleOn: Bool = false, handedOver: Bool = false, bundle: Bool = false) {
+    init(_ name: String, module: Module = .awake, moduleOn: Bool = false, handedOver: Bool = false, bundle: Bool = false) {
+        self.module = module
         root = workRoot.appendingPathComponent(name)
         try? fm.removeItem(at: root)
         try! fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -70,19 +73,17 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
 
         let spy = SpyDefaults(suiteName: suiteName)!
         let spyJournal = journal
-        spy.onSynchronize = { spyJournal.add("synchronize handed=\(spy.bool(forKey: "App.awake.HandedOver"))") }
+        let handedKey = "App.\(module.rawValue).HandedOver"
+        spy.onSynchronize = { spyJournal.add("synchronize handed=\(spy.bool(forKey: handedKey))") }
         defaults = spy
         defaults.removePersistentDomain(forName: suiteName)
         // Без флага ModuleOn выглядел бы обновлением со старой версии, и одноразовый сброс выключил бы модули.
         defaults.set(true, forKey: ModuleReset.flagKey)
-        defaults.set(moduleOn, forKey: ModuleManager.onKey(.awake))
-        if handedOver { defaults.set(true, forKey: "App.awake.HandedOver") }
+        defaults.set(moduleOn, forKey: ModuleManager.onKey(module))
+        if handedOver { defaults.set(true, forKey: handedKey) }
 
         let journal = self.journal
-        modules = ModuleManager(defaults: defaults) { module in
-            ModuleHooks(start: { journal.add("start \(module.rawValue)") },
-                        stop: { journal.add("stop \(module.rawValue)") })
-        }
+        modules = ModuleManager(defaults: defaults)
 
         let box = self.box
         box.defaults = defaults
@@ -112,8 +113,8 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
                     Thread.sleep(forTimeInterval: box.statusDelay)
                     return try box.reply.get()
                 },
-                setEnabled: { _, on in
-                    let handed = box.defaults?.bool(forKey: "App.awake.HandedOver") == true
+                setEnabled: { id, on in
+                    let handed = box.defaults?.bool(forKey: "App.\(id).HandedOver") == true
                     journal.add("setEnabled \(on) handed=\(handed)")
                     try await Task.sleep(for: .seconds(box.enableDelay))
                     if box.takeEnableFailure() { throw Boom() }
@@ -121,13 +122,18 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
                 openWindow: { _ in journal.add("openWindow") }),
             loadCatalog: { try box.catalog.get() },
             hubVersion: "0.6.0",
-            modules: modules))
+            modules: modules,
+            // Настоящий FnSystemAction: сборка со швом пишет в ключи Test.* домена Kit, run-скрипт проверяет это по nm.
+            restoreSystemFn: {
+                journal.add("fn restore")
+                FnSystemAction.restore()
+            }))
         if bundle { makeBundle() }
     }
 
-    var bundleURL: URL { paths.appsDir.appendingPathComponent("Awake.app") }
-    var agentURL: URL { paths.agentsDir.appendingPathComponent("local.utilitumus.app.awake.plist") }
-    var handedOverKey: Bool { defaults.bool(forKey: "App.awake.HandedOver") }
+    var bundleURL: URL { paths.appsDir.appendingPathComponent(SatelliteRegistry.bundleName(module) + ".app") }
+    var agentURL: URL { paths.agentsDir.appendingPathComponent("local.utilitumus.app.\(module.rawValue).plist") }
+    var handedOverKey: Bool { defaults.bool(forKey: "App.\(module.rawValue).HandedOver") }
 
     func makeBundle(version: String = "1.0.0") {
         let contents = bundleURL.appendingPathComponent("Contents")
@@ -185,109 +191,102 @@ func sampleApp(_ id: String = "awake") -> CatalogApp {
 
 func tableChecks() {
     typealias D = ModuleHandover.Decision
-    func decide(_ bundle: Bool, _ handed: Bool, _ reply: LinkStatus?) -> D {
-        ModuleHandover.decide(bundlePresent: bundle, handedOver: handed, reply: reply)
+    func decide(_ bundle: Bool, _ handed: Bool) -> D {
+        ModuleHandover.decide(bundlePresent: bundle, handedOver: handed)
     }
-    check(decide(false, false, nil) == .keepBuiltIn, "нет бандла, не передано → встроенный")
-    check(decide(false, true, nil) == .returnToBuiltIn, "нет бандла, передано → вернуть встроенный")
-    check(decide(false, true, ready) == .returnToBuiltIn, "нет бандла, передано, ответ есть → всё равно вернуть")
-    check(decide(true, false, nil) == .keepBuiltIn, "бандл, не передано, нет ответа → встроенный")
-    check(decide(true, false, waiting) == .keepBuiltIn, "бандл, не передано, чек-лист не сделан → встроенный")
-    check(decide(true, false, ready) == .handOver, "бандл, не передано, чек-лист сделан → передать")
-    check(decide(true, true, ready) == .satelliteOwns, "бандл, передано, ответ есть → у утилиты")
-    check(decide(true, true, waiting) == .satelliteOwns, "бандл, передано, чек-лист не сделан → у утилиты")
-    check(decide(true, true, nil) == .satelliteOwns, "бандл, передано, нет ответа → у утилиты")
+    check(decide(false, false) == .notInstalled, "нет бандла, не передано → утилиты нет")
+    check(decide(false, true) == .utilityGone, "нет бандла, передано → утилиту убрали")
+    check(decide(true, false) == .handOver, "бандл, не передано → передать, чек-лист тут ни при чём")
+    check(decide(true, true) == .satelliteOwns, "бандл, передано → у утилиты")
+    check(ModuleHandover.handedOverKey("awake") == "App.awake.HandedOver", "имя ключа передачи не меняется")
+    check(ModuleHandover.handedOverKey("awake") == SatelliteRole.handedOverKey("awake"), "выпущенные утилиты читают тот же ключ")
 }
 
 // MARK: - ModuleManager
 
 @MainActor func managerChecks() {
     do {
-        let rig = Rig("manager-stop", moduleOn: true)
-        rig.modules.startEnabled()
-        check(rig.journal.count("start awake") == 1, "встроенный запущен")
+        let rig = Rig("manager-wants", moduleOn: true)
+        check(rig.modules.wantsUtility(.awake), "включён, утилита не ведёт: нужна утилита")
+        check(rig.modules.isOn(.awake) && rig.modules.isInPanel(.awake), "и строка в панели есть")
         rig.modules.setExternal(.awake, true)
-        check(rig.journal.count("stop awake") == 1, "setExternal(true) останавливает встроенный")
         check(rig.modules.isOn(.awake) && rig.modules.isInstalled(.awake), "внешний модуль считается включённым и установленным")
-        check(!rig.modules.runsBuiltIn(.awake), "встроенный не работает")
+        check(!rig.modules.wantsUtility(.awake), "утилита ведёт: ставить нечего")
         check(rig.defaults.bool(forKey: ModuleManager.onKey(.awake)), "ModuleOn не меняется")
-        rig.modules.setOn(.awake, true)
-        check(rig.journal.count("start awake") == 1, "setOn при внешнем варианте не стартует встроенный")
         rig.modules.setExternal(.awake, false)
-        check(rig.journal.count("start awake") == 2, "снятие внешнего варианта стартует встроенный")
+        check(rig.modules.wantsUtility(.awake), "снятие внешнего при включённом: снова нужна утилита")
     }
     do {
         let rig = Rig("manager-off")
-        rig.modules.startEnabled()
+        check(!rig.modules.wantsUtility(.awake), "выключенному утилита не нужна")
         rig.modules.setExternal(.awake, true)
-        check(rig.modules.isOn(.awake) && rig.modules.isInstalled(.awake), "внешний при выключенном встроенном виден как установленный")
-        check(!rig.journal.has("start"), "и встроенный не стартует")
+        check(rig.modules.isOn(.awake) && rig.modules.isInstalled(.awake), "внешний при выключенном виден как установленный")
         rig.modules.setExternal(.awake, false)
-        check(!rig.modules.isOn(.awake) && !rig.journal.has("start"), "снятие внешнего варианта не включает выключенный модуль")
+        check(!rig.modules.isOn(.awake), "снятие внешнего варианта не включает выключенный модуль")
     }
     do {
         let rig = Rig("manager-launch", moduleOn: true, handedOver: true)
         check(rig.modules.isExternal(.awake), "передача видна сразу при создании менеджера")
-        rig.modules.startEnabled()
-        check(!rig.journal.has("start"), "при запуске переданный модуль не стартует даже на миг")
+        check(!rig.modules.wantsUtility(.awake), "при запуске переданному утилиту не ставим")
     }
 }
 
 // MARK: - Опрос
 
+/// Что `SatelliteRole` решит у выпущенной утилиты, запущенной launchd при живом центре.
+@MainActor func role(_ rig: Rig) -> SatelliteRole.Mode {
+    SatelliteRole.decide(launchedByLaunchd: true, hubRunning: true, hubVersion: "0.8.0",
+                         hubModuleOn: rig.defaults.bool(forKey: SatelliteRole.hubModuleOnKey(rig.module.rawValue)),
+                         handedOver: rig.defaults.bool(forKey: SatelliteRole.handedOverKey(rig.module.rawValue)))
+}
+
 @MainActor func pollChecks() async {
     do {
-        let rig = Rig("return", moduleOn: true, handedOver: true)
-        rig.makeAgent()
-        rig.modules.startEnabled()
+        // Главное: чек-лист не сделан, а передать всё равно надо, иначе выпущенная утилита не заработает никогда.
+        let rig = Rig("old-passive", moduleOn: true, bundle: true)
+        rig.box.reply = .success(waiting)
+        check(role(rig) == .passive(reason: "Ждём передачу от центра"), "старая утилита до опроса пассивна: ждёт центр")
+        check(rig.modules.wantsUtility(.awake), "до опроса модуль без утилиты")
         await rig.registry.update()
-        check(rig.journal.has("launchctl bootout"), "бандл удалён: агент снят")
-        check(!fm.fileExists(atPath: rig.agentURL.path), "бандл удалён: плист удалён")
-        check(!rig.handedOverKey, "бандл удалён: HandedOver сброшен")
-        check(!rig.modules.isExternal(.awake), "бандл удалён: модуль снова встроенный")
-        check(rig.journal.count("start awake") == 1, "бандл удалён: встроенный снова работает")
-        check(rig.registry.entries[.awake]?.installedVersion == nil, "бандл удалён: версии нет")
+        check(rig.handedOverKey, "чек-лист не сделан: ключ передачи всё равно записан")
+        check(role(rig) == .active, "старая утилита становится активной")
+        check(rig.modules.isExternal(.awake) && !rig.modules.wantsUtility(.awake), "чек-лист не сделан: страница утилиты")
+        check(rig.journal.count("setEnabled true handed=true") == 1, "чек-лист не сделан: утилите сказано работать")
+        check(rig.registry.entries[.awake]?.status == waiting, "статус утилиты записан: чек-лист покажет её шаги")
+        check(rig.registry.entries[.awake]?.responding == true, "ответ есть: responding = true")
+        check(rig.defaults.bool(forKey: ModuleManager.onKey(.awake)), "ModuleOn не тронут")
     }
     do {
         let rig = Rig("no-reply", moduleOn: true, bundle: true)
-        rig.modules.startEnabled()
         await rig.registry.update()
         check(rig.registry.entries[.awake]?.responding == false, "нет ответа: responding = false")
         check(rig.registry.entries[.awake]?.installedVersion == "1.0.0", "версия читается из бандла")
-        check(!rig.modules.isExternal(.awake) && !rig.journal.has("stop"), "нет ответа до передачи: встроенный работает")
-        check(!rig.handedOverKey, "нет ответа до передачи: ключа нет")
-    }
-    do {
-        let rig = Rig("needs-setup", moduleOn: true, bundle: true)
-        rig.box.reply = .success(waiting)
-        rig.modules.startEnabled()
-        await rig.registry.update()
-        check(rig.registry.entries[.awake]?.status == waiting, "статус утилиты записан")
-        check(rig.registry.entries[.awake]?.responding == true, "ответ есть: responding = true")
-        check(!rig.modules.isExternal(.awake) && !rig.journal.has("stop"), "чек-лист не сделан: встроенный работает")
-        check(!rig.journal.has("setEnabled"), "чек-лист не сделан: команд утилите нет")
+        check(rig.handedOverKey && rig.modules.isExternal(.awake), "нет ответа до передачи: всё равно передаём")
+        check(role(rig) == .active, "нет ответа: при следующем запуске утилита уже активна")
     }
     do {
         let rig = Rig("needs-setup-off", bundle: true)
         rig.box.reply = .success(waiting)
         await rig.registry.update()
-        check(rig.modules.isExternal(.awake), "встроенный выключен, утилита есть: страница утилиты, не «＋»")
-        check(!rig.handedOverKey, "и передачи ещё не было")
-        rig.modules.setOn(.awake, true)
+        check(rig.modules.isExternal(.awake), "модуль выключен, утилита есть: страница утилиты, не «＋»")
+        check(rig.handedOverKey, "модуль выключен: передача записана")
+        check(!rig.journal.has("setEnabled"), "модуль выключен: включать утилиту не просим, это её настройка")
+    }
+    do {
+        let rig = Rig("not-installed", moduleOn: true)
+        check(!rig.registry.polled.contains(.awake), "до первого опроса про утилиту ничего не известно")
         await rig.registry.update()
-        check(!rig.modules.isExternal(.awake) && rig.modules.runsBuiltIn(.awake),
-              "встроенный снова включён, передачи не было: он и работает")
+        check(rig.registry.polled.contains(.awake), "опрос записан: страница «утилиты нет» верна")
+        check(rig.modules.wantsUtility(.awake) && rig.modules.isInPanel(.awake), "включён, утилиты нет: строка остаётся, нужна установка")
+        check(!rig.defaults.bool(forKey: ModuleMigration.removedKey("awake")), "человек ничего не убирал: автопереход не запрещён")
+        check(!rig.handedOverKey && !rig.journal.has("launchctl"), "ключа нет, агента не трогаем")
     }
     do {
         let rig = Rig("hand-over", moduleOn: true, bundle: true)
         rig.box.reply = .success(ready)
-        rig.modules.startEnabled()
         await rig.registry.update()
-        let stop = rig.journal.index("stop awake")
         let enable = rig.journal.index("setEnabled true handed=true")
-        check(stop != nil, "передача: встроенный остановлен")
         check(enable != nil, "передача: setEnabled(true) ушёл при уже поставленном HandedOver")
-        if let stop, let enable { check(stop < enable, "передача: сначала стоп встроенного, потом setEnabled") }
         let synced = rig.journal.index("synchronize handed=true")
         check(synced != nil, "передача: ключ сброшен на диск")
         if let synced, let enable { check(synced < enable, "передача: synchronize до setEnabled") }
@@ -338,10 +337,8 @@ func tableChecks() {
     }
     do {
         let rig = Rig("owns-no-reply", moduleOn: true, handedOver: true, bundle: true)
-        rig.modules.startEnabled()
         await rig.registry.update()
         check(rig.modules.isExternal(.awake) && rig.handedOverKey, "передано, нет ответа: остаётся у утилиты")
-        check(!rig.journal.has("start"), "передано, нет ответа: встроенный не включается")
         check(rig.registry.entries[.awake]?.responding == false, "передано, нет ответа: «не отвечает»")
         check(!rig.journal.has("launchctl"), "передано, нет ответа: агент не тронут")
     }
@@ -445,15 +442,13 @@ func tableChecks() {
         let rig = Rig("uninstall", moduleOn: true, handedOver: true, bundle: true)
         rig.makeAgent()
         rig.defaults.set("значение", forKey: "Awake.Настройка")
-        rig.modules.startEnabled()
-        check(!rig.journal.has("start"), "до удаления встроенный не работает")
         try? await rig.registry.uninstall(.awake)
         check(rig.journal.has("quit"), "удаление: утилите сказали выйти")
         check(rig.journal.has("launchctl bootout"), "удаление: агент снят")
         check(!fm.fileExists(atPath: rig.bundleURL.path) && !fm.fileExists(atPath: rig.agentURL.path), "удаление: нет бандла и плиста")
         check(!rig.handedOverKey, "удаление: HandedOver сброшен")
         check(!rig.modules.isOn(.awake) && !rig.modules.isExternal(.awake), "удаление: модуль выключен")
-        check(!rig.journal.has("start"), "удаление: встроенный не стартует и на миг")
+        check(!rig.journal.has("fn restore"), "удаление не Клавиатуры: Fn не трогаем")
         check(rig.defaults.string(forKey: "Awake.Настройка") == "значение", "удаление: настройки остаются")
     }
 }
@@ -510,10 +505,177 @@ func tableChecks() {
     check(rig.registry.entries[.awake]?.status == ready, "statusChanged: статус перечитан по связи")
 }
 
+// MARK: - Утилиту удалили руками
+
+/// Ловит `.moduleRemoved`, как главное окно.
+@MainActor final class RemovalSpy {
+    private(set) var removed: [Module] = []
+    private var token: NSObjectProtocol?
+    init() {
+        token = NotificationCenter.default.addObserver(forName: .moduleRemoved, object: nil, queue: nil) { [weak self] note in
+            MainActor.assumeIsolated { if let module = note.object as? Module { self?.removed.append(module) } }
+        }
+    }
+    deinit { if let token { NotificationCenter.default.removeObserver(token) } }
+}
+
+@MainActor func goneChecks() async {
+    for module in Module.allCases {
+        let name = module.rawValue
+        let rig = Rig("gone-\(name)", module: module, moduleOn: true, handedOver: true)
+        rig.makeAgent()
+        rig.modules.setHidden(module, true)
+        let spy = RemovalSpy()
+        await rig.registry.update()
+        check(rig.journal.has("launchctl bootout") && !fm.fileExists(atPath: rig.agentURL.path), "\(name) удалён руками: агент снят")
+        check(!rig.handedOverKey, "\(name) удалён руками: HandedOver сброшен")
+        check(rig.defaults.bool(forKey: ModuleMigration.removedKey(name)), "\(name) удалён руками: сам не поставится")
+        check(!rig.modules.isExternal(module) && !rig.modules.isOn(module) && !rig.modules.isInstalled(module), "\(name) удалён руками: снова только в Сторе")
+        check(!rig.modules.isInPanel(module) && !rig.modules.panelModules.contains(module), "\(name) удалён руками: строки в панели нет")
+        check(!rig.modules.wantsUtility(module), "\(name) удалён руками: страницы «утилиты нет» не будет")
+        check(!rig.defaults.bool(forKey: ModuleManager.onKey(module)), "\(name) удалён руками: ModuleOn снят")
+        check(!rig.modules.isHidden(module), "\(name) удалён руками: скрытие снято, как при удалении в Сторе")
+        check(spy.removed == [module], "\(name) удалён руками: окно уходит с его страницы")
+        check(rig.registry.entries[module]?.installedVersion == nil, "\(name) удалён руками: версии нет")
+        check(rig.journal.count("fn restore") == (module == .keyboard ? 1 : 0), "\(name) удалён руками: Fn трогает только Клавиатура")
+        let handedCalls = rig.journal.count("launchctl bootout")
+        await rig.registry.update()
+        check(rig.journal.count("launchctl bootout") == handedCalls && spy.removed == [module], "\(name) удалён руками: следующий опрос ничего не повторяет")
+    }
+    do {
+        // Модуль был выключен: так живут утилиты, поставленные из Стора.
+        let rig = Rig("gone-module-off", handedOver: true)
+        await rig.registry.update()
+        check(!rig.modules.isInstalled(.awake) && !rig.handedOverKey, "утилита из Стора удалена руками: тоже только в Сторе")
+    }
+    do {
+        // Агента снять не вышло: ключ остаётся, следующий опрос пробует снова, а строки в панели уже нет.
+        let rig = Rig("gone-agent-stuck", moduleOn: true, handedOver: true)
+        rig.makeAgent()
+        try! fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: rig.paths.agentsDir.path)
+        await rig.registry.update()
+        check(rig.handedOverKey && !rig.defaults.bool(forKey: ModuleMigration.removedKey("awake")), "агент не снялся: ключ остаётся")
+        check(!rig.modules.isInstalled(.awake), "агент не снялся: строки в панели всё равно нет")
+        try! fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: rig.paths.agentsDir.path)
+        await rig.registry.update()
+        check(!rig.handedOverKey && !fm.fileExists(atPath: rig.agentURL.path), "агент не снялся: следующий опрос довёл до конца")
+        check(rig.defaults.bool(forKey: ModuleMigration.removedKey("awake")), "агент снялся: выбор человека записан")
+    }
+}
+
+// MARK: - Fn
+
+/// Состояние настоящего `FnSystemAction` в домене Kit: мы держим 0, у человека было 1.
+func holdFnOff() {
+    let kit = Kit.defaults
+    for key in ["Keyboard.SavedFnUsage", "Keyboard.KeepSystemFnOff", "Keyboard.SavedDictationEnabled", "Test.ApplyCount"] { kit.removeObject(forKey: key) }
+    kit.set(1, forKey: "Test.FnUsage")
+    FnSystemAction.disable()
+}
+
+@MainActor func fnChecks() async {
+    let kit = Kit.defaults
+    do {
+        let rig = Rig("fn-gone", module: .keyboard, moduleOn: true, handedOver: true)
+        holdFnOff()
+        check(FnSystemAction.usage == 0 && FnSystemAction.keepsOff, "подготовка: 🌐 отключена")
+        await rig.registry.update()
+        check(FnSystemAction.usage == 1, "Клавиатуру удалили руками: 🌐 снова как была у человека")
+        check(!FnSystemAction.keepsOff && kit.object(forKey: "Keyboard.SavedFnUsage") == nil, "Клавиатуру удалили руками: запомненное снято")
+        check(kit.integer(forKey: "Test.ApplyCount") == 2, "Клавиатуру удалили руками: система применила настройки")
+    }
+    do {
+        let rig = Rig("fn-store", module: .keyboard, moduleOn: true, handedOver: true, bundle: true)
+        rig.makeAgent()
+        holdFnOff()
+        try? await rig.registry.uninstall(.keyboard)
+        check(FnSystemAction.usage == 1, "удаление в Сторе, утилита не ответила: 🌐 всё равно возвращена")
+    }
+    do {
+        let rig = Rig("fn-handover", module: .keyboard, moduleOn: true, bundle: true)
+        rig.box.reply = .success(waiting)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 1, "передача без разрешения: 🌐 вернулась системе")
+        check(rig.journal.count("fn restore") == 1, "передача без разрешения: один раз")
+        if let restored = rig.journal.index("fn restore"), let enabled = rig.journal.index("setEnabled true handed=true") {
+            check(restored < enabled, "передача без разрешения: возврат до setEnabled, утилита прочитает новое")
+        } else {
+            check(false, "передача без разрешения: возврат и setEnabled в журнале")
+        }
+        // Человек сам отключил 🌐 в чек-листе утилиты: следующие опросы это не откатывают.
+        FnSystemAction.disable()
+        await rig.registry.update()
+        check(rig.journal.count("fn restore") == 1 && FnSystemAction.usage == 0, "передача без разрешения: повторный опрос Fn не трогает")
+    }
+    do {
+        let rig = Rig("fn-handover-no-reply", module: .keyboard, moduleOn: true, bundle: true)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 1, "передача без ответа: разрешения неизвестны, 🌐 вернулась")
+    }
+    do {
+        let rig = Rig("fn-handover-ready", module: .keyboard, moduleOn: true, bundle: true)
+        rig.box.reply = .success(ready)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "разрешение есть: утилита слушает, 🌐 остаётся отключённой")
+    }
+    do {
+        let rig = Rig("fn-handover-off", module: .keyboard, bundle: true)
+        rig.box.reply = .success(waiting)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "модуль был выключен: это настройки утилиты, не трогаем")
+    }
+    do {
+        let rig = Rig("fn-handover-other", moduleOn: true, bundle: true)
+        rig.box.reply = .success(waiting)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "передача другого модуля: Fn не трогаем")
+    }
+}
+
+// MARK: - Кнопка «Установить»
+
+@MainActor func missingPageChecks() async {
+    do {
+        let rig = Rig("missing-button", moduleOn: true)
+        rig.box.catalog = .success(catalogData())
+        await rig.registry.update()
+        // Отступ после сбоя и отметка «убрал сам» держат только автопереход.
+        rig.defaults.set(true, forKey: ModuleMigration.removedKey("awake"))
+        rig.defaults.set(Date().addingTimeInterval(9999).timeIntervalSince1970, forKey: ModuleMigration.retryAfterKey("awake"))
+        rig.registry.installMissing(.awake)
+        for _ in 0..<100 where rig.registry.installFailures[.awake] == nil { try? await Task.sleep(for: .seconds(0.02)) }
+        check(rig.journal.count("download") == 1, "кнопка: установка пошла несмотря на отступ и отметку")
+        check(rig.registry.installFailures[.awake] is Boom, "кнопка: причина сбоя видна странице")
+        check(!rig.registry.busy.contains(.awake), "кнопка: после сбоя можно снова")
+        check(rig.modules.wantsUtility(.awake), "кнопка: сбой оставляет модуль на странице «утилиты нет»")
+        rig.box.downloadDelay = 0.3
+        rig.registry.installMissing(.awake)
+        for _ in 0..<100 where !rig.registry.busy.contains(.awake) { try? await Task.sleep(for: .seconds(0.01)) }
+        check(rig.registry.installFailures[.awake] == nil, "кнопка: новая попытка снимает прежний сбой")
+        for _ in 0..<100 where rig.registry.busy.contains(.awake) { try? await Task.sleep(for: .seconds(0.02)) }
+        check(rig.journal.count("download") == 2, "кнопка: повтор дошёл до установщика")
+    }
+    do {
+        let rig = Rig("missing-no-catalog", moduleOn: true)
+        await rig.registry.update()
+        rig.registry.installMissing(.awake)
+        try? await Task.sleep(for: .seconds(0.05))
+        check(!rig.journal.has("download") && rig.registry.catalogFailed, "кнопка без каталога: ставить нечего, каталог сорвался")
+    }
+}
+
 Task { @MainActor in
     tableChecks()
     managerChecks()
     await pollChecks()
+    await goneChecks()
+    await fnChecks()
+    await missingPageChecks()
     await stallChecks()
     await serialChecks()
     await catalogChecks()

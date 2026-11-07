@@ -20,25 +20,9 @@ struct ModuleDetail: View {
             case .load: RemoteLoadPage()
             case .clipboard: RemoteClipboardPage()
             case .bots: RemoteBotsPage()
-            default: SatellitePage(module: module)
             }
         } else {
-            ModuleScreen(module: module) {
-                switch module {
-                case .sound: SoundView()
-                case .fans: FansView()
-                case .load: LoadScreen()
-                case .stash: StashView()
-                case .mixer: MixerView()
-                case .mouse: MouseView()
-                case .browser: BrowserView()
-                case .voice: VoiceView()
-                case .clipboard: ClipboardView()
-                case .keyboard: KeyboardView()
-                case .awake: AwakeView(model: AwakeController.shared)
-                case .bots: BotsView(model: BotsStore.shared)
-                }
-            }
+            ModuleMissingPage(module: module)
         }
     }
 }
@@ -293,12 +277,10 @@ struct NoShownModules: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        KeyboardController.onFeaturesChanged = { AccessState.shared.refresh() }
         MicGuardMigration.run()
         DockMode.start()
         ModuleMenuIcons.shared.start()
         SidebarModel.shared.start()
-        ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
         SatelliteRegistry.shared.startMigration()
         AutoUpdate.shared.start()
@@ -336,13 +318,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated {
-            ModuleManager.shared.stopAll()
-        }
+    /// Модуль без утилиты: пока центр был в фоне, вышел отступ после сбоя или появилась сеть.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        MainActor.assumeIsolated { SatelliteRegistry.shared.startMigration() }
     }
 
-    /// Окно закрыли — модули (держать микрофон и т.п.) продолжают работать.
+    /// Окно закрыли — значок в меню и опрос утилит продолжают работать.
     /// Выход только через Cmd+Q / меню.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false

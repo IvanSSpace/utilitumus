@@ -21,6 +21,16 @@ func reset(usage: Int?) {
 }
 func applies() -> Int { d.integer(forKey: "Test.ApplyCount") }
 
+// Утилита возвратила, а центр зовёт ещё раз (удаление в Сторе, повтор опроса): значение, выбранное человеком после этого, остаётся.
+reset(usage: 1)
+FnSystemAction.disable()
+FnSystemAction.restore()
+d.set(2, forKey: "Test.FnUsage")
+let appliedBefore = applies()
+FnSystemAction.restore()
+check(FnSystemAction.usage == 2, "повторный restore не трогает выбор человека")
+check(applies() == appliedBefore, "повторный restore систему не дёргает")
+
 // Обычный путь: пользователь отключил 🌐, потом выключил модуль.
 for original in [1, 2, 3] {
     reset(usage: original)

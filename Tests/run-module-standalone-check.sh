@@ -41,12 +41,6 @@ for module in "${MODULES[@]}"; do
   fi
 done
 
-# Проводка, которая держит модули отдельно от центра: без неё модуль компилируется, но перестаёт обновлять экран.
-if ! grep -q 'KeyboardController.onFeaturesChanged = { AccessState.shared.refresh() }' Sources/App/UtilitumusApp.swift; then
-  echo "ПРОВАЛ: центр не назначает KeyboardController.onFeaturesChanged"
-  failed=$((failed + 1))
-fi
-
 if [ "$failed" -gt 0 ]; then
   echo "ПРОВАЛ: не компилируются отдельно: $failed"
   exit 1

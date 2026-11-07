@@ -40,3 +40,34 @@ struct SatellitePage: View {
         .onAppear { registry.refresh(module) }
     }
 }
+
+/// Модуль включён, а утилиты нет: ставится, установка сорвалась или каталог недоступен. Работать за неё центру нечем.
+struct ModuleMissingPage: View {
+    let module: Module
+    @ObservedObject private var registry = SatelliteRegistry.shared
+
+    private var lead: String {
+        if registry.busy.contains(module) { return "Утилита модуля ставится…" }
+        // До первого опроса неизвестно, есть ли она: при каждом запуске здесь мигало бы «не установлена».
+        guard registry.polled.contains(module) else { return "Проверяем утилиту модуля…" }
+        if let error = registry.installFailures[module] {
+            return StoreModel.failureMessage(error, fallback: "Не получилось поставить утилиту модуля")
+        }
+        guard registry.catalogApp(module) != nil else {
+            return registry.catalogFailed ? "Утилита модуля не установлена, а каталог недоступен: проверь сеть"
+                                          : "Утилита модуля не установлена, в каталоге её пока нет"
+        }
+        return "Утилита модуля не установлена"
+    }
+
+    var body: some View {
+        ModuleCentered(module: module, title: module.title, lead: lead) {
+            EmptyView()
+        } actions: {
+            DSButton("Установить", style: .primary) { registry.installMissing(module) }
+                .disabled(registry.busy.contains(module) || !registry.polled.contains(module) || registry.catalogApp(module) == nil)
+        }
+        // Каталог мог сорваться при запуске: открытая страница пробует его снова.
+        .onAppear { registry.refresh() }
+    }
+}

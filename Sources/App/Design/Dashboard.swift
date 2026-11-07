@@ -56,7 +56,7 @@ final class DashSlot: ObservableObject {
     private var subs: [AnyCancellable] = []
     private var sourceSub: AnyCancellable?
     /// На что подписан `sourceSub`: при передаче утилите или возврате подписку надо сменить.
-    private enum SourceKind { case none, model, builtIn }
+    private enum SourceKind { case none, model }
     private var sourceKind = SourceKind.none
     private var visibilitySub: AnyCancellable?
 
@@ -113,10 +113,8 @@ final class DashSlot: ObservableObject {
         update()
     }
 
-    /// Выключенный модуль ничего не публикует: на контроллер подписываемся, только пока он включён.
     private func syncSource() {
-        let kind: SourceKind = DashboardLive.hasRemoteModel(module) ? .model
-            : (ModuleManager.shared.runsBuiltIn(module) ? .builtIn : .none)
+        let kind: SourceKind = DashboardLive.hasRemoteModel(module) ? .model : .none
         guard kind != sourceKind || (kind != .none && sourceSub == nil) else { return }
         sourceKind = kind
         guard kind != .none, let source = DashboardLive.source(module) else {
@@ -156,58 +154,14 @@ enum DashboardLive {
         if let model = RemoteModules.model(module) { model.refresh() } else { SatelliteRegistry.shared.refresh(module) }
     }
 
-    /// Что слушать, пока модуль на экране. Встроенный — свой контроллер, ведомый — его модель (статус слушает реестр).
+    /// Что слушать, пока модуль на экране: его модель (статус слушает реестр).
     fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never>? {
-        if ModuleManager.shared.isExternal(module) { return RemoteModules.model(module)?.changes }
-        switch module {
-        case .sound: return MonitorState.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .mouse: return MouseController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .fans: return FanController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .browser: return BrowserCatalog.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .stash: return StashStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .voice: return VoiceController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .clipboard: return ClipboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .awake: return AwakeController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .mixer: return MixerController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .load: return LoadStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .bots: return BotsStore.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        case .keyboard: return KeyboardController.shared.objectWillChange.map { _ in }.eraseToAnyPublisher()
-        }
+        ModuleManager.shared.isExternal(module) ? RemoteModules.model(module)?.changes : nil
     }
 
     /// Быстрое действие карточки. `ask` — показать подтверждение, если оно нужно.
     static func perform(_ module: Module, ask: (DashConfirmation) -> Void) {
-        if ModuleManager.shared.isExternal(module) { return performExternal(module, ask: ask) }
-        switch module {
-        case .fans:
-            FanController.shared.fullPower.toggle()
-        case .browser:
-            // Тестовая ссылка идёт тем же путём, что и кнопка «Проверить» на экране браузера.
-            if Kit.standRefuses("тестовая ссылка помощнику") { return }
-            NSWorkspace.shared.open([BrowserHelper.testURL], withApplicationAt: BrowserHelper.appURL,
-                                    configuration: NSWorkspace.OpenConfiguration()) { _, error in
-                if let error { NSLog("Utilitumus: помощник ссылок не запустился: %@", error.localizedDescription) }
-            }
-        case .stash:
-            let store = StashStore.shared
-            if !store.stashed.isEmpty {
-                Task { await store.restore() }
-            } else {
-                // Закрытие программ — только через подтверждение, как на экране Стеша.
-                ask(DashConfirmation(
-                    title: "Закрыть \(programs(store.selected.count))?",
-                    message: store.selected.compactMap(\.localizedName).joined(separator: ", ")
-                        + "\n\nНесохранённое программы спросят сами.",
-                    button: "Закрыть и спрятать",
-                    run: { Task { await StashStore.shared.stashSelected() } }))
-            }
-        case .load:
-            LoadStore.shared.refreshNow()
-        case .awake:
-            AwakeController.shared.toggle()
-        case .sound, .mouse, .voice, .mixer, .clipboard, .keyboard, .bots:
-            break
-        }
+        if ModuleManager.shared.isExternal(module) { performExternal(module, ask: ask) }
     }
 
     /// Переключатель модуля на карточке: утилита выключается у себя, `ModuleOn` — настройка встроенного.
@@ -236,21 +190,7 @@ enum DashboardLive {
                                  model: RemoteModules.model(module))
         }
         guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
-        if module.isBlocked { return DashState(text: "нужен доступ", attention: true) }
-        switch module {
-        case .sound: return sound()
-        case .mouse: return mouse()
-        case .fans: return fans()
-        case .browser: return browser()
-        case .stash: return stash()
-        case .voice: return voice()
-        case .clipboard: return clipboard()
-        case .awake: return awake(AwakeController.shared)
-        case .mixer: return mixer()
-        case .load: return load()
-        case .bots: return bots()
-        case .keyboard: return keyboard()
-        }
+        return DashState(text: "утилита не установлена", attention: true)
     }
 
     /// Карточка ведомого модуля из статуса утилиты: те же состояния, что у встроенного (выключен, нужен доступ,
@@ -410,7 +350,6 @@ enum DashboardLive {
 
 struct DashboardPage: View, Equatable {
     static func == (a: Self, b: Self) -> Bool { true }
-    @Environment(\.pageActive) private var pageActive
     /// Открыть модуль в основном окне.
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
@@ -431,13 +370,6 @@ struct DashboardPage: View, Equatable {
             Button("Отмена", role: .cancel) {}
         } message: { item in
             Text(item.message)
-        }
-        // Список программ для Стеша: один разовый снимок, без подписок. Само не запускается.
-        // Только у встроенного: ведомый Стеш считает это у себя, а `.shared` здесь запустил бы второго.
-        .task(id: pageActive) {
-            guard pageActive, modules.runsBuiltIn(.stash) else { return }
-            StashStore.shared.refresh()
-            await StashStore.shared.refreshUsage()
         }
     }
 

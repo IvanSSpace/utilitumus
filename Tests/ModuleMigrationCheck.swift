@@ -54,7 +54,7 @@ final class Fake: @unchecked Sendable {
         ModuleMigrationEnvironment(
             defaults: defaults, hubVersion: hub,
             loadCatalog: { [self] in try catalog.get() },
-            isBuiltInOn: { [self] in on.contains($0.rawValue) },
+            wantsUtility: { [self] in on.contains($0.rawValue) },
             hasBundle: { [self] module in lock.withLock { bundles.contains(module.rawValue) } },
             install: { [self] module, _ in
                 try lock.withLock {
@@ -165,7 +165,7 @@ final class Journal: @unchecked Sendable {
     func makeRegistry(_ defaults: UserDefaults) -> SatelliteRegistry {
         defaults.set(true, forKey: ModuleReset.flagKey)
         defaults.set(true, forKey: ModuleManager.onKey(.awake))
-        let modules = ModuleManager(defaults: defaults) { _ in ModuleHooks(start: {}, stop: {}) }
+        let modules = ModuleManager(defaults: defaults)
         let installer = SatelliteInstaller(
             paths: paths, launchctl: { _ in }, download: { _ in throw Boom() }, verify: { _, _ in },
             link: SatelliteLink(quit: { _, _ in journal.add("quit") }, hello: { _ in }))
@@ -201,6 +201,26 @@ final class Journal: @unchecked Sendable {
         try? fm.removeItem(at: paths.appsDir.appendingPathComponent("Awake.app"))
         await registry.update()
         check(defaults.bool(forKey: ModuleMigration.removedKey("awake")), "бандл убран руками: выбор человека записан")
+        check(!registry.environment.modules.wantsUtility(.awake), "бандл убран руками: автопереходу здесь делать нечего")
+    }
+    do {
+        // Настоящий менеджер: кого ставит автопереход.
+        let f = Fake()
+        let defaults = f.defaults
+        let registry = makeRegistry(defaults)
+        let modules = registry.environment.modules
+        var env = f.env
+        env.wantsUtility = { module in await MainActor.run { modules.wantsUtility(module) } }
+        await ModuleMigration.run(env)
+        check(f.installs == ["awake"], "включён и утилиты нет: ставится, выключенный «Мышь» нет")
+        check(defaults.string(forKey: ModuleMigration.doneKey("awake")) == "0.6.0", "переход записан")
+        let f2 = Fake()
+        let modules2 = makeRegistry(f2.defaults).environment.modules
+        modules2.setExternal(.awake, true)
+        var env2 = f2.env
+        env2.wantsUtility = { module in await MainActor.run { modules2.wantsUtility(module) } }
+        await ModuleMigration.run(env2)
+        check(f2.installs.isEmpty, "утилита уже ведёт модуль: ставить нечего")
     }
     do {
         let defaults = UserDefaults(suiteName: suiteName)!

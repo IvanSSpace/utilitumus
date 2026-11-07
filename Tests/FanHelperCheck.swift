@@ -120,9 +120,8 @@ func legacyChecks() {
 
     check(restore.contains("hasLegacySetuid") && restore.contains("LegacyFanHelper.restoreAutoWithin"), "выход при setuid идёт через прежний помощник")
     let updater = source("Sources/App/Updater.swift")
-    // Сам порядок и удержание проверяет поведением Tests/run-update-order-check.sh; здесь — что Updater подключён именно к ним.
-    check(updater.contains("beforeReplace: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.holdForUpdate() } }"), "обновление отдаёт вентиляторы, но не поднимает модуль, который ведёт утилита")
-    check(updater.contains("replaceFailed: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.resumeAfterFailedUpdate() } }"), "неудачное обновление возвращает управление")
+    // Встроенного модуля нет: обновление центра вентиляторов не касается, их ведёт утилита (`FansModule.stopForUpdate`).
+    check(!updater.contains("FanController"), "обновление центра не поднимает контроллер вентиляторов")
     check(updater.contains("try await UpdateBundle.install(") && !updater.contains("UpdateBundle.commit"), "обновление идёт через install с шагами вокруг подмены")
 }
 

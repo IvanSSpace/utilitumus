@@ -248,8 +248,6 @@ enum StoreTab: String, CaseIterable, Hashable {
 extension Notification.Name {
     /// Стор просит главное окно открыть модуль (после установки): в `object` — `Module`.
     static let storeOpenModule = Notification.Name("Utilitumus.StoreOpenModule")
-    /// Модуль удалён (из Стора или из боковой панели): в `object` — `Module`. Главное окно уходит с его страницы.
-    static let moduleRemoved = Notification.Name("Utilitumus.ModuleRemoved")
 }
 
 @MainActor

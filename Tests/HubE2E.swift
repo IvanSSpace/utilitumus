@@ -53,7 +53,7 @@ func stateLine(_ entry: SatelliteRegistry.Entry?) -> String {
     let defaults = Kit.defaults
     // Без флага ModuleOn выглядел бы обновлением со старой версии, и одноразовый сброс выключил бы модули.
     defaults.set(true, forKey: ModuleReset.flagKey)
-    let modules = ModuleManager(defaults: defaults) { _ in ModuleHooks(start: {}, stop: {}) }
+    let modules = ModuleManager(defaults: defaults)
     let registry = SatelliteRegistry(SatelliteEnvironment(
         paths: paths,
         defaults: defaults,

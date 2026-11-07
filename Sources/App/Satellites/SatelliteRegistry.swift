@@ -65,6 +65,8 @@ struct SatelliteEnvironment {
     var loadCatalog: @Sendable () async throws -> Data
     var hubVersion: String
     var modules: ModuleManager
+    /// Вернуть системе 🌐 и диктовку, когда их больше некому держать. Настоящий `FnSystemAction` даёт только `live()`.
+    var restoreSystemFn: @MainActor () -> Void = {}
 }
 
 /// Что центр знает об отдельных утилитах и кто из них ведёт модуль.
@@ -110,6 +112,12 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// Текст последней неудачи действия или шага: «Модуль не ответил» и отказ самой утилиты.
     @Published private(set) var actionErrors: [Module: String] = [:]
     @Published private(set) var stepErrors: [String: String] = [:]
+    /// Почему не вышла последняя установка: её показывает страница модуля без утилиты.
+    @Published private(set) var installFailures: [Module: any Error] = [:]
+    /// Модули, которые опросили хотя бы раз. До этого неизвестно, есть ли утилита: страница «утилиты нет» ещё не верна.
+    @Published private(set) var polled: Set<Module> = []
+    /// Идёт проход `ModuleMigration`: второй поверх него счёл бы занятый модуль сбоем.
+    var migration: Task<Void, Never>?
 
     init(_ environment: SatelliteEnvironment) {
         self.environment = environment
@@ -271,10 +279,17 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     // MARK: Установка и удаление
 
+    /// Кнопка на странице модуля без утилиты. Это выбор человека: отступ автоперехода и отметка «убрал сам» его не держат.
+    func installMissing(_ module: Module) {
+        guard let app = catalogApp(module) else { return }
+        Task { try? await install(module, app: app) }
+    }
+
     /// «＋» значит «включить»: утилита иначе взяла бы «выключен» из `ModuleOn` или с прошлой установки.
     /// Обновление включённость не трогает: её выбрал человек.
     func install(_ module: Module, app: CatalogApp, checkStaged: @escaping @Sendable (URL, URL) throws -> Void = { _, _ in }) async throws {
         guard busy.insert(module).inserted else { return }
+        installFailures[module] = nil
         let enabledKey = ModuleHandover.enabledKey(module.rawValue)
         let previous = defaults.object(forKey: enabledKey)
         let bundle = environment.paths.appsDir.appendingPathComponent(Self.bundleName(module) + ".app")
@@ -292,6 +307,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
             }
         } catch {
             if fresh { defaults.set(previous, forKey: enabledKey) }
+            if !(error is CancellationError), (error as? URLError)?.code != .cancelled { installFailures[module] = error }
             finish(module)
             // Откат тоже перезапустил утилиту.
             environment.commands.refreshScreen(module)
@@ -299,17 +315,21 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         }
         finish(module)
         defaults.removeObject(forKey: ModuleMigration.removedKey(module.rawValue))
+        defaults.removeObject(forKey: ModuleMigration.failuresKey(module.rawValue))
+        defaults.removeObject(forKey: ModuleMigration.retryAfterKey(module.rawValue))
         await poll(module)
         environment.commands.refreshScreen(module)
     }
 
-    /// Настройки остаются. Встроенный вариант не стартует: сначала `setOn(false)`, потом снятие внешнего.
+    /// Настройки остаются.
     func uninstall(_ module: Module) async throws {
         guard busy.insert(module).inserted else { return }
         defer { finish(module) }
         let installer = environment.installer
         let id = module.rawValue, name = Self.bundleName(module)
         try await serialized { try await installer.remove(id: id, name: name) }
+        // Утилита возвращает 🌐 сама, но могла не ответить на просьбу выйти. Повтор безвреден: возвращать будет уже нечего.
+        if module == .keyboard { environment.restoreSystemFn() }
         defaults.removeObject(forKey: ModuleHandover.handedOverKey(id))
         defaults.set(true, forKey: ModuleMigration.removedKey(id))
         enableOwed.remove(module)
@@ -388,6 +408,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// Нет бандла — нет и запроса: иначе launchd пытался бы поднять мёртвого агента.
     private func poll(_ module: Module) async {
         guard !busy.contains(module) else { return }
+        defer { polled.insert(module) }
         let started = generation[module, default: 0]
         let id = module.rawValue
         let info = environment.paths.appsDir.appendingPathComponent(Self.bundleName(module) + ".app")
@@ -400,15 +421,18 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         guard !isStale else { return }
 
         let handedOver = defaults.bool(forKey: ModuleHandover.handedOverKey(id))
-        switch ModuleHandover.decide(bundlePresent: version != nil, handedOver: handedOver, reply: reply) {
-        case .keepBuiltIn:
-            // Встроенный выключен, а утилита стоит: кроме неё показывать нечего. Передачи при этом ещё не было.
-            modules.setExternal(module, version != nil && !modules.enabled.contains(module))
-        case .returnToBuiltIn:
-            await returnToBuiltIn(module)
+        switch ModuleHandover.decide(bundlePresent: version != nil, handedOver: handedOver) {
+        case .notInstalled:
+            modules.setExternal(module, false)
+        case .utilityGone:
+            await utilityGone(module)
         case .handOver:
-            // Встроенный был выключен: утилита передачи не ждёт, а её выключенность выбрал человек.
+            // Модуль был выключен: утилита передачи не ждёт, а её выключенность выбрал человек.
             let moduleWasOn = modules.enabled.contains(module)
+            // Клавиатура при обновлении: разрешение было у центра, утилите его ещё не выдали, а 🌐 отключена. Слушать Fn некому,
+            // поэтому один раз возвращаем системе: язык продолжит меняться, отключить снова попросит чек-лист утилиты.
+            // До `setEnabled`: утилита при старте читает, держать ли 0. Выключенный модуль 🌐 не держал, это уже настройки утилиты.
+            if module == .keyboard, moduleWasOn, reply?.needsSetup != 0 { environment.restoreSystemFn() }
             modules.setExternal(module, true)
             defaults.set(true, forKey: ModuleHandover.handedOverKey(id))
             // Утилита читает ключ из другого процесса, как только получит setEnabled.
@@ -448,11 +472,15 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         }
     }
 
-    /// Бандл удалили руками. Встроенный возвращается сразу; если агента снять не вышло, ключ остаётся
-    /// и следующий опрос попробует снова.
-    private func returnToBuiltIn(_ module: Module) async {
+    /// Бандл удалили руками: как удаление в Сторе, строка уходит из панели, модуль снова в Сторе. Если агента снять
+    /// не вышло, ключ остаётся и следующий опрос попробует снова; сама утилита 🌐 уже не вернёт.
+    private func utilityGone(_ module: Module) async {
+        modules.setOn(module, false)
         modules.setExternal(module, false)
+        modules.setHidden(module, false)
         enableOwed.remove(module)
+        if module == .keyboard { environment.restoreSystemFn() }
+        NotificationCenter.default.post(name: .moduleRemoved, object: module)
         let installer = environment.installer
         let id = module.rawValue
         do {

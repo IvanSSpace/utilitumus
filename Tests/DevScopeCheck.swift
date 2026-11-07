@@ -202,27 +202,10 @@ func mentioned(_ text: String) -> Set<Module> {
     check(outside.allSatisfy(modules.isInstalled), "вне набора модули остаются установленными")
     check(outside.filter { !builtIn.contains($0) }.allSatisfy(modules.isExternal), "вне набора утилиты остаются внешними")
     check(outside.filter { !builtIn.contains($0) }.allSatisfy { registry.entries[$0]?.status != nil }, "опрос ходит и к утилитам вне набора")
-    check(outside.filter(builtIn.contains).allSatisfy(modules.runsBuiltIn), "вне набора встроенные остаются включёнными")
+    check(outside.filter(builtIn.contains).allSatisfy(modules.wantsUtility), "вне набора модули без утилиты остаются включёнными")
     check(outside.filter(hiddenOnes.contains).allSatisfy(modules.isHidden), "скрытые вне набора остаются скрытыми")
     check(calls.all.isEmpty, "утилитам ничего не сказано: \(calls.all)")
     check(told.isEmpty, "значки утилит не трогались: \(told)")
-
-    print("== \(label): запуск и выход встроенных не зависят от набора")
-    var started: [Module] = [], stopped: [Module] = []
-    let suite = "local.utilitumus.test.kit.dev-scope.hooks"
-    let own = UserDefaults(suiteName: suite)!
-    own.removePersistentDomain(forName: suite)
-    own.set(true, forKey: "ModulesV2"); own.set(true, forKey: "ModulesV3"); own.set(true, forKey: ModuleReset.flagKey)
-    for module in Module.allCases { own.set(true, forKey: ModuleManager.onKey(module)) }
-    let manager = ModuleManager(defaults: own) { module in
-        ModuleHooks(start: { started.append(module) }, stop: { stopped.append(module) })
-    }
-    manager.startEnabled()
-    check(Set(started) == Set(Module.allCases), "стартуют все включённые, не только набор")
-    check(Set(manager.enabled) == Set(Module.allCases), "enabled настоящий")
-    manager.stopAll()
-    check(Set(stopped) == Set(Module.allCases), "останавливаются все")
-    own.removePersistentDomain(forName: suite)
 
     print("== \(label): настройки после запуска")
     check(guardedSettings(.standard) == before, "настройки центра не изменились: \(difference(before, guardedSettings(.standard)))")

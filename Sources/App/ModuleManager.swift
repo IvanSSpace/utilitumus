@@ -1,15 +1,11 @@
 import Foundation
 
-/// Как запустить и остановить фоновую часть модуля. Оба вызова идемпотентны.
-struct ModuleHooks {
-    let start: @MainActor () -> Void
-    let stop: @MainActor () -> Void
-    /// Выход из приложения. Если не задан, вызывается `stop`; нужен тем, кому при выходе
-    /// возвращать нельзя то, что они настроили в системе (модуль «Клавиатура»).
-    var quit: (@MainActor () -> Void)? = nil
+extension Notification.Name {
+    /// Модуль удалили (из Стора, из панели или саму утилиту руками): окно уходит с его страницы. В `object` — `Module`.
+    static let moduleRemoved = Notification.Name("Utilitumus.ModuleRemoved")
 }
 
-/// Порядок модулей, включён ли каждый и виден ли в боковой панели; запуск/остановка их фоновых частей.
+/// Порядок модулей, включён ли каждый и виден ли в боковой панели. Работают утилиты, центр показывает их экраны.
 ///
 /// «Установлен» (включён) и «скрыт из панели» — независимы. Установленный модуль работает; скрытый
 /// работает так же, но его строки нет в панели (он в подвале «Скрытые»). Выключенный модуль считается
@@ -23,7 +19,7 @@ final class ModuleManager: ObservableObject {
     var order: [Module] { ModuleScope.shown(fullOrder) }
     @Published private(set) var enabled: Set<Module>
     @Published private(set) var hidden: Set<Module>
-    /// Модули, которые ведёт отдельная утилита: встроенный код не работает, страница и строка панели остаются.
+    /// Модули, которые ведёт отдельная утилита.
     @Published private(set) var external: Set<Module>
     /// Открытая страница «Об инструменте» (кнопка (i) или «Подробнее»).
     @Published var infoModule: Module?
@@ -31,14 +27,8 @@ final class ModuleManager: ObservableObject {
     @Published var settingsShown = false
 
     private let defaults: UserDefaults
-    private let hooks: (Module) -> ModuleHooks
-    /// Модули, у которых сейчас вызван start без парного stop.
-    private var running: Set<Module> = []
     /// Сброс при первом запуске коснулся модулей, которых ведёт утилита: реестр выключит их у утилиты при первом ответе.
     private var utilityResets: Set<Module> = []
-    /// Пока приложение не запустило модули (или уже гасит их), переключение
-    /// только меняет настройку и ничего не стартует.
-    private var isActive = false
 
     private static let orderKey = "ModuleOrder"
     private static let migratedKey = "ModulesV2"
@@ -46,9 +36,8 @@ final class ModuleManager: ObservableObject {
     static func onKey(_ module: Module) -> String { "ModuleOn.\(module.rawValue)" }
     private static func hiddenKey(_ module: Module) -> String { "ModuleHidden.\(module.rawValue)" }
 
-    init(defaults: UserDefaults = .standard, hooks: @escaping (Module) -> ModuleHooks) {
+    init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.hooks = hooks
         // Слепок до миграций: они сами пишут `ModulesV2`, и по нему новую установку было бы не отличить.
         let resetPlan = ModuleReset.plan(snapshot: defaults.dictionaryRepresentation(),
                                          moduleIDs: Module.allCases.map(\.rawValue),
@@ -61,7 +50,7 @@ final class ModuleManager: ObservableObject {
             Self.splitUninstallFromHidden(defaults)
             defaults.set(true, forKey: Self.uninstallSplitKey)
         }
-        // После миграций (иначе они вернули бы старые состояния) и до чтения `enabled`: ничего лишнего не стартует.
+        // После миграций (иначе они вернули бы старые состояния) и до чтения `enabled`.
         if let resetPlan {
             for (key, value) in resetPlan.writes { defaults.set(value, forKey: key) }
             // «Клавиатура» при выходе не возвращала 🌐; без этого после сброса Fn не менял бы язык вообще.
@@ -71,7 +60,7 @@ final class ModuleManager: ObservableObject {
         fullOrder = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
         hidden = Set(Module.allCases.filter { defaults.bool(forKey: Self.hiddenKey($0)) })
-        // Сразу из настроек: ответа утилиты и каталога при запуске ещё нет, а двойной работы быть не должно и на миг.
+        // Сразу из настроек: ответа утилиты и каталога при запуске ещё нет, а её страница нужна с первого кадра.
         external = Set(Module.allCases.filter { defaults.bool(forKey: ModuleHandover.handedOverKey($0.rawValue)) })
     }
 
@@ -123,8 +112,8 @@ final class ModuleManager: ObservableObject {
 
     func isOn(_ module: Module) -> Bool { enabled.contains(module) || external.contains(module) }
     func isExternal(_ module: Module) -> Bool { external.contains(module) }
-    /// Работает ли встроенный код: контроллеры модуля можно трогать только тогда.
-    func runsBuiltIn(_ module: Module) -> Bool { enabled.contains(module) && !external.contains(module) }
+    /// Модуль включён, а утилита его не ведёт: её надо поставить, а пока окно показывает `ModuleMissingPage`.
+    func wantsUtility(_ module: Module) -> Bool { enabled.contains(module) && !external.contains(module) }
     func isHidden(_ module: Module) -> Bool { hidden.contains(module) }
 
     /// «Установлен» = включён или ведётся утилитой. Скрытие на это не влияет.
@@ -151,11 +140,8 @@ final class ModuleManager: ObservableObject {
     func setOn(_ module: Module, _ on: Bool) {
         defaults.set(on, forKey: Self.onKey(module))
         if on { enabled.insert(module) } else { enabled.remove(module) }
-        if isActive { sync(module) }
     }
 
-    /// Модуль ведёт утилита: встроенный останавливается и не стартует. `ModuleOn` не меняется: снимут
-    /// утилиту — встроенный вернётся таким, каким был.
     /// Один раз на модуль: сброс просит утилиту выключиться, а не трогает её настройки сам.
     func takeUtilityReset(_ module: Module) -> Bool {
         utilityResets.remove(module) != nil
@@ -164,7 +150,6 @@ final class ModuleManager: ObservableObject {
     func setExternal(_ module: Module, _ isExternal: Bool) {
         guard isExternal != external.contains(module) else { return }
         if isExternal { external.insert(module) } else { external.remove(module) }
-        if isActive { sync(module) }
     }
 
     func setHidden(_ module: Module, _ isHidden: Bool) {
@@ -194,36 +179,5 @@ final class ModuleManager: ObservableObject {
     /// иначе первый модуль панели; иначе nil.
     func resolve(_ selection: Module) -> Module? {
         hidden.contains(selection) || !ModuleScope.shows(selection) ? firstInPanel : selection
-    }
-
-    /// Запуск приложения: стартуют включённые (скрытые тоже работают).
-    func startEnabled() {
-        isActive = true
-        Module.allCases.forEach(sync)
-    }
-
-    /// Выход из приложения: остановить всё, что запущено.
-    func stopAll() {
-        isActive = false
-        for module in Module.allCases where running.contains(module) {
-            running.remove(module)
-            let hook = hooks(module)
-            (hook.quit ?? hook.stop)()
-        }
-    }
-
-    private func sync(_ module: Module) {
-        let wanted = runsBuiltIn(module)
-        guard wanted != running.contains(module) else { return }
-        if wanted {
-            running.insert(module)
-            hooks(module).start()
-        } else {
-            running.remove(module)
-            let hook = hooks(module)
-            // Передача утилите не отменяет настройки человека в системе (🌐 у «Клавиатуры»): утилита продолжает с ними,
-            // поэтому встроенный останавливается как при выходе. Выключил человек — обычная остановка.
-            if external.contains(module) { (hook.quit ?? hook.stop)() } else { hook.stop() }
-        }
     }
 }

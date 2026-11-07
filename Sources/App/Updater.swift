@@ -80,8 +80,7 @@ final class Updater: ObservableObject {
             do {
                 try await Self.downloadAndReplace(from: url, expectedVersion: version,
                                                   target: Bundle.main.bundleURL,
-                                                  beforeReplace: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.holdForUpdate() } },
-                                                  replaceFailed: { if !ModuleManager.shared.isExternal(.fans) { FanController.shared.resumeAfterFailedUpdate() } })
+                                                  beforeReplace: {}, replaceFailed: {})
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)
@@ -167,12 +166,8 @@ final class Updater: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             NSApp.terminate(nil)
-            // Если что-то всё же отменило выход — выходим принудительно через секунду;
-            // модули останавливаем сами, как в applicationWillTerminate.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                ModuleManager.shared.stopAll()  // вентиляторы в «Авто» и т.п., как при обычном выходе
-                exit(0)
-            }
+            // Если что-то всё же отменило выход — выходим принудительно через секунду.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { exit(0) }
         }
     }
 
