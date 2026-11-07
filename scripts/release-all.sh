@@ -93,7 +93,8 @@ print(next((a["version"] for a in catalog["apps"] if a["id"] == sys.argv[1]), ""
 printf '%-10s %-10s %-10s %s\n' утилита версия каталог действие
 for i in "${!IDS[@]}"; do
   in_catalog="$(catalog_version "${IDS[$i]}")"
-  if [ "$in_catalog" = "${VERSIONS[$i]}" ]; then
+  # scripts/fix.sh выпускает на патч выше, не меняя Info.plist утилиты: каталог бывает новее исходников, и это не повод выпускать старую версию.
+  if [ -n "$in_catalog" ] && [ "$(printf '%s\n%s\n' "$in_catalog" "${VERSIONS[$i]}" | sort -V | tail -1)" = "$in_catalog" ]; then
     action="уже в каталоге"
     TODO+=("")
   else
