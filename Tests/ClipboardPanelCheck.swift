@@ -1335,6 +1335,51 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
 
 // MARK: - Перестановка
 
+/// Правила движения: короткие значения, выбор и смена вкладки не двигают ничего вокруг.
+@MainActor func checkMotionRules(out: String) async {
+    check((0.12...0.22).contains(ClipMotion.moveTime) && (0.12...0.22).contains(ClipMotion.fadeTime) && (0.12...0.22).contains(ClipboardPanelHost.slideDuration), "движения короткие: 0,12–0,22 с")
+    let model = panelModel(theme: "vivid")
+    let host = Stand.host(model, width: 1440)
+    await pause(0.45)
+    let rest = snapshot(host, out: out)
+    func body(_ i: Int) -> CGRect { CGRect(x: cardOrigin(i).x + 8, y: cardOrigin(i).y + 8, width: ClipCard.width - 16, height: ClipCard.height - 16) }
+    // Выбор: кадры сразу после клика, пока могла бы идти анимация.
+    model.selected = 2
+    var moved = 0
+    for _ in 0..<6 {
+        await pause(0.02)
+        let shot = snapshot(host, out: out)
+        moved += (0..<4).reduce(0) { $0 + changed(rest, shot, in: body($1)) }
+    }
+    check(moved == 0, "выбор меняет только рамку: внутри карточек ни одной другой точки (\(moved))")
+    let ring = snapshot(host, out: out)
+    check(changed(rest, ring, in: CGRect(x: cardOrigin(2).x - 4, y: cardOrigin(2).y, width: 3, height: ClipCard.height)) > 100, "и рамка на новой карточке")
+    // Поиск раскрывается сразу: ни наложений в ряду, ни движения ленты.
+    model.selected = 0
+    await pause(0.05)
+    let before = snapshot(host, out: out)
+    model.openSearch()
+    await pause(0.03)
+    let opened = snapshot(host, out: out)
+    await pause(0.4)
+    let settled = snapshot(host, out: out)
+    check(changed(opened, settled, in: CGRect(x: 0, y: 0, width: 1440, height: ClipPanelMetrics.panelHeight)) == 0, "поиск раскрылся сразу, без промежуточных кадров")
+    check((0..<4).reduce(0) { $0 + changed(before, settled, in: body($1)) } == 0, "содержимое карточек при этом не шевельнулось")
+    model.closeSearch()
+    // Смена вкладки: затухание на месте. Ни один промежуточный кадр не показывает карточку не на своём месте: край ленты слева всегда на месте.
+    await pause(0.1)
+    model.selectTab(ClipPanelFixture.spaces[0].id)
+    var edgeMoved = false
+    for _ in 0..<6 {
+        await pause(0.02)
+        let shot = snapshot(host, out: out)
+        if shot.count(in: CGRect(x: cardOrigin(0).x - 12, y: cardOrigin(0).y + 60, width: 6, height: 100), where: { min($0.r, $0.g, $0.b) > 0.5 }) > 0 { edgeMoved = true }
+    }
+    check(!edgeMoved, "смена вкладки: карточки не летят мимо своего места")
+    await pause(ClipMotion.fadeTime + 0.3)
+    Stand.window.contentView = nil
+}
+
 @MainActor func checkReorderLogic() {
     let panelFrame = CGRect(x: -1000, y: 300, width: 1440, height: 334)
     check(ClipboardPanelHost.pointInPanel(CGPoint(x: -900, y: 584), frame: panelFrame) == CGPoint(x: 100, y: 50), "курсор экрана в координатах панели, и на втором экране левее основного")
@@ -2280,6 +2325,8 @@ enum Main {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         Task { @MainActor in
+            // Ленты кадров вместо проверок: Tests/ClipboardPanelFilm.swift.
+            if let films = ProcessInfo.processInfo.environment["CLIPBOARD_FILM_DIR"] { await runFilms(out: films) }
             checkTracker()
             checkModelClicks()
             checkKeys()
@@ -2296,6 +2343,7 @@ enum Main {
             await checkPasteAfterLeaving()
             await checkDragPreview(out: out)
             checkReorderLogic()
+            await checkMotionRules(out: out)
             await checkRecordOrder(out: out)
             await checkSpaceOrder(out: out)
             await checkTitle(out: out)

@@ -111,6 +111,7 @@ final class ClipboardPanelModel: ObservableObject {
     private(set) var draggedSpace: UUID?
     /// Прокрутка в обрез, а не к центру: при переносе лента едет, только когда курсор у края.
     private(set) var scrollsMinimally = false
+    private(set) var scrollAnimated = true
     /// Курсор в координатах панели, от левого верхнего угла. Панель даёт его сама, проверка подставляет свой.
     var pointer: () -> CGPoint? = { nil }
     var isMouseDown: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
@@ -149,6 +150,9 @@ final class ClipboardPanelModel: ObservableObject {
     /// В «Истории» видно всё, что есть; во вкладке пространства — только его записи.
     var visible: [ClipItem] { ClipboardStore.filter(allItems, space: tab, query: query, spaces: spaces) }
 
+    /// Что показывает лента: вкладка и запрос.
+    var stripIdentity: String { "\(tab?.uuidString ?? "")|\(query)" }
+
     var selectedItem: ClipItem? {
         let list = visible
         return list.indices.contains(selected) ? list[selected] : nil
@@ -162,12 +166,14 @@ final class ClipboardPanelModel: ObservableObject {
     }
 
     private func scrollToFirst() {
-        requestScroll(to: visible.first?.id)
+        // Новое содержимое появляется сразу с начала: прокрутка анимацией тащила бы через него карточки.
+        requestScroll(to: visible.first?.id, animated: false)
     }
 
-    private func requestScroll(to id: UUID?, minimally: Bool = false) {
+    private func requestScroll(to id: UUID?, minimally: Bool = false, animated: Bool = true) {
         scrollRequest = id
         scrollsMinimally = minimally
+        scrollAnimated = animated
         scrollTick += 1
     }
 
@@ -255,9 +261,15 @@ final class ClipboardPanelModel: ObservableObject {
     func conceal(_ id: UUID) { revealed.remove(id) }
 
     /// Закрепить запись. Открытая на время в другой категории в новой снова скрыта.
+    /// Один анимированный переход на всё: точка на карточке и смыкание соседних, если запись ушла из открытой вкладки.
     func pin(_ id: UUID, to space: UUID?) {
         revealed.remove(id)
-        onPin(id, space)
+        withAnimation(ClipMotion.move) { onPin(id, space) }
+    }
+
+    /// Удалить запись: соседние смыкаются.
+    func delete(_ id: UUID) {
+        withAnimation(ClipMotion.move) { onDelete(id) }
     }
 
     // MARK: Перетаскивание
@@ -339,7 +351,10 @@ final class ClipboardPanelModel: ObservableObject {
         ClipDragLog.log.info("перенос окончен: место записи \(toRecord ?? -1), категории \(toSpace ?? -1)")
         draggedRecord = nil
         draggedSpace = nil
-        withAnimation(ClipMotion.settle) {
+        // Без анимации: соседи уже стоят на новых местах, порядок только подтверждает то, что видно.
+        var settled = Transaction()
+        settled.disablesAnimations = true
+        withTransaction(settled) {
             keepingSelection {
                 recordSlot = nil
                 spaceSlot = nil
@@ -355,13 +370,16 @@ final class ClipboardPanelModel: ObservableObject {
             let slot = point.flatMap(recordSlot(under:))
             guard slot != recordSlot else { return }
             ClipDragLog.log.info("место записи \(slot ?? -1)")
-            withAnimation(ClipMotion.settle) { recordSlot = slot }
-            // У края лента едет, открывая следующих соседей.
-            if let slot, visible.indices.contains(slot) { requestScroll(to: visible[slot].id, minimally: true) }
+            withAnimation(ClipMotion.move) { recordSlot = slot }
+            // Только у края: лента едет, открывая следующих соседей. Иначе прокрутка шла бы поверх движения соседей.
+            if let slot, visible.indices.contains(slot), let strip = stripFrames[ClipStripKey.strip], let content = stripFrames[ClipStripKey.content] {
+                let x = content.minX + ClipPanelMetrics.ringRoom + CGFloat(slot) * (ClipCard.width + ClipPanelMetrics.cardGap)
+                if x < strip.minX || x + ClipCard.width > strip.maxX { requestScroll(to: visible[slot].id, minimally: true) }
+            }
         } else if draggedSpace != nil {
             let slot = point.flatMap(spaceSlot(under:))
             guard slot != spaceSlot else { return }
-            withAnimation(ClipMotion.settle) { spaceSlot = slot }
+            withAnimation(ClipMotion.move) { spaceSlot = slot }
         }
     }
 
@@ -527,7 +545,7 @@ final class ClipboardPanelModel: ObservableObject {
             return true
         case 48: cycleTab(key.shift ? -1 : 1); return true  // Tab
         case 51 where key.command:                    // ⌘⌫ — удалить запись
-            if let item = selectedItem { onDelete(item.id) }
+            if let item = selectedItem { delete(item.id) }
             return true
         default:
             guard !searchOpen, !key.command else { return false }
@@ -724,14 +742,13 @@ struct ClipboardPanelView: View {
                     // Ряд мог не влезть: новая категория должна быть видна.
                     .onChange(of: model.spaceNameEdit?.id) {
                         guard let id = model.spaceNameEdit?.id else { return }
-                        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+                        DispatchQueue.main.async { proxy.scrollTo(id) }
                     }
                 }
             }
             moreMenu
         }
         .frame(height: ClipPanelMetrics.barHeight)
-        .animation(.easeOut(duration: 0.14), value: model.searchOpen)
     }
 
     private var rowGap: CGFloat { model.searchOpen ? 10 : ClipPanelMetrics.spaceGap }
@@ -822,6 +839,9 @@ struct ClipboardPanelView: View {
     private func spaceTab(_ space: ClipSpace) -> some View {
         let active = model.tab == space.id
         return spaceLabel(space, active: active)
+        // Приёмник и кадр в ряду снаружи: сдвинутая вкладка не уносит их из-под курсора.
+        .opacity(model.spaceSlot != nil && model.draggedSpace == space.id ? 0 : 1)
+        .offset(x: model.spaceShift(space.id))
         .accessibilityAddTraits(.isButton)
         .onTapGesture { model.selectTab(space.id) }
         .onDrag {
@@ -836,8 +856,6 @@ struct ClipboardPanelView: View {
         .contextMenu { spaceMenu(space) }
         // Половина зазора с каждой стороны: приёмники смыкаются, и между соседними вкладками бросок не пропадает.
         .modifier(spaceDropEffect(space, reach: ClipPanelMetrics.spaceGap / 2))
-        .opacity(model.spaceSlot != nil && model.draggedSpace == space.id ? 0.35 : 1)
-        .offset(x: model.spaceShift(space.id))
     }
 
     /// Категория на время поиска: только точка, название в подсказке.
@@ -862,8 +880,7 @@ struct ClipboardPanelView: View {
         guard let provider = ClipDrag.recordProvider(in: providers) else { return false }
         _ = provider.loadDataRepresentation(forTypeIdentifier: ClipDrag.recordType.identifier) { data, _ in
             guard let id = data.flatMap(ClipDrag.recordID) else { return }
-            // Один анимированный переход на всё: точка на карточке и смыкание соседних, если запись ушла из открытой вкладки.
-            DispatchQueue.main.async { withAnimation(ClipMotion.settle) { model.acceptDroppedRecord(id, on: space) } }
+            DispatchQueue.main.async { model.acceptDroppedRecord(id, on: space) }
         }
         return true
     }
@@ -959,10 +976,10 @@ struct ClipboardPanelView: View {
                                          theme: model.theme, spaces: model.spaces, now: model.shownAt, model: model,
                                          concealed: model.isConcealed(item), editingTitle: model.titleEdit?.id == item.id)
                                     .id(item.id)
-                                    // Место, куда встанет переносимая карточка, и соседи вокруг него.
-                                    .opacity(model.recordSlot != nil && index == from ? 0.3 : 1)
+                                    // Сама она летит под курсором, здесь пустое место, вокруг которого расступаются соседи.
+                                    .opacity(model.recordSlot != nil && index == from ? 0 : 1)
                                     .offset(x: model.recordShift(at: index, draggedAt: from))
-                                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                                    .transition(.opacity.animation(ClipMotion.fade))
                                     // Один обработчик: второй, на двойной клик, заставил бы одиночный ждать.
                                     .onTapGesture { model.click(item, at: index) }
                                     // Половина зазора с каждой стороны: цели смыкаются, между карточками бросок не пропадает.
@@ -977,12 +994,21 @@ struct ClipboardPanelView: View {
                     .clipStripFrame(ClipStripKey.strip)
                     .onChange(of: model.scrollTick) {
                         guard let target = model.scrollRequest else { return }
-                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target, anchor: model.scrollsMinimally ? nil : .center) }
+                        let anchor: UnitPoint? = model.scrollsMinimally ? nil : .center
+                        if model.scrollAnimated {
+                            withAnimation(ClipMotion.fade) { proxy.scrollTo(target, anchor: anchor) }
+                        } else {
+                            proxy.scrollTo(target, anchor: anchor)
+                        }
                     }
                 }
+                // Другая вкладка или выдача — другая лента: содержимое меняется затуханием, карточки никуда не летят.
+                .id(model.stripIdentity)
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(ClipMotion.fade, value: model.stripIdentity)
     }
 
     private var emptyText: String {
@@ -1095,6 +1121,15 @@ private final class ClipboardNSPanel: NSPanel {
 /// не обязана принимать. Поэтому внутри программы разрешён и перенос, а наружу по-прежнему только копия: Finder не переместит настоящий файл.
 /// Метод SwiftUI закрыт для переопределения в Swift, селектор добавляется на этот подкласс, общий `NSHostingView` не меняется.
 final class ClipPanelHostingView: NSHostingView<ClipboardPanelView> {
+    #if KIT_TEST_DEFAULTS
+    /// Сколько раз вид пересчитал раскладку: при движении окна её быть не должно.
+    static var layoutCount = 0
+    override func layout() {
+        Self.layoutCount += 1
+        super.layout()
+    }
+    #endif
+
     private static let dragMask: Void = {
         let selector = #selector(NSDraggingSource.draggingSession(_:sourceOperationMaskFor:))
         guard let inherited = class_getInstanceMethod(ClipPanelHostingView.self, selector) else { return }
@@ -1181,15 +1216,29 @@ final class ClipboardPanelHost {
             panel.setFrame(frame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
             panel.alphaValue = 0
         }
+        // Раскладка новых данных здесь, а не посреди движения: иначе первый шаг анимации опаздывает и окно прыгает.
+        panel.contentView?.layoutSubtreeIfNeeded()
         panel.makeKeyAndOrderFront(nil)
+        // Первый показ рисуется долго: пусть это случится при нулевой альфе, отсчёт движения начнётся после.
+        panel.displayIfNeeded()
         if reducesMotion() {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
         } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.slideDuration
-                panel.animator().setFrame(frame, display: true)
-                panel.animator().alphaValue = 1
+            // В следующем такте: отсчёт анимации идёт от начала текущего, и всё, что сделано выше (30–80 мс), она считала бы прошедшим.
+            // На ленте окно появлялось уже на 90% пути.
+            let presentation = self.presentation
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.presentation == presentation, !self.isLeaving else { return }
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = Self.slideDuration
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        // Окно только едет: размер тот же, перерисовка и раскладка не нужны.
+                        panel.animator().setFrame(frame, display: false)
+                        panel.animator().alphaValue = 1
+                    }
+                }
             }
         }
         installMonitors()
@@ -1231,7 +1280,8 @@ final class ClipboardPanelHost {
         let presentation = self.presentation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.slideDuration
-            panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: true)
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {

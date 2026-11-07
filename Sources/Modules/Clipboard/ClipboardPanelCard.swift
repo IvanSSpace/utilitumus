@@ -125,7 +125,7 @@ struct ClipCard: View {
                         Circle().fill(ClipPalette.color(space.colorID)).frame(width: 9, height: 9)
                             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
                             .help("Пространство «\(space.name)»")
-                            .transition(.scale(scale: 0.2).combined(with: .opacity))
+                            .transition(.opacity)
                     }
                 }
                 Text(subtitle).font(.system(size: 12))
@@ -281,9 +281,11 @@ struct ClipCard: View {
 
     @ViewBuilder private var numberLabel: some View {
         if let number {
+            // Номер меняется сразу: в общей анимации смыкания старый и новый просвечивали бы друг через друга.
             Text("⌘\(number)").font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.6))
                 .fixedSize()
+                .contentTransition(.identity)
         }
     }
 
@@ -322,7 +324,7 @@ struct ClipCard: View {
             Button("Убрать из пространства") { model.pin(item.id, to: nil) }
         }
         Divider()
-        Button("Удалить", role: .destructive) { model.onDelete(item.id) }
+        Button("Удалить", role: .destructive) { model.delete(item.id) }
     }
 }
 

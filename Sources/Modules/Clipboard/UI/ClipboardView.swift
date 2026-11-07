@@ -260,7 +260,7 @@ struct ClipboardView<Model: ClipboardModel>: View {
 private enum SpaceRowHeight {
     static let value: CGFloat = 40
     static var spring: Animation? {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.2)
     }
 }
 
