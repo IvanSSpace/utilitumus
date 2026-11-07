@@ -20,7 +20,7 @@ CACHE="$(incremental_cache clipboard)"
 mkdir -p "$CACHE/src"
 cmp -s Tests/ClipboardCheck.swift "$CACHE/src/main.swift" || cp Tests/ClipboardCheck.swift "$CACHE/src/main.swift"
 FILES=("$CACHE/src/main.swift"
-  Sources/Modules/Clipboard/ClipboardModels.swift
+  Sources/Modules/Clipboard/UI/ClipboardModels.swift
   Sources/Modules/Clipboard/ClipboardStore.swift
   Sources/Modules/Clipboard/ClipboardPasteboard.swift
   Sources/Modules/Clipboard/ClipboardPreview.swift)

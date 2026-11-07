@@ -17,7 +17,8 @@ Sources/Modules/Browser/BrowserView.swift|LSRegisterURL
 Sources/Modules/Browser/BrowserView.swift|NSWorkspace.shared.open
 Sources/Modules/Browser/BrowserView.swift|setDefaultApplication
 Sources/Modules/Clipboard/ClipboardController.swift|NSWorkspace.shared.open
-Sources/Modules/Clipboard/ClipboardKeyring.swift|SecItem
+Sources/Modules/Clipboard/UI/ClipboardKeyring.swift|SecItem
+Sources/Modules/Clipboard/ClipboardKeyResolver.swift|SecItem
 Sources/Modules/Clipboard/ClipboardStore.swift|SecItem
 Sources/Modules/Clipboard/ClipboardStore.swift|removeItem
 Sources/Modules/Clipboard/ClipboardStore.swift|urls(for:

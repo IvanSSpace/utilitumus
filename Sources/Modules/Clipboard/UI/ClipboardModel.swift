@@ -31,9 +31,3 @@ protocol ClipboardModel: ObservableObject, HotKeyTarget {
     func addExcluded(_ bundleID: String)
     func removeExcluded(_ bundleID: String)
 }
-
-extension ClipboardController: ClipboardModel {
-    var totalCount: Int { items.count }
-    func count(inSpace id: UUID) -> Int { items.filter { $0.spaceID == id }.count }
-    var recent: [ClipRecentRow] { ClipRecentRow.rows(from: items) }
-}

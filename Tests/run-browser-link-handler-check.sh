@@ -40,7 +40,7 @@ mkdir -p "$CACHE/src"
 for f in main.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
 FILES=("$CACHE/src/main.swift" $(find Sources/Kit Sources/Modules/Browser -name '*.swift' | sort) \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleHandover.swift \
-  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Clipboard/ClipboardKeyring.swift Sources/Modules/Clipboard/ClipboardStore.swift Sources/Modules/Clipboard/ClipboardModels.swift)
+  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Clipboard/UI/ClipboardKeyring.swift Sources/Modules/Clipboard/ClipboardKeyResolver.swift Sources/Modules/Clipboard/ClipboardStore.swift Sources/Modules/Clipboard/UI/ClipboardModels.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name BrowserLinkHandlerCheck -o "$OUT/check" \
   "${FILES[@]}" -framework SwiftUI -framework AppKit

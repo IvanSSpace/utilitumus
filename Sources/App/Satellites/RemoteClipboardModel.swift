@@ -24,8 +24,8 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
         self.keyring = keyring
         super.init(id: id,
                    initial: ClipboardState(totalCount: 0, historyCount: 0, spaces: [], spaceCounts: [:], recent: [],
-                                           hotKeyLabel: VoiceHotKey.label(keyCode: ClipboardController.defaultKeyCode,
-                                                                          modifiers: ClipboardController.defaultModifiers),
+                                           hotKeyLabel: VoiceHotKey.label(keyCode: ClipboardDefaults.keyCode,
+                                                                          modifiers: ClipboardDefaults.modifiers),
                                            hotKeyError: nil, storeError: nil, storeNotice: nil,
                                            limit: ClipboardPolicy.defaultLimit, excludedApps: [], axTrusted: false),
                    dashboardWatch: .changes, link: link, canRead: canRead,
