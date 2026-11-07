@@ -33,8 +33,8 @@ export MARK="$T"
 fixture() {
   { printf '#!/bin/bash\n%ssource "$(dirname "$0")/lib/check-limit.sh"\nset -uo pipefail\n' "${2:+CHECK_LIMIT=$2 }"; cat; } > "$T/Tests/run-$1.sh"
 }
-# Сама эта проверка уже под сторожем, а подставным нужен свой.
-fresh() { env -u CHECK_LIMIT_GUARD -u CHECK_LIMIT "$@"; }
+# Сама эта проверка уже под сторожем, а подставным нужен свой. Не функция: с ней $! был бы подоболочкой, а не сторожем.
+FRESH=(env -u CHECK_LIMIT_GUARD -u CHECK_LIMIT)
 
 # Висит на переднем плане; потомки: фоновый, осиротевший, со своей группой (его находит только обход по родителю).
 fixture hung 2 <<'EOF'
@@ -66,10 +66,30 @@ EOF
 
 echo "== код и аргументы независлой проверки доходят как есть"
 status=0
-fresh /bin/bash "$T/Tests/run-exits.sh" a 'b c' > "$T/exits.log" 2>&1 || status=$?
+"${FRESH[@]}" /bin/bash "$T/Tests/run-exits.sh" a 'b c' > "$T/exits.log" 2>&1 || status=$?
 same "код проверки" "$status" 7
 has "аргументы" "$T/exits.log" 'аргументы: 2 [a] [b c]'
 same "строки о зависании нет" "$(/usr/bin/grep -c ПРОВАЛ "$T/exits.log" || true)" 0
+
+# У скрипта под сторожем своя группа, поэтому Ctrl-C в терминале получает только сторож: он обязан передать сигнал дереву.
+echo "== прерывание сторожа доходит до проверки"
+fixture stopped "" <<'EOF'
+trap 'exit 1' TERM
+trap 'echo есть > "$MARK/stopped.trap"' EXIT
+sleep 907 &
+echo $! > "$MARK/stopped.bg"
+sleep 908
+EOF
+"${FRESH[@]}" /bin/bash "$T/Tests/run-stopped.sh" > "$T/stopped.log" 2>&1 &
+stopped=$!
+for _ in $(seq 1 100); do [ -e "$T/stopped.bg" ] && break; sleep 0.1; done
+kill -TERM "$stopped"
+status=0
+wait "$stopped" || status=$?
+same "код прерванной" "$status" 143
+dead "потомок прерванной" "$(cat "$T/stopped.bg")"
+[ -s "$T/stopped.trap" ] && ok "trap прерванной выполнен" || bad "trap прерванной не выполнен"
+same "о зависании не сказано" "$(/usr/bin/grep -c зависла "$T/stopped.log" || true)" 0
 
 echo "== зависшие проверки"
 locked() { /usr/bin/python3 -I -c 'import fcntl, sys
@@ -79,11 +99,11 @@ except OSError:
     sys.exit(0)
 sys.exit(1)' "$1"; }
 started=$SECONDS
-CHECK_LOCK_DIR="$T/locks" fresh Tests/with-check-lock.sh /bin/bash "$T/Tests/run-hung.sh" > "$T/hung.log" 2>&1 &
+CHECK_LOCK_DIR="$T/locks" "${FRESH[@]}" Tests/with-check-lock.sh /bin/bash "$T/Tests/run-hung.sh" > "$T/hung.log" 2>&1 &
 hung=$!
-fresh env CHECK_LIMIT=1 /bin/bash "$T/Tests/run-stubborn.sh" > "$T/stubborn.log" 2>&1 &
+"${FRESH[@]}" CHECK_LIMIT=1 /bin/bash "$T/Tests/run-stubborn.sh" > "$T/stubborn.log" 2>&1 &
 stubborn=$!
-fresh /bin/bash "$T/Tests/run-immortal.sh" > "$T/immortal.log" 2>&1 &
+"${FRESH[@]}" /bin/bash "$T/Tests/run-immortal.sh" > "$T/immortal.log" 2>&1 &
 immortal=$!
 for _ in $(seq 1 100); do [ -e "$T/hung.bg" ] && break; sleep 0.1; done
 if locked "$T/locks/run-hung.lock"; then ok "пока висит, замок группы занят"; else bad "пока висит, замок группы свободен"; fi
