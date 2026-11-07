@@ -73,8 +73,6 @@ func differingRowBand(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> ClosedRan
     return first...last
 }
 
-/// Два текста внешнего модуля отличаются по замыслу (Q2): только одна строка внизу, не выше строки текста. Всё, что выше, совпадает до пикселя.
-let footerRowsLimit = 40
 
 /// Служба в стенде не стоит: без «Позже» на месте экрана чек-лист, и сверялись бы два чек-листа.
 @MainActor func showModuleScreen() async {
@@ -101,26 +99,24 @@ let footerRowsLimit = 40
         check(registry.isEnabled(.fans), "\(themeName): реестр видит утилиту включённой")
         // Датчики настоящие, такт утилиты меняет обороты и градусы, пока вкладка открыта. Контроллер закрепляется на том,
         // что вкладка показала в момент снимка; такт мог попасть между ними, поэтому до трёх попыток. Подделка красна в каждой.
-        var band: ClosedRange<Int>?, local: NSBitmapImageRep!, remote: NSBitmapImageRep!, shown = model.state
+        var different = Int.max, local: NSBitmapImageRep!, remote: NSBitmapImageRep!, shown = model.state
         for _ in 0..<3 {
             remote = await Stand.open(theme)
             shown = model.state
             pinLocal(to: shown)
             local = await openLocal(theme)
-            band = differingRowBand(local, remote)
-            if let band, band.count <= footerRowsLimit { break }
+            different = differingPixels(local, remote)
+            if different == 0 { break }
         }
         Stand.save(local, "\(themeName)-local")
         Stand.save(remote, "\(themeName)-remote")
-        let rows = band?.count ?? 0
-        check(band != nil && rows <= footerRowsLimit, "\(themeName): вне нижней строки снимки совпали, разные строки пикселей \(band.map { "\($0)" } ?? "нет") (допуск \(footerRowsLimit))")
-        check(RemoteFansModel.shared.isExternal && !BuiltInFansModel.shared.isExternal, "\(themeName): тексты внешнего модуля только у внешнего")
+        check(different == 0, "\(themeName): окно утилиты и вкладка совпали до пикселя, разных пикселей \(different)")
         // Сверка видит значения: контроллер с другими градусами на тот же снимок уже не похож.
         FanController.shared.testPin(fans: shown.fans, cpu: shown.cpuSensors.map { SensorReading(key: $0.key, value: $0.value + 10) }, gpu: shown.gpuSensors,
                                      conflict: nil, safetyTripped: shown.safetyTripped, lastError: shown.lastError)
         let changed = await openLocal(theme)
         let changedRows = differingRowBand(changed, remote)?.count ?? 0
-        check(changedRows > footerRowsLimit, "\(themeName): другие градусы сверка замечает, разные строки \(changedRows)")
+        check(changedRows > 0, "\(themeName): другие градусы сверка замечает, разные строки \(changedRows)")
     }
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
 }

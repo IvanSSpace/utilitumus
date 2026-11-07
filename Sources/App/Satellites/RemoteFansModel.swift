@@ -51,7 +51,6 @@ final class RemoteFansModel: RemoteModuleModel<FansState, FansAction>, FansModel
     var addable: [RunningCandidate] { state.addable.map { RunningCandidate(key: $0.key, name: $0.name, icon: Self.icon(forKey: $0.key)) } }
     var gameName: String? { state.gameName }
     var gameLeavingUntil: Date? { state.gameLeavingUntil }
-    var isExternal: Bool { true }
 
     func icon(for entry: GameEntry) -> NSImage? { Self.icon(forKey: entry.key) }
     func addGame(_ candidate: RunningCandidate) { send(.addGame(key: candidate.key)) }

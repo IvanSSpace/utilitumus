@@ -573,7 +573,7 @@ struct FansView<Model: FansModel>: View {
         if let app = model.conflict {
             Banner(icon: "exclamationmark.triangle.fill", color: .orange,
                    text: "\(app.name ?? "Другая программа") управляет вентиляторами",
-                   detail: model.isExternal ? "Пока она открыта, утилита «Вентиляторы» не вмешивается." : "Пока она открыта, Utilitumus не вмешивается.") {
+                   detail: "Пока она открыта, утилита «Вентиляторы» не вмешивается.") {
                 DSButton("Закрыть её") { model.closeConflictingApp(id: app.id) }
             }
         }
@@ -684,7 +684,7 @@ struct FansView<Model: FansModel>: View {
                 Text(error).font(.system(size: 11.5)).foregroundStyle(.red)
             }
             HStack {
-                Text(model.isExternal ? "Когда утилита «Вентиляторы» останавливается, вентиляторы возвращаются в «Авто»." : "При выходе из Utilitumus вентиляторы возвращаются в «Авто».")
+                Text("Когда утилита «Вентиляторы» останавливается, вентиляторы возвращаются в «Авто».")
                     .font(.system(size: 11)).foregroundStyle(dim)
                 Spacer()
                 if model.helperStatus != .notInstalled {

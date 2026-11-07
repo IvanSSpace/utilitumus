@@ -37,8 +37,6 @@ protocol FansModel: ObservableObject {
     func installHelper()
     func uninstallHelper()
     func setScreenOpen(_ open: Bool)
-    /// Вентиляторами ведает отдельная утилита, а не центр: от этого зависят два текста экрана.
-    var isExternal: Bool { get }
 }
 
 extension FansModel {

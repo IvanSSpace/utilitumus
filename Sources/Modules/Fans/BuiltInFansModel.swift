@@ -64,7 +64,6 @@ final class BuiltInFansModel: FansModel {
         controller.restoreAutoBlocking()
         installer.uninstall()
     }
-    var isExternal: Bool { false }
     func setScreenOpen(_ open: Bool) {
         installer.screenOpen = open
         if open { installer.refresh() }
