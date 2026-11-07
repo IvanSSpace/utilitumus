@@ -36,13 +36,13 @@
     },
     {
       "id": "fans",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.2.0/Fans.zip",
-      "sha256": "2118c9a9114685b592c797a6f26b418311f04d6bb5ed6b8f9e5938377c01432b",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.2.1/Fans.zip",
+      "sha256": "d986bd58672b56b654714ea692653eb09d3610745651218a770f668571f2d902",
       "sizeMB": 2,
       "notes": [
-        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
