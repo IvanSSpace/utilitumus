@@ -148,7 +148,8 @@ clean_defaults() {
   defaults delete "$SUITE" >/dev/null 2>&1 || true
   rm -f "$HOME/Library/Preferences/$SUITE.plist" "$HOME/Library/Preferences/$BIN.plist"
 }
-trap clean_defaults EXIT
+# Код выхода сохраняется: иначе ошибка скрипта выглядела бы успехом по коду последней команды ловушки.
+trap 'rc=$?; clean_defaults; exit $rc' EXIT
 
 run_stand() { # exe журнал
   rm -rf "$OUT/work" "$OUT/png"
@@ -194,13 +195,13 @@ text = open(source, encoding="utf-8").read()
 assert old in text, "нет места для поломки: " + old
 open(target, "w", encoding="utf-8").write(text.replace(old, new, 1))
 PY
-  build "$MUT" "$MUT/stand" ${replace_arg[@]+"${replace_arg[@]}"} 2>"$MUT/build.log" || { echo "ПРОВАЛ: поломка «$name» не собралась, $MUT/build.log"; /usr/bin/tail -5 "$MUT/build.log"; exit 1; }
+  build "$MUT" "$MUT/stand" ${replace_arg[@]+"${replace_arg[@]}"} 2>"$MUT/build.log" || { echo "ПРОВАЛ: поломка «${name}» не собралась, $MUT/build.log"; /usr/bin/tail -5 "$MUT/build.log"; exit 1; }
   local status=0
   run_stand "$MUT/stand" "$MUT/run.log" || status=$?
-  if [ "$status" = 0 ]; then echo "ПРОВАЛ: поломка «$name» не замечена"; exit 1; fi
+  if [ "$status" = 0 ]; then echo "ПРОВАЛ: поломка «${name}» не замечена"; exit 1; fi
   /usr/bin/grep -F "FAIL" "$MUT/run.log" | /usr/bin/grep -F "$expect" | head -3 > "$MUT/hits" || true
-  if [ ! -s "$MUT/hits" ]; then echo "ПРОВАЛ: поломка «$name»: ждали красную «$expect»"; /usr/bin/grep -F FAIL "$MUT/run.log" | head -5; /usr/bin/tail -3 "$MUT/run.log"; exit 1; fi
-  echo "ok   поломка «$name» краснеет:"; sed 's/^/       /' "$MUT/hits"
+  if [ ! -s "$MUT/hits" ]; then echo "ПРОВАЛ: поломка «${name}»: ждали красную «${expect}»"; /usr/bin/grep -F FAIL "$MUT/run.log" | head -5; /usr/bin/tail -3 "$MUT/run.log"; exit 1; fi
+  echo "ok   поломка «${name}» краснеет:"; sed 's/^/       /' "$MUT/hits"
 }
 
 mutate "без пропуска занятых" Sources/App/Satellites/SatelliteRegistry.swift \
