@@ -36,7 +36,7 @@ func guardedSettings(_ defaults: UserDefaults) -> [String: String] {
     return result
 }
 
-func seed() {
+@MainActor func seed() {
     let defaults = UserDefaults.standard
     defaults.set(true, forKey: "ModulesV2")
     defaults.set(true, forKey: "ModulesV3")
@@ -80,7 +80,7 @@ final class Calls: @unchecked Sendable {
 let calls = Calls()
 
 /// Статус: утилиты вне встроенных отвечают, у встроенных связи нет.
-func setEnvironment(apps: URL) {
+@MainActor func setEnvironment(apps: URL) {
     let paths = SatellitePaths(appsDir: apps, agentsDir: workRoot.appendingPathComponent("Agents"))
     SatelliteRegistry.standEnvironment = SatelliteEnvironment(
         paths: paths, defaults: .standard,
