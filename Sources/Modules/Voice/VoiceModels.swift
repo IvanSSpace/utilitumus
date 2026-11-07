@@ -1,85 +1,12 @@
 import Foundation
 import CryptoKit
 
-/// Модели распознавания речи для sherpa-onnx. Скачиваются по кнопке (сотни мегабайт
-/// в приложение не вшиваются); хэш каждого архива вшит сюда и сверяется после загрузки.
-enum VoiceModel: String, CaseIterable, Identifiable {
-    case gigaam
-    case parakeet
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .gigaam: return "GigaAM v3 — русский"
-        case .parakeet: return "Parakeet v3 — многоязычный"
-        }
-    }
-
-    /// Короткая подпись под названием: размер и сильные стороны.
-    var subtitle: String {
-        switch self {
-        case .gigaam: return "170 МБ · лучший для русского, сам ставит знаки препинания"
-        case .parakeet: return "487 МБ · 25 европейских языков, включая русский и английский"
-        }
-    }
-
-    var license: String {
-        switch self {
-        case .gigaam: return "MIT"
-        case .parakeet: return "CC-BY-4.0"
-        }
-    }
-
-    /// Архив с моделью в релизах sherpa-onnx.
-    var url: URL {
-        URL(string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/\(folderName).tar.bz2")!
-    }
-
-    var sha256: String {
-        switch self {
-        case .gigaam: return "f9620a0099019c6afcee26525ef9ed3297fa50dd5691c1902af0c948fc1a470b"
-        case .parakeet: return "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
-        }
-    }
-
-    /// Размер архива в байтах — для прогресса, когда сервер не прислал Content-Length.
-    var sizeBytes: Int64 {
-        switch self {
-        case .gigaam: return 170_197_019
-        case .parakeet: return 487_170_055
-        }
-    }
-
-    /// Имя папки: оно же имя корневой папки внутри архива.
-    var folderName: String {
-        switch self {
-        case .gigaam: return "sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16"
-        case .parakeet: return "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-        }
-    }
-
-    /// Файлы, без которых модель не работает.
-    var requiredFiles: [String] {
-        switch self {
-        case .gigaam: return ["encoder.int8.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt"]
-        case .parakeet: return ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"]
-        }
-    }
-}
-
 /// Скачанные модели: статус, загрузка, удаление, выбранная модель.
 @MainActor
 final class VoiceModelStore: ObservableObject {
     static let shared = VoiceModelStore()
 
-    enum Status: Equatable, Codable {
-        case notInstalled
-        case downloading(progress: Double)
-        case verifying
-        case installed
-        case failed(String)
-    }
+    typealias Status = VoiceModelStatus
 
     @Published private(set) var statuses: [VoiceModel: Status] = [:]
 
@@ -88,29 +15,16 @@ final class VoiceModelStore: ObservableObject {
         didSet { Kit.defaults.set(selected.rawValue, forKey: Self.selectedKey) }
     }
 
-    nonisolated static let selectedKey = "Voice.Model"
+    nonisolated static let selectedKey = VoiceModelFiles.selectedKey
 
     private var tasks: [VoiceModel: Task<Void, Never>] = [:]
 
-    /// Application Support/Utilitumus/Voice/Models. В сборке со швом `KIT_TEST_DEFAULTS` это временная папка своего suite:
-    /// домашний каталог в ней не участвует, потому что утилита стенда под launchd живёт с настоящим домом
-    /// и иначе чистила бы и стирала настоящие модели.
-    nonisolated static var modelsRoot: URL {
-        #if KIT_TEST_DEFAULTS
-        let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? "local.utilitumus.test.kit"
-        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("utilitumus-test-models/\(suite)/Voice/Models", isDirectory: true)
-        Kit.assertStandPath(root, "модели Голоса")
-        return root
-        #else
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Utilitumus/Voice/Models", isDirectory: true)
-        #endif
-    }
+    nonisolated static var modelsRoot: URL { VoiceModelFiles.modelsRoot }
+    nonisolated static func folder(of model: VoiceModel) -> URL { VoiceModelFiles.folder(of: model) }
+    nonisolated static func isInstalled(_ model: VoiceModel) -> Bool { VoiceModelFiles.isInstalled(model) }
 
     private init() {
-        selected = Kit.defaults.string(forKey: Self.selectedKey)
-            .flatMap(VoiceModel.init(rawValue:)) ?? .gigaam
+        selected = VoiceModelFiles.selected
         for model in VoiceModel.allCases {
             statuses[model] = Self.isInstalled(model) ? .installed : .notInstalled
         }
@@ -171,22 +85,11 @@ final class VoiceModelStore: ObservableObject {
 
     func delete(_ model: VoiceModel) {
         tasks[model]?.cancel()
-        try? FileManager.default.removeItem(at: Self.folder(of: model))
+        VoiceModelFiles.delete(model)
         statuses[model] = .notInstalled
     }
 
     // MARK: - Диск
-
-    nonisolated static func folder(of model: VoiceModel) -> URL {
-        modelsRoot.appendingPathComponent(model.folderName, isDirectory: true)
-    }
-
-    nonisolated static func isInstalled(_ model: VoiceModel) -> Bool {
-        let dir = folder(of: model)
-        return model.requiredFiles.allSatisfy {
-            FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
-        }
-    }
 
     private var leftoversCleaned = false
 

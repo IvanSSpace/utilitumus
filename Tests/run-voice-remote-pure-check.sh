@@ -10,7 +10,7 @@ trap 'defaults delete local.utilitumus.test.kit.voice-pure 2>/dev/null || true; 
 # Инкрементальная сборка: кэш вне папки стенда. Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache voice-remote-pure KIT_TEST_DEFAULTS)"
-FILES=(Tests/VoiceRemotePureCheck.swift Sources/Modules/Voice/*.swift Sources/Kit/*.swift Sources/Kit/Link/*.swift)
+FILES=(Tests/VoiceRemotePureCheck.swift Sources/Modules/Voice/*.swift Sources/Modules/Voice/UI/*.swift Sources/Kit/*.swift Sources/Kit/Link/*.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name VoiceRemotePure -o "$OUT/check" \
   "${FILES[@]}" \

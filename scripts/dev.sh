@@ -220,7 +220,7 @@ if ! helper_fresh utilitumus-voice "$STAMP"; then
   echo "$STAMP" > "$HC/utilitumus-voice.stamp"; HELPER_NOTE="$HELPER_NOTE voice"
 fi
 
-LINKS_FILES=(Sources/LinkHelper/main.swift Sources/Modules/Browser/BrowserCatalog.swift Sources/Modules/Browser/BrowserRules.swift
+LINKS_FILES=(Sources/LinkHelper/main.swift Sources/Modules/Browser/UI/BrowserCatalog.swift Sources/Modules/Browser/UI/BrowserRules.swift
   Sources/Modules/Browser/BrowserPicker.swift Sources/Modules/Browser/BrowserRouter.swift Sources/LinkHelper/Info.plist Info.plist)
 [ ! -f Resources/AppIcon.icns ] || LINKS_FILES+=(Resources/AppIcon.icns)
 STAMP="$(helper_stamp links "${LINKS_FILES[@]}")"

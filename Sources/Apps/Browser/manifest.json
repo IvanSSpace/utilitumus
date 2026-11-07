@@ -4,5 +4,5 @@
   "identifier": "local.utilitumus.links",
   "executable": "UtilitumusLinks",
   "info": "Sources/LinkHelper/Info.plist",
-  "sources": ["Sources/LinkHelper/main.swift", "Sources/Modules/Browser/BrowserCatalog.swift", "Sources/Modules/Browser/BrowserRules.swift", "Sources/Modules/Browser/BrowserPicker.swift", "Sources/Modules/Browser/BrowserRouter.swift"]
+  "sources": ["Sources/LinkHelper/main.swift", "Sources/Modules/Browser/UI/BrowserCatalog.swift", "Sources/Modules/Browser/UI/BrowserRules.swift", "Sources/Modules/Browser/BrowserPicker.swift", "Sources/Modules/Browser/BrowserRouter.swift"]
 }]}

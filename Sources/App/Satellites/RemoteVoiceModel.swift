@@ -9,7 +9,7 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
 
     init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool, installedVersion: @escaping () -> String? = { nil }) {
         self.installedVersion = installedVersion
-        super.init(id: id, initial: VoiceController.storedState(), baseWatch: .changes, link: link, canRead: canRead,
+        super.init(id: id, initial: VoiceState.stored(), baseWatch: .changes, link: link, canRead: canRead,
                    optimistic: { state, action in
                        switch action {
                        case .setMode(let mode): state.mode = mode
@@ -34,7 +34,7 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
 
     var hotKeyLabel: String { state.hotKeyLabel }
     var hotKeyError: String? { state.hotKeyError }
-    var mode: VoiceController.Mode {
+    var mode: VoiceMode {
         get { state.mode }
         set { send(.setMode(newValue)) }
     }
@@ -62,7 +62,7 @@ final class RemoteVoiceModel: RemoteModuleModel<VoiceState, VoiceAction>, VoiceS
     var statusChanges: AnyPublisher<[VoiceModelRow], Never> {
         $state.receive(on: DispatchQueue.main).map(\.models).removeDuplicates().eraseToAnyPublisher()
     }
-    func status(_ model: VoiceModel) -> VoiceModelStore.Status {
+    func status(_ model: VoiceModel) -> VoiceModelStatus {
         state.models.first { $0.model == model }?.status ?? .notInstalled
     }
     func download(_ model: VoiceModel) { send(.download(model)) }

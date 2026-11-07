@@ -1,21 +1,21 @@
 # Разобранные места: файл|API. Каждая строка пройдена вручную и закрыта швом KIT_TEST_DEFAULTS (временное/подставное)
 # или отказом Kit.standRefuses / охраной Kit.assertStandPath, либо только читает. Новая строка — только после такого разбора.
 Sources/Apps/Mixer/MixerModule.swift|NSWorkspace.shared.open
-Sources/Modules/Browser/BrowserCatalog.swift|"/Applications
-Sources/Modules/Browser/BrowserCatalog.swift|UserDefaults(suiteName
-Sources/Modules/Browser/BrowserLinkHandler.swift|.terminate()
-Sources/Modules/Browser/BrowserLinkHandler.swift|LSRegisterURL
-Sources/Modules/Browser/BrowserLinkHandler.swift|setDefaultApplication
+Sources/Modules/Browser/UI/BrowserCatalog.swift|"/Applications
+Sources/Modules/Browser/UI/BrowserCatalog.swift|UserDefaults(suiteName
+Sources/Modules/Browser/UI/BrowserLinkHandler.swift|.terminate()
+Sources/Modules/Browser/UI/BrowserLinkHandler.swift|LSRegisterURL
+Sources/Modules/Browser/UI/BrowserLinkHandler.swift|setDefaultApplication
 # Пользовательское действие помощника ссылок («скопировать ссылку», ⌘C в окне выбора): пишет в общий буфер только по клавише человека, из стенда недостижимо.
 Sources/Modules/Browser/BrowserPicker.swift|NSPasteboard.general
 Sources/Modules/Browser/BrowserRouter.swift|NSWorkspace.shared.open
 Sources/Modules/Browser/BrowserRouter.swift|NSWorkspace.shared.openApplication
 Sources/Modules/Browser/BrowserRouter.swift|Process()
-Sources/Modules/Browser/BrowserRules.swift|"/Applications
-Sources/Modules/Browser/BrowserView.swift|"/Applications
-Sources/Modules/Browser/BrowserView.swift|LSRegisterURL
-Sources/Modules/Browser/BrowserView.swift|NSWorkspace.shared.open
-Sources/Modules/Browser/BrowserView.swift|setDefaultApplication
+Sources/Modules/Browser/UI/BrowserRules.swift|"/Applications
+Sources/Modules/Browser/UI/BrowserView.swift|"/Applications
+Sources/Modules/Browser/UI/BrowserView.swift|LSRegisterURL
+Sources/Modules/Browser/UI/BrowserView.swift|NSWorkspace.shared.open
+Sources/Modules/Browser/UI/BrowserView.swift|setDefaultApplication
 Sources/Modules/Clipboard/ClipboardController.swift|NSWorkspace.shared.open
 Sources/Modules/Clipboard/UI/ClipboardKeyring.swift|SecItem
 Sources/Modules/Clipboard/ClipboardKeyResolver.swift|SecItem
@@ -80,4 +80,5 @@ Sources/Modules/Voice/VoiceEngine.swift|.terminate()
 Sources/Modules/Voice/VoiceEngine.swift|Process()
 Sources/Modules/Voice/VoiceModels.swift|Process()
 Sources/Modules/Voice/VoiceModels.swift|removeItem
-Sources/Modules/Voice/VoiceModels.swift|urls(for:
+Sources/Modules/Voice/UI/VoiceTypes.swift|removeItem
+Sources/Modules/Voice/UI/VoiceTypes.swift|urls(for:
