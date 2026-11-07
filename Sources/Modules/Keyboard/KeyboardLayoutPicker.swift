@@ -1,11 +1,5 @@
 import Foundation
 
-/// Режим выбора следующей раскладки.
-enum LayoutMode: String, CaseIterable {
-    case lastTwo, cycle
-    var title: String { self == .lastTwo ? "Между двумя последними" : "По кругу" }
-}
-
 /// Какую раскладку включить следом. Чистая логика, id раскладок — строки.
 struct LayoutPicker {
     var mode: LayoutMode = .lastTwo

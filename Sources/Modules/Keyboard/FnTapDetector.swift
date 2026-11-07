@@ -1,11 +1,5 @@
 import Foundation
 
-/// Когда переключать раскладку: на отпускании Fn (как в системе) или сразу на нажатии.
-enum FnTrigger: String, CaseIterable {
-    case onRelease, onPress
-    var title: String { self == .onRelease ? "При отпускании" : "При нажатии" }
-}
-
 /// Событие клавиатуры/мыши, как его видит детектор. Без AppKit и CoreGraphics: проверяется тестом.
 enum FnEvent: Equatable {
     /// flagsChanged с keyCode 63. `others` — зажат ли ещё какой-то модификатор (⇧ ⌃ ⌥ ⌘).

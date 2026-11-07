@@ -3,10 +3,7 @@ import Foundation
 /// Журнал модуля «Клавиатура» для диагностики: последние записи в памяти и файл с ротацией.
 /// Нажатые клавиши не пишем: только Fn и тип события. Без AppKit: проверяется тестом.
 final class KeyboardLog: @unchecked Sendable {
-    struct Entry: Codable, Equatable {
-        let date: Date
-        let text: String
-    }
+    typealias Entry = KeyboardLogEntry
 
     static let maxEntries = 50
     static let maxFileBytes = 200_000
@@ -54,16 +51,10 @@ final class KeyboardLog: @unchecked Sendable {
     /// Дождаться записи в файл (для теста).
     func flush() { queue.sync {} }
 
-    static func line(_ entry: Entry) -> String { "\(stamp(entry.date)) \(entry.text)" }
+    static func line(_ entry: Entry) -> String { "\(KeyboardLogEntry.stamp(entry.date)) \(entry.text)" }
 
     /// Время для списка на экране.
-    static func shortTime(_ date: Date) -> String { String(stamp(date).dropFirst(11)) }
-
-    private static func stamp(_ date: Date) -> String {
-        let c = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
-        return String(format: "%04d-%02d-%02d %02d:%02d:%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0,
-                      c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
-    }
+    static func shortTime(_ date: Date) -> String { KeyboardLogEntry.shortTime(date) }
 
     // MARK: Файл
 

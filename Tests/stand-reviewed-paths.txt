@@ -28,12 +28,12 @@ Sources/Modules/Fans/FanHelperInstaller.swift|"/Library
 Sources/Modules/Fans/FanHelperInstaller.swift|NSAppleScript
 Sources/Modules/Fans/FanHelperInstaller.swift|launchctl
 Sources/Modules/Fans/LegacyFanHelper.swift|Process()
-Sources/Modules/Keyboard/InputSources.swift|CFPreferences
-Sources/Modules/Keyboard/InputSources.swift|Process()
 Sources/Modules/Keyboard/InputSources.swift|TISSelectInputSource
-Sources/Modules/Keyboard/InputSources.swift|kill(
 Sources/Modules/Keyboard/KeyboardController.swift|NSWorkspace.shared.open
 Sources/Modules/Keyboard/KeyboardLog.swift|homeDirectoryForCurrentUser
+Sources/Modules/Keyboard/UI/FnSystemAction.swift|CFPreferences
+Sources/Modules/Keyboard/UI/FnSystemAction.swift|Process()
+Sources/Modules/Keyboard/UI/FnSystemAction.swift|kill(
 Sources/Modules/Load/Native/Background/BackgroundActions.swift|launchctl
 Sources/Modules/Bots/BotsModel.swift|launchctl
 # Поиск ботов: "/Applications и "/Library — только список папок, которые поиск обходит стороной. NSHomeDirectory — корни поиска;

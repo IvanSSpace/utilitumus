@@ -10,6 +10,8 @@ swiftc -D KIT_TEST_DEFAULTS -o "$OUT/test" \
   Sources/Modules/Keyboard/KeyboardLayoutPicker.swift \
   Sources/Modules/Keyboard/InputSources.swift \
   Sources/Modules/Keyboard/KeyboardLog.swift \
+  Sources/Modules/Keyboard/UI/KeyboardTypes.swift \
+  Sources/Modules/Keyboard/UI/FnSystemAction.swift \
   Tests/FnTap/main.swift \
   -framework Carbon -framework AppKit
 "$OUT/test"
