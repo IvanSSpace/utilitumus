@@ -770,9 +770,44 @@ func knownTOML(_ home: String) -> String {
 
 @MainActor func pinLocal(_ state: BotsState) { BotsStore.shared.testPin(state) }
 
+/// Экран утилиты на её хранилище в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.bots), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .bots) { BotsView(model: BotsStore.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.bots))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .bots, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
+/// Вкладка и хранилище утилиты, закреплённое на том, что вкладка показала в момент снимка. Вкладка ведёт аренду, и утилита
+/// могла перемерить память между снимками, поэтому до трёх попыток; подделка красна в каждой.
+@MainActor func compareTab(_ theme: DSTheme, _ name: String) async -> NSBitmapImageRep {
+    let model = RemoteBotsModel.shared
+    await SatelliteRegistry.shared.update()
+    var remote: NSBitmapImageRep!, local: NSBitmapImageRep!, diff = 0
+    for _ in 0..<3 {
+        remote = await Stand.open(theme)
+        pinLocal(model.state)
+        local = await openLocal(theme)
+        diff = differingPixels(local, remote)
+        if diff == 0 { break }
+    }
+    Stand.save(local, "\(name)-local")
+    Stand.save(remote, "\(name)-remote")
+    check(diff == 0, "\(name): снимки совпали, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
+    return remote
+}
+
 @MainActor func pixels() async {
     let model = RemoteBotsModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     var seen: [NSBitmapImageRep] = []
     var plainBots: [String: NSBitmapImageRep] = [:]
@@ -784,24 +819,25 @@ func knownTOML(_ home: String) -> String {
             await model.perform(.refresh)
             check(await until(5) { model.state.file.kind == (text == nil ? .missing : mode == 0o666 ? .unsafe : .ok) && (text == nil || mode == 0o666 || model.state.bots.count == 3) }, "\(themeName) \(name): утилита в нужном состоянии")
             await model.read()
-            // Локальный экран закреплён на том же состоянии, что получил центр от утилиты.
-            modules.setExternal(.bots, false)
-            pinLocal(model.state)
-            let local = await Stand.open(theme)
-            Stand.save(local, "\(themeName)-\(name)-local")
-            modules.setExternal(.bots, true)
-            await registry.update()
+            let remote = await compareTab(theme, "\(themeName)-\(name)")
             check(registry.isEnabled(.bots), "\(themeName) \(name): реестр видит утилиту включённой")
-            let remote = await Stand.open(theme)
-            Stand.save(remote, "\(themeName)-\(name)-remote")
-            let diff = differingPixels(local, remote)
-            check(diff == 0, "\(themeName) \(name): снимки совпали, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
             seen.append(remote)
-            if name == "bots" { plainBots[themeName] = remote }
+            if name == "bots" {
+                plainBots[themeName] = remote
+                // Сверка видит значения: другое имя бота на экране утилиты на снимок вкладки не похоже.
+                var other = model.state
+                other.bots = other.bots.map { card in
+                    BotCard(id: card.id, name: card.name + "-подделка", project: card.project, state: card.state, memMB: card.memMB,
+                            uptime: card.uptime, ports: card.ports, url: card.url, note: card.note, verbs: card.verbs)
+                }
+                pinLocal(other)
+                let changed = await openLocal(theme)
+                check(differingPixels(changed, remote) > 0, "\(themeName): другое имя бота сверка замечает, разных пикселей \(differingPixels(changed, remote))")
+            }
         }
         check(differingPixels(seen[seen.count - 3], seen[seen.count - 2]) > 0 && differingPixels(seen[seen.count - 2], seen[seen.count - 1]) > 0, "\(themeName): три состояния выглядят по-разному, снимки не пустые")
     }
-    // Результаты поиска: утилита нашла ботов в поддельном доме, центр и утилита рисуют одно и то же.
+    // Результаты поиска: утилита нашла ботов в поддельном доме, вкладка и экран утилиты рисуют одно и то же.
     // Для снимка оставляем трёх: уверенный и двое «возможно», иначе список не влезает на экран.
     for file in ["a1", "a5", "a6", "a7", "a8", "a9", "b2", "b3", "b4", "b5", "b6"] { try? fm.removeItem(atPath: standHome() + "/Library/LaunchAgents/\(file).plist") }
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
@@ -814,21 +850,11 @@ func knownTOML(_ home: String) -> String {
             await model.perform(.find)
             check(await until(15) { model.state.discovery?.scanning == false && model.state.discovery?.found.isEmpty == false && (text == nil ? model.state.file.kind == .missing : model.state.bots.count == 3) }, "\(themeName) \(name): утилита нашла ботов в поддельном доме")
             await model.read()
-            modules.setExternal(.bots, false)
-            pinLocal(model.state)
-            let local = await Stand.open(theme)
-            Stand.save(local, "\(themeName)-\(name)-local")
-            modules.setExternal(.bots, true)
-            await registry.update()
-            let remote = await Stand.open(theme)
-            Stand.save(remote, "\(themeName)-\(name)-remote")
-            let diff = differingPixels(local, remote)
-            check(diff == 0, "\(themeName) \(name): снимки совпали, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
+            let remote = await compareTab(theme, "\(themeName)-\(name)")
             if name == "found", let base = plainBots[themeName] { check(differingPixels(base, remote) > 0, "\(themeName): экран с найденными отличается от экрана без них") }
             await model.perform(.dismissFound)
         }
-        // Все виды карточек разом и поиск в ходу: только локальные снимки состояния, чтобы увидеть экран.
-        modules.setExternal(.bots, false)
+        // Все виды карточек разом и поиск в ходу: только снимки на хранилище утилиты, чтобы увидеть экран.
         var all = BotsState.empty
         all.file = .ok
         all.discovery = BotsDiscoveryState(scanning: false, found: [
@@ -838,14 +864,12 @@ func knownTOML(_ home: String) -> String {
             BotFound(id: "4", name: "locked", place: "LaunchAgent com.example.locked · ~/Documents/locked", why: "папку проекта проверить не удалось. Нет доступа к папке: разрешите в «Конфиденциальность и безопасность»", possible: true, monitorOnly: false),
         ], skipped: 1)
         pinLocal(all)
-        Stand.save(await Stand.open(theme), "\(themeName)-found-all-local")
+        Stand.save(await openLocal(theme), "\(themeName)-found-all-local")
         var scanning = BotsState.empty
         scanning.file = .ok
         scanning.discovery = .scanning
         pinLocal(scanning)
-        Stand.save(await Stand.open(theme), "\(themeName)-scanning-local")
-        modules.setExternal(.bots, true)
-        await registry.update()
+        Stand.save(await openLocal(theme), "\(themeName)-scanning-local")
     }
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
     BotsStore.shared.testUnpin()
