@@ -8,8 +8,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${SATELLITE_MUTATIONS_DIR:-${TMPDIR:-/tmp}/satellite-mutations}"
 mkdir -p "$WORK"
 # Лимит на поломку. Без поломок проверка зелёная и не зависает, поэтому зависание значит, что поломка замечена; каждый раз
-# это не сверяется. Со сборкой с нуля под нагрузкой проверка шла до 426 с.
-LIMIT=600
+# это не сверяется. В полном прогоне (полная сборка, 71 проверка разом) проверка шла 61 с.
+LIMIT=300
 MODEL=Sources/App/Satellites/RemoteModuleModel.swift
 HOST=Sources/Kit/SatelliteHost.swift
 SERVER=Sources/Kit/Link/LinkServer.swift
