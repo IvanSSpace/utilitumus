@@ -205,5 +205,5 @@ else
   printf '%8s с  выкладка\n' "$(secs "$T_BUILT" "$T_END")"
 fi
 printf '%8s с  всего\n' "$(secs "$T_START" "$T_END")"
-[ "$status" -eq 0 ] || fail "release-app.sh остановился с кодом ${status}, журнал выше."
+[ "$status" -eq 0 ] || fail "${REL##*/} остановился с кодом ${status}, журнал выше."
 rm -rf -- "$LOGS"
