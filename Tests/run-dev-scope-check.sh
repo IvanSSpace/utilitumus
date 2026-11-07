@@ -74,7 +74,7 @@ put Tests/DevScopeCheck.swift "$CACHE/src/main.swift"
 SOURCES=()
 while IFS= read -r f; do SOURCES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
   -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift -not -name KitDefaults.swift | LC_ALL=C sort)
-FRAMEWORKS=(-framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit)
+FRAMEWORKS=(-framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit -framework Vision)
 
 # Сборка с набором: тот самый файл, что пишет dev.sh, и тот самый флаг. Смена набора пересобирает один файл и линковку.
 build_scoped() {

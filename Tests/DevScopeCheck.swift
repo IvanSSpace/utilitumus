@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import Vision
 
 // Набор модулей дев-сборки на стенде за экраном: что видно и что осталось нетронутым в настройках.
 // Запуск: Tests/run-dev-scope-check.sh. Аргументы: рабочая папка, папка PNG, ожидаемый набор (`awake,load`, пусто или `*`),
@@ -112,12 +113,15 @@ final class SilentModel: RemoteModuleSurface {
 
 // MARK: - Текст на экране
 
-/// Весь текст вида, как его видит доступность. Спрашивается у самого вида в своём процессе: разрешений не нужно.
-@MainActor func texts(_ element: Any, depth: Int = 0, into out: inout [String]) {
-    guard depth < 40, let node = element as? NSAccessibilityElementProtocol as? NSObject else { return }
-    if let label = node.value(forKey: "accessibilityLabel") as? String, !label.isEmpty { out.append(label) }
-    if let value = node.value(forKey: "accessibilityValue") as? String, !value.isEmpty { out.append(value) }
-    for child in (node.value(forKey: "accessibilityChildren") as? [Any]) ?? [] { texts(child, depth: depth + 1, into: &out) }
+/// Текст, распознанный на снимке вида: дерево доступности у окна за экраном пустое, а проверка «чужих нет» на пустом тексте
+/// прошла бы впустую. Поэтому каждая страница сверяется ещё и с тем, что на ней есть. Разрешений не нужно.
+func recognizedText(_ image: CGImage) -> String {
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.recognitionLanguages = ["ru-RU", "en-US"]
+    request.usesLanguageCorrection = false
+    try? VNImageRequestHandler(cgImage: image).perform([request])
+    return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
 }
 
 @MainActor func render<V: View>(_ name: String, height: CGFloat = 900, _ view: V) async -> String {
@@ -138,11 +142,9 @@ final class SilentModel: RemoteModuleSurface {
     let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
     host.cacheDisplay(in: host.bounds, to: rep)
     try? rep.representation(using: .png, properties: [:])?.write(to: pngDir.appendingPathComponent(name + ".png"))
-    var found: [String] = []
-    texts(host, into: &found)
     window.orderOut(nil)
     window.contentView = nil
-    return found.joined(separator: "\n")
+    return rep.cgImage.map(recognizedText) ?? ""
 }
 
 /// Какие модули упомянуты в тексте страницы: по названию на экране.
@@ -250,7 +252,8 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
     check(ModuleScope.parse(mark) == [], "без знака равенства ничего не показывает")
 
     print("== \(label): страницы")
-    let about = await render("\(label)-about", AboutView { _ in })
+    // У всех двенадцати подвал со счётчиком не помещается в обычную высоту и уходит под прокрутку.
+    let about = await render("\(label)-about", height: isAll ? 1800 : 900, AboutView { _ in })
     let store = await render("\(label)-store", StoreView())
     print("     текст О проекте: \(about.count) знаков, Стор: \(store.count) знаков")
     check(about.contains("О проекте"), "«О проекте» читается")
