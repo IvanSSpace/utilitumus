@@ -363,7 +363,7 @@ extension LaunchAgents {
             // они уже посчитаны в проектах, а остановить их отсюда всё равно нельзя.
             let held = why != nil ? Array(sub.suffix(1)) : sub
             items.append(AgentItem(
-                label: label, name: name(program: program, label: label), vendor: v.vendor, plist: job?.plist,
+                label: label, name: ScreenText.clean(name(program: program, label: label), BotRunner.maxShown), vendor: v.vendor, plist: job?.plist,
                 pids: main.map { [$0] } ?? [], memMB: Int(held.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()),
                 keepalive: job?.keepalive ?? false, runAtLoad: job?.runAtLoad ?? false, disabled: off, domain: "gui",
                 note: root ? rootNote : why.map { "Не трогаю: \($0)" } ?? v.note,
@@ -382,7 +382,7 @@ extension LaunchAgents {
             let sub = pids.flatMap { tree.subtree(of: $0) }
             let v = vendor(of: label, program: job.program)
             items.append(AgentItem(
-                label: label, name: name(program: job.program, label: label), vendor: v.vendor, plist: job.plist, pids: pids,
+                label: label, name: ScreenText.clean(name(program: job.program, label: label), BotRunner.maxShown), vendor: v.vendor, plist: job.plist, pids: pids,
                 memMB: Int(sub.reduce(0.0) { $0 + (procs[$1]?.mem ?? 0) }.rounded()), keepalive: job.keepalive,
                 runAtLoad: job.runAtLoad, disabled: job.disabled, domain: "system",
                 note: v.note == unknown ? unknownRoot : v.note, sudoHint: sudoHint(label), verbs: [],

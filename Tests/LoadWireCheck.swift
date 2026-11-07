@@ -581,6 +581,13 @@ func realFileStamp(_ url: URL?) -> String {
     check(named?.title == "Включить File bot", "заголовок без смены направления: \(named?.title ?? "нет")")
     check(named?.message.unicodeScalars.contains { tricks.contains($0.value) } == false && named?.message.contains("note over") == true, "пояснение без смены направления")
     check(store.handle(.cancelBackground) == nil, "отмена")
+
+    // Те же имя и пояснение в строке списка.
+    var dirty = BotSpec.none
+    dirty.name = "Row\u{202E}bot"
+    dirty.note = "note\u{202E}over"
+    let row = BotRegistry.status(dirty, procs: [:], tree: ProcessTree([:]), launchd: [:])
+    check(row.name == "Row bot" && !row.note.unicodeScalars.contains { $0.value == 0x202E }, "строка списка без смены направления: \(row.name)")
 }
 #endif
 

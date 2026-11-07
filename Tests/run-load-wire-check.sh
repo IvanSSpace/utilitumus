@@ -122,11 +122,11 @@ PY
   mutation Native/Background/BackgroundActions.swift '{ shown = argv }' '{ shown = argv } else if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { shown = argv }' "план без команды запускает то, чего человек не видел"
   mutation Native/Background/BackgroundActions.swift 'cmd = BotRunner.shown(argv)' 'cmd = Exec.display(argv)' "команда в вопросе бота не очищена"
   mutation Native/Background/BackgroundActions.swift 'message: ScreenText.clean((cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"), BotRunner.maxShown),' 'message: (cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"),' "текст вопроса бота не очищен"
-  mutation Native/Background/BackgroundActions.swift 'title: ScreenText.clean("\(verb.title) \(b.name)", BotRunner.maxShown),' 'title: "\(verb.title) \(b.name)",' "заголовок вопроса бота не очищен"
   mutation LoadWire.swift 'guard label.utf8.count <= LoadStore.maxIDBytes else { return "Непонятная команда" }' '' "длина метки не ограничена"
   mutation LoadWire.swift 'guard !stopRunning else { return "Остановка уже идёт" }
             guard pendingStop?.id' 'guard pendingStop?.id' "второе подтверждение во время остановки"
   mutation Native/Core/LoadHistory.swift 'guard claimWriter() else {' 'guard true || claimWriter() else {' "второй писатель истории"
+  mutation Native/Background/BotStatus.swift 'name: ScreenText.clean(spec.name, BotRunner.maxShown), state' 'name: spec.name, state' "имя бота в строке без очистки"
   mutation LoadWire.swift 'guard watchers < Self.maxWatchers else { return "Экран и так открыт" }' '' "открытия экрана без предела"
   mutation LoadWire.swift 'for i in m.sessions.claude.indices { m.sessions.claude[i].activity.lastPromptTS = nil }' '' "состояние не приведено к связи"
   rm -rf "$M"
