@@ -5,7 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
-OUT="${SATELLITE_CHECK_DIR:-${TMPDIR:-/tmp}/browser-link-handler-check}"
+# Подпапка: скрипт чистит $OUT, а в SATELLITE_CHECK_DIR лежат стенды модулей, идущие рядом.
+OUT="${SATELLITE_CHECK_DIR:-${TMPDIR:-/tmp}}/browser-link-handler-check"
 
 # Ни проверка, ни её запуск не имеют права дотянуться до настоящего LaunchServices.
 status=0

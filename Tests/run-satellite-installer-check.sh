@@ -1,12 +1,13 @@
 #!/bin/bash
 # Каталог и установщик утилит: подставные launchctl, download и связь с утилитой, настоящие zip и codesign.
 # /Applications и ~/Library/LaunchAgents не трогаются: все пути — в папке стенда.
-# Папка стенда: SATELLITE_CHECK_DIR, иначе $TMPDIR/satellite-installer-check. Нужен сертификат «Utilitumus Signing».
+# Папка стенда: $SATELLITE_CHECK_DIR/satellite-installer-check, иначе $TMPDIR/satellite-installer-check. Нужен сертификат «Utilitumus Signing».
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
-OUT="${SATELLITE_CHECK_DIR:-${TMPDIR:-/tmp}/satellite-installer-check}"
+# Подпапка: скрипт чистит $OUT, а в SATELLITE_CHECK_DIR лежат стенды модулей, идущие рядом.
+OUT="${SATELLITE_CHECK_DIR:-${TMPDIR:-/tmp}}/satellite-installer-check"
 F="$OUT/fixtures"
 IDENT="local.utilitumus.app.test.fixture"
 NAME="Fixture"
