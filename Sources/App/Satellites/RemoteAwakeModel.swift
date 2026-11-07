@@ -8,8 +8,8 @@ final class RemoteAwakeModel: RemoteModuleModel<AwakeState, AwakeAction>, AwakeM
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один.
         super.init(id: id,
                    initial: AwakeState(isActive: false, endDate: nil,
-                                       keepDisplay: Kit.defaults.bool(forKey: AwakeController.displayKey),
-                                       duration: AwakeDuration(rawValue: Kit.defaults.integer(forKey: AwakeController.durationKey)) ?? .forever,
+                                       keepDisplay: Kit.defaults.bool(forKey: AwakeKeys.display),
+                                       duration: AwakeDuration(rawValue: Kit.defaults.integer(forKey: AwakeKeys.duration)) ?? .forever,
                                        canStart: true),
                    baseWatch: .changes, canRead: canRead,
                    optimistic: { state, action in

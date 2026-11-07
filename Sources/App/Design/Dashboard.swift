@@ -380,7 +380,7 @@ enum DashboardLive {
             return c.canStart ? DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer")
                               : DashState(text: "можно спать")
         }
-        let tail = c.endDate.map { " · ещё \(AwakeController.remainingText(until: $0))" } ?? ""
+        let tail = c.endDate.map { " · ещё \(AwakeKeys.remainingText(until: $0))" } ?? ""
         return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
     }
 
