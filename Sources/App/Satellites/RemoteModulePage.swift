@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Что показать вместо встроенного модуля, пока его ведёт утилита.
+/// Что показать на вкладке модуля, который ведёт утилита.
 enum RemoteModuleScreen { case notResponding, off, module }
 
 extension RemoteModuleModel {
@@ -11,7 +11,7 @@ extension RemoteModuleModel {
     }
 }
 
-/// Вкладка модуля, когда его ведёт утилита: тот же экран, что у встроенного, сразу с последним известным
+/// Вкладка модуля, когда его ведёт утилита: экран из `Modules/*/UI`, сразу с последним известным
 /// состоянием. Ответа она не ждёт. Запасной экран — только если утилита не отвечает.
 struct RemoteModulePage<State: Codable & Equatable & Sendable, Action: Codable & Sendable, Content: View>: View {
     let module: Module
