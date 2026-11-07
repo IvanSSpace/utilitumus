@@ -51,6 +51,8 @@ struct ClipCard: View {
     let spaces: [ClipSpace]
     let now: Date
     let model: ClipboardPanelModel
+    /// Плавающая копия при перетаскивании: только сама карточка, без рамки выбора и без меню.
+    var isDragPreview = false
 
     static let width = ClipboardPreview.cardWidth
     static let height = ClipPanelMetrics.cardHeight
@@ -64,7 +66,9 @@ struct ClipCard: View {
         theme == .graphite ? ClipHeaderTint.graphite : ClipSourceTint.color(item.sourceBundleID)
     }
 
-    var body: some View {
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: Self.radius, style: .continuous) }
+
+    private var face: some View {
         VStack(spacing: 0) {
             header
             content
@@ -73,7 +77,15 @@ struct ClipCard: View {
         }
         .frame(width: Self.width, height: Self.height)
         .background(Color(white: 0.085))
-        .clipShape(RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
+        .clipShape(shape)
+    }
+
+    @ViewBuilder var body: some View {
+        if isDragPreview { face } else { interactive }
+    }
+
+    private var interactive: some View {
+        face
         .overlay {
             if selected {
                 // Рамка снаружи карточки: так шапка и значок не меняются при выборе.
@@ -82,8 +94,15 @@ struct ClipCard: View {
                     .padding(-3)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: Self.radius, style: .continuous))
-        .onDrag { NSItemProvider(object: item.id.uuidString as NSString) }
+        .contentShape(shape)
+        .contentShape(.dragPreview, shape)
+        // Копия рисуется отдельно: со снимком всей карточки в неё попадали куски рамки выбора, выходящей за края.
+        .onDrag {
+            model.dragProvider(for: item)
+        } preview: {
+            ClipCard(item: item, number: number, selected: false, searching: false, theme: theme, spaces: spaces, now: now,
+                     model: model, isDragPreview: true)
+        }
         .contextMenu { menu }
     }
 

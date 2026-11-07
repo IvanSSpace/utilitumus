@@ -23,16 +23,17 @@ absent() { # имя, шаблон, файлы...
 }
 
 absent "проверка не называет настоящую связку, каталог истории и общий буфер" \
-  'SystemClipboardKeyring|ClipboardKeychain\.system|NSPasteboard|SecItem(Copy|Add|Delete|Update)|defaultDirectory|Application Support|history-key|\.paste\(' \
+  'SystemClipboardKeyring|ClipboardKeychain\.system|NSPasteboard\.general|Kit\.pasteboard|SecItem(Copy|Add|Delete|Update)|defaultDirectory|Application Support|history-key|\.paste\(' \
   Tests/ClipboardPanelCheck.swift Tests/ClipboardPanelFixture.swift
 
-PANEL=(Sources/Modules/Clipboard/ClipboardPanel.swift Sources/Modules/Clipboard/ClipboardPanelCard.swift Sources/Modules/Clipboard/ClipboardPanelLogic.swift)
+PANEL=(Sources/Modules/Clipboard/ClipboardPanel.swift Sources/Modules/Clipboard/ClipboardPanelCard.swift Sources/Modules/Clipboard/ClipboardPanelLogic.swift Sources/Modules/Clipboard/ClipboardPanelDrag.swift)
 absent "панель не ходит в сеть: сайт не узнает, что скопировано" \
   'URLSession|URLRequest|LinkPresentation|LPMetadata|WKWebView|WebKit|AsyncImage|NSImage\(contentsOf|Data\(contentsOf|dataTask' "${PANEL[@]}"
 absent "панель не активирует приложение и не открывает окон, которые могли бы" \
   'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}"
 absent "выделение не ждёт двойного клика системы" 'onTapGesture\(count' "${PANEL[@]}"
 absent "у выбора нет масштаба: карточка не дрожит" 'scaleEffect' "${PANEL[@]}"
+absent "перетаскивание не пишет содержимое ни в буфер, ни во временные файлы" 'NSPasteboard|temporaryDirectory|NSTemporaryDirectory|\.write\(' Sources/Modules/Clipboard/ClipboardPanelDrag.swift
 # Кнопки только через clipPanelButton: иначе у новой кнопки вернётся системная рамка фокуса. Проверка по исходникам:
 # окно за экраном не ключевое и такого фокуса не показывает, обход клавиатуры в нём зелёный и без focusable(false).
 BARE="$(/usr/bin/grep -n 'buttonStyle(.plain)' Sources/Modules/Clipboard/ClipboardPanel.swift | /usr/bin/grep -v 'buttonStyle(.plain).focusable(false)' || true)"

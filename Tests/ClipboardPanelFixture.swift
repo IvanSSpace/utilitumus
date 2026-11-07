@@ -36,6 +36,11 @@ enum ClipPanelFixture {
         ]
     }
 
+    /// PNG той же нарисованной картинки: что унесёт перетаскивание наружу.
+    static func png(_ item: ClipItem) -> Data? {
+        image(item)?.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
+    }
+
     /// Нарисованная картинка вместо расшифрованной из хранилища.
     static func image(_ item: ClipItem) -> NSImage? {
         guard item.kind == .image else { return nil }

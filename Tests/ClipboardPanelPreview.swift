@@ -51,6 +51,17 @@ enum PreviewApp {
         model.allItems = ClipPanelFixture.items()
         model.spaces = ClipPanelFixture.spaces
         model.imageLoader = ClipPanelFixture.image
+        // Перенос наружу несёт выдуманное: нарисованный PNG и выдуманный файл во временной папке показа.
+        model.imageBytes = { item in { ClipPanelFixture.png(item) } }
+        let files = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("clipboard-panel-preview-files", isDirectory: true)
+        try? FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        for index in model.allItems.indices where model.allItems[index].kind == .file {
+            model.allItems[index].filePaths = model.allItems[index].filePaths?.map { path in
+                let file = files.appendingPathComponent((path as NSString).lastPathComponent)
+                try? Data("Выдуманный файл из показа панели.\n".utf8).write(to: file)
+                return file.path
+            }
+        }
         model.onPaste = { item in
             let what = item.text ?? item.filePaths?.first ?? item.kind.title
             PreviewNote.show("Вставил бы: " + what.replacingOccurrences(of: "\n", with: " "))

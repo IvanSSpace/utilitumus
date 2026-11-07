@@ -1,6 +1,7 @@
 import AppKit
 import CryptoKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Панель «Буфера»: клики, клавиши, категории, поиск, снимки. Запуск: Tests/run-clipboard-panel-check.sh
 // Хранилище во временной папке с выдуманным ключом, окно прозрачное и за экраном, настройки в своём suite.
@@ -226,6 +227,237 @@ let esc: UInt16 = 53, enter: UInt16 = 36, tab: UInt16 = 48, left: UInt16 = 123, 
     check(store.items.map(\.id) == kept, "в лимите все записи на месте")
     check(ClipSpaceDeletion.summary(items: [], space: second.id, limit: 10) == "Записей в нём нет.", "подпись пустого пространства")
     controller.detachStore()
+}
+
+// MARK: - Перетаскивание
+
+/// Данные провайдера по типу, как их запросит программа. nil — данных нет.
+func loaded(_ provider: NSItemProvider, _ type: String) async -> Data? {
+    await withCheckedContinuation { continuation in
+        _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in continuation.resume(returning: data) }
+    }
+}
+
+/// Сверх своего типа в провайдере ничего, что содержит номер записи.
+func exposesID(_ provider: NSItemProvider, _ id: UUID) async -> Bool {
+    let text = id.uuidString
+    for type in provider.registeredTypeIdentifiers {
+        guard let data = await loaded(provider, type) else { continue }
+        if String(decoding: data, as: UTF8.self).uppercased().contains(text) { return true }
+        if type != ClipDrag.recordType.identifier, data.range(of: ClipDrag.data(for: id)) != nil { return true }
+    }
+    return false
+}
+
+func hex(_ data: Data?) -> String { data.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "нет" }
+
+@MainActor func checkDrag() async {
+    let now = Date()
+    func fresh(_ kind: ClipKind, _ text: String? = nil, paths: [String]? = nil) -> ClipItem {
+        ClipPanelFixture.entry(kind, text, source: nil, ago: 60, now: now, paths: paths)
+    }
+    let refuse: @Sendable () -> Data? = { nil }
+    let plain = UTType.utf8PlainText.identifier
+
+    // Текст
+    let text = fresh(.text, "Обычный текст записи")
+    let textDrag = ClipDrag.provider(for: text, loadImage: refuse)
+    check(textDrag.registeredTypeIdentifiers.contains(plain), "текст: наружу есть строка")
+    check(await loaded(textDrag, plain).map { String(decoding: $0, as: UTF8.self) } == text.text, "текст: наружу сам текст")
+    check(!(await exposesID(textDrag, text.id)), "текст: наружу нет номера записи")
+    check(textDrag.hasItemConformingToTypeIdentifier(ClipDrag.recordType.identifier), "текст: свой тип для броска на категорию есть")
+
+    // Ссылка
+    let address = "https://example.com/a?b=1"
+    let link = fresh(.link, address)
+    let linkDrag = ClipDrag.provider(for: link, loadImage: refuse)
+    check(await loaded(linkDrag, plain).map { String(decoding: $0, as: UTF8.self) } == address, "ссылка: наружу адрес строкой")
+    check(linkDrag.hasItemConformingToTypeIdentifier(UTType.url.identifier), "ссылка: наружу и как URL")
+    check(!(await exposesID(linkDrag, link.id)), "ссылка: наружу нет номера записи")
+    let script = fresh(.link, "javascript:alert(1)")
+    let scriptDrag = ClipDrag.provider(for: script, loadImage: refuse)
+    check(!scriptDrag.hasItemConformingToTypeIdentifier(UTType.url.identifier), "не настоящая ссылка: как URL не уходит")
+
+    // Картинка: настоящее хранилище, те же байты, расшифровка только по запросу.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-drag-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256))
+    let image = ClipPanelFixture.image(fresh(.image))!
+    let png = image.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }!
+    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png))
+    let stored = store.items[0]
+    let controller = ClipboardController.shared
+    controller.attach(store)
+    let model = ClipboardPanelHost.shared.makeModel(controller)
+    model.allItems = store.items
+    let before = store.items
+    let drag = model.dragProvider(for: stored)
+    check(drag.registeredTypeIdentifiers.contains(UTType.png.identifier), "картинка: наружу PNG")
+    check(!drag.registeredTypeIdentifiers.contains(plain), "картинка: строки наружу нет")
+    check(hex(await loaded(drag, UTType.png.identifier)) == hex(png), "картинка: наружу те же байты, что сохранены (хеш)")
+    check(!(await exposesID(drag, stored.id)), "картинка: наружу нет номера записи")
+    check(store.items == before, "вынос наружу не меняет историю и порядок")
+
+    final class Counter: @unchecked Sendable { var calls = 0 }
+    let counter = Counter()
+    let lazy = ClipDrag.provider(for: stored, loadImage: { counter.calls += 1; return png })
+    check(counter.calls == 0, "картинка: при начале перетаскивания не расшифровывается")
+    _ = await loaded(lazy, UTType.png.identifier)
+    check(counter.calls == 1, "картинка: расшифровка только по запросу, один раз")
+
+    try? FileManager.default.removeItem(at: dir.appendingPathComponent(stored.imageFile!))
+    let gone = model.dragProvider(for: stored)
+    check(await loaded(gone, UTType.png.identifier) == nil, "картинка с пропавшим файлом: данных нет, ничего не выдумано")
+    check(!gone.registeredTypeIdentifiers.contains(plain), "картинка с пропавшим файлом: подмены строкой нет")
+    controller.detachStore()
+
+    // Файл
+    let real = dir.appendingPathComponent("настоящий.txt")
+    try? Data("x".utf8).write(to: real)
+    let missing = dir.appendingPathComponent("нет такого.txt")
+    let fileDrag = ClipDrag.provider(for: fresh(.file, paths: [real.path]), loadImage: refuse)
+    check(fileDrag.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier), "файл: наружу файловый адрес")
+    let fileData = await loaded(fileDrag, UTType.fileURL.identifier)
+    check(fileData.flatMap { URL(dataRepresentation: $0, relativeTo: nil) }?.path == real.path, "файл: адрес того самого файла")
+    let noFile = ClipDrag.provider(for: fresh(.file, paths: [missing.path]), loadImage: refuse)
+    check(noFile.registeredTypeIdentifiers == [ClipDrag.recordType.identifier], "пропавший файл: наружу ничего, только свой тип")
+    let some = ClipDrag.provider(for: fresh(.file, paths: [missing.path, real.path]), loadImage: refuse)
+    let someData = await loaded(some, UTType.fileURL.identifier)
+    check(someData.flatMap { URL(dataRepresentation: $0, relativeTo: nil) }?.path == real.path, "из нескольких файлов уходит первый живой")
+
+    // Свой тип
+    let id = UUID()
+    check(ClipDrag.recordID(from: ClipDrag.data(for: id)) == id, "номер записи читается обратно")
+    check(ClipDrag.recordID(from: Data(id.uuidString.utf8)) == nil, "номер текстом не принимается")
+    check(!String(decoding: ClipDrag.data(for: id), as: UTF8.self).contains(id.uuidString), "свой тип несёт не текст")
+    check(ClipDrag.recordType.identifier.hasPrefix("dyn.") && UTType(ClipDrag.recordType.identifier) != nil, "свой тип читается без объявления в Info.plist")
+    check(ClipDrag.recordProvider(in: [textDrag])  != nil, "своя запись принимается по своему типу")
+    check(ClipDrag.recordProvider(in: [NSItemProvider(object: "посторонний текст" as NSString)]) == nil, "посторонний текст не принимается")
+    check(ClipDrag.recordProvider(in: [NSItemProvider(object: id.uuidString as NSString)]) == nil, "посторонний текст с номером записи не принимается")
+}
+
+/// Настоящая цель броска SwiftUI: панель в окне за экраном, события приходят от подставного сеанса перетаскивания.
+final class FakeDrag: NSObject, NSDraggingInfo {
+    let pasteboard: NSPasteboard
+    let window: NSWindow
+    var location = NSPoint.zero
+    init(_ pasteboard: NSPasteboard, _ window: NSWindow) { self.pasteboard = pasteboard; self.window = window }
+    var draggingDestinationWindow: NSWindow? { window }
+    var draggingSourceOperationMask: NSDragOperation { .every }
+    var draggingLocation: NSPoint { location }
+    var draggedImageLocation: NSPoint { location }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { pasteboard }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    override func namesOfPromisedFilesDropped(atDestination dropDestination: URL) -> [String]? { nil }
+    var draggingFormation: NSDraggingFormation = .none
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass],
+                                searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+                                using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func resetSpringLoading() {}
+}
+
+@MainActor func checkDropTarget() async {
+    let model = panelModel(theme: "vivid")
+    var pins: [(UUID, UUID?)] = []
+    model.onPin = { pins.append(($0, $1)) }
+    let host = Stand.host(model, width: 1440)
+    try? await Task.sleep(nanoseconds: 450_000_000)
+    host.layoutSubtreeIfNeeded()
+    func targets(_ view: NSView) -> [NSView] { (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets) }
+    // Цель SwiftUI отличается от поля ввода типами: поле поиска тоже принимает брошенное, но это другой вид.
+    guard let target = targets(host).first(where: { $0.registeredDraggedTypes.map(\.rawValue).contains("public.data") }) else {
+        check(false, "цель броска SwiftUI найдена")
+        return
+    }
+
+    let own = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)"))
+    let foreign = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)"))
+    defer { own.releaseGlobally(); foreign.releaseGlobally() }
+    let record = model.allItems[0]
+    let item = NSPasteboardItem()
+    item.setData(ClipDrag.data(for: record.id), forType: NSPasteboard.PasteboardType(ClipDrag.recordType.identifier))
+    own.clearContents(); own.writeObjects([item])
+    let textItem = NSPasteboardItem()
+    textItem.setString(record.id.uuidString, forType: .string)
+    foreign.clearContents(); foreign.writeObjects([textItem])
+
+    // Ищем кнопку категории в ряду: сверху по центру ряда, шаг короче любой кнопки.
+    let y = ClipPanelMetrics.panelHeight - ClipPanelMetrics.topPadding - ClipPanelMetrics.barHeight / 2
+    let ownDrag = FakeDrag(own, Stand.window)
+    var found: NSPoint?
+    for x in stride(from: CGFloat(100), to: 1400, by: 12) {
+        ownDrag.location = NSPoint(x: x, y: y)
+        if target.draggingEntered(ownDrag) != [] { found = ownDrag.location; break }
+        target.draggingExited(ownDrag)
+    }
+    check(found != nil, "настоящая цель: своя запись над категорией принимается")
+    guard let found else { return }
+    check(target.prepareForDragOperation(ownDrag) && target.performDragOperation(ownDrag), "настоящая цель: бросок своей записи выполнен")
+    target.concludeDragOperation(ownDrag)
+    try? await Task.sleep(nanoseconds: 300_000_000)
+    check(pins.count == 1 && pins.first?.0 == record.id && pins.first?.1 == ClipPanelFixture.spaces[0].id,
+          "настоящая цель: запись закрепилась в категории под курсором (\(pins.count))")
+
+    pins = []
+    let foreignDrag = FakeDrag(foreign, Stand.window)
+    foreignDrag.location = found
+    check(target.draggingEntered(foreignDrag) == [], "настоящая цель: посторонний текст над категорией не принимается")
+    _ = target.performDragOperation(foreignDrag)
+    target.draggingExited(foreignDrag)
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    check(pins.isEmpty, "настоящая цель: посторонний текст с номером записи ничего не закрепил")
+
+    // Запись, которой нет в панели, тоже не закрепляется.
+    model.acceptDroppedRecord(UUID(), on: ClipPanelFixture.spaces[0].id)
+    check(pins.isEmpty, "чужой номер записи ничего не закрепил")
+    Stand.window.contentView = nil
+}
+
+/// Копия при перетаскивании: на цветной подложке углы дают подложку, синего нет. Настоящую копию рисует система, здесь её содержимое.
+@MainActor func checkDragPreview(out: String) async {
+    for theme in ["graphite", "vivid"] {
+        let model = panelModel(theme: theme)
+        let item = ClipPanelFixture.entry(.text, "Копия карточки при перетаскивании", source: nil, ago: 60, now: Date())
+        let margin: CGFloat = 20
+        let root = ZStack(alignment: .topLeading) {
+            Color(red: 0, green: 1, blue: 0)
+            ClipCard(item: item, number: 2, selected: true, searching: false, theme: model.theme, spaces: [], now: Date(),
+                     model: model, isDragPreview: true)
+                .offset(x: margin, y: margin)
+        }
+        .frame(width: ClipCard.width + margin * 2, height: ClipCard.height + margin * 2)
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(x: 0, y: 0, width: ClipCard.width + margin * 2, height: ClipCard.height + margin * 2)
+        Stand.window.setContentSize(host.frame.size)
+        Stand.window.contentView = host
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        host.layoutSubtreeIfNeeded()
+        let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(out)/\(theme == "graphite" ? "graphite" : "color")-drag-preview.png"))
+        let shot = Shot(bitmap: bitmap, scale: CGFloat(bitmap.pixelsWide) / host.bounds.width)
+        Stand.window.contentView = nil
+
+        // Сверка с самой подложкой, её байты зависят от цветового профиля снимка.
+        let backdrop = shot.rgb(2, 2)
+        check(backdrop.g > backdrop.r + 0.3 && backdrop.g > backdrop.b + 0.3, "\(theme): подложка зелёная")
+        let green: (ClipRGB) -> Bool = { abs($0.r - backdrop.r) + abs($0.g - backdrop.g) + abs($0.b - backdrop.b) < 0.03 }
+        let w = ClipCard.width, h = ClipCard.height
+        let corners = [(margin + 1, margin + 1), (margin + w - 2, margin + 1), (margin + 1, margin + h - 2), (margin + w - 2, margin + h - 2)]
+        check(corners.allSatisfy { green(shot.rgb($0.0, $0.1)) }, "\(theme): углы копии прозрачные, видна подложка")
+        check(!green(shot.rgb(margin + w / 2, margin + 1)) && !green(shot.rgb(margin + w / 2, margin + h - 2)), "\(theme): края копии на месте, это сама карточка")
+        let outside = shot.count(in: CGRect(x: 0, y: 0, width: w + margin * 2, height: margin - 1)) { !green($0) }
+            + shot.count(in: CGRect(x: 0, y: margin, width: margin - 1, height: h)) { !green($0) }
+        check(outside == 0, "\(theme): снаружи карточки ничего нет, рамки выбора нет (\(outside) точек)")
+        let blue = shot.count(in: CGRect(x: 0, y: 0, width: w + margin * 2, height: h + margin * 2)) { $0.b > $0.r + 0.25 && $0.b > $0.g + 0.15 }
+        check(blue == 0, "\(theme): синих точек нет (\(blue))")
+    }
 }
 
 // MARK: - Подписи и цвет
@@ -550,7 +782,10 @@ enum Main {
             checkTexts()
             checkTint()
             checkGeometry()
+            await checkDrag()
             await checkLiveEvents()
+            await checkDropTarget()
+            await checkDragPreview(out: out)
             await checkScreens(out: out)
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)

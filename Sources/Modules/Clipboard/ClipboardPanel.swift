@@ -131,6 +131,8 @@ final class ClipboardPanelModel: ObservableObject {
     var limit = ClipboardPolicy.defaultLimit
 
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
+    /// Как достать сохранённые байты картинки для переноса наружу. Возвращает загрузчик: сама расшифровка только по запросу программы.
+    var imageBytes: (ClipItem) -> @Sendable () -> Data? = { _ in { nil } }
     var onPaste: (ClipItem) -> Void = { _ in }
     var onPin: (UUID, UUID?) -> Void = { _, _ in }
     var onDelete: (UUID) -> Void = { _ in }
@@ -222,6 +224,17 @@ final class ClipboardPanelModel: ObservableObject {
     }
 
     func forgetImages() { images.removeAllObjects() }
+
+    // MARK: Перетаскивание
+
+    func dragProvider(for item: ClipItem) -> NSItemProvider {
+        ClipDrag.provider(for: item, loadImage: imageBytes(item))
+    }
+
+    func acceptDroppedRecord(_ id: UUID, on space: UUID) {
+        guard allItems.contains(where: { $0.id == id }), spaces.contains(where: { $0.id == space }) else { return }
+        onPin(id, space)
+    }
 
     // MARK: Поиск
 
@@ -495,7 +508,7 @@ struct ClipboardPanelView: View {
         .help(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
-        .onDrop(of: [.plainText], isTargeted: nil) { dropCard($0, on: space.id) }
+        .onDrop(of: [ClipDrag.recordType], isTargeted: nil) { dropCard($0, on: space.id) }
     }
 
     /// Категория на время поиска: только точка, название в подсказке.
@@ -512,14 +525,15 @@ struct ClipboardPanelView: View {
         .accessibilityLabel(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
-        .onDrop(of: [.plainText], isTargeted: nil) { dropCard($0, on: space.id) }
+        .onDrop(of: [ClipDrag.recordType], isTargeted: nil) { dropCard($0, on: space.id) }
     }
 
-    /// Перетащил карточку на категорию — запись закрепилась в ней.
+    /// Перетащил карточку на категорию — запись закрепилась в ней. Принимается только свой тип и только своя запись.
     private func dropCard(_ providers: [NSItemProvider], on space: UUID) -> Bool {
-        providers.first?.loadObject(ofClass: NSString.self) { object, _ in
-            guard let text = object as? String, let item = UUID(uuidString: text) else { return }
-            DispatchQueue.main.async { model.onPin(item, space) }
+        guard let provider = ClipDrag.recordProvider(in: providers) else { return false }
+        _ = provider.loadDataRepresentation(forTypeIdentifier: ClipDrag.recordType.identifier) { data, _ in
+            guard let id = data.flatMap(ClipDrag.recordID) else { return }
+            DispatchQueue.main.async { model.acceptDroppedRecord(id, on: space) }
         }
         return true
     }
@@ -802,6 +816,11 @@ final class ClipboardPanelHost {
         let model = ClipboardPanelModel()
         self.model = model
         model.imageLoader = { [weak controller] item in controller?.imageData(item).flatMap { NSImage(data: $0) } }
+        model.imageBytes = { [weak controller] item in
+            // Запрос придёт не обязательно на главном потоке. Хранилищу это не мешает: чтение файла и ключ неизменяемы.
+            nonisolated(unsafe) let store = controller?.store
+            return { store?.imageData(item) }
+        }
         model.onPaste = { [weak controller] item in controller?.paste(item) }
         model.onPin = { [weak self, weak controller] id, space in
             controller?.pin(id, to: space)
