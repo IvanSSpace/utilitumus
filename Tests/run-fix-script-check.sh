@@ -282,7 +282,7 @@ same "--dry-run: origin на месте" "$(/usr/bin/git -C "$ORIGIN" rev-parse 
 same "--dry-run: теги origin на месте" "$(ORIGIN_TAGS)" "$TAGS_BEFORE"
 same "--dry-run: каталог на месте" "$(shasum -a 256 "$FX/Catalog/catalog.json")" "$CATALOG_BEFORE"
 same "--dry-run: дерево чисто" "$("${G[@]}" status --porcelain)" ""
-for step in "определение изменений" "проверки, 3 шт." "сборка -O" "выкладка" "всего"; do
+for step in "определение изменений" "проверки, 4 шт." "сборка -O" "выкладка" "всего"; do
   check "время: $step" has "$PLAN" "$step"
 done
 NEW_CATALOG="$(sed -n 's/^Каталог: //p' "$PLAN")"
@@ -295,7 +295,7 @@ status=0; output="$(EXTRA_ENV=FAKE_RED=run-mixer-wire-check fix mixer "${NOTE[@]
 check "код не 0" test "$status" -ne 0
 check "названа красная" grep -qF "Красные проверки: run-mixer-wire-check" <<<"$output"
 same "сборки не было" "$(cat "$RELEASE_MARK")" ""
-check "все проверки успели отработать" test "$(wc -l < "$CHECK_LOG" | tr -d ' ')" -eq 3
+check "все проверки успели отработать" test "$(wc -l < "$CHECK_LOG" | tr -d ' ')" -eq 4
 
 echo "== порядок и аргументы"
 args_refused() { # описание, текст, аргументы

@@ -462,16 +462,18 @@ func silenceAndChannels() {
     let streams = engine(preset("bass"), rate: 48000)
     var a = [Float](repeating: 9, count: 1024), b = [Float](repeating: 9, count: 1024)
     var source2 = sine(440, rate: 48000, frames: 512, amplitude: 0.5)
+    let streamsTap = TapState()
     a.withUnsafeMutableBytes { pa in
         b.withUnsafeMutableBytes { pb in
             list[0] = AudioBuffer(mNumberChannels: 2, mDataByteSize: 4096, mData: pa.baseAddress)
             list[1] = AudioBuffer(mNumberChannels: 2, mDataByteSize: 4096, mData: pb.baseAddress)
             source2.withUnsafeMutableBytes { ps in
                 var ins = AudioBufferList(mNumberBuffers: 1, mBuffers: AudioBuffer(mNumberChannels: 2, mDataByteSize: 4096, mData: ps.baseAddress))
-                ProcessTap.render(&ins, list.unsafeMutablePointer, state: TapState().state, ramp: 0.001, isFloat32: true, eq: streams)
+                ProcessTap.render(&ins, list.unsafeMutablePointer, state: streamsTap.state, ramp: 0.001, isFloat32: true, eq: streams)
             }
         }
     }
+    withExtendedLifetime(streamsTap) {}
     check(b.allSatisfy { $0 == 0 } && a.contains { $0 != 0 && $0 != 9 }, "второй поток без входа: нули, первый звучит")
     streams.deallocate()
 }
@@ -697,6 +699,7 @@ func load() {
 @main
 enum Main {
     static func main() {
+        setbuf(stdout, nil)
         validation()
         settings()
         response()
