@@ -238,7 +238,8 @@ TARGET="arm64-apple-macos$MIN_SYSTEM"
 
 # Подпись как в build.sh: нет сертификата (CI) — ad-hoc. Выкладывать такое не даст release-app.sh.
 SIGN_NAME="Utilitumus Signing"
-scripts/unlock-signing.sh
+# Общий выпуск собирает параллельно и открывает связку заранее один раз (scripts/release-all.sh).
+[ -n "${UTILITUMUS_SIGNING_UNLOCKED:-}" ] || scripts/unlock-signing.sh
 if [[ "$(security find-identity -p codesigning)" == *"\"$SIGN_NAME\""* ]]; then
   SIGN_ID="$SIGN_NAME"
 else
@@ -254,6 +255,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Без -parse-as-library: точка входа утилиты — Sources/Apps/<Имя>/main.swift.
 APP_SOURCES=($(find "Sources/Apps/$NAME" "Sources/Modules/$NAME" Sources/Kit -name '*.swift') ${EXTRA_SOURCES[@]+"${EXTRA_SOURCES[@]}"})
 OPT_FLAGS=(-O)
+# Предел компиляторов на одну сборку, когда сборок несколько разом (scripts/release-all.sh). На результат не влияет.
+SWIFT_JOBS="${UTILITUMUS_SWIFT_JOBS:-}"
+if [ -n "$SWIFT_JOBS" ]; then
+  matches "$SWIFT_JOBS" '^[1-9][0-9]*$' || fail "UTILITUMUS_SWIFT_JOBS: нужно целое больше нуля"
+  OPT_FLAGS+=("-j$SWIFT_JOBS")
+fi
 if [ -n "$DEV_CACHE" ]; then
   mkdir -p "$DEV_CACHE"
   # Карта объектных файлов: имя от пути файла, чтобы перестановка списка не сбрасывала кэш.
