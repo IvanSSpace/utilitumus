@@ -436,6 +436,11 @@ final class StoreModel: ObservableObject {
             return
         }
         guard satellites.hasBundle(module) else {
+            // До первого опроса бандла ещё не видно, а утилита работает: удаление стёрло бы модели из-под неё.
+            guard !modules.isExternal(module) else {
+                failure = StoreFailure(module: module, message: "Утилита ещё проверяется, попробуй через секунду")
+                return
+            }
             finishRemoval(module)
             return
         }

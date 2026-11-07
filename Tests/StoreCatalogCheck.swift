@@ -320,6 +320,12 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     for file in model.requiredFiles { fm.createFile(atPath: VoiceModelFiles.folder(of: model).appendingPathComponent(file).path, contents: Data()) }
     check(VoiceModelFiles.isInstalled(model), "модель на месте")
     check(StoreCatalog.removal(.voice).contains { $0.contains(model.title) }, "в подтверждении удаления названа модель")
+    // Утилита ведёт модуль, а опроса ещё не было: бандла не видно, но стирать модели из-под неё нельзя.
+    modules.setExternal(.voice, true)
+    store.remove(.voice)
+    check(VoiceModelFiles.isInstalled(model) && store.failure?.module == .voice, "до первого опроса: модель цела, отказ виден")
+    store.dismissFailure()
+    modules.setExternal(.voice, false)
     modules.setOn(.voice, true)
     check(store.state(.voice) == .available, "модуль включён, утилиты нет: «Голос» с «＋»")
     store.remove(.voice)
