@@ -35,7 +35,7 @@ swiftc -target "$TARGET" -o "$CACHE/gate/plain" "$CACHE/gate/main.swift"
 swiftc -target "$TARGET" -D KIT_PILOT_CATALOG -o "$CACHE/gate/pilot" "$CACHE/gate/main.swift"
 same "обычная сборка ставит сама" "$("$CACHE/gate/plain")" "true"
 same "сборка с KIT_PILOT_CATALOG сама не ставит" "$("$CACHE/gate/pilot")" "false"
-grep -q -- '-target "$TARGET" -D KIT_PILOT_CATALOG -o "$HC/Utilitumus"' scripts/dev.sh || { echo "ПРОВАЛ: dev.sh собирает центр без флага"; exit 1; }
+grep -qE -- '-target "\$TARGET" -D KIT_PILOT_CATALOG .*-o "\$HC/Utilitumus"' scripts/dev.sh || { echo "ПРОВАЛ: dev.sh собирает центр без флага"; exit 1; }
 echo "ok   scripts/dev.sh собирает центр с KIT_PILOT_CATALOG"
 grep -q 'SatelliteRegistry.installsOnItsOwn' Sources/App/Store/AutoUpdate.swift || { echo "ПРОВАЛ: автообновление не смотрит на пилот"; exit 1; }
 grep -q 'guard buildAllows, timer == nil' Sources/App/Store/AutoUpdate.swift || { echo "ПРОВАЛ: start() не смотрит на сборку"; exit 1; }
