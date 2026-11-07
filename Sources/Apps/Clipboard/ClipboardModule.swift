@@ -204,7 +204,7 @@ final class ClipboardModule: SatelliteModule {
     }
 
     func windowRoot() -> AnyView { AnyView(ClipboardView(model: controller)) }
-    var windowSize: CGSize { CGSize(width: 520, height: 520) }
+    var windowSize: CGSize { CGSize(width: 760, height: 780) }
 
     #if KIT_TEST_DEFAULTS
     /// Стенд: сигнал USR1 кладёт в историю выдуманные записи, буфер обмена не нужен.
