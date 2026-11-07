@@ -18,7 +18,8 @@ KIT=(Sources/Kit/KitDefaults.swift Sources/Kit/KitSigning.swift Sources/Kit/Sate
   Sources/Kit/SatelliteRole.swift Sources/Kit/SatelliteSelfUpdate.swift Sources/Kit/KitArchive.swift)
 while IFS= read -r f; do KIT+=("$f"); done < <(find Sources/Kit/Link -name '*.swift' | sort)
 # Пустые файлы от тестовых suite: removePersistentDomain оставляет их в Preferences.
-trap 'rm -f "$HOME/Library/Preferences/local.utilitumus.test.role.plist" "$HOME/Library/Preferences/$SUITE.plist"' EXIT
+# Домен стенда сперва через defaults: иначе cfprefsd допишет файл заново уже после rm.
+trap 'defaults delete "$SUITE" >/dev/null 2>&1 || true; rm -f "$HOME/Library/Preferences/local.utilitumus.test.role.plist" "$HOME/Library/Preferences/$SUITE.plist"' EXIT
 
 copy_if_changed() { cmp -s "$1" "$2" || cp "$1" "$2"; }
 
