@@ -17,8 +17,10 @@ struct ModuleHooks {
 /// тумблером на его странице, остаётся до ухода со страницы. На новой установке всё выключено.
 @MainActor
 final class ModuleManager: ObservableObject {
-    /// Все модули в порядке боковой панели и настроек.
-    @Published private(set) var order: [Module]
+    /// Настоящий порядок всех модулей: его читают и пишут настройки, показывают через `order`.
+    @Published private var fullOrder: [Module]
+    /// Модули в порядке боковой панели и настроек. Все, кроме дев-сборки с набором (`ModuleScope`).
+    var order: [Module] { ModuleScope.shown(fullOrder) }
     @Published private(set) var enabled: Set<Module>
     @Published private(set) var hidden: Set<Module>
     /// Модули, которые ведёт отдельная утилита: встроенный код не работает, страница и строка панели остаются.
@@ -66,7 +68,7 @@ final class ModuleManager: ObservableObject {
             if resetPlan.restoresSystemFn { FnSystemAction.restore() }
             utilityResets = Set(resetPlan.askUtility.compactMap(Module.init(rawValue:)))
         }
-        order = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
+        fullOrder = Self.normalizedOrder(defaults.stringArray(forKey: Self.orderKey) ?? [])
         enabled = Set(Module.allCases.filter { defaults.bool(forKey: Self.onKey($0)) })
         hidden = Set(Module.allCases.filter { defaults.bool(forKey: Self.hiddenKey($0)) })
         // Сразу из настроек: ответа утилиты и каталога при запуске ещё нет, а двойной работы быть не должно и на миг.
@@ -132,7 +134,7 @@ final class ModuleManager: ObservableObject {
     var installedModules: [Module] { order.filter(isInstalled) }
 
     /// Есть ли строка модуля в боковой панели: установлен и не скрыт.
-    func isInPanel(_ module: Module) -> Bool { isInstalled(module) && !hidden.contains(module) }
+    func isInPanel(_ module: Module) -> Bool { ModuleScope.shows(module) && isInstalled(module) && !hidden.contains(module) }
 
     /// Модули, у которых есть строка в панели, в порядке панели.
     var panelModules: [Module] { order.filter(isInPanel) }
@@ -173,25 +175,25 @@ final class ModuleManager: ObservableObject {
     /// Порядок по умолчанию и все модули в панели. Включённость не трогаем.
     func resetAll() {
         defaults.removeObject(forKey: Self.orderKey)
-        order = Module.allCases
+        fullOrder = Module.allCases
         for module in Module.allCases { setHidden(module, false) }
     }
 
     /// Новый общий порядок (перетаскивание в панели). Лишние и повторы отбрасываются, недостающие идут в конец.
     func applyOrder(_ new: [Module]) {
-        setOrder(Self.normalizedOrder(new.map(\.rawValue)))
+        setOrder(Self.normalizedOrder(ModuleScope.merged(new, into: fullOrder).map(\.rawValue)))
     }
 
     private func setOrder(_ new: [Module]) {
-        guard new != order else { return }
-        order = new
+        guard new != fullOrder else { return }
+        fullOrder = new
         defaults.set(new.map(\.rawValue), forKey: Self.orderKey)
     }
 
     /// Выбранный модуль, если он не скрыт (выключенный остаётся, пока страница открыта);
     /// иначе первый модуль панели; иначе nil.
     func resolve(_ selection: Module) -> Module? {
-        hidden.contains(selection) ? firstInPanel : selection
+        hidden.contains(selection) || !ModuleScope.shows(selection) ? firstInPanel : selection
     }
 
     /// Запуск приложения: стартуют включённые (скрытые тоже работают).

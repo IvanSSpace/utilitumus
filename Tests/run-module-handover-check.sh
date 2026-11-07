@@ -37,7 +37,7 @@ cp Tests/ModuleHandoverCheck.swift "$OUT/src/main.swift"
 mkdir -p "$CACHE/src"
 for f in main.swift KitDefaults.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
 FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift | sort) \
-  Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
+  Sources/App/ModuleManager.swift Sources/App/ModuleScope.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift)

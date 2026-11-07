@@ -44,7 +44,12 @@ struct ModuleDetail: View {
 }
 
 struct MainView: View {
+    #if KIT_DEV_SCOPE
+    /// Настройка не трогается: дев-сборка ушла бы с модуля вне набора и записала бы это, а настройки у неё общие с обычным центром.
+    @State private var selection: Module = .sound
+    #else
     @AppStorage("SelectedModule") private var selection: Module = .sound
+    #endif
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var whatsNew = WhatsNew.shared
     @ObservedObject private var updates = UpdateAll.shared
@@ -177,7 +182,7 @@ struct MainView: View {
         .onChange(of: showStore) { if showStore { SatelliteRegistry.shared.refresh() } }
         // Стор просит открыть модуль («Открыть» и «Настроить»): скрытый открывается разовым показом.
         .onReceive(NotificationCenter.default.publisher(for: .storeOpenModule)) { note in
-            guard let module = note.object as? Module else { return }
+            guard let module = note.object as? Module, ModuleScope.shows(module) else { return }
             if modules.isHidden(module) {
                 peeked = module
             } else {

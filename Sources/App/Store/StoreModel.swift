@@ -336,7 +336,7 @@ final class StoreModel: ObservableObject {
 
     /// Установленные и ставящиеся модули.
     var buildModules: [Module] {
-        Module.allCases.filter { state($0) != .available }
+        ModuleScope.shown(Module.allCases).filter { state($0) != .available }
     }
 
     /// Сколько реально лежит на диске из скачанного.
