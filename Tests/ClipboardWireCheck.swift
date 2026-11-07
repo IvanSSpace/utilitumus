@@ -451,6 +451,7 @@ func longFixture() -> Fixture {
     fixture.spaces = threeSpaces
     let model = FakeClipboardModel(fixture)
     let root = ClipboardView(model: model)
+        .background(ZStack { DSBackground(module: .clipboard, neutral: false); DSTheme.dusk.card })
         .environment(\.dsTheme, DSTheme.dusk)
         .preferredColorScheme(.dark)
         .frame(width: 738, height: 660)
