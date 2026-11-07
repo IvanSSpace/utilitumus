@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Свой значок модуля в строке меню. Настройка `MenuBarIcon.<id>` в общем домене: нет ключа — как было до неё
-/// (у утилиты значок есть, пока центр не запущен; у встроенного модуля его нет), `true` — значок есть всегда,
+/// (у утилиты значок есть, пока центр не запущен), `true` — значок есть всегда,
 /// `false` — нет никогда. Значок наш и только наш: чужих значков в строке меню мы не трогаем.
 enum MenuBarIcon {
     static func key(_ module: Module) -> String { "MenuBarIcon.\(module.rawValue)" }
@@ -31,16 +31,10 @@ enum MenuBarIcon {
     /// не отличаются от прежних.
     static func switchOn(_ setting: Bool?) -> Bool { setting == true }
 
-    /// Рисует ли значок утилита. `active` — модуль ведёт она (центр не запущен или передал модуль): иначе значок
-    /// модуля, если он нужен, рисует центр.
+    /// Рисует ли значок утилита. `active` — модуль ведёт она (центр не запущен или передал модуль).
     static func utilityShows(setting: Bool?, hubRunning: Bool, active: Bool) -> Bool {
         if !hubRunning { return setting ?? true }
         return setting == true && active
-    }
-
-    /// Рисует ли центр значок встроенного модуля. Модуль утилиты рисует она сама.
-    static func hubShows(setting: Bool?, external: Bool, moduleOn: Bool) -> Bool {
-        setting == true && !external && moduleOn
     }
 
     /// Нужна ли утилите меню: центр запущен — клик по значку открывает меню, центра нет — окно утилиты, как раньше.
@@ -54,9 +48,8 @@ enum MenuBarIcon {
         case hide
     }
 
-    /// Состав меню значка: строка статуса, быстрые действия, «Открыть в Utilitumus», «Скрыть значок». Одинаков для
-    /// утилиты и для встроенного модуля. Строку статуса модуль отдаёт сам и она не меняется на каждое событие;
-    /// читается она при открытии меню, а не по таймеру.
+    /// Состав меню значка: строка статуса, быстрые действия, «Открыть в Utilitumus», «Скрыть значок».
+    /// Строку статуса модуль отдаёт сам и она не меняется на каждое событие; читается она при открытии меню, а не по таймеру.
     static func entries(status: String, actions: [LinkQuickAction]) -> [Entry] {
         var result: [Entry] = []
         let line = status.trimmingCharacters(in: .whitespacesAndNewlines)

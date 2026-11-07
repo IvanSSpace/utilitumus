@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // Боковая панель: чистая раскладка (зоны, переносы, сетка плиток), настройки и переход со старого вида,
@@ -160,7 +161,6 @@ func pure() {
     let defaults = Kit.defaults
     let modules = ModuleManager.shared
     let icons = ModuleMenuIcons.shared
-    icons.makeItem = { _ in nil }
     var told: [String] = []
     icons.tellUtility = { m, on in told.append("\(m.rawValue) \(on)") }
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)); modules.setOn(m, true); modules.setHidden(m, false) }
@@ -191,7 +191,7 @@ func pure() {
     let launched = SidebarModel(modules: modules, icons: icons, satellites: registry)
     await poll(.clipboard) { modules.isExternal(.clipboard) }
     launched.reconcile()
-    check(modules.isExternal(.clipboard), "опрос: утилита стоит, встроенный выключен — модуль ведёт она")
+    check(modules.isExternal(.clipboard), "опрос: утилита стоит, модуль был выключен — модуль ведёт она")
     check(modules.order == arranged, "первый опрос при запуске не меняет порядок, который расставил человек")
     launched.reconcile()
     check(modules.order == arranged, "и следующие пересчёты его не меняют")
@@ -220,9 +220,18 @@ func pure() {
     icons.set(.sound, true)
     check(!model.layout().pinned.contains(.fans) && model.layout().pinned == [.sound], "false остаётся не закреплённым, true — закреплённый")
 
+    // Значок рисует утилита: закрепление доходит до неё сразу.
+    modules.setExternal(.awake, true)
+    told = []
     check(model.send(.awake, to: .pinned) && defaults.bool(forKey: MenuBarIcon.key(.awake)) && icons.isOn(.awake), "закрепление включает MenuBarIcon.<id> сразу")
-    check(icons.wanted.contains(.awake), "значок в строке меню появился без перезапуска")
-    check(model.send(.awake, to: .list) && defaults.object(forKey: MenuBarIcon.key(.awake)) == nil && !icons.wanted.contains(.awake), "открепление снимает ключ и убирает значок сразу")
+    check(told == ["awake true"], "утилите сказано о значке без перезапуска: \(told)")
+    check(model.send(.awake, to: .list) && defaults.object(forKey: MenuBarIcon.key(.awake)) == nil, "открепление снимает ключ")
+    check(told == ["awake true", "awake false"], "и утилите сказано сразу: \(told)")
+    modules.setExternal(.awake, false)
+    // Без утилиты говорить некому: плитка закрепляется, ключ прочитает будущая утилита.
+    told = []
+    check(model.send(.awake, to: .pinned) && icons.isOn(.awake) && told.isEmpty, "модуль без утилиты: закреплён, сказать некому: \(told)")
+    check(model.send(.awake, to: .list), "и откреплён")
     check(MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления запасной значок утилиты без центра остаётся")
     check(model.send(.sound, to: .hidden) && modules.isHidden(.sound) && defaults.object(forKey: MenuBarIcon.key(.sound)) == nil, "перенос закреплённого в скрытые снимает ключ")
     icons.set(.awake, false)
@@ -341,11 +350,37 @@ func pure() {
 
 // MARK: - Снимки панели
 
+/// Отвечают ли утилиты на опрос: на снимках отвечают, в настройках и переходе модули без утилит.
+final class AnswerFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var on = false
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return on }
+        set { lock.lock(); on = newValue; lock.unlock() }
+    }
+}
+let utilitiesAnswer = AnswerFlag()
+
+/// Модель с готовой строкой: настоящим нужна живая утилита.
+final class FixtureCard: RemoteModuleSurface {
+    let card: DashState
+    init(_ card: DashState) { self.card = card }
+    var responding: Bool { true }
+    var changes: AnyPublisher<Void, Never> { Empty().eraseToAnyPublisher() }
+    func refresh() {}
+    func dashboardState(base: DashState, status: LinkStatus?) -> DashState { card }
+    func performDashboardAction() -> Bool { false }
+    func performDashboardAction(ask: (DashConfirmation) -> Void) -> Bool { false }
+    func setDashboardVisible(_ visible: Bool) {}
+    var menuUsesQuickActions: Bool { true }
+}
+
 @MainActor func scenes() async {
     let model = SidebarModel.shared
     let modules = ModuleManager.shared
     let defaults = Kit.defaults
-    DashboardLive.testBuiltIn = [
+    // Строки как у настоящих утилит: бандл, ответ на опрос, карточка из модели.
+    let fixtures: [Module: DashState] = [
         .fans: DashState(text: "59° · По датчику · 3101 об/мин"),
         .keyboard: DashState(text: "ABC"),
         .sound: DashState(text: "Микрофон: MacBook Pro"),
@@ -358,6 +393,18 @@ func pure() {
         .mixer: DashState(text: "Музыка 60%"),
         .load: DashState(text: "Память 11 из 16 ГБ · очень длинная строка, которая обязана обрезаться"),
     ]
+    let registry = SatelliteRegistry.shared
+    let apps = registry.environment.paths.appsDir
+    for module in Module.allCases {
+        let contents = apps.appendingPathComponent(SatelliteRegistry.bundleName(module) + ".app/Contents")
+        try? FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        (["CFBundleShortVersionString": "1.1.0"] as NSDictionary).write(to: contents.appendingPathComponent("Info.plist"), atomically: true)
+        RemoteModules.testModels[module] = FixtureCard(fixtures[module] ?? DashState())
+    }
+    utilitiesAnswer.value = true
+    await registry.update()
+    check(Module.allCases.allSatisfy(modules.isExternal), "снимки панели: все модули ведут утилиты")
+    check(fixtures.allSatisfy { DashboardLive.snapshot($0.key) == $0.value }, "снимки панели: строки идут из модели утилиты")
     var rows: [String: NSBitmapImageRep] = [:]
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         func reset() {
@@ -402,7 +449,8 @@ func pure() {
         check(differing(rows["\(themeName)-mid-drag"]!, rows["\(themeName)-pins3"]!) > 0, "\(themeName): снимок с перетаскиванием отличается")
         reset()
     }
-    DashboardLive.testBuiltIn = [:]
+    utilitiesAnswer.value = false
+    RemoteModules.testModels = [:]
 }
 
 @MainActor func run() async {
@@ -413,7 +461,10 @@ func pure() {
     SatelliteRegistry.standEnvironment = SatelliteEnvironment(
         paths: paths, defaults: Kit.defaults,
         installer: SatelliteInstaller(paths: paths, launchctl: { _ in }, download: { $0 }, verify: { _, _ in }),
-        commands: SatelliteCommands(status: { _ in throw LinkError.timeout }, setEnabled: { _, _ in }, openWindow: { _ in }),
+        commands: SatelliteCommands(status: { _ in
+            guard utilitiesAnswer.value else { throw LinkError.timeout }
+            return LinkStatus(enabled: true, line: "", needsSetup: 0)
+        }, setEnabled: { _, _ in }, openWindow: { _ in }),
         loadCatalog: { Data(#"{"schema":1,"apps":[]}"#.utf8) },
         hubVersion: "0.6.0", modules: .shared)
     pure()

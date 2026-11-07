@@ -49,19 +49,16 @@ struct AppMenuBarScene: Scene {
         MenuBarExtra("Utilitumus", systemImage: "slider.horizontal.3") {
             Button("Открыть Utilitumus") { show() }
 
-            if !modules.order.isEmpty {
+            let switchable = Self.switchable(modules)
+            if !switchable.isEmpty {
                 Section("Модули") {
-                    ForEach(modules.order) { module in
-                        Toggle(module.title, isOn: Binding(
-                            get: { modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module) },
-                            set: {
-                                if modules.isExternal(module) { satellites.setEnabled(module, $0) } else { modules.setOn(module, $0) }
-                            }))
+                    ForEach(switchable) { module in
+                        Toggle(module.title, isOn: Binding(get: { satellites.isEnabled(module) }, set: { satellites.setEnabled(module, $0) }))
                     }
                 }
 
                 Menu("Значки") {
-                    ForEach(modules.order) { module in
+                    ForEach(switchable) { module in
                         Toggle(module.title, isOn: Binding(get: { menuIcons.isOn(module) }, set: { menuIcons.set(module, $0) }))
                             .disabled(menuIcons.isFull && !menuIcons.isOn(module))
                     }
@@ -75,7 +72,7 @@ struct AppMenuBarScene: Scene {
 
             if ModuleScope.shows(.stash), modules.isExternal(.stash) { RemoteStashMenuSection() }
 
-            // Ведомые модули: быстрые действия приходят в статусе утилиты.
+            // Быстрые действия приходят в статусе утилиты.
             ForEach(MenuQuickActions.sections(order: modules.order, modules: modules, entries: satellites.entries), id: \.module) { section in
                 Section(section.module.title) {
                     ForEach(Array(section.actions.enumerated()), id: \.offset) { _, quick in
@@ -94,13 +91,16 @@ struct AppMenuBarScene: Scene {
         }
     }
 
+    /// Модули с переключателями в меню: те, что ведёт утилита. Без неё включать, выключать и рисовать значок некому.
+    static func switchable(_ modules: ModuleManager) -> [Module] { modules.order.filter(modules.isExternal) }
+
     private func show() {
         openWindow(id: "main")
         DockMode.bringToFront()
     }
 }
 
-/// Быстрые действия ведомых модулей в меню-баре: секция на модуль, кнопка на действие из статуса.
+/// Быстрые действия модулей в меню-баре: секция на модуль, кнопка на действие из статуса.
 @MainActor
 enum MenuQuickActions {
     struct MenuSection: Equatable {
@@ -108,7 +108,7 @@ enum MenuQuickActions {
         let actions: [LinkQuickAction]
     }
 
-    /// Секции в порядке модулей. Выключенного, неотвечающего и без действий в меню нет, как и у встроенного.
+    /// Секции в порядке модулей. Выключенного, неотвечающего и без действий в меню нет.
     /// Модуль, чьё меню рисует его модель (`menuUsesQuickActions == false`), пропускается.
     static func sections(order: [Module], modules: ModuleManager, entries: [Module: SatelliteRegistry.Entry]) -> [MenuSection] {
         order.compactMap { module in
@@ -132,19 +132,7 @@ enum MenuQuickActions {
     }
 }
 
-/// Секции встроенных «Вентиляторов» и «Стеша»: вид существует, только пока модуль встроенный и включён.
-private struct FansMenuSection: View {
-    @ObservedObject private var fans = FanController.shared
-
-    var body: some View {
-        Section("Вентиляторы") {
-            Toggle("Полная мощность", isOn: $fans.fullPower)
-            Button("Все в режим «Авто»") { fans.setAllAuto() }
-        }
-    }
-}
-
-/// Те же пункты, что у встроенных, когда модуль ведёт утилита: «Полная мощность» с галочкой, а не быстрое действие из статуса.
+/// Пункты «Вентиляторов»: «Полная мощность» с галочкой, а не быстрое действие из статуса.
 private struct RemoteFansMenuSection: View {
     @ObservedObject private var fans = RemoteFansModel.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
@@ -177,26 +165,7 @@ private struct RemoteStashMenuSection: View {
     }
 }
 
-private struct StashMenuSection: View {
-    @ObservedObject private var stash = StashStore.shared
-
-    var body: some View {
-        Section("Стеш программ") {
-            Button("Спрятать выбранные") {
-                Task {
-                    stash.refresh()
-                    await stash.stashSelected()
-                }
-            }
-            Button("Вернуть\(stash.stashed.isEmpty ? "" : " (\(stash.stashed.count))")") {
-                Task { await stash.restore() }
-            }
-            .disabled(stash.stashed.isEmpty)
-        }
-    }
-}
-
-/// Пункт «Не спать» в меню-баре: тот же переключатель, кто бы ни вёл модуль. Выключенного модуля в меню нет.
+/// Пункт «Не спать» в меню-баре. Выключенного модуля и модуля без утилиты в меню нет.
 struct AwakeMenuItem: View {
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared

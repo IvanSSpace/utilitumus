@@ -81,16 +81,11 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
     check(!MenuBarIcon.utilityShows(setting: nil, hubRunning: true, active: true), "утилита по умолчанию: центр запущен — значка нет")
     check(!MenuBarIcon.utilityShows(setting: nil, hubRunning: true, active: false), "утилита по умолчанию: пассивная при центре — нет")
     check(MenuBarIcon.utilityShows(setting: true, hubRunning: true, active: true), "«да»: значок есть и при центре")
-    check(!MenuBarIcon.utilityShows(setting: true, hubRunning: true, active: false), "«да», но модуль встроенный: утилита не рисует")
+    check(!MenuBarIcon.utilityShows(setting: true, hubRunning: true, active: false), "«да», но модуль ей не передан: утилита не рисует")
     check(!MenuBarIcon.utilityShows(setting: false, hubRunning: false, active: true), "«нет»: значка нет и без центра")
     check(MenuBarIcon.utilityShows(setting: true, hubRunning: false, active: true), "«да» без центра: есть")
     check(MenuBarIcon.utilityUsesMenu(hubRunning: true) && !MenuBarIcon.utilityUsesMenu(hubRunning: false), "меню при центре, окно без него")
 
-    check(MenuBarIcon.hubShows(setting: true, external: false, moduleOn: true), "встроенный: «да» — рисует центр")
-    check(!MenuBarIcon.hubShows(setting: nil, external: false, moduleOn: true), "встроенный: по умолчанию значка нет")
-    check(!MenuBarIcon.hubShows(setting: false, external: false, moduleOn: true), "встроенный: «нет» — нет")
-    check(!MenuBarIcon.hubShows(setting: true, external: true, moduleOn: true), "ведёт утилита: центр не рисует")
-    check(!MenuBarIcon.hubShows(setting: true, external: false, moduleOn: false), "модуль выключен: значка нет")
     check(!MenuBarIcon.switchOn(nil) && !MenuBarIcon.switchOn(false) && MenuBarIcon.switchOn(true), "переключатель включён только явным «да»")
 
     print("== состав меню")
@@ -120,37 +115,47 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
     let lookalike = KitLink.requirement(identifier: "local.utilitumus.fake")
     check(hubSpec.requirement != lookalike, "требование не пускает подделку с другим identifier")
 
-    print("== центр: кто рисует и что говорит утилите")
+    print("== центр: значки рисует утилита, центр только говорит ей")
     let modules = ModuleManager.shared
     var told: [String] = []
     let icons = ModuleMenuIcons(modules: modules, satellites: .shared, defaults: defaults)
-    icons.makeItem = { _ in nil }
     icons.tellUtility = { m, on in told.append("\(m.rawValue) \(on)") }
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
-    icons.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
-    told = []
     modules.setOn(.fans, true); modules.setOn(.awake, true); modules.setOn(.load, true)
     modules.setExternal(.load, true)
+    check(modules.wantsUtility(.fans) && modules.isExternal(.load), "до проверки: у «Вентиляторов» утилиты нет, «Нагрузку» ведёт она")
     icons.set(.fans, true); icons.set(.load, true)
     check(icons.isOn(.fans) && icons.isOn(.load) && !icons.isOn(.awake), "переключатели читают сохранённое")
-    check(icons.wanted == [.fans], "центр рисует значок только встроенного модуля с «да»")
-    check(told == ["load true"], "утилите сказано про её модуль, встроенному не нужно (\(told))")
+    check(MenuBarIcon.setting(.fans) == true, "модуль без утилиты: настройка записана, утилита прочитает её при запуске")
+    check(told == ["load true"], "сказано только утилите, модулю без неё говорить некому (\(told))")
     icons.set(.load, false)
     check(told == ["load true", "load false"], "выключение тоже уходит утилите")
-    modules.setOn(.fans, false)
-    check(icons.wanted.isEmpty, "модуль выключили — значка нет")
-    modules.setOn(.fans, true)
+    icons.clear(.fans)
+    check(told == ["load true", "load false"] && MenuBarIcon.setting(.fans) == nil, "снятие у модуля без утилиты: только ключ")
+
+    print("== меню: переключатели только у модулей с утилитой")
+    check(AppMenuBarScene.switchable(modules) == modules.order.filter { $0 == .load }, "включён без утилиты и не установлен: переключателя нет, только «Нагрузка»")
     modules.setExternal(.fans, true)
-    check(icons.wanted.isEmpty, "модуль передан утилите — центр не рисует")
+    check(Set(AppMenuBarScene.switchable(modules)) == [.load, .fans], "утилита появилась: переключатель появился")
     modules.setExternal(.fans, false); modules.setExternal(.load, false)
+    check(AppMenuBarScene.switchable(modules).isEmpty, "утилит нет: переключателей нет")
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
-    icons.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
 
     print("== снимки раздела")
     let shared = ModuleMenuIcons.shared
-    shared.makeItem = { _ in nil }
     shared.tellUtility = { _, _ in }
     var shots: [NSBitmapImageRep] = []
+    // Раздел настроек: модули без утилиты в нём не показаны, значок им рисовать некому.
+    for m in Module.allCases { modules.setExternal(m, false) }
+    let none = await snapshot("section-no-utility", MenuIconsSection(), theme: .dusk, width: 380)
+    modules.setExternal(.fans, true)
+    let one = await snapshot("section-one-utility", MenuIconsSection(), theme: .dusk, width: 380)
+    // По высоте не сравнить: снимок не ниже 100 pt, и в них помещается одна строка.
+    check(differing(one, none) > 0, "раздел: появилась утилита, появилась строка")
+    modules.setOn(.fans, true); modules.setOn(.awake, true); modules.setOn(.stash, true)
+    modules.setExternal(.awake, true); modules.setExternal(.stash, true)
+    let three = await snapshot("section-three-utilities", MenuIconsSection(), theme: .dusk, width: 380)
+    check(three.pixelsHigh > one.pixelsHigh, "раздел: три утилиты выше одной")
     for (name, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
         shared.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
@@ -170,6 +175,7 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
         check(ctrlOn.pixelsHigh == ctrlOff2.pixelsHigh && ctrlOn.pixelsWide == ctrlOff2.pixelsWide, "шапка \(name): включение не сдвигает раскладку")
     }
     check(differing(shots[0], shots[1]) > 0, "темы различаются")
+    for m in [Module.fans, .awake, .stash] { modules.setExternal(m, false) }
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
     defaults.removeObject(forKey: DSTheme.storageKey)
 }

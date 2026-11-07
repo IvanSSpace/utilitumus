@@ -167,7 +167,6 @@ func mentioned(_ text: String) -> Set<Module> {
     let want = Set(expected)
     let before = guardedSettings(.standard)
     let beforeKit = guardedSettings(Kit.defaults)
-    icons.makeItem = { _ in nil }
     var told: [String] = []
     icons.tellUtility = { module, on in told.append("\(module.rawValue) \(on)") }
 
@@ -193,7 +192,8 @@ func mentioned(_ text: String) -> Set<Module> {
     check(Set(UpdateAll.shared.rows.map(\.module)) == updatable, "обновления: только набор, \(UpdateAll.shared.rows.map(\.module.rawValue))")
     check(Set(UpdateAll.shared.startable) == updatable, "«Обновить всё»: только набор")
     check(Set(StoreModel.shared.buildModules) == updatable, "полоса Стора: только набор, и без модулей, у которых нет утилиты")
-    check(icons.wanted == want.intersection(pinned).intersection(withoutUtility), "значки центра: только набор, \(icons.wanted.map(\.rawValue))")
+    check(Set(modules.order.filter(icons.isOn)) == want.intersection(pinned), "значки: настройка видна только у набора")
+    check(Set(AppMenuBarScene.switchable(modules)) == want.subtracting(withoutUtility), "переключатели в меню: только набор и только с утилитой, \(AppMenuBarScene.switchable(modules).map(\.rawValue))")
     check(icons.waitingForUpdate.allSatisfy(want.contains), "тихая строка о значках: только набор")
     #if KIT_TEST_DEFAULTS
     // Модель в `sections` своя: настоящие говорили бы с настоящими утилитами, поэтому обычная сборка это не считает.
@@ -228,9 +228,6 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
 @MainActor func scoped(expected: [Module], isAll: Bool, label: String) async {
     let want = Set(expected)
     let before = guardedSettings(.standard)
-    for module in Module.allCases where want.contains(module) && withoutUtility.contains(module) {
-        DashboardLive.testBuiltIn[module] = DashState(text: "стенд")
-    }
     await common(expected: expected, label: label)
     // Дальше настоящие виды: без фильтра они открыли бы экраны утилит вне набора и пошли бы к настоящим утилитам.
     guard failures == 0, stepName != "model" else { return }

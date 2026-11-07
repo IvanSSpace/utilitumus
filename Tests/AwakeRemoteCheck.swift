@@ -62,7 +62,7 @@ let pinnedStates = [
     if pinned.active { await model.perform(.toggle) }
 }
 
-/// Встроенный контроллер в том же состоянии, тот же срок до секунды. Assertion у стенда при этом не появляется.
+/// Контроллер утилиты, собранный в стенд, в том же состоянии, тот же срок до секунды. Assertion у стенда при этом не появляется.
 @MainActor func pinLocal(to state: AwakeState) {
     let controller = AwakeController.shared
     controller.testPin(isActive: false, endDate: nil)
@@ -70,6 +70,23 @@ let pinnedStates = [
     controller.duration = state.duration
     controller.canStart = state.canStart
     controller.testPin(isActive: state.isActive, endDate: state.endDate)
+}
+
+/// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme, @ViewBuilder _ content: @escaping () -> some View) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.awake), animated: false) { _, active in
+        AnyView(content()
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.awake))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .awake, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
 }
 
 // MARK: - Сценарии
@@ -106,7 +123,7 @@ func wirePure() {
     check(await until(2) { model.isActive }, "нажатие: модель показала ответ утилиты")
     check(await holdsAssertion(pid: utility), "нажатие: assertion у процесса утилиты")
     check(!(await holdsAssertion(pid: stand)), "нажатие: у центра assertion нет")
-    check(!AwakeController.shared.isActive, "нажатие: встроенный контроллер не трогали")
+    check(!AwakeController.shared.isActive, "нажатие: контроллер стенда не трогали")
 
     // Статус меняет сама утилита: команда сигналом, чтения от стенда нет.
     kill(utility, SIGUSR1)
@@ -147,12 +164,10 @@ func wirePure() {
             check(model.responding && model.isActive == pinned.active && model.duration == pinned.duration, "\(themeName) \(pinned.name): утилита в нужном состоянии")
             check((model.endDate != nil) == (pinned.duration != .forever && pinned.active), "\(themeName) \(pinned.name): срок \(model.endDate.map(String.init(describing:)) ?? "нет")")
 
-            modules.setExternal(.awake, false)
             pinLocal(to: model.state)
-            let local = await Stand.open(theme)
+            let local = await openLocal(theme) { ModuleScreen(module: .awake) { AwakeView(model: AwakeController.shared) } }
             Stand.save(local, "\(themeName)-\(pinned.name)-local")
 
-            modules.setExternal(.awake, true)
             await registry.update()
             check(registry.isEnabled(.awake), "\(themeName) \(pinned.name): реестр видит утилиту включённой")
             let remote = await Stand.open(theme)
@@ -165,15 +180,11 @@ func wirePure() {
         check(differingPixels(shots[0], shots[1]) > 0 && differingPixels(shots[1], shots[2]) > 0, "\(themeName): три состояния выглядят по-разному, снимки не пустые")
         await drive(pinnedStates[0])
     }
-    // Эта тема выбрана и выключенный модуль выглядит как встроенный выключенный.
+    // Выключенная утилита: тот самый экран «модуль выключен».
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
     let other = LinkClient(id: moduleID)
-    modules.setOn(.awake, false)
-    modules.setExternal(.awake, false)
-    let local = await Stand.open(.dusk)
+    let local = await openLocal(.dusk) { ModuleOffView(module: .awake) {} more: {} }
     Stand.save(local, "dusk-off-local")
-    modules.setOn(.awake, true)
-    modules.setExternal(.awake, true)
     try? await other.setEnabled(false)
     await registry.update()
     let remote = await Stand.open(.dusk)
@@ -187,14 +198,14 @@ func wirePure() {
 
 // MARK: - Карточка дашборда и меню-бар
 
-/// Что показывает карточка дашборда в этом состоянии у встроенного модуля.
+/// Что показывает карточка дашборда в этом состоянии.
 func expectedCard(_ pinned: Pinned) -> DashState {
     guard pinned.active else { return DashState(text: "можно спать", actionTitle: "Не спать", actionIcon: "cup.and.saucer") }
     let tail = pinned.duration == .forever ? "" : " · ещё 1 ч 0 мин"
     return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
 }
 
-/// Встроенный модуль и утилита в одном состоянии: дашборд и пункт меню совпадают до пикселя.
+/// Контроллер утилиты и центр в одном состоянии: карточка та же, пункт меню совпадает до пикселя.
 @MainActor func cardPixels() async {
     let model = RemoteAwakeModel.shared
     let modules = ModuleManager.shared
@@ -211,18 +222,12 @@ func expectedCard(_ pinned: Pinned) -> DashState {
             let expected = expectedCard(pinned)
             let name = "\(themeName) \(pinned.name)"
 
-            modules.setExternal(.awake, false)
             pinLocal(to: model.state)
-            _ = await Stand.open(theme, .dashboard)
-            check(await until(2.5) { slot.state == expected }, "\(name): карточка встроенного «\(slot.state.text)»")
-            await pause(0.2)
-            let localShot = Stand.snapshot(Stand.window.contentView!)
-            Stand.save(localShot, "dash-\(themeName)-\(pinned.name)-local")
-            let localMenu = await Stand.menuItem(AwakeMenuItem())
+            check(DashboardLive.awake(AwakeController.shared) == expected, "\(name): контроллер утилиты даёт ту же карточку")
+            let localMenu = await Stand.menuItem(AwakeMenuToggle(model: AwakeController.shared))
 
-            // Контроллер в обратном состоянии: экран, читающий его вместо утилиты, снимок не пройдёт.
+            // Контроллер в обратном состоянии: экран, читающий его вместо утилиты, проверку не пройдёт.
             AwakeController.shared.testPin(isActive: !pinned.active, endDate: nil)
-            modules.setExternal(.awake, true)
             _ = await Stand.open(theme, .dashboard)
             check(await until(2.5) { slot.state == expected }, "\(name): карточка утилиты «\(slot.state.text)»")
             await pause(0.2)
@@ -230,8 +235,6 @@ func expectedCard(_ pinned: Pinned) -> DashState {
             Stand.save(remoteShot, "dash-\(themeName)-\(pinned.name)-remote")
             let remoteMenu = await Stand.menuItem(AwakeMenuItem())
 
-            let diff = differingPixels(localShot, remoteShot)
-            check(diff == 0, "\(name): дашборд совпал, разных пикселей \(diff) из \(localShot.pixelsWide * localShot.pixelsHigh)")
             let menuDiff = differingPixels(localMenu, remoteMenu)
             check(menuDiff == 0, "\(name): пункт меню совпал, разных пикселей \(menuDiff)")
             shots.append(remoteShot)
@@ -246,7 +249,7 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     AwakeController.shared.testPin(isActive: false, endDate: nil)
 }
 
-/// Кнопка карточки и пункт меню идут в утилиту, встроенный контроллер не трогают.
+/// Кнопка карточки и пункт меню идут в утилиту, контроллер стенда не трогают.
 @MainActor func cardActions(stand: Int32, utility: Int32) async {
     let model = RemoteAwakeModel.shared
     let modules = ModuleManager.shared
@@ -283,33 +286,30 @@ func expectedCard(_ pinned: Pinned) -> DashState {
     kill(utility, SIGUSR1)
     check(await until(2.5) { slot.state.actionTitle == "Не спать" }, "statusChanged: и выключение")
 
-    // Встроенный при этом ни при чём: `canStart` у него проверяет кнопка, как на экране модуля.
-    modules.setExternal(.awake, false)
+    // Включить нельзя: как у кнопки на экране модуля, действия нет. Формула карточки одна, состояние здесь задаёт контроллер.
     AwakeController.shared.canStart = false
-    check(await until(2.5) { slot.state == DashState(text: "можно спать") }, "включить нельзя: у карточки нет действия")
+    check(DashboardLive.awake(AwakeController.shared) == DashState(text: "можно спать"), "включить нельзя: у карточки нет действия")
     AwakeController.shared.canStart = true
-    modules.setExternal(.awake, true)
-    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "после возврата утилите снова её состояние")
 
-    // Выключенная утилита: тумблер карточки идёт в реестр, настройка встроенного остаётся.
+    // Выключенная утилита: тумблер карточки идёт в реестр, `ModuleOn` остаётся.
     let keyBefore = UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake))
     DashboardLive.setOn(.awake, false)
     check(await until(2.5) { registry.entries[.awake]?.status?.enabled == false }, "«Выключить модуль» на карточке выключает утилиту")
     let offStatus = try? await other.status()
     check(offStatus?.enabled == false, "утилита сама говорит, что выключена")
     check(await until(2.5) { slot.state == DashState(on: false, text: "выключен") }, "карточка выключенной утилиты «\(slot.state.text)»")
-    check(UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake)) == keyBefore && modules.enabled.contains(.awake), "настройка встроенного не тронута")
+    check(UserDefaults.standard.bool(forKey: ModuleManager.onKey(.awake)) == keyBefore && modules.enabled.contains(.awake), "`ModuleOn` не тронут")
     Stand.save(await Stand.open(.dusk, .dashboard), "dash-dusk-off-remote")
     let menuOff = await Stand.menuItem(AwakeMenuItem())
     modules.setExternal(.awake, false)
     modules.setOn(.awake, false)
-    let menuBuiltInOff = await Stand.menuItem(AwakeMenuItem())
-    check(differingPixels(menuOff, menuBuiltInOff) == 0, "выключенный модуль: в меню пункта нет, как у встроенного")
+    let menuNoUtility = await Stand.menuItem(AwakeMenuItem())
+    check(differingPixels(menuOff, menuNoUtility) == 0, "выключенный модуль: в меню пункта нет, как и у модуля без утилиты")
     modules.setOn(.awake, true)
     modules.setExternal(.awake, true)
     DashboardLive.setOn(.awake, true)
     check(await until(2.5) { registry.entries[.awake]?.status?.enabled == true }, "«Включить» на карточке включает утилиту")
-    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "карточка снова как у встроенного")
+    check(await until(2.5) { slot.state == expectedCard(pinnedStates[0]) }, "карточка снова как была")
 }
 
 /// Зависшая утилита: как вкладка, карточка и меню говорят «не отвечает». Узнают сами, без открытой вкладки.

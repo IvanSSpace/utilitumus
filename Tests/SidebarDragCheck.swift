@@ -737,11 +737,9 @@ func center(_ r: CGRect) -> CGPoint { CGPoint(x: r.midX, y: r.midY) }
         loadCatalog: { Data(#"{"schema":1,"apps":[]}"#.utf8) },
         hubVersion: "0.6.0", modules: .shared)
     let icons = ModuleMenuIcons.shared
-    icons.makeItem = { _ in nil }
     icons.tellUtility = { _, _ in }
     icons.start()
     SidebarModel.shared.start()
-    DashboardLive.testBuiltIn = [:]
     // SIDEBAR_DRAG_ONLY=clicks,hidden — только эти сценарии (отладка).
     let only = ProcessInfo.processInfo.environment["SIDEBAR_DRAG_ONLY"].map { Set($0.split(separator: ",").map(String.init)) }
     let scenarios: [(String, () async -> Void)] = [("clicks", clicks), ("reorder", reorder), ("between", between),
