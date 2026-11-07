@@ -39,7 +39,7 @@ enum VoiceModel: String, CaseIterable, Identifiable {
     var sha256: String {
         switch self {
         case .gigaam: return "f9620a0099019c6afcee26525ef9ed3297fa50dd5691c1902af0c948fc1a470b"
-        case .parakeet: return "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
+        case .parakeet: return "1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9"
         }
     }
 
@@ -47,7 +47,7 @@ enum VoiceModel: String, CaseIterable, Identifiable {
     var sizeBytes: Int64 {
         switch self {
         case .gigaam: return 170_197_019
-        case .parakeet: return 487_170_055
+        case .parakeet: return 487_211_443
         }
     }
 
