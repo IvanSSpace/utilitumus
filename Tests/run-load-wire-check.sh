@@ -118,8 +118,11 @@ PY
   mutation Native/Background/BackgroundStore.swift 'guard let plan = pending, plan.id == planID, !running else { return }' 'guard let plan = pending, !running else { return }' "модель фонового выполняет план с чужим id"
   mutation LoadWire.swift 'agent.verbs.contains(verb) else' 'true else' "действие агента, которого нет на кнопках"
   mutation LoadWire.swift 'bot.actions.contains(verb) else' 'true else' "действие бота, которого нет на кнопках"
-  mutation Native/Background/BackgroundActions.swift 'try BotRunner.run(verb, id: spec.id, expected: shown)' 'try BotRunner.run(verb, id: spec.id)' "команда бота не сверяется с показанной"
-  mutation Native/Background/BackgroundActions.swift 'expected: shown)' 'expected: shown.isEmpty ? nil : shown)' "план без команды запускает то, чего человек не видел"
+  mutation Native/Background/BackgroundActions.swift 'if case .argv(let argv)? = spec.commands[verb] { shown = argv }' 'if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { shown = argv }' "команда бота сверяется с файлом, а не с показанной"
+  mutation Native/Background/BackgroundActions.swift '{ shown = argv }' '{ shown = argv } else if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { shown = argv }' "план без команды запускает то, чего человек не видел"
+  mutation Native/Background/BackgroundActions.swift 'cmd = BotRunner.shown(argv)' 'cmd = Exec.display(argv)' "команда в вопросе бота не очищена"
+  mutation Native/Background/BackgroundActions.swift 'message: ScreenText.clean((cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"), BotRunner.maxShown),' 'message: (cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"),' "текст вопроса бота не очищен"
+  mutation Native/Background/BackgroundActions.swift 'title: ScreenText.clean("\(verb.title) \(b.name)", BotRunner.maxShown),' 'title: "\(verb.title) \(b.name)",' "заголовок вопроса бота не очищен"
   mutation LoadWire.swift 'guard label.utf8.count <= LoadStore.maxIDBytes else { return "Непонятная команда" }' '' "длина метки не ограничена"
   mutation LoadWire.swift 'guard !stopRunning else { return "Остановка уже идёт" }
             guard pendingStop?.id' 'guard pendingStop?.id' "второе подтверждение во время остановки"

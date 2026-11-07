@@ -50,7 +50,7 @@ final class BotsModule: SatelliteModule {
             return LinkQuickAction(
                 title: "\(verb.title) \(bot.name)", icon: on ? "stop.circle" : "play.circle",
                 action: LinkWire.encoded(BotsAction.quick(id: bot.id, verb: verb, sum: BotRunner.fingerprint(argv))),
-                confirm: LinkConfirm(title: "\(verb.title) \(bot.name)?", message: "Выполнит \(BotsStore.shown(argv)).", button: verb.title))
+                confirm: LinkConfirm(title: "\(verb.title) \(bot.name)?", message: "Выполнит \(BotRunner.shown(argv)).", button: verb.title))
         }
         .prefix(3).map { $0 }
     }

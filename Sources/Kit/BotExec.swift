@@ -117,6 +117,26 @@ enum Exec {
     }
 }
 
+// MARK: Текст для экрана
+
+/// Только замена символов: поиск ботов зовёт это из файла, где запусков быть не должно.
+enum ScreenText {
+    /// Строка для экрана: без управляющих и невидимых символов, не длиннее `limit`.
+    static func clean(_ s: String, _ limit: Int) -> String {
+        var out = String.UnicodeScalarView()
+        for u in s.unicodeScalars {
+            let v = u.value
+            if v < 0x20 || (0x7f...0x9f).contains(v) || v == 0x2028 || v == 0x2029 || (0x202a...0x202e).contains(v) || (0x2066...0x2069).contains(v) || v == 0x200b || v == 0xfeff || v == 0x061c || v == 0x200e || v == 0x200f {
+                out.append(" ")
+            } else {
+                out.append(u)
+            }
+        }
+        let text = String(out).trimmingCharacters(in: .whitespaces)
+        return text.count <= limit ? text : String(text.prefix(limit - 1)) + "…"
+    }
+}
+
 // MARK: Журнал действий
 
 /// Журнал действий: по строке JSON на действие в `~/Library/Logs/Utilitumus/actions.log`
@@ -221,14 +241,22 @@ enum BotRunner {
     static let timeout: TimeInterval = 60
     static let changedMessage = "Команда в bots.toml изменилась после вопроса, ничего не запущено. Нажми кнопку ещё раз и проверь команду."
 
+    static let maxShown = 2000
+
+    /// Команда в вопросе: без управляющих символов и смены направления текста, которыми подпись можно выдать за другую.
+    /// Только для показа: сверяется и запускается настоящий argv.
+    static func shown(_ argv: [String]) -> String { ScreenText.clean(Exec.display(argv), maxShown) }
+
     /// Отпечаток команды для быстрого действия: сам argv в действие не влезает, а связь и не должна его присылать.
+    /// Перед каждой частью её длина: в TOML бывает `\u0000`, и разделитель не отличил бы ["a\0b"] от ["a", "b"].
     static func fingerprint(_ argv: [String]) -> String {
-        SHA256.hash(data: Data(argv.joined(separator: "\0").utf8)).map { String(format: "%02x", $0) }.joined()
+        let framed = argv.map { "\($0.utf8.count):\($0)" }.joined()
+        return SHA256.hash(data: Data(framed.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Текст результата для экрана; сбой — `BackgroundActionError`. `expected` — команда, которую человек подтвердил:
     /// файл успели поменять, значит подтверждал он другое.
-    static func run(_ verb: BotVerb, id: String, file: URL = BotRegistry.url, expected: [String]? = nil) throws -> String {
+    static func run(_ verb: BotVerb, id: String, file: URL = BotRegistry.url, expected: [String]) throws -> String {
         let loaded = BotRegistry.read(file)
         if case .unsafe(let why)? = loaded.problem { throw BackgroundActionError(message: "Не запускаю: \(why)") }
         guard let bot = loaded.bots.first(where: { $0.id == id }), let cmd = bot.commands[verb] else {
@@ -237,7 +265,7 @@ enum BotRunner {
         guard case .argv(let argv) = cmd else {
             throw BackgroundActionError(message: "В bots.toml команда \(verb.rawValue) бота \(bot.id) — не список строк")
         }
-        if let expected, expected != argv { throw BackgroundActionError(message: changedMessage) }
+        if expected != argv { throw BackgroundActionError(message: changedMessage) }
         let command = Exec.display(argv)
         // Стенд не запускает ничего из bots.toml: даже если файл подложили, настоящие боты ему не цель.
         if Kit.standRefuses("команда бота \(bot.id): \(verb.rawValue)") {

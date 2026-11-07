@@ -86,10 +86,10 @@ struct BackgroundPlan: Identifiable, Sendable {
 
     static func bot(_ b: BotItem, _ verb: BotVerb) -> BackgroundPlan {
         var cmd = ""
-        if case .argv(let argv)? = b.spec.commands[verb] { cmd = Exec.display(argv) }
+        if case .argv(let argv)? = b.spec.commands[verb] { cmd = BotRunner.shown(argv) }
         return BackgroundPlan(
-            action: .bot(verb, b.spec), title: "\(verb.title) \(b.name)",
-            message: (cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"),
+            action: .bot(verb, b.spec), title: ScreenText.clean("\(verb.title) \(b.name)", BotRunner.maxShown),
+            message: ScreenText.clean((cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"), BotRunner.maxShown),
             command: cmd, targets: [], totalMB: 0, confirmTitle: verb.title, destructive: verb == .stop)
     }
 }

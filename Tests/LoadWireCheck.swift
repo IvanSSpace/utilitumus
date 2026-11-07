@@ -552,6 +552,35 @@ func realFileStamp(_ url: URL?) -> String {
     let unseenThenSet = ask()
     put(shownA)
     check(await confirm(unseenThenSet)?.text == BotRunner.changedMessage, "команда появилась после вопроса без команды: отказ")
+
+    // Смена направления в файле: вопрос её не показывает и команду не переставляет, а сверка идёт по настоящему argv.
+    let sly = "/nonexistent/bot\u{202E}gpj.exe", tricks: [UInt32] = [0x202E, 0x200F, 0x2066, 0x0A, 0x07]
+    put(#"["/nonexistent/bot\u202Egpj.exe", "a\u200Fb\u2066c\nd\u0007"]"#)
+    await showing(.argv([sly, "a\u{200F}b\u{2066}c\nd\u{7}"]))
+    let tricky = ask()
+    check(tricky?.command == "'/nonexistent/bot gpj.exe' 'a b c d '", "команда в вопросе читается как есть: \(tricky?.command ?? "нет")")
+    for (name, text) in [("command", tricky?.command), ("message", tricky?.message)] {
+        check(text?.unicodeScalars.contains { tricks.contains($0.value) } == false, "\(name) без смены направления и управляющих символов")
+    }
+    check(await confirm(tricky)?.text == reached, "очистка только для показа: настоящий argv прошёл сверку")
+
+    // Имя и пояснение из того же файла попадают в заголовок и текст вопроса.
+    let plain = FileManager.default.createFile(atPath: file.path, contents: Data(#"""
+    [[bot]]
+    id = "filebot"
+    name = "File\u202Ebot"
+    project = "p"
+    note = "note\u202Eover"
+    launchd = ["com.stand.filebot"]
+    start = ["/nonexistent/stand-bot-a"]
+
+    """#.utf8), attributes: [.posixPermissions: 0o600])
+    check(plain, "файл ботов записан")
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let named = ask()
+    check(named?.title == "Включить File bot", "заголовок без смены направления: \(named?.title ?? "нет")")
+    check(named?.message.unicodeScalars.contains { tricks.contains($0.value) } == false && named?.message.contains("note over") == true, "пояснение без смены направления")
+    check(store.handle(.cancelBackground) == nil, "отмена")
 }
 #endif
 
