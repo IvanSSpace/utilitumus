@@ -78,7 +78,7 @@ fix_classify() { # id
         if fix_released_in "$HUB_TAG" "$file"; then
           FIX_SKIPPED+=("$file")
         else
-          FIX_REFUSED+=("$file — это лаунчер, такого выпуска ${HUB_TAG} ещё нет")
+          FIX_REFUSED+=("$file — это лаунчер, в выпуске ${HUB_TAG} такого ещё нет")
         fi ;;
       Sources/Apps/*/* | Sources/Modules/*/* | Sources/VoiceHelper/* | Sources/LinkHelper/*)
         dev_scope_classify <<<"$file"
