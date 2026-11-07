@@ -352,6 +352,14 @@ func hasCyrillic(_ text: String) -> Bool { text.range(of: "[а-яА-Я]", option
     store.close()
 
     // После сбоя установки единственный выход: ещё раз «＋». Без сети снова тот же сбой, модуль не появился.
+    // Ставит не кнопка, а переход при запуске: плитка видит ход, «＋» здесь ничего бы не сделал.
+    store.dismissFailure()
+    let migrating = Task { try? await registry.install(.awake, app: registry.catalogApp(.awake)!) }
+    await Task.yield()
+    check(registry.busy.contains(.awake) && store.state(.awake) == .installing(.download, 0), "ставит переход при запуске: плитка показывает ход")
+    await migrating.value
+    check(store.state(.awake) == .available, "переход сорвался: плитка снова «＋»")
+
     let downloads = journal.count("download")
     store.install(.awake)
     check(store.failure == nil, "повтор снимает прежнюю ошибку")
