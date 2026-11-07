@@ -7,6 +7,7 @@ struct AboutView: View, Equatable {
     let open: (Module) -> Void
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var updater = Updater.shared
+    @ObservedObject private var satellites = SatelliteRegistry.shared
 
     @Environment(\.dsTheme) private var theme
 
@@ -28,7 +29,7 @@ struct AboutView: View, Equatable {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help(modules.isOn(module) ? "Открыть" : "Открыть — там его можно включить")
+                        .help(isEnabled(module) ? "Открыть" : "Открыть — там его можно включить")
                     }
                 }
             }
@@ -66,9 +67,14 @@ struct AboutView: View, Equatable {
         }
     }
 
+    /// Включён тот, у кого есть утилита и она не выключена. Модуль без утилиты не включён, как и в шапке дашборда.
+    private func isEnabled(_ module: Module) -> Bool {
+        modules.isExternal(module) && satellites.entries[module]?.status?.enabled ?? true
+    }
+
     @ViewBuilder
     private func status(_ module: Module) -> some View {
-        if !modules.isOn(module) {
+        if !isEnabled(module) {
             DSChip("выключен", color: .gray)
         } else if modules.isHidden(module) {
             DSChip("в фоне", color: .orange)
@@ -79,7 +85,7 @@ struct AboutView: View, Equatable {
 
     private var footer: some View {
         let all = ModuleScope.shown(Module.allCases)
-        let on = all.filter { modules.isOn($0) }.count
+        let on = all.filter(isEnabled).count
         return HStack(spacing: 6) {
             Text("Модулей: \(all.count), включено: \(on).")
             Text("Открытый код — делай форк и предлагай свои модули.")
