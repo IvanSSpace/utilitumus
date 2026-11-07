@@ -456,8 +456,9 @@ do {
     check(ClipboardPreview.hiddenLines(in: String(repeating: "👨‍👩‍👧‍👦", count: 500)) == 1, "составные эмодзи на границе не ломают подсчёт")
     check(ClipboardPreview.hiddenLines(in: "") == 0, "пустой текст")
 
-    check(ClipboardPreview.caption(for: "коротко") == "7 симв.", "подпись без скрытого текста прежняя")
-    check(ClipboardPreview.caption(for: lines(10)).hasSuffix(" симв. · ещё 1 строка"), "подпись: ещё 1 строка")
+    check(ClipboardPreview.caption(for: "коротко") == "7 символов", "подпись без скрытого текста: только символы")
+    check(ClipboardPreview.caption(for: "1") == "1 символ" && ClipboardPreview.caption(for: "12") == "2 символа", "склонение: 1 символ, 2 символа")
+    check(ClipboardPreview.caption(for: lines(10)).hasSuffix(" символов · ещё 1 строка"), "подпись: ещё 1 строка")
     let words = [1: "строка", 2: "строки", 4: "строки", 5: "строк", 11: "строк", 12: "строк", 21: "строка", 22: "строки", 111: "строк"]
     for (n, word) in words { check(ClipboardPreview.hiddenCaption(n) == "ещё \(n) \(word)", "склонение: ещё \(n) \(word)") }
 }

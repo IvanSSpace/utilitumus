@@ -1,0 +1,100 @@
+import AppKit
+import SwiftUI
+
+// Показ панели автору: настоящая панель, выдуманные записи. Собирает Tests/preview-clipboard-panel.sh.
+// Контроллера и хранилища здесь нет, поэтому нет истории, ключа, горячей клавиши и слежения за буфером; всё живёт в памяти.
+// «Вставка» только пишет на экране, что вставила бы: системный буфер не трогается, ⌘V не шлётся.
+
+@MainActor
+enum PreviewNote {
+    private static var panel: NSPanel?
+    private static var hide: DispatchWorkItem?
+
+    /// Надпись над панелью. Своя панель: плашка выпуска осталась бы ниже уровня панели.
+    static func show(_ text: String) {
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        let size = NSSize(width: 520, height: 44)
+        let area = screen?.visibleFrame ?? .zero
+        let frame = NSRect(x: area.midX - size.width / 2, y: area.minY + ClipPanelMetrics.panelHeight + 14,
+                           width: size.width, height: size.height)
+        let note = panel ?? {
+            let made = NSPanel(contentRect: frame, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            made.level = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
+            made.isOpaque = false
+            made.backgroundColor = .clear
+            made.ignoresMouseEvents = true
+            made.isReleasedWhenClosed = false
+            return made
+        }()
+        panel = note
+        note.contentView = NSHostingView(rootView: Text(text)
+            .font(.system(size: 14, weight: .medium)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
+            .padding(.horizontal, 16)
+            .frame(width: size.width, height: size.height)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.black.opacity(0.85))))
+        note.setFrame(frame, display: true)
+        note.orderFrontRegardless()
+        hide?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { note.orderOut(nil) } }
+        hide = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5, execute: work)
+    }
+}
+
+@main
+enum PreviewApp {
+    @MainActor static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+
+        let model = ClipboardPanelModel()
+        model.allItems = ClipPanelFixture.items()
+        model.spaces = ClipPanelFixture.spaces
+        model.imageLoader = ClipPanelFixture.image
+        model.onPaste = { item in
+            let what = item.text ?? item.filePaths?.first ?? item.kind.title
+            PreviewNote.show("Вставил бы: " + what.replacingOccurrences(of: "\n", with: " "))
+        }
+        model.onPin = { [weak model] id, space in
+            guard let model, let index = model.allItems.firstIndex(where: { $0.id == id }) else { return }
+            model.allItems[index].spaceID = space
+        }
+        model.onDelete = { [weak model] id in
+            guard let model else { return }
+            model.allItems.removeAll { $0.id == id }
+            model.selected = min(model.selected, max(0, model.visible.count - 1))
+        }
+        model.onAddSpace = { [weak model] name, color in
+            model?.spaces.append(ClipSpace(id: UUID(), name: name, colorID: color))
+        }
+        model.onRenameSpace = { [weak model] id, name in
+            guard let model, let index = model.spaces.firstIndex(where: { $0.id == id }) else { return }
+            model.spaces[index].name = name
+        }
+        model.onSetSpaceColor = { [weak model] id, color in
+            guard let model, let index = model.spaces.firstIndex(where: { $0.id == id }) else { return }
+            model.spaces[index].colorID = color
+        }
+        model.onDeleteSpace = { [weak model] id in
+            guard let model else { return }
+            model.spaces.removeAll { $0.id == id }
+            for index in model.allItems.indices where model.allItems[index].spaceID == id { model.allItems[index].spaceID = nil }
+        }
+        model.onOpenSettings = { PreviewNote.show("Открыл бы настройки Буфера") }
+        // Esc без поиска и окошка закрывает панель: здесь вернуть её нечем, поэтому показ завершается.
+        model.onClose = { NSApp.terminate(nil) }
+
+        let host = ClipboardPanelHost.shared
+        host.hidesOnOutsideClick = false
+        let panel = host.present(model)
+        // Автор может снять экран: записи выдуманные.
+        panel.sharingType = .readOnly
+        // Тема из аргумента, настройки не трогаем: graphite, dusk, calm, vivid, midnight.
+        if let raw = CommandLine.arguments.dropFirst().first, let theme = DSTheme(rawValue: raw) {
+            model.theme = theme
+        } else {
+            model.theme = .vivid
+        }
+        app.run()
+    }
+}

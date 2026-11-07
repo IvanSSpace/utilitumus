@@ -33,6 +33,11 @@ final class ClipboardModule: SatelliteModule {
         self.directory = directory ?? ClipboardStore.defaultDirectory
         #endif
         controller.storeOpener = { [weak self] in self?.openStore() }
+        // Окно настроек открывает своя же служба, как и для копии из Finder: другого пути из модуля к окну нет.
+        let id = LinkIdentity.id(linkName)
+        ClipboardPanelHost.shared.settingsOpener = {
+            Task { @MainActor in try? await LinkSelfClient.openWindow(id: id) }
+        }
     }
 
     func start() {
