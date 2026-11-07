@@ -50,7 +50,7 @@ same "окно пароля службы только по кнопке" \
   "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift | LC_ALL=C sort)"
 same "браузер по умолчанию меняют только кнопка и удаление" \
   "$(grep -rlE '\.setDefault\(|setDefaultApplication' Sources | LC_ALL=C sort)" \
-  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/BrowserLinkHandler.swift Sources/Modules/Browser/BrowserView.swift | LC_ALL=C sort)"
+  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/UI/BrowserLinkHandler.swift Sources/Modules/Browser/UI/BrowserView.swift | LC_ALL=C sort)"
 same "установка и очередь ничего системного не просят" \
   "$(grep -lE 'FanHelperInstaller\.shared\.install|setDefaultApplication|AXIsProcessTrustedWithOptions|requestAccess|CGRequest|SecItem' Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteRegistry.swift Sources/App/Store/UpdateAll.swift Sources/App/Store/AutoUpdate.swift || true)" ""
 

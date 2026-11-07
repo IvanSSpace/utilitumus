@@ -29,13 +29,13 @@ scripts/unlock-signing.sh
 security find-identity -p codesigning | grep -q "\"$SIGN_NAME\"" || { echo "ПРОВАЛ: нет сертификата «${SIGN_NAME}»"; exit 1; }
 
 rm -rf "$OUT"
-mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Sources/Apps" "$FX/Sources/Modules" "$FX/Sources/Modules/Browser"
+mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Sources/Apps" "$FX/Sources/Modules" "$FX/Sources/Modules/Browser/UI"
 cp scripts/build-app.sh scripts/fetch-sherpa.sh scripts/unlock-signing.sh scripts/check-no-seam.sh "$FX/scripts/"
 cp install.sh Info.plist "$FX/"
 cp Sources/Kit/KitSigning.swift "$FX/Sources/Kit/"
 cp -R Sources/Shared Sources/FanHelper Sources/VoiceHelper Sources/LinkHelper "$FX/Sources/"
-for file in BrowserCatalog BrowserRules BrowserPicker BrowserRouter; do
-  cp "Sources/Modules/Browser/$file.swift" "$FX/Sources/Modules/Browser/"
+for file in UI/BrowserCatalog UI/BrowserRules BrowserPicker BrowserRouter; do
+  cp "Sources/Modules/Browser/$file.swift" "$FX/Sources/Modules/Browser/$file.swift"
 done
 ln -s "$ROOT/Vendor" "$FX/Vendor"
 plutil -remove CFBundleURLTypes "$FX/Sources/LinkHelper/Info.plist"
@@ -182,7 +182,7 @@ cat > "$FX/Sources/Apps/Browser/manifest.json" <<'EOF'
   "identifier": "local.utilitumus.links",
   "executable": "UtilitumusLinks",
   "info": "Sources/LinkHelper/Info.plist",
-  "sources": ["Sources/LinkHelper/main.swift", "Sources/Modules/Browser/BrowserCatalog.swift", "Sources/Modules/Browser/BrowserRules.swift", "Sources/Modules/Browser/BrowserPicker.swift", "Sources/Modules/Browser/BrowserRouter.swift"]
+  "sources": ["Sources/LinkHelper/main.swift", "Sources/Modules/Browser/UI/BrowserCatalog.swift", "Sources/Modules/Browser/UI/BrowserRules.swift", "Sources/Modules/Browser/BrowserPicker.swift", "Sources/Modules/Browser/BrowserRouter.swift"]
 }]}
 EOF
 if build browser Browser; then

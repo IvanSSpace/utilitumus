@@ -88,7 +88,7 @@ mkdir -p "$LINKS_APP/Contents/MacOS" "$LINKS_APP/Contents/Resources"
 swiftc -O -target "$TARGET" \
   -o "$LINKS_APP/Contents/MacOS/UtilitumusLinks" \
   Sources/LinkHelper/main.swift \
-  Sources/Modules/Browser/BrowserCatalog.swift Sources/Modules/Browser/BrowserRules.swift \
+  Sources/Modules/Browser/UI/BrowserCatalog.swift Sources/Modules/Browser/UI/BrowserRules.swift \
   Sources/Modules/Browser/BrowserPicker.swift Sources/Modules/Browser/BrowserRouter.swift \
   -framework SwiftUI -framework AppKit
 cp Sources/LinkHelper/Info.plist "$LINKS_APP/Contents/Info.plist"

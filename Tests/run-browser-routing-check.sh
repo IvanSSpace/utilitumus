@@ -57,5 +57,5 @@ else
 fi
 
 cp Tests/BrowserRoutingCheck.swift "$OUT/main.swift"
-swiftc -o "$OUT/check" "$OUT/main.swift" Sources/Modules/Browser/BrowserRules.swift
+swiftc -o "$OUT/check" "$OUT/main.swift" Sources/Modules/Browser/UI/BrowserRules.swift
 "$OUT/check" "$F"
