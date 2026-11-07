@@ -30,10 +30,18 @@ for file in "$OUT/src/KeyboardView.swift" "$OUT/src/BaselineKeyboardView.swift";
 done
 grep -q baselineModel "$OUT/src/BaselineKeyboardView.swift" || { echo "ПРОВАЛ: старый экран не подменён"; exit 1; }
 
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name KeyboardWireCheck -o "$OUT/$NAME" \
-  Tests/KeyboardWireCheck.swift Tests/KeyboardWireStubs.swift "$OUT/src/KeyboardView.swift" "$OUT/src/BaselineKeyboardView.swift" \
-  $(find Sources/Modules/Keyboard -name '*.swift' -not -name InputSources.swift -not -name KeyboardView.swift) \
-  $(find Sources/Kit -name '*.swift') Sources/App/Design/Pages.swift Sources/Apps/Keyboard/KeyboardModule.swift \
+# Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
+CACHE="$(incremental_cache keyboard-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+FILES=(Tests/KeyboardWireCheck.swift Tests/KeyboardWireStubs.swift "$CACHE/src/KeyboardView.swift" "$CACHE/src/BaselineKeyboardView.swift"
+  Sources/App/Design/Pages.swift Sources/Apps/Keyboard/KeyboardModule.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Keyboard -name '*.swift' -not -name InputSources.swift -not -name KeyboardView.swift | sort)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name KeyboardWireCheck -o "$OUT/$NAME" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreGraphics
 
 # В файле стенда нет кода, который мог бы тронуть систему.

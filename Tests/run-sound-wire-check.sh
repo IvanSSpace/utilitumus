@@ -26,8 +26,16 @@ mkdir -p "$OUT/src"
   | sed 's/^struct SoundView: View {/struct LegacySoundView: View {/' > "$OUT/src/LegacySoundView.swift"
 grep -q '^struct LegacySoundView: View {' "$OUT/src/LegacySoundView.swift"
 
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SoundWireCheck -o "$OUT/$NAME" \
-  Tests/SoundWireCheck.swift "$OUT/src/LegacySoundView.swift" Sources/Apps/Sound/SoundModule.swift \
-  $(find Sources/Kit Sources/Modules/Sound -name '*.swift') \
+# Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
+CACHE="$(incremental_cache sound-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+FILES=(Tests/SoundWireCheck.swift "$CACHE/src/LegacySoundView.swift" Sources/Apps/Sound/SoundModule.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit Sources/Modules/Sound -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+rm -f "$OUT/$NAME"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name SoundWireCheck -o "$OUT/$NAME" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio
 KIT_TEST_SUITE="$SUITE" "$OUT/$NAME"

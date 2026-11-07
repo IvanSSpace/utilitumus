@@ -14,6 +14,9 @@ mkdir -p "$OUT/src" "$OUT/home" "$OUT/base" "$OUT/new"
 OUT="$(cd "$OUT" && pwd -P)"
 trap 'defaults delete "$NAME" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$NAME.plist"' EXIT
 
+# Инкрементальная сборка: у базы и у нового экрана свой кэш с копиями подставных файлов. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
 cp Tests/FansWireCheck.swift "$OUT/src/main.swift"
 KIT="Sources/Kit/Components.swift Sources/Kit/KitDefaults.swift Sources/Kit/Module.swift Sources/Kit/ModuleCategory.swift Sources/Kit/ModuleControls.swift Sources/Kit/ModuleInfo.swift Sources/Kit/PageActive.swift Sources/Kit/PrivateLog.swift Sources/Kit/KitIdentity.swift Sources/Kit/Link/LinkProtocol.swift Sources/Kit/KitSigning.swift Sources/Kit/Link/LinkWire.swift Sources/Kit/ScrollThumb.swift Sources/Kit/SegmentedControl.swift Sources/Kit/Theme.swift Sources/App/Design/Pages.swift"
 FANS="Sources/Shared/FanLink.swift Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/GameDetection.swift Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift"
@@ -22,17 +25,25 @@ FLAGS=(-target "$TARGET" -D KIT_TEST_DEFAULTS -framework AppKit -framework Swift
 if [ -z "${FANS_SKIP_BASE:-}" ] || [ ! -f "$OUT/base/normal.rgba" ]; then
   /usr/bin/git show "$BASE_REF:Sources/Modules/Fans/FansView.swift" > "$OUT/src/OldFansView.swift"
   mkdir -p "$OUT/bin-base"
-  # shellcheck disable=SC2086
-  swiftc "${FLAGS[@]}" -D FANS_BASELINE -module-name FansBaseline -o "$OUT/bin-base/$NAME" \
-    "$OUT/src/main.swift" "$OUT/src/OldFansView.swift" $KIT $FANS
+  rm -f "$OUT/bin-base/$NAME"
+  CACHE="$(incremental_cache fans-wire-base KIT_TEST_DEFAULTS FANS_BASELINE)"
+  incremental_sync "$OUT/src" "$CACHE/src"
+  # shellcheck disable=SC2206
+  FILES=("$CACHE/src/main.swift" "$CACHE/src/OldFansView.swift" $KIT $FANS)
+  incremental_flags "$CACHE" "${FILES[@]}"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} "${FLAGS[@]}" -D FANS_BASELINE -module-name FansBaseline -o "$OUT/bin-base/$NAME" "${FILES[@]}"
   rm -f "$OUT"/base/*
   CFFIXED_USER_HOME="$OUT/home" "$OUT/bin-base/$NAME" pixels "$OUT/base" "$OUT/home"
 fi
 
 mkdir -p "$OUT/bin-new"
-# shellcheck disable=SC2086
-swiftc "${FLAGS[@]}" -module-name FansWireCheck -o "$OUT/bin-new/$NAME" \
-  "$OUT/src/main.swift" Sources/Modules/Fans/FansView.swift $KIT $FANS
+rm -f "$OUT/bin-new/$NAME"
+CACHE="$(incremental_cache fans-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+# shellcheck disable=SC2206
+FILES=("$CACHE/src/main.swift" Sources/Modules/Fans/FansView.swift $KIT $FANS)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} "${FLAGS[@]}" -module-name FansWireCheck -o "$OUT/bin-new/$NAME" "${FILES[@]}"
 
 if nm -u "$OUT/bin-new/$NAME" | grep -E 'IOConnect|IOService|NSXPCConnection|NSAppleScript'; then
   echo "ПРОВАЛ: стенд мог бы дойти до настоящего SMC, службы или AppleScript"

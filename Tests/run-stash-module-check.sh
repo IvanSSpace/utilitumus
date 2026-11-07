@@ -25,7 +25,12 @@ esac
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name StashModuleCheck -o "$OUT/check" \
-  Tests/StashModuleCheck.swift Sources/Apps/Stash/StashModule.swift \
-  $(find Sources/Modules/Stash Sources/Kit -name '*.swift') -framework SwiftUI -framework AppKit -framework IOKit
+# Инкрементальная сборка: кэш вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache stash-module KIT_TEST_DEFAULTS)"
+FILES=(Tests/StashModuleCheck.swift Sources/Apps/Stash/StashModule.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Stash Sources/Kit -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name StashModuleCheck -o "$OUT/check" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit -framework IOKit
 "$OUT/check"

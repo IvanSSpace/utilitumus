@@ -31,7 +31,15 @@ reset_suite
 rm -rf "$OUT"
 mkdir -p "$OUT"
 prepare . "$OUT/src"
-swiftc "${FLAGS[@]}" -module-name MixerWireCheck -o "$OUT/check" Tests/MixerWireCheck.swift "$OUT"/src/*.swift $(find Sources/Kit -name '*.swift')
+# Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
+CACHE="$(incremental_cache mixer-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+FILES=(Tests/MixerWireCheck.swift "$CACHE"/src/*.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} "${FLAGS[@]}" -module-name MixerWireCheck -o "$OUT/check" "${FILES[@]}"
 "$OUT/check" run "$OUT/after"
 
 if [ -n "${MIXER_BEFORE_REV:-}" ]; then

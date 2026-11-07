@@ -21,12 +21,18 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$OUT"
+# Инкрементальная сборка только у обычного режима: кэш вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache load-wire KIT_TEST_DEFAULTS)"
 
 # Свой suite вместо общего для стендов: другой стенд в это время может менять тему.
 kit_sources() {
   local root="$1" dest="$2"
-  rm -rf "$dest"; mkdir -p "$dest"
-  sed "s/local.utilitumus.test.kit/$SUITE/" "$root/Sources/Kit/KitDefaults.swift" > "$dest/KitDefaults.swift"
+  mkdir -p "$dest"
+  # Файл с тем же содержимым сохраняет время изменения и не перекомпилируется зря.
+  sed "s/local.utilitumus.test.kit/$SUITE/" "$root/Sources/Kit/KitDefaults.swift" > "$dest/KitDefaults.swift.new"
+  cmp -s "$dest/KitDefaults.swift.new" "$dest/KitDefaults.swift" || cp "$dest/KitDefaults.swift.new" "$dest/KitDefaults.swift"
+  rm -f "$dest/KitDefaults.swift.new"
   find "$root/Sources/Kit" -name '*.swift' -not -name KitDefaults.swift -print
   echo "$dest/KitDefaults.swift"
   echo "$root/Sources/App/Design/Pages.swift"
@@ -35,10 +41,16 @@ kit_sources() {
 build_full() { # корень исходников, папка, выход, флаги
   local root="$1" dir="$2" exe="$3"; shift 3
   mkdir -p "$dir"
-  cp Tests/LoadWireCheck.swift "$dir/LoadWireCheck.swift"
-  # shellcheck disable=SC2046
-  swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS "$@" -o "$exe" "$dir/LoadWireCheck.swift" \
-    $(kit_sources "$root" "$dir/kit") $(find "$root/Sources/Modules/Load" -name '*.swift') "${FRAMEWORKS[@]}" 2>&1 | grep -E 'error|^<unknown>' || true
+  # Иначе при ошибке сборки ниже остался бы и прошёл проверку файл прошлого запуска: вывод swiftc здесь отфильтрован.
+  rm -f "$exe"
+  cmp -s Tests/LoadWireCheck.swift "$dir/LoadWireCheck.swift" || cp Tests/LoadWireCheck.swift "$dir/LoadWireCheck.swift"
+  local files=("$dir/LoadWireCheck.swift") f
+  while IFS= read -r f; do files+=("$f"); done < <({ kit_sources "$root" "$dir/kit"; find "$root/Sources/Modules/Load" -name '*.swift'; } | sort)
+  # С флагами (-O замера, -D LOAD_BASELINE) сборка целиком: -O инкрементально не собирают, а база нужна редко.
+  INC_FLAGS=()
+  [ "$#" -gt 0 ] || incremental_flags "$CACHE" "${files[@]}"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS "$@" -module-name LoadWireCheck -o "$exe" \
+    "${files[@]}" "${FRAMEWORKS[@]}" 2>&1 | grep -E 'error|^<unknown>' || true
   [ -x "$exe" ] || { echo "ПРОВАЛ: не собралось"; exit 1; }
 }
 
@@ -56,7 +68,7 @@ build_logic() { # папка модуля Load, выход
 
 case "$MODE" in
 check)
-  build_full . "$OUT/new" "$OUT/check"
+  build_full . "$CACHE/src" "$OUT/check"
   "$OUT/check" logic
   rm -rf "$OUT/png-new" "$OUT/png-remote"; mkdir -p "$OUT/png-new" "$OUT/png-remote"
   cleanup
@@ -67,7 +79,7 @@ check)
   ;;
 baseline)
   COMMIT="${2:?нужен коммит}"
-  [ -x "$OUT/check" ] || build_full . "$OUT/new" "$OUT/check"
+  [ -x "$OUT/check" ] || build_full . "$CACHE/src" "$OUT/check"
   BASE="$OUT/base"
   rm -rf "$BASE"; mkdir -p "$BASE"
   /usr/bin/git archive "$COMMIT" Sources | tar -x -C "$BASE"

@@ -45,12 +45,23 @@ mkdir -p "$OUT/src" "$OUT/shots-after"
 sources() {
   find "$1" -name '*.swift' -not -path "$1/FanHelper/*" -not -path "$1/LinkHelper/*" -not -path "$1/Apps/*" -not -name UtilitumusApp.swift
 }
+# Инкрементальная сборка: у каждой из двух сборок свой кэш с копиями подставных файлов. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
 # Настоящие файлы; точка входа у стенда своя. Шов KIT_TEST_DEFAULTS уводит Kit.defaults в тестовый suite.
 build() { # файл стенда, корень исходников, выход, флаги
   local app="$OUT/src/$(basename "$3")-app.swift"
   sed '/^@main$/d' "$2/App/UtilitumusApp.swift" > "$app"
-  swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS ${4:-} -module-name VoiceWireCheck -o "$3" \
-    "$1" "$app" $(sources "$2") \
+  # Коммит базы в ключе: файлы из git archive получают время коммита, и разные коммиты не должны делить объекты.
+  # shellcheck disable=SC2086
+  local cache f; cache="$(incremental_cache "$(basename "$3")" KIT_TEST_DEFAULTS ${4:-} "$BASE")"
+  incremental_sync "$OUT/src" "$cache/src"
+  local files=("$cache/src/$(basename "$1")" "$cache/src/$(basename "$app")")
+  while IFS= read -r f; do files+=("$f"); done < <(sources "$2" | sort)
+  incremental_flags "$cache" "${files[@]}"
+  rm -f "$3"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS ${4:-} -module-name VoiceWireCheck -o "$3" \
+    "${files[@]}" \
     -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 }
 cp Tests/VoiceWireCheck.swift "$OUT/src/VoiceWireCheck.swift"
