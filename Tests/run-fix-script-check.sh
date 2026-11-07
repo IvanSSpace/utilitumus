@@ -1,7 +1,7 @@
 #!/bin/bash
 # scripts/fix.sh: отказы на подставных правках, таблица проверок, порядок шагов. Ничего не выкладывает и не запускает утилит:
 # подставные репозиторий с локальным origin, gh, codesign, сборка и проверки; настоящие только fix.sh, fix-scope.sh, dev-scope.sh,
-# release-app.sh, check-no-seam.sh и with-check-lock.sh. Подпись не нужна.
+# release-app.sh, release.sh, check-no-seam.sh и with-check-lock.sh. Подпись не нужна. Сборка лаунчера (build.sh) подставная.
 # Папка стенда: FIX_CHECK_DIR, иначе $TMPDIR/fix-script-check.
 source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
@@ -28,7 +28,7 @@ mkdir -p "$OUT/bin" "$OUT/tmp" "$OUT/locks" "$FX/scripts"
 : > "$GH_LOG"; : > "$GIT_LOG"; : > "$CHECK_LOG"; : > "$RELEASE_MARK"
 
 echo "== скрипты без запуска"
-for script in scripts/fix.sh scripts/fix-scope.sh Tests/run-fix-script-check.sh; do
+for script in scripts/fix.sh scripts/fix-scope.sh scripts/release.sh Tests/run-fix-script-check.sh; do
   check "bash 3.2 -n $script" /bin/bash -n "$script"
   # bash 5 в UTF-8 считает кириллицу и кавычки «» частью имени: рядом с ними только ${VAR}.
   found="$(LC_ALL=C grep -nE "\\\$[A-Za-z0-9_]+$(printf '[\200-\377]')" "$script" || true)"
@@ -39,7 +39,9 @@ CODE="$(grep -vhE '^[[:space:]]*#' scripts/fix.sh scripts/fix-scope.sh | sed -E 
 for word in 'gh ' 'git push' 'git tag' 'git commit' 'git merge' 'codesign' 'ditto' 'buildq' '--skip' '--force' '--no-check'; do
   if grep -qF -- "$word" <<<"$CODE"; then bad "в коде fix.sh есть «${word}»"; else pass "в коде fix.sh нет «${word}»"; fi
 done
-check "fix.sh зовёт release-app.sh" has scripts/fix.sh 'scripts/release-app.sh "${ARGS[@]}"'
+check "fix.sh зовёт выпуск утилиты" has scripts/fix.sh 'REL=scripts/release-app.sh'
+check "fix.sh зовёт выпуск лаунчера" has scripts/fix.sh 'REL=scripts/release.sh'
+check "выпуск идёт с ARGS" has scripts/fix.sh '"$REL" "${ARGS[@]}"'
 check "проверки идут через замок" has scripts/fix.sh 'Tests/with-check-lock.sh'
 
 echo "== таблица проверок: настоящие файлы"
@@ -65,14 +67,17 @@ for pair in $APPS; do
   done
 done
 for name in $FIX_COMMON_CHECKS; do check "общая: есть Tests/$name.sh" test -f "Tests/$name.sh"; done
+for name in $(fix_checks_of hub); do check "hub: есть Tests/$name.sh" test -f "Tests/$name.sh"; done
+check "hub: в таблице есть оболочка и следы шва" test "$(fix_checks_of hub | tr ' ' '\n' | grep -cE '^(run-hub-shell-check|run-seam-check)$')" -eq 2
 if fix_checks_of nosuch >/dev/null; then bad "таблица ответила на чужой id"; else pass "чужого id в таблице нет"; fi
 
 # --- Стенд
-cp scripts/fix.sh scripts/fix-scope.sh scripts/dev-scope.sh scripts/release-app.sh scripts/check-no-seam.sh "$FX/scripts/"
-mkdir -p "$FX/Tests" "$FX/Catalog" "$FX/Sources/Kit" "$FX/Sources/App/Satellites" "$FX/Sources/Shared" "$FX/docs"
+cp scripts/fix.sh scripts/fix-scope.sh scripts/dev-scope.sh scripts/release-app.sh scripts/release.sh scripts/check-no-seam.sh "$FX/scripts/"
+mkdir -p "$FX/Resources" "$FX/Tests" "$FX/Catalog" "$FX/Sources/Kit" "$FX/Sources/App/Satellites" "$FX/Sources/Shared" "$FX/docs"
 cp Tests/with-check-lock.sh "$FX/Tests/"
 cp Sources/Kit/KitSigning.swift "$FX/Sources/Kit/"
 cp Info.plist "$FX/Info.plist"
+echo 'build/' > "$FX/.gitignore"
 HUB="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
 for name in Mixer Awake Voice; do
   mkdir -p "$FX/Sources/Apps/$name" "$FX/Sources/Modules/$name"
@@ -81,6 +86,10 @@ for name in Mixer Awake Voice; do
   echo "// $name" > "$FX/Sources/Modules/$name/${name}View.swift"
   echo "// $name" > "$FX/Sources/Modules/$name/${name}Wire.swift"
 done
+mkdir -p "$FX/Sources/Modules/Mixer/UI"
+echo "// экран" > "$FX/Sources/Modules/Mixer/UI/MixerView.swift"
+echo "// связь" > "$FX/Sources/Modules/Mixer/UI/MixerWire.swift"
+printf '[\n  {\n    "version": "%s",\n    "items": [\n      "старое"\n    ]\n  }\n]\n' "$HUB" > "$FX/Resources/WhatsNew.json"
 echo '// экран' > "$FX/Sources/App/Satellites/RemoteMixerPage.swift"
 echo '// общий' > "$FX/Sources/App/Satellites/RemoteModulePage.swift"
 echo '// центр' > "$FX/Sources/App/UtilitumusApp.swift"
@@ -89,13 +98,26 @@ echo '# пилот' > "$FX/scripts/build-pilot.sh"
 echo '# доки' > "$FX/docs/a.md"
 # Проверка стенда пишет своё имя в журнал. FAKE_RED — кому покраснеть.
 for name in run-mixer-remote-check run-mixer-wire-check run-awake-app-check run-awake-remote-check run-awake-settings-check \
-  run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check run-module-defaults-guard; do
+  run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check run-module-defaults-guard $(fix_checks_of hub); do
   cat > "$FX/Tests/$name.sh" <<EOF
 #!/bin/bash
 echo "$name" >> "$CHECK_LOG"
 [ "\${FAKE_RED:-}" != "$name" ]
 EOF
 done
+# Подставная сборка лаунчера: бандл из Info.plist и WhatsNew.json рабочей копии, в журнал — версия и первая запись, которые она увидела.
+cat > "$FX/build.sh" <<EOF
+#!/bin/bash
+set -euo pipefail
+cd "\$(dirname "\$0")"
+rm -rf build
+mkdir -p build/Utilitumus.app/Contents/MacOS build/Utilitumus.app/Contents/Resources
+printf 'чистый бинарник' > build/Utilitumus.app/Contents/MacOS/Utilitumus
+cp Info.plist build/Utilitumus.app/Contents/Info.plist
+cp Resources/WhatsNew.json build/Utilitumus.app/Contents/Resources/
+echo "hub-build \$(plutil -extract CFBundleShortVersionString raw -o - Info.plist) \$(plutil -extract 0.version raw -o - Resources/WhatsNew.json) \$(plutil -extract 0.items.0 raw -o - Resources/WhatsNew.json)" >> "$RELEASE_MARK"
+echo "Собрано: build/Utilitumus.app"
+EOF
 cat > "$FX/scripts/build-app.sh" <<EOF
 #!/bin/bash
 set -euo pipefail
@@ -111,6 +133,7 @@ json.dump({"schema": 1, "apps": [
     {"id": i, "version": "1.1.0", "minHub": "0.6.0", "url": "u", "sha256": "s", "sizeMB": 1, "notes": ["x"]}
     for i in ("mixer", "awake", "voice")]}, open(sys.argv[1], "w"), indent=2)' "$FX/Catalog/catalog.json"
 find "$FX/scripts" "$FX/Tests" -type f -exec chmod +x {} +
+chmod +x "$FX/build.sh"
 
 # Подставные программы. Настоящим gh и git в стенде не дотянуться до GitHub: origin локальный.
 cat > "$OUT/bin/gh" <<EOF
@@ -126,7 +149,8 @@ cat > "$OUT/bin/git" <<EOF
 echo "git \$*" >> "$GIT_LOG"
 exec /usr/bin/git "\$@"
 EOF
-printf '#!/bin/bash\nexit 0\n' > "$OUT/bin/codesign"
+# release.sh ищет в выводе codesign -d строку про сертификат.
+printf '#!/bin/bash\necho "certificate leaf" >&2\nexit 0\n' > "$OUT/bin/codesign"
 chmod +x "$OUT/bin/gh" "$OUT/bin/git" "$OUT/bin/codesign"
 
 G=(/usr/bin/git -C "$FX" -c core.hooksPath=/dev/null -c commit.gpgsign=false -c user.name=Test -c user.email=test@example.invalid)
@@ -315,6 +339,140 @@ clear_logs
 status=0; output="$(fix mixer "${NOTE[@]}" --dry-run)" || status=$?
 if [ "$status" -eq 0 ]; then pass "вторая правка: каталог в разнице не мешает"; else bad "вторая правка: $output"; fi
 same "вторая правка: версия ещё на патч выше" "$(cut -d' ' -f3 "$RELEASE_MARK")" 1.1.2
+
+echo "== лаунчер: scripts/fix.sh hub"
+HUB_CHECKS="$(fix_checks_of hub) $FIX_COMMON_CHECKS"
+hub_refused() { # описание, текст в выводе, файлы правки
+  local what="$1" pattern="$2" output status=0
+  shift 2
+  commit_change "$@"
+  clear_logs
+  output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+  if [ "$status" -eq 0 ]; then bad "${what}: прошло"; echo "$output"
+  elif ! grep -qF -- "$pattern" <<<"$output"; then bad "${what}: нет «${pattern}»"; echo "$output"
+  elif [ -s "$CHECK_LOG" ] || [ -s "$RELEASE_MARK" ]; then bad "${what}: отказ после проверок или сборки"
+  else pass "$what"; fi
+}
+hub_refused "лаунчер, Kit: отказ" "Kit входит в сборку" Sources/Kit/Theme.swift
+hub_refused "лаунчер, Kit: обычный путь" "scripts/release-all.sh" Sources/Kit/KitSigning.swift
+hub_refused "лаунчер, свой файл и Kit: отказ" "Kit входит в сборку" Sources/App/UtilitumusApp.swift Sources/Kit/Theme.swift
+hub_refused "лаунчер, утилита: отказ" "код утилиты mixer" Sources/Modules/Mixer/MixerController.swift
+hub_refused "лаунчер, Apps утилиты: отказ" "код утилиты awake" Sources/Apps/Awake/manifest.json
+hub_refused "лаунчер, помощник: отказ" "помощник утилиты" Sources/VoiceHelper/main.c
+hub_refused "лаунчер, Shared: отказ" "общий код вентиляторов" Sources/Shared/SMC.swift
+hub_refused "лаунчер, договор связи: отказ" "договор связи" Sources/Modules/Mixer/UI/MixerWire.swift
+hub_refused "лаунчер, скрипт сборки утилит: отказ" "этим собирается" scripts/release-app.sh
+hub_refused "лаунчер, неизвестный файл: отказ" "не файл лаунчера" Новый/файл.txt
+hub_refused "лаунчер, только проверки: выпускать нечего" "выпускать нечего" Tests/run-sidebar-check.sh
+# Перенос из Kit в экран не прячется за новым именем.
+"${G[@]}" reset -q --hard "$BASE"
+"${G[@]}" mv Sources/Kit/KitSigning.swift Sources/Modules/Mixer/UI/KitSigning.swift
+"${G[@]}" commit -q -m "перенос"
+"${G[@]}" push -q -f origin main
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "Kit входит в сборку" <<<"$output"; then pass "лаунчер, перенос из Kit: отказ"; else bad "перенос из Kit в лаунчере прошёл: $output"; fi
+
+# Правка лаунчера: проходит, --dry-run проверяет, собирает с новой версией и записью и ничего не меняет.
+commit_change Sources/App/UtilitumusApp.swift
+clear_logs
+HEAD_BEFORE="$("${G[@]}" rev-parse HEAD)"
+PLAN="$OUT/hub-plan.txt"
+fix hub --note "Первая" --note "Вторая" --dry-run > "$PLAN" 2>&1 || { cat "$PLAN"; bad "hub --dry-run упал"; }
+same "лаунчер: проверки из таблицы" "$(LC_ALL=C sort "$CHECK_LOG" | tr '\n' ' ')" "$(printf '%s\n' $HUB_CHECKS | LC_ALL=C sort | tr '\n' ' ')"
+NEXT="${HUB%.*}.$(( ${HUB##*.} + 1 ))"
+same "лаунчер: сборка видит версию и запись" "$(cat "$RELEASE_MARK")" "hub-build $NEXT $NEXT Первая"
+check "лаунчер: нет предупреждения про экран" lacks "$PLAN" "компилируется и в окно утилиты"
+check "лаунчер: план коммита версии" has "$PLAN" "+ git commit -q -m Версия $NEXT"
+check "лаунчер: план пуша main" has "$PLAN" "+ git push -q origin HEAD:main"
+check "лаунчер: план тега" has "$PLAN" "+ git tag v$NEXT"
+check "лаунчер: план релиза с Latest" has "$PLAN" "--latest=true"
+check "лаунчер: gh release create только напечатан" lacks "$GH_LOG" "release create"
+check "лаунчер: git без push" lacks "$GIT_LOG" "push"
+check "лаунчер: git без commit" lacks "$GIT_LOG" "commit"
+check "лаунчер: git без tag" lacks "$GIT_LOG" "git tag "
+same "лаунчер --dry-run: HEAD на месте" "$("${G[@]}" rev-parse HEAD)" "$HEAD_BEFORE"
+same "лаунчер --dry-run: origin на месте" "$(/usr/bin/git -C "$ORIGIN" rev-parse main)" "$HEAD_BEFORE"
+same "лаунчер --dry-run: версия на месте" "$(plutil -extract CFBundleShortVersionString raw -o - "$FX/Info.plist")" "$HUB"
+same "лаунчер --dry-run: дерево чисто (версия и запись откатились)" "$("${G[@]}" status --porcelain)" ""
+for step in "определение изменений" "проверки, $(echo $HUB_CHECKS | wc -w | tr -d ' ') шт." "сборка -O" "выкладка" "всего"; do
+  check "лаунчер, время: $step" has "$PLAN" "$step"
+done
+
+# Экран утилиты компилируется и в лаунчер: проходит с предупреждением, если утилита ещё не выпустила эту правку.
+commit_change Sources/Modules/Mixer/UI/MixerView.swift
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -eq 0 ] && grep -qF "компилируется и в окно утилиты" <<<"$output" && grep -qF "Sources/Modules/Mixer/UI/MixerView.swift" <<<"$output"; then
+  pass "лаунчер, экран: проходит с предупреждением"
+else
+  bad "лаунчер, экран (код $status): $output"
+fi
+"${G[@]}" tag -f mixer-v1.1.0 HEAD >/dev/null
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -eq 0 ] && ! grep -qF "компилируется и в окно утилиты" <<<"$output"; then pass "лаунчер, экран уже в выпуске утилиты: без предупреждения"; else bad "лаунчер, экран выпущен (код $status): $output"; fi
+"${G[@]}" tag -f mixer-v1.1.0 "$BASE" >/dev/null
+
+# Утилита уже выпустила свою правку своим выпуском: лаунчеру она не мешает.
+commit_change Sources/App/UtilitumusApp.swift Sources/Modules/Mixer/MixerController.swift
+"${G[@]}" tag -f mixer-v1.1.0 HEAD >/dev/null
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -eq 0 ]; then pass "лаунчер, выпущенная правка утилиты: не мешает"; else bad "лаунчер, выпущенная утилита: $output"; fi
+"${G[@]}" tag -f mixer-v1.1.0 "$BASE" >/dev/null
+
+echo "== лаунчер: порядок и красные проверки"
+commit_change Sources/App/UtilitumusApp.swift
+clear_logs
+status=0; output="$(EXTRA_ENV=FAKE_RED=run-sidebar-check fix hub "${NOTE[@]}" --dry-run)" || status=$?
+check "лаунчер, красная: код не 0" test "$status" -ne 0
+check "лаунчер, красная: названа" grep -qF "Красные проверки: run-sidebar-check" <<<"$output"
+same "лаунчер, красная: сборки не было" "$(cat "$RELEASE_MARK")" ""
+check "лаунчер, красная: все проверки успели отработать" test "$(wc -l < "$CHECK_LOG" | tr -d ' ')" -eq "$(echo $HUB_CHECKS | wc -w | tr -d ' ')"
+check "лаунчер, красная: коммитов и тегов нет" lacks "$GIT_LOG" "commit"
+same "лаунчер, красная: дерево чисто" "$("${G[@]}" status --porcelain)" ""
+clear_logs
+status=0; output="$(fix hub --dry-run)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "Нет заметок" <<<"$output" && [ ! -s "$CHECK_LOG" ] && [ ! -s "$RELEASE_MARK" ]; then pass "лаунчер без заметки: отказ до проверок"; else bad "лаунчер без заметки (код $status): $output"; fi
+clear_logs
+status=0; output="$(fix hub --note --dry-run)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "После --note" <<<"$output" && [ ! -s "$CHECK_LOG" ]; then pass "лаунчер: --note не съедает --dry-run"; else bad "лаунчер --note --dry-run (код $status): $output"; fi
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --skip-checks)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "Неизвестный аргумент" <<<"$output" && [ ! -s "$CHECK_LOG" ] && [ ! -s "$RELEASE_MARK" ]; then pass "лаунчер: обхода проверок нет"; else bad "лаунчер --skip-checks (код $status): $output"; fi
+"${G[@]}" commit -q --allow-empty -m ahead
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "правка влита в main, git push" <<<"$output" && [ ! -s "$CHECK_LOG" ]; then pass "лаунчер: HEAD впереди origin/main, порядок в тексте"; else bad "лаунчер HEAD впереди (код $status): $output"; fi
+"${G[@]}" reset -q --hard HEAD~1
+# Запись для новой версии уже лежит: выпуск не должен дописывать вторую.
+"${G[@]}" reset -q --hard "$BASE"
+sed -i '' "s/\"version\": \"$HUB\"/\"version\": \"$NEXT\"/" "$FX/Resources/WhatsNew.json"
+echo "// правка" >> "$FX/Sources/App/UtilitumusApp.swift"
+"${G[@]}" commit -q -am "запись уже есть"
+"${G[@]}" push -q -f origin main
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+if [ "$status" -ne 0 ] && grep -qF "уже есть запись для $NEXT" <<<"$output" && [ ! -s "$CHECK_LOG" ]; then pass "лаунчер: готовая запись версии: отказ до проверок"; else bad "лаунчер готовая запись (код $status): $output"; fi
+
+echo "== лаунчер: настоящий путь на локальном origin и подставном gh"
+commit_change Sources/App/UtilitumusApp.swift
+clear_logs
+status=0; output="$(fix hub --note "Исправлено: окно" --note "Ещё одно")" || status=$?
+if [ "$status" -ne 0 ]; then bad "лаунчер, настоящий путь упал: $output"; fi
+check "лаунчер: gh release create с новым тегом и Latest" has "$GH_LOG" "release create v$NEXT build/Utilitumus.zip"
+check "лаунчер: релиз с Latest" has "$GH_LOG" "--latest=true"
+check "лаунчер: тег в origin" grep -qx "v$NEXT" <<<"$(/usr/bin/git -C "$ORIGIN" tag)"
+same "лаунчер: в origin версия в Info.plist" "$(/usr/bin/git -C "$FX" show origin/main:Info.plist | plutil -extract CFBundleShortVersionString raw -o - -)" "$NEXT"
+same "лаунчер: в origin запись сверху" "$(/usr/bin/git -C "$FX" show origin/main:Resources/WhatsNew.json | plutil -extract 0.items.1 raw -o - -)" "Ещё одно"
+same "лаунчер: прежняя запись на месте" "$(/usr/bin/git -C "$FX" show origin/main:Resources/WhatsNew.json | plutil -extract 1.version raw -o - -)" "$HUB"
+same "лаунчер: сборка видела версию и запись" "$(cut -d' ' -f1-3 "$RELEASE_MARK")" "hub-build $NEXT $NEXT"
+same "лаунчер: тег указывает на origin/main" "$(/usr/bin/git -C "$ORIGIN" rev-parse "v$NEXT^{commit}")" "$(/usr/bin/git -C "$ORIGIN" rev-parse main)"
+same "лаунчер: после выпуска дерево чисто" "$("${G[@]}" status --porcelain)" ""
+clear_logs
+status=0; output="$(fix hub "${NOTE[@]}" --dry-run)" || status=$?
+check "лаунчер: сразу после выпуска выпускать нечего" grep -qF "ничего не менялось" <<<"$output"
 
 if [ "$fails" -ne 0 ]; then
   echo "Провалов: $fails"

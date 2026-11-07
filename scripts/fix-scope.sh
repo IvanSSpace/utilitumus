@@ -20,6 +20,10 @@ fix_checks_of() {
     sound) echo run-sound-remote-check run-sound-wire-check ;;
     stash) echo run-own-identity-check run-stash-module-check run-stash-remote-check run-stash-title-check run-stash-wire-check ;;
     voice) echo run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check ;;
+    # Лаунчер (fix.sh hub): оболочка и следы утилит в ней, боковая панель, дашборд и меню-бар, значки меню (раздел настроек), Стор,
+    # обновление центра и утилит, следы шва в бандле. Окна настроек целиком проверкой не охвачено: menu-icons снимает раздел «Значки в меню»,
+    # auto-update — раздел «Обновления».
+    hub) echo run-hub-shell-check run-sidebar-check run-dashboard-routing-check run-menu-icons-check run-store-catalog-check run-update-bundle-check run-update-all-check run-auto-update-check run-seam-check ;;
     *) return 1 ;;
   esac
 }
@@ -101,6 +105,49 @@ fix_classify() { # id
           fi
         fi ;;
       *) FIX_REFUSED+=("$file — не файл этой утилиты") ;;
+    esac
+  done
+}
+
+# Правка лаунчера (scripts/fix.sh hub): то же, что fix_classify, но своё у лаунчера — то, что собирает scripts/hub-sources.sh
+# (Sources/App и экраны Sources/Modules/*/UI) и build.sh. Kit, Shared, помощники, код утилит и договор связи — отказ.
+# FIX_SCREENS — экраны утилит из Sources/Modules/*/UI, которых нет в выпуске утилиты: лаунчер их получит, окно утилиты нет.
+fix_classify_hub() {
+  local file owner version
+  FIX_OWN=(); FIX_SKIPPED=(); FIX_REFUSED=(); FIX_SCREENS=()
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    case "$file" in
+      Catalog/catalog.json | README.md | docs/* | Tests/* | .github/* | .gitignore | \
+        scripts/dev.sh | scripts/dev-scope.sh | scripts/fix.sh | scripts/fix-scope.sh | scripts/release-all.sh | scripts/release.sh | \
+        scripts/build-pilot.sh | scripts/test-app-layout.sh | scripts/test-fn-tap.sh | scripts/list-layouts/*)
+        FIX_SKIPPED+=("$file") ;;
+      Sources/Kit/*) FIX_REFUSED+=("$file — Kit входит в сборку всех утилит и лаунчера") ;;
+      Sources/Shared/*) FIX_REFUSED+=("$file — общий код вентиляторов, он есть и в службе, и в лаунчере") ;;
+      Sources/FanHelper/* | Sources/VoiceHelper/* | Sources/LinkHelper/*) FIX_REFUSED+=("$file — помощник утилиты: выходит вместе с ней") ;;
+      Sources/Modules/*/UI/*Wire.swift) FIX_REFUSED+=("$file — договор связи с утилитой: нужен и выпуск утилиты") ;;
+      Sources/Modules/*/UI/*)
+        FIX_OWN+=("$file")
+        dev_scope_classify <<<"$file"
+        owner="${PICK[0]:-}"
+        version=""
+        [ -z "$owner" ] || version="$(fix_catalog_version "$owner")"
+        if [ -z "$version" ] || ! fix_released_in "$owner-v$version" "$file"; then FIX_SCREENS+=("$file"); fi ;;
+      Sources/App/* | Info.plist | build.sh | install.sh | Resources/* | local.utilitumus.plist | \
+        scripts/hub-sources.sh | scripts/check-no-seam.sh | scripts/unlock-signing.sh)
+        FIX_OWN+=("$file") ;;
+      scripts/*) FIX_REFUSED+=("$file — этим собирается и выпускается каждая утилита") ;;
+      Sources/Apps/*/* | Sources/Modules/*/*)
+        dev_scope_classify <<<"$file"
+        owner="${PICK[0]:-}"
+        version=""
+        [ -z "$owner" ] || version="$(fix_catalog_version "$owner")"
+        if [ -n "$version" ] && fix_released_in "$owner-v$version" "$file"; then
+          FIX_SKIPPED+=("$file")
+        else
+          FIX_REFUSED+=("$file — код утилиты ${owner:-без владельца}, ещё не выпущен её выпуском")
+        fi ;;
+      *) FIX_REFUSED+=("$file — не файл лаунчера") ;;
     esac
   done
 }
