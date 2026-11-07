@@ -124,13 +124,13 @@
     },
     {
       "id": "bots",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.7.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.2.0/Bots.zip",
-      "sha256": "e48f0bf2be07fe727c3383297d54edfad7344c7c77a64914722063b0d46deb5d",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.2.1/Bots.zip",
+      "sha256": "b678d3d1daf6a7f55f048184b26d813e92d93046315a14c813450704f4b08006",
       "sizeMB": 2,
       "notes": [
-        "Быстрые действия сверяют команду точнее. Из имён убираются символы, которыми можно подменить текст"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     }
   ]
