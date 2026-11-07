@@ -47,7 +47,7 @@ same "AutoUpdate.swift сам не качает и не ставит" "$(grep -c
 # Каждый вызов, после которого система спрашивает человека. Новый вызов должен быть проверен глазами и дописан сюда.
 same "окно пароля службы только по кнопке" \
   "$(grep -rlE 'installer\.install\(\)|FanHelperInstaller\.shared\.install\(\)' Sources | LC_ALL=C sort)" \
-  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/FansModel.swift Sources/Modules/Fans/FansWire.swift | LC_ALL=C sort)"
+  "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Fans/FansModule.swift Sources/Modules/Fans/BuiltInFansModel.swift Sources/Modules/Fans/FanControllerWire.swift | LC_ALL=C sort)"
 same "браузер по умолчанию меняют только кнопка и удаление" \
   "$(grep -rlE '\.setDefault\(|setDefaultApplication' Sources | LC_ALL=C sort)" \
   "$(printf '%s\n' Sources/App/Setup/SetupStep.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Browser/BrowserLinkHandler.swift Sources/Modules/Browser/BrowserView.swift | LC_ALL=C sort)"

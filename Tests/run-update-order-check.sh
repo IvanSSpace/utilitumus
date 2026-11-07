@@ -47,7 +47,7 @@ cmp -s "$OUT/main.swift" "$CACHE/src/main.swift" || cp "$OUT/main.swift" "$CACHE
 # Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек,
 # и FanController записал бы туда настройки вентиляторов.
 FILES=("$CACHE/src/main.swift" Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
-  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift)
+  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/UI/FanTypes.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" \
   "${FILES[@]}" -framework AppKit

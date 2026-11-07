@@ -30,7 +30,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/src"
 cp Tests/FanHelperCheck.swift "$OUT/src/main.swift"
 
-CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift"
+CHECK_SOURCES="$OUT/src/main.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/Link/LinkProtocol.swift Sources/Modules/Fans/FanGate.swift Sources/Modules/Fans/FanHelperClient.swift Sources/Modules/Fans/FanHelperInstaller.swift Sources/Modules/Fans/LegacyFanHelper.swift Sources/Modules/Fans/UI/FanTypes.swift"
 # Метка выпуска: без бандла Info.plist лежит в самом бинарнике.
 MARKED=(-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfo.plist)
 HELPER_SOURCES="Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift"
@@ -102,7 +102,7 @@ ok "в build.sh нет шва"
 # Статус и команды идут по XPC, копию проверяет root-скрипт установки. Исключение одно: прежний
 # setuid-помощник, и только после проверки подписи. Убрать вместе с поддержкой setuid.
 LEGACY=Sources/Modules/Fans/LegacyFanHelper.swift
-if grep -nE 'Process\(\)|NSTask|posix_spawn' Sources/Modules/Fans/*.swift | grep -v "^$LEGACY:"; then fail "модуль Вентиляторы запускает процесс"; fi
+if grep -nE 'Process\(\)|NSTask|posix_spawn' Sources/Modules/Fans/*.swift Sources/Modules/Fans/UI/*.swift | grep -v "^$LEGACY:"; then fail "модуль Вентиляторы запускает процесс"; fi
 ok "модуль Вентиляторы не запускает процессов, кроме прежнего setuid-помощника"
 [ "$(grep -cE 'Process\(\)' "$LEGACY")" = 1 ] || fail "в $LEGACY ждём один запуск"
 verify_line="$(grep -n 'KitSigning.verifySignature' "$LEGACY" | cut -d: -f1)"
