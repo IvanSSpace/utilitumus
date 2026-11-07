@@ -126,9 +126,10 @@ ok "метки набора в обычной сборке нет"
 if nm -a "$OUT/$BIN" 2>/dev/null | grep -q KitDevScope; then fail "символ KitDevScope в обычной сборке"; fi
 ok "кода фильтра в обычной сборке нет (символа KitDevScope нет)"
 mkdir -p "$OUT/clean/X.app/Contents/MacOS" "$OUT/dirty/X.app/Contents/MacOS"
-cp "$OUT/$BIN" "$OUT/clean/X.app/Contents/MacOS/X"
-scripts/check-no-seam.sh "$OUT/clean/X.app" || fail "check-no-seam отверг обычную сборку"
-ok "check-no-seam: обычная сборка проходит"
+# Не бинарник стенда: в нём сама проверка с её тестовыми строками, и отказ был бы верным. Настоящую сборку проверяет выпуск.
+printf 'xx без меток xx' > "$OUT/clean/X.app/Contents/MacOS/X"
+scripts/check-no-seam.sh "$OUT/clean/X.app" || fail "check-no-seam отверг файл без меток"
+ok "check-no-seam: файл без меток проходит"
 printf 'xx%s=mixer\nxx' "$MARK" > "$OUT/dirty/X.app/Contents/MacOS/X"
 if scripts/check-no-seam.sh "$OUT/dirty/X.app" 2>/dev/null; then fail "check-no-seam пропустил метку набора"; fi
 ok "check-no-seam: метка набора — отказ"
