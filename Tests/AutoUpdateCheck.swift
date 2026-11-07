@@ -494,12 +494,16 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
         exit(failures == 0 ? 0 : 1)
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { stage.holdQuit(nil) }
-    NSApp.terminate(nil)
-    // `terminate` не возвращается: `terminateLater` крутит цикл до ответа, затем выход.
-    check(false, "выход: `terminate` вернулся")
-    exit(1)
+    // Из таймера, как событие меню, а не из блока главной очереди: иначе задачи главного актора стояли бы до конца выхода.
+    Timer.scheduledTimer(withTimeInterval: 0.01, repeats: false) { _ in
+        NSApp.terminate(nil)
+        // `terminate` не возвращается: `terminateLater` крутит цикл до ответа, затем выход.
+        check(false, "выход: `terminate` вернулся")
+        exit(1)
+    }
 }
 
+setvbuf(stdout, nil, _IOLBF, 0)
 try! fm.createDirectory(at: workRoot, withIntermediateDirectories: true)
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)

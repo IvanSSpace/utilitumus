@@ -211,20 +211,23 @@ final class UpdateAll: ObservableObject {
     /// Выход во время установки мог бы оставить утилиту остановленной: launchd загрузит её только при следующем входе.
     /// Очередь снимается, идущая установка отменяется: до остановки утилиты ничего не тронуто, после неё работает откат.
     /// Срок на случай зависшей связи: окно выхода не должно висеть вечно.
-    func stopForQuit(deadline: Duration = .seconds(15), done: @escaping @MainActor () -> Void) {
+    func stopForQuit(deadline: TimeInterval = 15, done: @escaping @MainActor () -> Void) {
         quitting = true
         queue.removeAll()
         store.cancelOperations()
-        Task {
-            let clock = ContinuousClock()
-            let end = clock.now + deadline
-            while installing, clock.now < end { try? await Task.sleep(for: .milliseconds(50)) }
-            done()
-            // Обычно сюда уже не дойти: процесс завершился внутри `done`.
-            quitting = false
-            // Обычно сюда уже не дойти: процесс завершился внутри `done`.
-            quitting = false
+        // Таймер, а не задача: `terminate` мог быть вызван из блока главной очереди (`Updater.relaunch`), и тогда задачи главного
+        // актора стоят до конца выхода. Срок сработает и в этом случае.
+        let end = Date().addingTimeInterval(deadline)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard !self.installing || Date() >= end else { return }
+                timer.invalidate()
+                done()
+                // Обычно сюда уже не дойти: процесс завершился внутри `done`.
+                self.quitting = false
+            }
         }
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// Идёт ли что-то через установщик, в том числе кнопка в Сторе и переход при запуске.

@@ -172,8 +172,8 @@ final class AutoUpdate: ObservableObject {
         }
         Task {
             await registry.firstRefreshFinished()
-            noteCatalogRead()
-            await tick()
+            // Каталог не прочитался: второго чтения подряд не будет, дождёмся витка таймера.
+            if noteCatalogRead() { await tick() }
         }
     }
 
@@ -194,7 +194,6 @@ final class AutoUpdate: ObservableObject {
     }
 
     /// Только удачное чтение сдвигает срок.
-    @discardableResult
     private func noteCatalogRead() -> Bool {
         guard registry.catalogReadAt != nil, !registry.catalogFailed else { return false }
         defaults.set(now(), forKey: AutoUpdatePolicy.lastCheckKey)
