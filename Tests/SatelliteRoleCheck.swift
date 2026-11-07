@@ -153,6 +153,26 @@ func updateChecks() {
     check(SatelliteSelfUpdate.newer(in: catalog, id: "awake", than: "1.2.0") == nil, "обновление: та же версия — нет")
     check(SatelliteSelfUpdate.newer(in: catalog, id: "awake", than: "1.10.0") == nil, "обновление: своя новее — нет")
     check(SatelliteSelfUpdate.newer(in: catalog, id: "nope", than: "0") == nil, "обновление: чужой id — нет")
+
+    check(SatelliteCatalog.personOnly == ["fans", "clipboard"], "только по кнопке: Вентиляторы и Буфер, больше никто")
+    for id in ["fans", "clipboard"] {
+        let own = Catalog(schema: 1, apps: [app(id, "9.0.0")])
+        check(!SatelliteSelfUpdate.mayUpdateItself(id: id), "обновление: \(id) сам себя не ставит")
+        check(SatelliteSelfUpdate.newer(in: own, id: id, than: "1.0.0") == nil, "обновление: \(id) — нет, хотя в каталоге новее")
+    }
+    check(SatelliteSelfUpdate.mayUpdateItself(id: "awake"), "обновление: другие утилиты ставят себя сами")
+
+    var marked = app("awake", "9.0.0")
+    marked.manualUpdate = true
+    check(SatelliteSelfUpdate.newer(in: Catalog(schema: 1, apps: [marked]), id: "awake", than: "1.0.0") == nil, "обновление: отметка manualUpdate — нет")
+    // Через настоящий разбор: кривая отметка тоже считается отметкой.
+    func decoded(_ manual: String) -> Catalog? {
+        let json = #"{"schema":1,"apps":[{"id":"awake","version":"9.0.0","minHub":"0.6.0","url":"https://example.com/a.zip","sha256":"ab","sizeMB":1,"manualUpdate":\#(manual)}]}"#
+        return try? SatelliteCatalog.decode(Data(json.utf8))
+    }
+    check(decoded("false").flatMap { SatelliteSelfUpdate.newer(in: $0, id: "awake", than: "1.0.0") }?.version == "9.0.0", "обновление: отметка false не мешает")
+    let crooked = decoded(#""да""#)
+    check(crooked != nil && SatelliteSelfUpdate.newer(in: crooked!, id: "awake", than: "1.0.0") == nil, "обновление: кривая отметка считается отметкой")
 }
 
 // MARK: - Клиент для стенда

@@ -391,6 +391,8 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     private var restartPending = false
 
     private func scheduleUpdateChecks() {
+        // Обновляется только по кнопке в центре: ни таймера, ни обращения к каталогу.
+        guard SatelliteSelfUpdate.mayUpdateItself(id: id) else { return }
         // Часовой таймер и дата в настройках: Mac спит, а сутки всё равно считаются по календарю.
         Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.checkForUpdate() }

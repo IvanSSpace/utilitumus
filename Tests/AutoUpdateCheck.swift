@@ -296,6 +296,7 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
     check(installedVersion("Fans") == "1.0.0" && !stage.downloads.contains("fans"), "вентиляторы только по кнопке: пароль службы")
     check(installedVersion("Clipboard") == "1.0.0" && !stage.downloads.contains("clipboard"), "буфер только по кнопке: окно связки")
     check(installedVersion("Bots") == "1.0.0" && !stage.downloads.contains("bots"), "отметка каталога: только по кнопке")
+    check(Set(AutoUpdatePolicy.personOnly.map(\.rawValue)) == SatelliteCatalog.personOnly, "только по кнопке: в общем списке только настоящие модули")
     check(Set(noticeModules()).isSuperset(of: [.fans, .clipboard, .bots]) && noticeHeight() > 0, "только по кнопке: остались на плашке")
     check(updates.startable.contains(.fans) && updates.startable.contains(.clipboard), "и в «Обновить всё»")
     check(linkCalls.register == 1 && linkCalls.setDefault == 0, "браузер: регистрация есть, браузер по умолчанию не менялся (\(linkCalls.register), \(linkCalls.setDefault))")
