@@ -187,8 +187,8 @@ struct DSSidebar: View {
     private var actions: SidebarActions {
         SidebarActions(
             selected: selected,
-            // Точка и «выкл» в строке говорят о работе самого модуля; утилита выключается отдельно от установки.
-            isOn: { modules.isExternal($0) ? satellites.isEnabled($0) : modules.isOn($0) },
+            // Яркость строки говорит о работе самого модуля: утилита выключается отдельно от установки, а без утилиты модуль не работает.
+            isOn: satellites.isEnabled,
             open: { module in
                 // Скрытый открывается разовым показом: состояние не меняем.
                 if modules.isHidden(module) {

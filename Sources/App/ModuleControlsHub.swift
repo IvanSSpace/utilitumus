@@ -9,11 +9,7 @@ struct DSModuleControls: View {
 
     /// Утилита ещё не ответила — не «выключен»: через миг ответ заменил бы надпись на глазах.
     private var on: Bool {
-        modules.isExternal(module) ? satellites.entries[module]?.status?.enabled ?? true : modules.isOn(module)
-    }
-
-    private func set(_ value: Bool) {
-        if modules.isExternal(module) { satellites.setEnabled(module, value) } else { modules.setOn(module, value) }
+        satellites.entries[module]?.status?.enabled ?? true
     }
 
     var body: some View {
@@ -26,7 +22,7 @@ struct DSModuleControls: View {
                 Text(on ? "Включён" : "Выключен")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(on ? 0.85 : 0.5))
-                DSToggle("Модуль включён", isOn: Binding(get: { on }, set: { set($0) }))
+                DSToggle("Модуль включён", isOn: Binding(get: { on }, set: { satellites.setEnabled(module, $0) }))
             }
             .help(on ? "Выключить: модуль остановится полностью" : "Включить модуль")
         }

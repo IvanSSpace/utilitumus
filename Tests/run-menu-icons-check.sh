@@ -16,6 +16,14 @@ awk '/func statusDidChange/,/^    }$/' Sources/App/Satellites/SatelliteRegistry.
 # Снятый ключ словом `false` не передать: утилита перечитывает настройку, а не пишет её.
 awk '/func linkSetMenuIcon/,/^    }$/' Sources/Kit/SatelliteHost.swift | grep -q 'MenuBarIcon.set' && { echo "ПРОВАЛ: команда центра записала бы false поверх снятого ключа"; exit 1; }
 echo "ok   утилита и центр сообщают друг другу о значке"
+# Центр значков не рисует: у модуля без утилиты вышел бы пустой значок, а компилятору это не видно.
+if grep -rn 'MenuBarIconItem(' Sources/App; then echo "ПРОВАЛ: центр снова создаёт значок в строке меню"; exit 1; fi
+if grep -rn 'hubShows' Sources; then echo "ПРОВАЛ: вернулось правило «значок рисует центр»"; exit 1; fi
+# Меню и настройки строят переключатели из `switchable`: полный порядок дал бы их и модулям без утилиты.
+if grep -n 'ForEach(modules.order)' Sources/App/MenuBar.swift Sources/App/ModuleMenuIcons.swift; then echo "ПРОВАЛ: переключатели у модулей без утилиты"; exit 1; fi
+# Выключает утилита у себя. `ModuleOn` без неё ничего не включит: такой переключатель врал бы.
+if grep -nE 'modules\.(setOn|isOn)|ModuleManager\.shared\.(setOn|isOn)' Sources/App/MenuBar.swift Sources/App/ModuleControlsHub.swift Sources/App/Design/Shell.swift Sources/App/Design/Dashboard.swift; then echo "ПРОВАЛ: переключатель снова идёт мимо утилиты"; exit 1; fi
+echo "ok   центр значков не рисует, переключатели только у модулей с утилитой"
 
 # Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh

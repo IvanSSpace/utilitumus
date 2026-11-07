@@ -140,19 +140,19 @@ final class WireBox: @unchecked Sendable {
     check(DashboardLive.externalState(status: plain, model: nil) == expected, "строка и действие из статуса")
     check(DashboardLive.externalState(status: nil, model: nil) == DashState(text: "не отвечает", attention: true), "нет ответа: не отвечает")
     check(DashboardLive.externalState(status: LinkStatus(enabled: false, line: "x", needsSetup: 0), model: nil)
-          == DashState(on: false, text: "выключен"), "выключена: как выключенный встроенный")
+          == DashState(on: false, text: "выключен"), "выключена: «выключен», кнопка «Включить»")
     check(DashboardLive.externalState(status: LinkStatus(enabled: true, line: "x", needsSetup: 2, attention: false), model: nil)
-          == DashState(text: "нужен доступ", attention: true), "нужен шаг: как у встроенного")
+          == DashState(text: "нужен доступ", attention: true), "нужен шаг: «нужен доступ»")
     check(DashboardLive.externalState(status: LinkStatus(enabled: true, line: "перегрев", needsSetup: 0, attention: true), model: nil)
           == DashState(text: "перегрев", attention: true), "оранжевое из статуса")
 
-    // Карточка «Не спать» по старому маршруту: модель, а не строка статуса.
+    // Карточка «Не спать»: модель, а не строка статуса.
     let awakeModel = RemoteAwakeModel(id: "test.awake", canRead: { false })
     let awakeStatus = LinkStatus(enabled: true, line: "Mac не уснёт", needsSetup: 0, quickActions: [quick])
     check(DashboardLive.externalState(status: awakeStatus, model: awakeModel) == DashboardLive.awake(awakeModel),
           "Не спать: карточка из модели, не из статуса")
     check(DashboardLive.awake(awakeModel) == DashboardLive.awake(FakeAwake(keepDisplay: awakeModel.keepDisplay, duration: awakeModel.duration)),
-          "Не спать: удалённая модель и встроенная дают одну карточку")
+          "Не спать: карточка зависит только от состояния модели")
     check(awakeModel.menuUsesQuickActions == false, "Не спать: меню рисует свой пункт")
 
     // MARK: Меню
@@ -165,7 +165,7 @@ final class WireBox: @unchecked Sendable {
         .awake: .init(catalog: nil, installedVersion: "1", status: awakeStatus, responding: true),
     ]
     let sections = MenuQuickActions.sections(order: order, modules: modules, entries: entries)
-    check(sections == [.init(module: .load, actions: [quick])], "секция только у ведомого модуля с действиями; Не спать и без действий нет")
+    check(sections == [.init(module: .load, actions: [quick])], "секция только у модуля с утилитой и действиями; Не спать и без действий нет")
     var off = entries
     off[.load]?.status = LinkStatus(enabled: false, line: "x", needsSetup: 0, quickActions: [quick])
     check(MenuQuickActions.sections(order: order, modules: modules, entries: off).isEmpty, "выключенного модуля в меню нет")
@@ -215,15 +215,8 @@ final class WireBox: @unchecked Sendable {
     check(journal.all == [#"action load {"refresh":{}}"#], "быстрое действие уходит в moduleAction как есть: \(journal.all)")
     check(registry.actionErrors[.load] == "нельзя", "отказ утилиты виден")
 
-    // MARK: Пиксели — карточка встроенного и ведомого модуля
-    print("== пиксели")
-    // Встроенной «Мыши» нужен доступ или нет — зависит от того, кто запустил проверку, поэтому её карточка (оранжевая)
-    // только снимается и сверяется на DashState выше.
-    struct Case { let module: Module; let status: LinkStatus; var compare = true }
-    let cases = [
-        // Звук и Нагрузка теперь идут через модель: их сверка по состоянию утилиты ниже («пиксели из состояния утилиты»).
-        Case(module: .mouse, status: LinkStatus(enabled: true, line: "x", needsSetup: 1, setupSteps: [steps[0]]), compare: false),
-    ]
+    // MARK: Модуль без утилиты
+    print("== модуль без утилиты")
     // Чистый лист: ни бандлов, ни передачи, ни включённых модулей.
     for module in Module.allCases {
         modules.setOn(module, false)
@@ -232,33 +225,57 @@ final class WireBox: @unchecked Sendable {
     try? FileManager.default.removeItem(at: appsDir)
     await registry.update()
     check(Module.allCases.allSatisfy { !modules.isExternal($0) && !modules.isOn($0) }, "чистый лист перед снимками")
-    var shots: [NSBitmapImageRep] = []
-    for c in cases {
-        var builtIn: NSBitmapImageRep?
-        if c.compare {
-            modules.setOn(c.module, true)
-            AccessState.shared.refresh()
-            builtIn = await snapshot("builtin-\(c.module.rawValue)", DashboardPage(open: { _ in }))
-            modules.setOn(c.module, false)
-        }
-        bundle(SatelliteRegistry.bundleName(c.module), in: appsDir)
-        box.set(c.module.rawValue, c.status)
-        Kit.defaults.set(true, forKey: ModuleHandover.handedOverKey(c.module.rawValue))
+    check(MenuQuickActions.sections(order: order, modules: modules, entries: entries).isEmpty, "без утилит быстрых действий в меню нет, что бы ни лежало в статусах")
+    check(AppMenuBarScene.switchable(modules).isEmpty, "без утилит переключателей в меню нет")
+    let emptyPage = await snapshot("no-modules", DashboardPage(open: { _ in }))
+    for module in Module.allCases {
+        modules.setOn(module, true)
         await registry.update()
-        AccessState.shared.refresh()
-        check(modules.isExternal(c.module), "\(c.module.rawValue): утилита ведёт модуль")
-        let external = await snapshot("external-\(c.module.rawValue)", DashboardPage(open: { _ in }))
-        if let builtIn {
-            let diff = differing(builtIn, external)
-            check(diff == 0, "\(c.module.rawValue): карточка и шапка совпали, разных пикселей \(diff)")
-        }
-        shots.append(external)
-        Kit.defaults.removeObject(forKey: ModuleHandover.handedOverKey(c.module.rawValue))
-        try? FileManager.default.removeItem(at: appsDir.appendingPathComponent(SatelliteRegistry.bundleName(c.module) + ".app"))
-        await registry.update()
-        check(!modules.isExternal(c.module), "\(c.module.rawValue): снято")
+        check(modules.wantsUtility(module), "\(module.rawValue): модуль включён, утилита нужна")
+        let state = DashboardLive.snapshot(module)
+        check(state == DashState(text: "утилита не установлена", attention: true) && state.actionTitle == nil && state.on,
+              "\(module.rawValue): карточка «утилита не установлена», оранжевая, без действий и без «Включить»")
+        check(!AppMenuBarScene.switchable(modules).contains(module), "\(module.rawValue): в меню переключателя нет")
+        // Просить некого: ни команды, ни включения, ни установки сама карточка не делает.
+        journal.clear()
+        DashboardLive.perform(module, ask: { _ in check(false, "\(module.rawValue): вопрос у карточки без действий") })
+        await pause(0.05)
+        check(journal.all.isEmpty && modules.wantsUtility(module), "\(module.rawValue): действие карточки ничего не делает: \(journal.all)")
+        modules.setOn(module, false)
+        check(DashboardLive.snapshot(module) == DashState(text: "утилита не установлена", attention: true),
+              "\(module.rawValue): и у открытой страницы не установленного модуля та же строка, а не «выключен» с кнопкой")
     }
-    check(shots.count == 1 && differing(shots[0], shots[0]) == 0, "карточка Мыши снята")
+    modules.setOn(.mixer, true)
+    let missingPage = await snapshot("missing-mixer", DashboardPage(open: { _ in }))
+    check(differing(emptyPage, missingPage) > 0, "карточка модуля без утилиты видна на дашборде")
+    modules.setOn(.mixer, false)
+
+    print("== шапка дашборда")
+    check(DashboardPage.summary(on: 2, of: 3, needAccess: [], missing: [.mixer]) == "Нет утилиты: \(Module.mixer.title) · 2 из 3 модулей включены",
+          "нет утилиты: шапка говорит об этом, а не «Всё работает»")
+    check(DashboardPage.summary(on: 1, of: 3, needAccess: [.mouse], missing: [.mixer, .load])
+          == "Нужен доступ: \(Module.mouse.title) · Нет утилиты: \(Module.mixer.title), \(Module.load.title) · 1 из 3 модулей включён",
+          "нужен доступ и нет утилиты: оба")
+    check(DashboardPage.summary(on: 2, of: 2, needAccess: [], missing: []).hasPrefix("Всё работает"), "всё на месте: «Всё работает»")
+    check(DashboardPage.summary(on: 0, of: 1, needAccess: [], missing: []).hasPrefix("Ничего не включено"), "всё выключено: «Ничего не включено»")
+
+    // MARK: Пиксели — карточка модуля с утилитой
+    print("== пиксели")
+    // Мышь с невыполненным шагом: карточка оранжевая, шапка просит доступ.
+    let mouseStatus = LinkStatus(enabled: true, line: "x", needsSetup: 1, setupSteps: [steps[0]])
+    bundle(SatelliteRegistry.bundleName(.mouse), in: appsDir)
+    box.set(Module.mouse.rawValue, mouseStatus)
+    Kit.defaults.set(true, forKey: ModuleHandover.handedOverKey(Module.mouse.rawValue))
+    await registry.update()
+    AccessState.shared.refresh()
+    check(modules.isExternal(.mouse), "mouse: утилита ведёт модуль")
+    check(DashboardLive.snapshot(.mouse).text != "утилита не установлена", "mouse: карточка больше не про установку")
+    let mouseShot = await snapshot("external-mouse", DashboardPage(open: { _ in }))
+    check(differing(emptyPage, mouseShot) > 0, "карточка Мыши снята")
+    Kit.defaults.removeObject(forKey: ModuleHandover.handedOverKey(Module.mouse.rawValue))
+    try? FileManager.default.removeItem(at: appsDir.appendingPathComponent(SatelliteRegistry.bundleName(.mouse) + ".app"))
+    await registry.update()
+    check(!modules.isExternal(.mouse), "mouse: снято")
 
     // MARK: Маршрутизация по RemoteModules
     print("== RemoteModules")
@@ -281,90 +298,86 @@ final class WireBox: @unchecked Sendable {
     struct Fixture {
         let module: Module
         let model: any RemoteModuleSurface
-        /// То, что даёт встроенный модуль по тем же данным (формулы `DashboardLive`, записанные руками).
-        let builtIn: DashState
+        /// Что должна показать карточка по этим данным, записано руками.
+        let expected: DashState
     }
     var fixtures: [Fixture] = []
     do {
         let (m, _) = await fixtureModel(make: { RemoteFansModel(id: "t.fans", link: $0, canRead: { true }) }) { (s: inout FansState) in
             s.fullPower = true; s.helperStatus = .ready; s.conflict = nil
         }
-        fixtures.append(Fixture(module: .fans, model: m, builtIn: DashState(text: "Макс", actionTitle: "Авто", actionIcon: "arrow.uturn.backward")))
+        fixtures.append(Fixture(module: .fans, model: m, expected: DashState(text: "Макс", actionTitle: "Авто", actionIcon: "arrow.uturn.backward")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteMixerModel(id: "t.mixer", link: $0, canRead: { true }) }) { (s: inout MixerState) in
             s.apps = [MixerAppState(id: "a", name: "Музыка", volume: 0.5, muted: false)]
         }
-        fixtures.append(Fixture(module: .mixer, model: m, builtIn: DashState(text: "играет Музыка · 50 %")))
+        fixtures.append(Fixture(module: .mixer, model: m, expected: DashState(text: "играет Музыка · 50 %")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteKeyboardModel(id: "t.keyboard", link: $0, canRead: { true }) }) { (s: inout KeyboardState) in
             s.features = [KeyboardFeature.fnLanguage.rawValue]; s.tapActive = true; s.systemUsage = 0; s.secureInputApp = nil
             s.currentName = "Русская"
         }
-        fixtures.append(Fixture(module: .keyboard, model: m, builtIn: DashState(text: "Русская")))
+        fixtures.append(Fixture(module: .keyboard, model: m, expected: DashState(text: "Русская")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteSoundModel(id: "t.sound", link: $0, canRead: { true }) }) { (s: inout SoundState) in
             s.currentInputName = "MacBook Pro Microphone"
         }
-        fixtures.append(Fixture(module: .sound, model: m, builtIn: DashState(text: "MacBook Pro Microphone")))
+        fixtures.append(Fixture(module: .sound, model: m, expected: DashState(text: "MacBook Pro Microphone")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteClipboardModel(id: "t.clipboard", link: $0, canRead: { true }) }) { (s: inout ClipboardState) in
             s.totalCount = 7; s.storeError = nil
         }
-        fixtures.append(Fixture(module: .clipboard, model: m, builtIn: DashState(text: "\(m.hotKeyLabel) · 7 записей")))
+        fixtures.append(Fixture(module: .clipboard, model: m, expected: DashState(text: "\(m.hotKeyLabel) · 7 записей")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteStashModel(id: "t.stash", link: $0, canRead: { true }) }) { (s: inout StashState) in
             s.stashed = []; s.busy = nil; s.usage = [:]
             s.running = [.init(bundleID: "a", name: "A", closing: true), .init(bundleID: "b", name: "B", closing: true)]
         }
-        fixtures.append(Fixture(module: .stash, model: m, builtIn: DashState(text: "выбрано 2", actionTitle: "Спрятать", actionIcon: "archivebox")))
+        fixtures.append(Fixture(module: .stash, model: m, expected: DashState(text: "выбрано 2", actionTitle: "Спрятать", actionIcon: "archivebox")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteLoadModel(id: "t.load", canRead: { true }, link: $0) }) { (s: inout LoadState) in s.measure = nil }
-        fixtures.append(Fixture(module: .load, model: m, builtIn: DashState(text: "открой для замера", actionTitle: "Обновить")))
+        fixtures.append(Fixture(module: .load, model: m, expected: DashState(text: "открой для замера", actionTitle: "Обновить")))
     }
     do {
         let (m, _) = await fixtureModel(make: { RemoteVoiceModel(id: "t.voice", link: $0, canRead: { true }) }) { (s: inout VoiceState) in
             s.recording = true
         }
-        fixtures.append(Fixture(module: .voice, model: m, builtIn: DashState(text: "идёт запись…")))
+        fixtures.append(Fixture(module: .voice, model: m, expected: DashState(text: "идёт запись…")))
     }
     let plainStatus = LinkStatus(enabled: true, line: "строка статуса", needsSetup: 0)
     for f in fixtures {
-        check(DashboardLive.externalState(status: plainStatus, model: f.model) == f.builtIn,
-              "\(f.module.rawValue): карточка из состояния утилиты равна карточке встроенного")
+        check(DashboardLive.externalState(status: plainStatus, model: f.model) == f.expected,
+              "\(f.module.rawValue): карточка из состояния утилиты")
     }
+    // Настоящий путь: модуль без утилиты, утилита появилась, реестр передал ей модуль, карточка сменилась; утилиту убрали, карточка вернулась.
     for f in fixtures {
         RemoteModules.testModels[f.module] = f.model
-        DashboardLive.testBuiltIn[f.module] = f.builtIn
         modules.setOn(f.module, true)
         AccessState.shared.refresh()
-        let blockedHere = f.module.isBlocked
-        let builtIn = await snapshot("fixture-builtin-\(f.module.rawValue)", DashboardPage(open: { _ in }))
+        check(DashboardLive.snapshot(f.module) == DashboardLive.missingState, "\(f.module.rawValue): без утилиты модель не читается")
+        let missing = await snapshot("fixture-missing-\(f.module.rawValue)", DashboardPage(open: { _ in }))
         modules.setOn(f.module, false)
         bundle(SatelliteRegistry.bundleName(f.module), in: appsDir)
         box.set(f.module.rawValue, plainStatus)
         Kit.defaults.set(true, forKey: ModuleHandover.handedOverKey(f.module.rawValue))
         await registry.update()
         check(modules.isExternal(f.module), "\(f.module.rawValue): утилита ведёт модуль")
+        check(DashboardLive.snapshot(f.module) == f.expected, "\(f.module.rawValue): карточка идёт через реестр и модель")
+        check(AppMenuBarScene.switchable(modules).contains(f.module), "\(f.module.rawValue): в меню есть переключатель")
         let external = await snapshot("fixture-external-\(f.module.rawValue)", DashboardPage(open: { _ in }))
-        // Шапка у встроенного зависит от разрешений этого Mac (помощник вентиляторов, Универсальный доступ, микрофон): без них
-        // там «Нужен доступ: …» и оранжевая точка, а у утилиты со статусом «всё готово» зелёная. Это не расхождение карточки,
-        // поэтому, когда встроенный здесь заблокирован, шапка (первые 200 px) не сравнивается, а карточки сверяются целиком.
-        let diff = differing(builtIn, external, fromRow: blockedHere ? 200 : 0)
         check(!f.module.isBlocked, "\(f.module.rawValue): у утилиты без шагов шапка не просит доступ")
-        // Причина, если когда-нибудь не ноль, называется здесь: карточка встроенного задана руками, потому что
-        // настоящим контроллерам нужны железо, права и данные человека (история буфера, SMC, микрофон).
-        check(diff == 0, "\(f.module.rawValue): карточка и шапка совпали, разных пикселей \(diff)")
+        check(differing(missing, external) > 0, "\(f.module.rawValue): карточка на экране сменилась")
         Kit.defaults.removeObject(forKey: ModuleHandover.handedOverKey(f.module.rawValue))
         try? FileManager.default.removeItem(at: appsDir.appendingPathComponent(SatelliteRegistry.bundleName(f.module) + ".app"))
         await registry.update()
+        check(!modules.isExternal(f.module), "\(f.module.rawValue): снято")
         RemoteModules.testModels[f.module] = nil
-        DashboardLive.testBuiltIn[f.module] = nil
     }
 
     // MARK: Меню и действия карточки

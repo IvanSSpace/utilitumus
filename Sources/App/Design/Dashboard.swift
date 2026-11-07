@@ -3,10 +3,9 @@ import AppKit
 import Combine
 
 // Дашборд: страница по умолчанию. Три секции по категориям, у каждого модуля — живой статус
-// и одно быстрое действие. Статусы читаются из настоящих контроллеров только у включённых модулей
-// и ничего не запускают: ни таймеров, ни подписок на систему.
+// и одно быстрое действие. Статус приходит от утилиты: центр сам ничего не меряет и не запускает.
 //
-// Статус модуля — отдельный `DashSlot`: он подписывается на контроллер, пока статус на экране (карточка
+// Статус модуля — отдельный `DashSlot`: он подписывается на модель утилиты, пока статус на экране (карточка
 // дашборда, строка с подписью в боковой панели), считает текст при событии и публикует его, только если
 // он реально изменился. Разбудить перерисовкой можно лишь ту карточку или строку, чей статус поменялся.
 
@@ -55,9 +54,6 @@ final class DashSlot: ObservableObject {
     private var attached = 0
     private var subs: [AnyCancellable] = []
     private var sourceSub: AnyCancellable?
-    /// На что подписан `sourceSub`: при передаче утилите или возврате подписку надо сменить.
-    private enum SourceKind { case none, model }
-    private var sourceKind = SourceKind.none
     private var visibilitySub: AnyCancellable?
 
     fileprivate init(_ module: Module) {
@@ -81,7 +77,7 @@ final class DashSlot: ObservableObject {
         stop()
     }
 
-    /// Модель, у которой включено слежение за дашбордом: снять его надо у неё же, даже если модуль уже вернулся.
+    /// Модель, у которой включено слежение за дашбордом: снять его надо у неё же, даже если утилиты уже нет.
     private var watched: (any RemoteModuleSurface)?
 
     private func stop() {
@@ -94,7 +90,7 @@ final class DashSlot: ObservableObject {
     private func reconcile() {
         guard attached > 0, WindowVisibility.shared.isVisible else { stop(); return }
         if subs.isEmpty {
-            // willChange приходит до смены значения: читаем контроллер со следующего витка.
+            // willChange приходит до смены значения: читаем состояние со следующего витка.
             subs = [
                 ModuleManager.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
                 AccessState.shared.objectWillChange.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.update() },
@@ -114,13 +110,11 @@ final class DashSlot: ObservableObject {
     }
 
     private func syncSource() {
-        let kind: SourceKind = DashboardLive.hasRemoteModel(module) ? .model : .none
-        guard kind != sourceKind || (kind != .none && sourceSub == nil) else { return }
-        sourceKind = kind
-        guard kind != .none, let source = DashboardLive.source(module) else {
+        guard let source = DashboardLive.source(module) else {
             sourceSub = nil
             return
         }
+        guard sourceSub == nil else { return }
         // Не чаще раза в секунду: вентиляторы публикуют каждые 2 с.
         sourceSub = source
             .receive(on: DispatchQueue.main)
@@ -135,7 +129,7 @@ final class DashSlot: ObservableObject {
     }
 }
 
-/// Реестр статусов модулей. Контроллер выключенного модуля не читается и не трогается.
+/// Реестр статусов модулей.
 @MainActor
 enum DashboardLive {
     private static let slots: [Module: DashSlot] = Dictionary(
@@ -143,18 +137,13 @@ enum DashboardLive {
 
     static func slot(_ module: Module) -> DashSlot { slots[module]! }
 
-    /// Модуль ведёт утилита, а экран у него свой, с моделью в центре (`RemoteModules`). Остальным хватает строки статуса.
-    fileprivate static func hasRemoteModel(_ module: Module) -> Bool {
-        ModuleManager.shared.isExternal(module) && RemoteModules.model(module) != nil
-    }
-
     /// Как при открытии вкладки: пока статус не был на экране, утилита могла зависнуть.
     fileprivate static func refreshExternal(_ module: Module) {
         guard ModuleManager.shared.isExternal(module) else { return }
         if let model = RemoteModules.model(module) { model.refresh() } else { SatelliteRegistry.shared.refresh(module) }
     }
 
-    /// Что слушать, пока модуль на экране: его модель (статус слушает реестр).
+    /// Что слушать, пока модуль на экране: его модель, если она есть (`RemoteModules`). Статус слушает реестр.
     fileprivate static func source(_ module: Module) -> AnyPublisher<Void, Never>? {
         ModuleManager.shared.isExternal(module) ? RemoteModules.model(module)?.changes : nil
     }
@@ -164,37 +153,25 @@ enum DashboardLive {
         if ModuleManager.shared.isExternal(module) { performExternal(module, ask: ask) }
     }
 
-    /// Переключатель модуля на карточке: утилита выключается у себя, `ModuleOn` — настройка встроенного.
+    /// Переключатель на карточке модуля с утилитой: она выключается у себя. Без утилиты переключать нечего.
     static func setOn(_ module: Module, _ on: Bool) {
-        if ModuleManager.shared.isExternal(module) {
-            SatelliteRegistry.shared.setEnabled(module, on)
-        } else {
-            ModuleManager.shared.setOn(module, on)
-        }
+        SatelliteRegistry.shared.setEnabled(module, on)
     }
 
-    #if KIT_TEST_DEFAULTS
-    /// Карточка встроенного модуля, которую проверка задаёт сама: настоящим контроллерам нужны железо и данные человека.
-    static var testBuiltIn: [Module: DashState] = [:]
-    #endif
-
-    /// Состояние карточки сейчас, без подписки: значок в строке меню читает его при открытии меню.
+    /// Состояние карточки сейчас, без подписки: поднятая при перетаскивании строка панели не должна заводить слот.
     static func snapshot(_ module: Module) -> DashState { compute(module) }
 
     fileprivate static func compute(_ module: Module) -> DashState {
-        #if KIT_TEST_DEFAULTS
-        if !ModuleManager.shared.isExternal(module), let fixture = testBuiltIn[module] { return fixture }
-        #endif
-        if ModuleManager.shared.isExternal(module) {
-            return externalState(status: SatelliteRegistry.shared.entries[module]?.status,
-                                 model: RemoteModules.model(module))
-        }
-        guard ModuleManager.shared.isOn(module) else { return DashState(on: false, text: "выключен") }
-        return DashState(text: "утилита не установлена", attention: true)
+        guard ModuleManager.shared.isExternal(module) else { return missingState }
+        return externalState(status: SatelliteRegistry.shared.entries[module]?.status,
+                             model: RemoteModules.model(module))
     }
 
-    /// Карточка ведомого модуля из статуса утилиты: те же состояния, что у встроенного (выключен, нужен доступ,
-    /// оранжевое, действие). Чистая функция: проверка не нуждается ни в утилите, ни в центре.
+    /// Карточка модуля без утилиты. Действия нет, включать нечего: клик ведёт на его страницу, а там кнопка «Установить».
+    static let missingState = DashState(text: "утилита не установлена", attention: true)
+
+    /// Карточка модуля из статуса утилиты: выключен, нужен доступ, оранжевое, действие.
+    /// Чистая функция: проверка не нуждается ни в утилите, ни в центре.
     /// `model` — тот, чья карточка показывает больше, чем строка статуса.
     static func externalState(status: LinkStatus?, model: (any RemoteModuleSurface)?) -> DashState {
         if let model {
@@ -219,101 +196,7 @@ enum DashboardLive {
         SatelliteRegistry.shared.confirmAndPerform(quick, module: module, ask: ask)
     }
 
-    private static func sound() -> DashState {
-        let name = MonitorState.shared.currentInputName
-        return DashState(text: name == "—" ? "слежу за микрофоном" : name)
-    }
-
-    private static func mouse() -> DashState {
-        let s = MouseController.shared.settings
-        guard s.needsTap else { return DashState(text: "всё как в системе") }
-        var parts: [String] = []
-        if s.mouseDirection == .reversed || s.magicMouseDirection == .reversed { parts.append("прокрутка обратная") }
-        if s.smoothEnabled { parts.append("плавность \(Int((s.smoothness * 100).rounded())) %") }
-        return DashState(text: parts.joined(separator: " · "))
-    }
-
-    private static func fans() -> DashState {
-        let c = FanController.shared
-        if c.safetyTripped { return DashState(text: "перегрев · вентиляторами управляет система", attention: true) }
-        var parts: [String] = []
-        if let t = c.cpuMax { parts.append("\(Int(t.rounded()))°") }
-        if c.fullPower {
-            parts.append("Макс")
-        } else {
-            let modes = Set(c.configs.map(\.mode))
-            parts.append(modes.count > 1 ? "Разные режимы" : (modes.first ?? .auto).title)
-        }
-        if let rpm = c.fans.map(\.actual).max() { parts.append("\(Int(rpm.rounded())) об/мин") }
-        var state = DashState(text: parts.joined(separator: " · "))
-        // Без доступа помощника кнопка ничего бы не сделала.
-        if FanHelperInstaller.shared.status == .ready && c.conflictingApp == nil {
-            state.actionTitle = c.fullPower ? "Авто" : "Максимум"
-            state.actionIcon = c.fullPower ? "arrow.uturn.backward" : "wind"
-        }
-        return state
-    }
-
-    private static func browser() -> DashState {
-        let catalog = BrowserCatalog.shared
-        let text: String
-        if let main = catalog.fallback {
-            text = "основной: \(main.name)"
-        } else {
-            text = catalog.browsers.isEmpty ? "ищу браузеры…" : "основной не выбран"
-        }
-        return DashState(text: text, actionTitle: "Проверить")
-    }
-
-    private static func stash() -> DashState {
-        let store = StashStore.shared
-        if !store.stashed.isEmpty {
-            return DashState(text: "спрятано \(store.stashed.count) · можно вернуть",
-                             actionTitle: "Вернуть", actionIcon: "arrow.uturn.backward")
-        }
-        if let busy = store.busy { return DashState(text: busy) }
-        let selected = store.selected
-        guard !selected.isEmpty else { return DashState(text: "нет программ для закрытия") }
-        let freed = selected.reduce(0.0) { $0 + (store.usage[$1.bundleIdentifier ?? ""]?.memoryMB ?? 0) }
-        let tail = freed > 0 ? " · ≈ \(memoryText(freed))" : ""
-        return DashState(text: "выбрано \(selected.count)\(tail)", actionTitle: "Спрятать", actionIcon: "archivebox")
-    }
-
-    private static func clipboard() -> DashState {
-        let controller = ClipboardController.shared
-        if controller.storeError != nil { return DashState(text: "нет ключа шифрования", attention: true) }
-        return DashState(text: "\(controller.hotKeyLabel) · \(controller.items.count) записей")
-    }
-
-    private static func voice() -> DashState {
-        let controller = VoiceController.shared
-        let models = VoiceModelStore.shared
-        if controller.phase == .recording { return DashState(text: "идёт запись…") }
-        let model = models.selected.title.components(separatedBy: " — ")[0]
-        if models.status(models.selected) != .installed {
-            return DashState(text: "\(controller.hotKeyLabel) · модель не скачана", attention: true)
-        }
-        return DashState(text: "\(controller.hotKeyLabel) · \(model)")
-    }
-
-    private static func keyboard() -> DashState {
-        let c = KeyboardController.shared
-        let fn = c.isOn(.fnLanguage), perApp = c.isOn(.perAppLayout)
-        guard fn || perApp else { return DashState(text: "нет включённых фишек", attention: true) }
-        if fn {
-            guard c.tapActive else { return DashState(text: "не слушаю клавиатуру", attention: true) }
-            if let app = c.secureInputApp {
-                return DashState(text: "Сейчас Fn не слышно: защищённый ввод в \(app)", attention: true)
-            }
-            // Второе переключение от системы ломает смену языка: показываем сразу.
-            if c.systemUsage != 0 { return DashState(text: "системное действие 🌐 мешает", attention: true) }
-        }
-        // Включённые фишки коротко; одна — просто текущий язык.
-        if fn && perApp { return DashState(text: "\(KeyboardFeature.fnLanguage.shortName) · \(KeyboardFeature.perAppLayout.shortName)") }
-        return DashState(text: fn ? c.currentName : "\(KeyboardFeature.perAppLayout.shortName) · \(c.currentName)")
-    }
-
-    /// И для встроенного модуля, и для `RemoteAwakeModel`: остаток времени в строку статуса не входит.
+    /// Карточка `RemoteAwakeModel`: остаток времени в строку статуса не входит.
     static func awake(_ c: some AwakeModel) -> DashState {
         guard c.isActive else {
             // Как кнопка на экране модуля: включить сейчас нельзя — действия нет.
@@ -322,27 +205,6 @@ enum DashboardLive {
         }
         let tail = c.endDate.map { " · ещё \(AwakeKeys.remainingText(until: $0))" } ?? ""
         return DashState(text: "не спит\(tail)", actionTitle: "Можно спать", actionIcon: "moon.zzz")
-    }
-
-    private static func mixer() -> DashState {
-        let apps = MixerController.shared.apps
-        guard let first = apps.first else { return DashState(text: "сейчас ничего не играет") }
-        let volume = first.volume < 0.995 ? " · \(Int((first.volume * 100).rounded())) %" : ""
-        if apps.count == 1 { return DashState(text: "играет \(first.name)\(volume)") }
-        return DashState(text: "играют \(first.name) и ещё \(apps.count - 1)")
-    }
-
-    private static func bots() -> DashState {
-        let state = BotsStore.shared.state
-        return DashState(text: BotsText.summary(state), attention: state.file.kind == .unsafe)
-    }
-
-    private static func load() -> DashState {
-        guard let memory = LoadStore.shared.snapshot?.memory else {
-            return DashState(text: "открой для замера", actionTitle: "Обновить")
-        }
-        return DashState(text: "память \(Fmt.gb(Double(memory.usedMB))) из \(Fmt.gb(Double(memory.totalMB))) ГБ",
-                         actionTitle: "Обновить")
     }
 }
 
@@ -393,8 +255,9 @@ struct DashboardPage: View, Equatable {
 
     private var header: some View {
         // Выключенная утилита остаётся установленной: в шапке она не «включена», как и на своей карточке.
-        let on = shown.filter { modules.isExternal($0) ? satellites.entries[$0]?.status?.enabled ?? true : modules.isOn($0) }
+        let on = shown.filter { modules.isExternal($0) && satellites.entries[$0]?.status?.enabled ?? true }
         let needAccess = on.filter { $0.isBlocked }
+        let missing = shown.filter { !modules.isExternal($0) }
         return HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.white.opacity(0.1)).frame(width: 50, height: 50)
@@ -403,9 +266,9 @@ struct DashboardPage: View, Equatable {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Дашборд").font(DS.pageTitle)
                 HStack(spacing: 6) {
-                    Circle().fill(needAccess.isEmpty ? Color(red: 0.50, green: 0.78, blue: 0.58) : .orange)
+                    Circle().fill(needAccess.isEmpty && missing.isEmpty ? Color(red: 0.50, green: 0.78, blue: 0.58) : .orange)
                         .frame(width: 7, height: 7)
-                    Text(summary(on: on.count, of: shown.count, needAccess: needAccess))
+                    Text(Self.summary(on: on.count, of: shown.count, needAccess: needAccess, missing: missing))
                         .font(.system(size: 13)).foregroundStyle(.white.opacity(0.55))
                 }
             }
@@ -413,11 +276,12 @@ struct DashboardPage: View, Equatable {
         }
     }
 
-    private func summary(on: Int, of total: Int, needAccess: [Module]) -> String {
+    static func summary(on: Int, of total: Int, needAccess: [Module], missing: [Module]) -> String {
         let count = "\(on) из \(total) \(Fmt.word(total, "модуля", "модулей", "модулей")) \(on == 1 ? "включён" : "включены")"
-        if !needAccess.isEmpty {
-            return "Нужен доступ: \(needAccess.map(\.title).joined(separator: ", ")) · \(count)"
-        }
+        let access = needAccess.isEmpty ? nil : "Нужен доступ: \(needAccess.map(\.title).joined(separator: ", "))"
+        let utility = missing.isEmpty ? nil : "Нет утилиты: \(missing.map(\.title).joined(separator: ", "))"
+        let problems = [access, utility].compactMap { $0 }
+        if !problems.isEmpty { return (problems + [count]).joined(separator: " · ") }
         return on == 0 ? "Ничего не включено · \(count)" : "Всё работает · \(count)"
     }
 
@@ -510,7 +374,9 @@ private struct DashCard: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(tint.opacity(0.2), lineWidth: 0.7))
         .onTapGesture(perform: open)
         .contextMenu {
-            Button(on ? "Выключить модуль" : "Включить модуль") { DashboardLive.setOn(module, !on) }
+            if ModuleManager.shared.isExternal(module) {
+                Button(on ? "Выключить модуль" : "Включить модуль") { DashboardLive.setOn(module, !on) }
+            }
             Button("Открыть", action: open)
         }
         .accessibilityElement(children: .contain)
