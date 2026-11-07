@@ -2,6 +2,7 @@
 # Лаунчер как оболочка: собирается из своего списка без логики модулей, не несёт помощников утилит и не просит их разрешений.
 #   Tests/run-hub-shell-check.sh [бандл]   бандл: сверить ещё и готовую сборку build.sh, кроме сборки scripts/dev.sh
 # Ничего не запускает и не ставит. Кэши между запусками вне папки проверки. Папка: HUB_SHELL_CHECK_DIR, иначе $TMPDIR/hub-shell-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

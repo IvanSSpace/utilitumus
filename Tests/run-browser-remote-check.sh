@@ -1,6 +1,7 @@
 #!/bin/bash
 # Вкладка «Браузер»: экран рисует центр из общего домена, от утилиты только статус. Его отдаёт стенд, настоящая утилита не запускается.
 # Браузер по умолчанию не меняется, помощник не собирается и не регистрируется. Папка стенда: SATELLITE_CHECK_DIR; снимки в browser/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup browser Browser
