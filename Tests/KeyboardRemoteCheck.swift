@@ -68,30 +68,55 @@ func wirePure() {
     check(fresh?.logCount == model.logCount, "журнал под открытым экраном совпадает")
 }
 
-/// Встроенный контроллер, запущенный в стенде без фишек, и утилита с теми же настройками показывают одно и то же.
+/// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.keyboard), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .keyboard) { KeyboardView(model: KeyboardController.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.keyboard))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .keyboard, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
+/// Контроллер утилиты, запущенный в стенде без фишек, и утилита с теми же настройками показывают одно и то же.
+/// Фишки выключены: их настройки на экран не выходят, от состояния на нём зависит только счётчик журнала.
 @MainActor func pixels() async {
     let model = RemoteKeyboardModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     let controller = KeyboardController.shared
-    modules.setExternal(.keyboard, false)
     controller.start()
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        modules.setExternal(.keyboard, false)
-        let local = await Stand.open(theme)
-        Stand.save(local, "\(themeName)-local")
-        modules.setExternal(.keyboard, true)
-        await registry.update()
-        let remote = await Stand.open(theme)
-        Stand.save(remote, "\(themeName)-remote")
-        await model.read()
-        let diff = differingPixels(local, remote)
-        check(diff == 0, "\(themeName): встроенный экран и экран утилиты, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
-        check(model.state.logCount == controller.logCount, "\(themeName): счётчик журнала \(model.state.logCount) и \(controller.logCount)")
+        var shots: [NSBitmapImageRep] = []
+        for variant in ["first", "restarted"] {
+            if variant == "restarted" {
+                // Запуск заново добавляет строку в журнал: утилите через передачу, контроллеру напрямую. Системное здесь не трогается.
+                await passive()
+                controller.quit()
+                controller.start()
+            }
+            let local = await openLocal(theme)
+            Stand.save(local, "\(themeName)-\(variant)-local")
+            await registry.update()
+            check(registry.isEnabled(.keyboard), "\(themeName) \(variant): реестр видит утилиту включённой")
+            _ = await Stand.open(theme)
+            check(await until(2) { model.state.logCount == controller.logCount }, "\(themeName) \(variant): счётчик журнала \(model.state.logCount) и \(controller.logCount)")
+            await pause(0.2)
+            let remote = Stand.snapshot(Stand.window.contentView!)
+            Stand.save(remote, "\(themeName)-\(variant)-remote")
+            let diff = differingPixels(local, remote)
+            check(diff == 0, "\(themeName) \(variant): экран контроллера утилиты и вкладка, разных пикселей \(diff) из \(local.pixelsWide * local.pixelsHigh)")
+            shots.append(remote)
+        }
+        check(differingPixels(shots[0], shots[1]) > 0, "\(themeName): строка журнала меняет снимок, он не пустой")
     }
-    // Состояние отличается — снимок тоже: он не пустой.
-    await model.perform(.setNewAppLayout(nil))
     controller.quit()
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
 }

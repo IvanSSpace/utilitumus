@@ -74,13 +74,27 @@ func wirePure() {
     await pause(1)
 }
 
+/// Экран на хранилище утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async {
+    let container = Stand.container()
+    container.show(.module(.load), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .load) { LoadScreen(store: LoadStore.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.load))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .load, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+}
+
 @MainActor func pixels() async {
     let model = RemoteLoadModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        modules.setExternal(.load, true)
         await registry.update()
         _ = await Stand.open(theme)
         check(await until(6) { model.state.measure != nil }, "\(themeName): экран утилиты получил замер")
@@ -93,10 +107,9 @@ func wirePure() {
         let palette = model.palette
         Stand.save(remote, "\(themeName)-remote")
 
-        modules.setExternal(.load, false)
         LoadStore.shared.visibleGate = { false }
         LoadStore.shared.testPin(state, palette: palette)
-        _ = await Stand.open(theme)
+        await openLocal(theme)
         LoadStore.shared.testPin(state, palette: palette)
         await pause(0.3)
         let local = Stand.snapshot(Stand.window.contentView!)
@@ -109,7 +122,6 @@ func wirePure() {
         await pause(0.5)
     }
     Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
-    modules.setExternal(.load, true)
     await registry.update()
 }
 
