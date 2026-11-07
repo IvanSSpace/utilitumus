@@ -3,134 +3,134 @@
   "apps": [
     {
       "id": "awake",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.1.0/Awake.zip",
-      "sha256": "5d981e84f01052763287c4c4df53b95f6f287671fa4c3ec427f6d5225b596bb5",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.2.0/Awake.zip",
+      "sha256": "53b0bf612a6a2b60610943869c3697658a4a767265561f341e42b75c86bf36bf",
       "sizeMB": 1,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "browser",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.1.0/Browser.zip",
-      "sha256": "4688684048af3861360e0ce468bf4ccfc9341747bf98bcb72e0c3aaad8e6d256",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.2.0/Browser.zip",
+      "sha256": "68c69a24a09afe3849f854d5b0cc740a9e463d859fc61267deb51edc905b01ae",
       "sizeMB": 2,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "clipboard",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.1.0/Clipboard.zip",
-      "sha256": "f529c684f60727ad2342f7d85af2e24c9fd7a751be3c65de2a6ee71739a1a38b",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.2.0/Clipboard.zip",
+      "sha256": "677f19fc610dd55b7258b40acec038eb0c9c0e1f8a86a74193056305bf89df36",
       "sizeMB": 2,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
       ]
     },
     {
       "id": "fans",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.1.0/Fans.zip",
-      "sha256": "eb36b562a4edaaf4490e1eb6deb830bc219bfea29c4440b69a08e4b78f385a9d",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.2.0/Fans.zip",
+      "sha256": "2118c9a9114685b592c797a6f26b418311f04d6bb5ed6b8f9e5938377c01432b",
       "sizeMB": 2,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
       ]
     },
     {
       "id": "keyboard",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.1.0/Keyboard.zip",
-      "sha256": "0dbdc64405b7a7733a8ca26de6adbbda9a7a2812653014055b85fabb9fa4f804",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.2.0/Keyboard.zip",
+      "sha256": "28eec35d4a086c6251369d76a1dba15cd1305841fd6431afe6586c075eacaf2e",
       "sizeMB": 2,
       "notes": [
-        "При удалении клавиша 🌐 сразу возвращается к прежней настройке. Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "load",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.1.0/Load.zip",
-      "sha256": "162f48e0a3e49e2f317ca839d5ac863f271dad3d474054076977339c9a8c8791",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.2.0/Load.zip",
+      "sha256": "7204d8893384ffff5b661c3b5b3c433bb2d0c93aac014e9e80724de860b5fe6a",
       "sizeMB": 2,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню. Боты из поиска показывают верное состояние"
+        "Перед запуском бота команда сверяется с той, что показана в вопросе. Из имён убираются символы, которыми можно подменить текст"
       ]
     },
     {
       "id": "mixer",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.1.0/Mixer.zip",
-      "sha256": "5351091d1f0772f6826974b31e3f871b39af38331e753a0e0a993b1f0a9fd020",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.2.0/Mixer.zip",
+      "sha256": "57253dc00ab7fabb9666105a6388461e690159f80129eba02f2004f41e141e0d",
       "sizeMB": 1,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "mouse",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.1.0/Mouse.zip",
-      "sha256": "fff3b0168b040a41866999a7f7b1c5fc299cb12c41bc99af60b076b7cbeec5ae",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.2.0/Mouse.zip",
+      "sha256": "f9a39552faefda804ccaf95edf8d0c32705071ff158c98e8e1b21d8b97cb916a",
       "sizeMB": 1,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "sound",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.1.0/Sound.zip",
-      "sha256": "13f1198b52afb004da3357673392e9c4260488b05c44ffd4c2f2b176fc3ec101",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.2.0/Sound.zip",
+      "sha256": "079975cd1371fff6b4250505fab235abc3ac3503f30fd8d47014efe84f280d06",
       "sizeMB": 1,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "stash",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.1.0/Stash.zip",
-      "sha256": "90e6bf250766ef16171369bb306940a2a081045dea6fd0cfdb5206c46faa8667",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.2.0/Stash.zip",
+      "sha256": "c0b90cd93f8bcb1540421fc589d88a02f4e0577ad5006ff0e7df60ec207d2ec6",
       "sizeMB": 2,
       "notes": [
-        "Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "voice",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.1.0/Voice.zip",
-      "sha256": "d8c1070672283ba652657ffc72888754687ea3be88c6f70efbc41d772a5bb396",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.0/Voice.zip",
+      "sha256": "7d22aed97bcb41153e0a0d36071807f38762d3346278528ba55b857784ef0c11",
       "sizeMB": 9,
       "notes": [
-        "Кнопка «Проверить» запускает запись. Закреплённый модуль получает свой значок в строке меню"
+        "Обновление проходит по новым правилам выпуска"
       ]
     },
     {
       "id": "bots",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "minHub": "0.7.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.1.0/Bots.zip",
-      "sha256": "dd06e5b02a9a1af01b961c4b1236108c99d3006b6764599a8b78a6ec7a7f80f4",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.2.0/Bots.zip",
+      "sha256": "e48f0bf2be07fe727c3383297d54edfad7344c7c77a64914722063b0d46deb5d",
       "sizeMB": 2,
       "notes": [
-        "Первая версия: статус Telegram-ботов, включить, выключить, перезапустить, поиск ботов на этом Mac"
+        "Быстрые действия сверяют команду точнее. Из имён убираются символы, которыми можно подменить текст"
       ]
     }
   ]
