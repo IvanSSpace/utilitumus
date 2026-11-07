@@ -3,8 +3,22 @@ import Foundation
 
 /// Занята ли утилита работой, которую перезапуск оборвал бы. Утилита решает это сама в `mayRestart`, но наружу не сообщает;
 /// то же самое центр читает из её состояния на экране. Новый вид занятости в `mayRestart` надо добавить и сюда.
-/// Не разобралось (чужая версия) — считается свободной: иначе такую утилиту не обновить никогда.
+/// Не разобралось (чужая версия) — считается свободной: иначе такую утилиту не обновить никогда. Без человека такую не
+/// перезапускают, см. `readable`.
 enum UpdateBusy {
+    /// Центр понял состояние этой утилиты, то есть ответ `reason` чего-то стоит.
+    static func readable(_ module: Module, state: Data) -> Bool {
+        func can<T: Decodable>(_ type: T.Type) -> Bool { (try? JSONDecoder().decode(type, from: state)) != nil }
+        switch module {
+        case .voice: return can(VoiceState.self)
+        case .awake: return can(AwakeState.self)
+        case .load: return can(LoadState.self)
+        case .stash: return can(StashState.self)
+        case .bots: return can(BotsState.self)
+        case .sound, .fans, .mixer, .mouse, .browser, .clipboard, .keyboard: return true
+        }
+    }
+
     static func reason(_ module: Module, state: Data) -> String? {
         func read<T: Decodable>(_ type: T.Type) -> T? { try? JSONDecoder().decode(type, from: state) }
         switch module {
@@ -83,6 +97,11 @@ final class UpdateAll: ObservableObject {
     private var draining = false
     private var watching = false
     private var clearDone: Task<Void, Never>?
+    /// Поставлены автообновлением: без плашки, без ожидания с опросом, со своими отказами и паузой после сбоя.
+    private var silent: Set<Module> = []
+    /// Центр выходит: нового не начинать.
+    private var quitting = false
+    private var auto: AutoUpdate { .shared }
 
     private init() {
         subs.append(satellites.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
@@ -92,6 +111,20 @@ final class UpdateAll: ObservableObject {
 
     /// Флаг ставится до первой паузы: второе нажатие уже видит занятость.
     var running: Bool { current != nil || !queue.isEmpty }
+
+    /// Идёт ли то, что запустил человек: только это видно на плашке.
+    var visiblyRunning: Bool { (queue + (current.map { [$0] } ?? [])).contains { !silent.contains($0) } }
+
+    /// Строки для плашки: без тех, что обновятся сами, иначе плашка мигала бы до и во время прохода.
+    var noticeRows: [UpdateRow] {
+        rows.filter { row in
+            switch row.phase {
+            case .ready: return !auto.willHandle(row.module)
+            case .queued, .working: return !silent.contains(row.module)
+            default: return true
+            }
+        }
+    }
 
     /// «Нужен центр новее» в конце: с этими сейчас ничего не сделать.
     var rows: [UpdateRow] {
@@ -179,8 +212,44 @@ final class UpdateAll: ObservableObject {
         drain()
     }
 
+    /// Проход автообновления: те же очередь и установка, что у кнопки. Только когда человек ничего не запустил.
+    func startAutomatic(_ modules: [Module]) {
+        guard !running, !quitting, !modules.isEmpty else { return }
+        silent = Set(modules)
+        for module in modules { outcomes[module] = nil }
+        total = modules.count
+        queue = modules
+        drain()
+    }
+
+    /// Выход во время установки мог бы оставить утилиту остановленной: launchd загрузит её только при следующем входе.
+    /// Очередь снимается, идущая установка отменяется: до остановки утилиты ничего не тронуто, после неё работает откат.
+    /// Срок на случай зависшей связи: окно выхода не должно висеть вечно.
+    func stopForQuit(deadline: TimeInterval = 15, done: @escaping @MainActor () -> Void) {
+        quitting = true
+        queue.removeAll()
+        store.cancelOperations()
+        // Таймер, а не задача: `terminate` мог быть вызван из блока главной очереди (`Updater.relaunch`), и тогда задачи главного
+        // актора стоят до конца выхода. Срок сработает и в этом случае.
+        let end = Date().addingTimeInterval(deadline)
+        let timer = Timer(timeInterval: 0.05, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard !self.installing || Date() >= end else { return }
+                timer.invalidate()
+                done()
+                // Обычно сюда уже не дойти: процесс завершился внутри `done`.
+                self.quitting = false
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    /// Идёт ли что-то через установщик, в том числе кнопка в Сторе и переход при запуске.
+    var installing: Bool { running || Module.allCases.contains(where: store.isOperating) }
+
     func retry(_ module: Module) {
         guard current != module, !queue.contains(module) else { return }
+        silent.remove(module)
         clearDone?.cancel()
         outcomes[module] = nil
         if !running { total = 0; clearDoneRows() }
@@ -190,6 +259,7 @@ final class UpdateAll: ObservableObject {
     // MARK: Очередь
 
     private func enqueue(_ module: Module) {
+        guard !quitting else { return }
         total += 1
         queue.append(module)
         drain()
@@ -207,6 +277,7 @@ final class UpdateAll: ObservableObject {
                 current = nil
             }
             draining = false
+            silent = []
             passFinished()
         }
     }
@@ -219,17 +290,42 @@ final class UpdateAll: ObservableObject {
             outcomes[module] = nil
             return
         }
+        let automatic = silent.contains(module)
+        // Настройку могли выключить, а человек мог успеть обновить кнопкой, пока шла очередь.
+        if automatic, !auto.willHandle(module) { return }
+        // Занята она или нет, не понять: перезапустить такую может только человек.
+        if automatic, await satellites.stateUnreadable(module) {
+            auto.leaveForPerson(module, version: app.version)
+            return
+        }
         // Скачивать незачем, если всё равно ждать. Перед самой остановкой установщик спросит ещё раз.
-        if let reason = await satellites.busyReason(module) { return wait(module, reason) }
-        switch await store.updateFromQueue(module, app: app) {
+        if let reason = await satellites.busyReason(module) {
+            if !automatic { wait(module, reason) }
+            return
+        }
+        if quitting { return }
+        let failure = automatic
+            ? await store.updateFromQueue(module, app: app, checkStaged: AutoUpdatePolicy.checkStaged)
+            : await store.updateFromQueue(module, app: app)
+        if automatic, let failure, auto.handledQuietly(failure, module: module, app: app) { return }
+        switch failure {
         case nil:
-            outcomes[module] = satellites.hasUpdate(module) ? .failed("Версия не сменилась, попробуй ещё раз") : .done(from: installed, to: app.version)
+            if satellites.hasUpdate(module) {
+                outcomes[module] = .failed("Версия не сменилась, попробуй ещё раз")
+                if automatic { auto.noteFailure(module, version: app.version) }
+            } else if automatic {
+                auto.noteUpdated(module, from: installed, to: app.version)
+            } else {
+                outcomes[module] = .done(from: installed, to: app.version)
+            }
         case SatelliteInstallError.busy(let reason)?:
             wait(module, reason)
         case let error? where error is CancellationError || (error as? URLError)?.code == .cancelled:
             outcomes[module] = .failed("Обновление отменено")
+            if automatic { auto.noteFailure(module, version: app.version) }
         case let error?:
             outcomes[module] = .failed(StoreModel.failureMessage(error, fallback: "Не удалось обновить"))
+            if automatic { auto.noteFailure(module, version: app.version) }
         }
     }
 
@@ -279,6 +375,11 @@ final class UpdateAll: ObservableObject {
             if !Task.isCancelled, !listShown, !running { clearDoneRows() }
         }
     }
+
+    #if KIT_TEST_DEFAULTS
+    /// Стенд начинает сценарий с чистого листа.
+    func forgetForStand(_ module: Module) { outcomes[module] = nil }
+    #endif
 
     private func clearDoneRows() {
         outcomes = outcomes.filter { if case .done = $0.value { return false }; return true }

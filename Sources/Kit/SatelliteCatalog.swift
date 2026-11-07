@@ -9,6 +9,9 @@ struct CatalogApp: Codable, Equatable {
     let sizeMB: Int
     /// Что изменилось в этой версии: простой текст после `SatelliteCatalog.cleanNotes`.
     var notes: [String] = []
+    /// Выпуск просит у человека новое разрешение, которое по файлу не видно («Универсальный доступ», мониторинг ввода):
+    /// автообновление его не ставит, остаётся кнопка.
+    var manualUpdate = false
 }
 
 extension CatalogApp {
@@ -32,6 +35,8 @@ extension CatalogApp {
             sizeMB: try container.decode(Int.self, forKey: .sizeMB),
             // Заметки только для чтения человеком: кривые не должны отвергать весь каталог.
             notes: SatelliteCatalog.cleanNotes((try? container.decodeIfPresent([String].self, forKey: .notes)) ?? []))
+        // Кривое значение считается отметкой: ошибка должна вести к кнопке, а не к тихой установке.
+        if container.contains(.manualUpdate) { manualUpdate = (try? container.decode(Bool.self, forKey: .manualUpdate)) ?? true }
     }
 }
 

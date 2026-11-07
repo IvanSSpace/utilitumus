@@ -68,7 +68,7 @@ struct SatelliteEnvironment {
 }
 
 /// Что центр знает об отдельных утилитах и кто из них ведёт модуль.
-/// Опрос: при запуске, при открытии Стора, по `statusChanged`. Таймера нет: в простое центр молчит.
+/// Опрос: при запуске, при открытии Стора, по `statusChanged`. Своего таймера нет; редкий таймер только у `AutoUpdate`.
 @MainActor
 final class SatelliteRegistry: NSObject, ObservableObject {
     struct Entry: Equatable {
@@ -103,6 +103,8 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// `setEnabled` при передаче сорвался: повторить, когда утилита снова ответит.
     private var enableOwed: Set<Module> = []
     private var observing = false
+    /// Первый опрос и чтение каталога при запуске: автообновление дожидается их, а не читает каталог второй раз.
+    private var firstRefresh: Task<Void, Never>?
     /// Опрос одного модуля уже идёт: чек-лист просит обновить раз в секунду и не должен копить запросы.
     private var polling: Set<Module> = []
     /// Текст последней неудачи действия или шага: «Модуль не ответил» и отказ самой утилиты.
@@ -128,7 +130,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
                     object: nil, suspensionBehavior: .deliverImmediately)
             }
         }
-        refresh()
+        firstRefresh = Task { await update() }
+    }
+
+    func firstRefreshFinished() async {
+        await firstRefresh?.value
     }
 
     func refresh() {
@@ -177,6 +183,12 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     func busyReason(_ module: Module) async -> String? {
         guard let state = try? await environment.commands.moduleState(module.rawValue) else { return nil }
         return UpdateBusy.reason(module, state: state)
+    }
+
+    /// Утилита ответила, но её состояние этому центру непонятно. Не ответила — обрывать нечего, как и в `busyReason`.
+    func stateUnreadable(_ module: Module) async -> Bool {
+        guard let state = try? await environment.commands.moduleState(module.rawValue) else { return false }
+        return !UpdateBusy.readable(module, state: state)
     }
 
     func isEnabled(_ module: Module) -> Bool {
@@ -261,7 +273,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
 
     /// «＋» значит «включить»: утилита иначе взяла бы «выключен» из `ModuleOn` или с прошлой установки.
     /// Обновление включённость не трогает: её выбрал человек.
-    func install(_ module: Module, app: CatalogApp) async throws {
+    func install(_ module: Module, app: CatalogApp, checkStaged: @escaping @Sendable (URL, URL) throws -> Void = { _, _ in }) async throws {
         guard busy.insert(module).inserted else { return }
         let enabledKey = ModuleHandover.enabledKey(module.rawValue)
         let previous = defaults.object(forKey: enabledKey)
@@ -272,11 +284,11 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         let name = Self.bundleName(module)
         do {
             try await serialized {
-                try await installer.install(app, name: name) {
+                try await installer.install(app, name: name, beforeQuit: {
                     // Распознавание наружу не видно: фраза, сказанная только что, успеет дойти до поля.
                     if module == .voice { try await Task.sleep(for: .seconds(4)) }
                     if let reason = await self.busyReason(module) { throw SatelliteInstallError.busy(reason) }
-                }
+                }, checkStaged: checkStaged)
             }
         } catch {
             if fresh { defaults.set(previous, forKey: enabledKey) }

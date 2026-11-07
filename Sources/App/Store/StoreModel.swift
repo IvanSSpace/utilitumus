@@ -411,13 +411,14 @@ final class StoreModel: ObservableObject {
 
     /// Обновление из очереди: та же запись в `operations`, что у кнопки, поэтому плитка видит ход и может отменить,
     /// а удаление и второе обновление не начнутся. Итог возвращается очереди, внизу Стора ничего не всплывает.
-    func updateFromQueue(_ module: Module, app: CatalogApp) async -> Error? {
+    func updateFromQueue(_ module: Module, app: CatalogApp,
+                         checkStaged: @escaping @Sendable (URL, URL) throws -> Void = { _, _ in }) async -> Error? {
         guard !isOperating(module) else { return URLError(.cancelled) }
         return await withCheckedContinuation { done in
             operations[module] = Task {
                 var failure: Error?
                 do {
-                    try await satellites.install(module, app: app)
+                    try await satellites.install(module, app: app, checkStaged: checkStaged)
                 } catch {
                     NSLog("Utilitumus: обновление модуля %@: %@", module.rawValue, String(describing: error))
                     failure = error
@@ -517,6 +518,11 @@ final class StoreModel: ObservableObject {
         if module == .voice {
             if voiceExternal { RemoteVoiceModel.shared.cancel(voiceSelected) } else { voice.cancel(voice.selected) }
         }
+    }
+
+    /// Выход из центра: всё, что идёт через установщик. Отмена после остановки утилиты возвращает прежнюю версию (откат).
+    func cancelOperations() {
+        operations.values.forEach { $0.cancel() }
     }
 
     func requestRemoval(_ module: Module) { pendingRemoval = module }

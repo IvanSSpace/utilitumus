@@ -14,6 +14,7 @@ final class SidebarModel {
 
 enum UpdateBusy {
     static func reason(_ module: Module, state: Data) -> String? { fatalError("Проверка дошла до занятости утилиты") }
+    static func readable(_ module: Module, state: Data) -> Bool { fatalError("Проверка дошла до занятости утилиты") }
 }
 
 @MainActor
