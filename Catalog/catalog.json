@@ -91,13 +91,13 @@
     },
     {
       "id": "sound",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.2.0/Sound.zip",
-      "sha256": "079975cd1371fff6b4250505fab235abc3ac3503f30fd8d47014efe84f280d06",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.2.1/Sound.zip",
+      "sha256": "4a6253232f81043121d1e4c05fe9a15138479e96feddad9d234f6b5b53bf88ef",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
