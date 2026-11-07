@@ -1,13 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Результат последнего действия «Остановить» — показывается баннером на экране.
-struct LoadNotice: Identifiable, Codable, Equatable {
-    var id = UUID()
-    var text: String
-    var isError: Bool
-}
-
 /// Что `LoadStore` просит у движка. Проверки подставляют свой, который ничего не запускает и не останавливает.
 protocol LoadMeasuring: Sendable {
     func recordHistory() async -> HistoryWindow

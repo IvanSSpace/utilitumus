@@ -33,7 +33,7 @@ struct SessionChild: Sendable, Codable, Equatable, Identifiable {
     var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
 
     /// Dev-сервер или от 500 MB: на такие смотрим в первую очередь.
-    var isHot: Bool { kind == .devServer || (memMB ?? 0) >= SessionsBuilder.heavyMB }
+    var isHot: Bool { kind == .devServer || (memMB ?? 0) >= SessionTexts.heavyMB }
 }
 
 /// Живая сессия Claude Code.
@@ -110,7 +110,7 @@ struct SessionsData: Sendable, Codable, Equatable {
     var terminals: [TerminalHost] = []
     var tmux = TmuxInfo()
     var docker = DockerInfo()
-    var orphans: [Advice.Orphan] = []
+    var orphans: [AdviceOrphan] = []
     /// Сироты, которых можно остановить (pid).
     var stoppableOrphans: Set<Int32> = []
     var ai = AIMemory()
@@ -127,5 +127,17 @@ struct SessionsData: Sendable, Codable, Equatable {
         try c.encode(orphans, forKey: .orphans)
         try c.encode(stoppableOrphans.sorted(), forKey: .stoppableOrphans)
         try c.encode(ai, forKey: .ai)
+    }
+}
+
+enum SessionTexts {
+    static let heavyMB = 500.0
+
+    /// sessionId приходит из файла в ~/.claude и попадает в имя файла и в команду для
+    /// терминала: допускаем только [A-Za-z0-9_-], иначе можно подсунуть «; rm -rf …».
+    static func isSafeID(_ sid: String) -> Bool {
+        !sid.isEmpty && sid.unicodeScalars.allSatisfy {
+            $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_")
+        }
     }
 }

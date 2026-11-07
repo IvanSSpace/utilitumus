@@ -1,17 +1,6 @@
 import Darwin
 import Foundation
 
-/// Что делает сессия: последний запрос человека и последний шаг ассистента (из хвоста транскрипта).
-struct SessionActivity: Sendable, Codable, Equatable {
-    var lastPrompt = ""
-    var lastPromptTS: TimeInterval?
-    var lastAction = ""
-    var lastActionTS: TimeInterval?
-
-    /// `lastPromptTS` экран не показывает.
-    private enum CodingKeys: String, CodingKey { case lastPrompt, lastAction, lastActionTS }
-}
-
 /// Чтение хвостов транскриптов `~/.claude/projects/<проект>/<sessionId>.jsonl`. Файл может весить сотни MB,
 /// поэтому читаем только конец (как sessions.py), а дописанное разбираем с прошлого конца. Данные никуда не
 /// уходят: наружу выходят только две строки (запрос и шаг), и те — в экран.
@@ -47,14 +36,6 @@ final class TranscriptReader: @unchecked Sendable {
         String(path.unicodeScalars.map { s in
             (s.value < 128 && (CharacterSet.alphanumerics.contains(s))) ? Character(s) : "-"
         })
-    }
-
-    /// sessionId приходит из файла в ~/.claude и попадает в имя файла и в команду для
-    /// терминала: допускаем только [A-Za-z0-9_-], иначе можно подсунуть «; rm -rf …».
-    static func isSafeID(_ sid: String) -> Bool {
-        !sid.isEmpty && sid.unicodeScalars.allSatisfy {
-            $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_")
-        }
     }
 
     /// Транскрипт сессии или nil, если sessionId странный (не пускаем «../» в путь).
@@ -234,4 +215,8 @@ final class TranscriptReader: @unchecked Sendable {
         stamps = stamps.filter { paths.contains($0.key) }
         lock.unlock()
     }
+}
+
+extension TranscriptReader {
+    static func isSafeID(_ sid: String) -> Bool { SessionTexts.isSafeID(sid) }
 }

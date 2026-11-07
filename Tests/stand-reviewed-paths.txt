@@ -62,7 +62,7 @@ Sources/Modules/Load/Native/Core/StopActions.swift|"/Library
 Sources/Modules/Load/Native/Core/StopActions.swift|kill(
 Sources/Modules/Load/Native/Core/Tool.swift|kill(
 Sources/Modules/Load/Native/Sessions/MuxProbe.swift|NSHomeDirectory
-Sources/Modules/Load/Native/Sessions/SessionViews.swift|NSHomeDirectory
+Sources/Modules/Load/UI/Native/Sessions/SessionViews.swift|NSHomeDirectory
 Sources/Modules/Load/Native/Sessions/SessionsBuilder.swift|NSHomeDirectory
 Sources/Modules/Mixer/MixerView.swift|NSWorkspace.shared.open
 Sources/Modules/Mouse/MouseController.swift|NSWorkspace.shared.open

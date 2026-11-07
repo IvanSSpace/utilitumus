@@ -1,53 +1,5 @@
 import Foundation
 
-/// Процесс в составе группы. Сам процесс берётся из `LoadSnapshot.procs` по pid.
-struct GroupMember: Sendable, Codable, Equatable, Identifiable {
-    var pid: Int32
-    /// Округлённая память; nil — неизвестна (root вне кэша `top`).
-    var memMB: Int?
-    var why: String = ""
-    /// Можно ли остановить его кнопкой (не системный, не чужой, не сама панель).
-    var stoppable: Bool
-    var uniqueID: UInt64 = 0
-    /// Подпись строки: `Kinds.label`.
-    var label = "—"
-    var note: String?
-    var cpuPercent: Double?
-    var id: Int32 { pid }
-    var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
-
-    /// `why` экран не показывает.
-    private enum CodingKeys: String, CodingKey { case pid, memMB, stoppable, uniqueID, label, note, cpuPercent }
-}
-
-struct SystemHint: Sendable, Codable, Equatable, Identifiable {
-    var title: String
-    var how: String
-    var savesMB: Int
-    var id: String { title }
-}
-
-/// Группа процессов: проект, приложение, система или прочее.
-struct ProcessGroup: Sendable, Codable, Equatable, Identifiable {
-    var id: String
-    var kind: GroupKind
-    var name: String
-    var path: String?
-    var memMB: Int
-    var count: Int
-    /// Все процессы группы: по убыванию памяти, с неизвестной памятью — в конце.
-    var members: [GroupMember]
-    /// Пять самых тяжёлых и «ещё N»: сумма строк и остатка ровно `memMB` (округление подогнано).
-    var topMB: [Int]
-    var restCount: Int
-    var restMB: Int
-    /// Сколько памяти группы освободит кнопка «Остановить группу».
-    var stoppableMB: Double
-    var hints: [SystemHint] = []
-
-    var top: ArraySlice<GroupMember> { members.prefix(topMB.count) }
-}
-
 enum Grouping {
     /// Группы снимка по убыванию памяти. Процессы с неизвестной памятью считаются в count и «ещё», но в top не попадают.
     static func groups(procs: [Int32: LoadProcess], assigned: [Int32: Assignment],

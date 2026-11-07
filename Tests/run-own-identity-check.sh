@@ -51,8 +51,10 @@ CACHE="$(incremental_cache own-identity KIT_TEST_DEFAULTS)"
 mkdir -p "$CACHE/src"
 cmp -s Tests/OwnIdentityCheck.swift "$CACHE/src/main.swift" || cp Tests/OwnIdentityCheck.swift "$CACHE/src/main.swift"
 L=Sources/Modules/Load/Native
+U=Sources/Modules/Load/UI
 FILES=("$CACHE/src/main.swift" "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
-  "$L/Background/LaunchAgents.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
+  "$L/Background/LaunchAgents.swift" "$L/Sessions/MuxProbe.swift" "$U/Native/Sessions/SessionModels.swift" \
+  "$U/Native/Sessions/MuxTypes.swift" "$U/Native/Core/MemoryMap.swift" "$U/LoadTypes.swift" \
   "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift)
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit "$L/Core" -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"

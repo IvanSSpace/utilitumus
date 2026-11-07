@@ -1,37 +1,6 @@
 import Darwin
 import Foundation
 
-enum MemoryPressure: Int, Sendable, Codable {
-    case normal = 1, warn = 2, critical = 4
-
-    init(level: Int) {
-        self = MemoryPressure(rawValue: level) ?? .normal
-    }
-}
-
-/// Итоги памяти мака — как в Мониторе активности, в целых MB.
-struct MemoryTotals: Sendable, Codable, Equatable {
-    var totalMB: Int
-    /// Занято = приложения + wired + сжатое.
-    var usedMB: Int
-    var appMB: Int
-    var wiredMB: Int
-    var compressedMB: Int
-    var cachedMB: Int
-    var freeMB: Int
-    var swapUsedMB: Int
-    var swapTotalMB: Int
-    var pressure: MemoryPressure
-}
-
-struct HostInfo: Sendable, Codable, Equatable {
-    var chip: String
-    var ramMB: Int
-    var macOS: String
-    var bootTime: TimeInterval
-    var uptime: TimeInterval { Date().timeIntervalSince1970 - bootTime }
-}
-
 /// Память системы из ядра: host_statistics64, vm.swapusage, давление.
 enum SystemMemory {
     private static let mb = 1_048_576.0

@@ -3,7 +3,7 @@ import Foundation
 /// Сборка данных «Сессий» по замеру: сессии Claude, вкладки терминалов, tmux/Docker, сироты, память ИИ.
 /// Правила один в один с lambscape (sessions.py, snapshot.py).
 final class SessionsBuilder: @unchecked Sendable {
-    static let heavyMB = 500.0
+    static let heavyMB = SessionTexts.heavyMB
 
     private let transcripts = TranscriptReader()
     private let mux = MuxProbe()

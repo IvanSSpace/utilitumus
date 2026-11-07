@@ -1,14 +1,6 @@
 import Foundation
 import SwiftUI
 
-/// Готовый список для экрана: сторонние агенты launchd и боты из bots.toml.
-struct BackgroundData: Sendable, Codable, Equatable {
-    var agents: [AgentItem] = []
-    var bots: [BotItem] = []
-
-    var isEmpty: Bool { agents.isEmpty && bots.isEmpty }
-}
-
 /// Сборка списка по снимку замера. Вне главного потока: читает plist и раз в минуту зовёт `launchctl print-disabled`
 /// (результаты кэшируются в `LaunchState`).
 enum BackgroundCollector {

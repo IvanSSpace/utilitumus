@@ -55,15 +55,16 @@ build_full() { # корень исходников, папка, выход, фл
 }
 
 build_logic() { # папка модуля Load, выход
-  local load="$1" exe="$2" L="$1/Native"
+  local load="$1" exe="$2" L="$1/Native" U="$1/UI"
   rm -f "$exe"
   cp Tests/LoadWireCheck.swift "$OUT/LoadWireCheck-logic.swift"
   # Команды ботов и ответ утилиты живут в Kit: логика без него не собирается, поломки его не копируют.
   swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -D LOAD_LOGIC_ONLY -o "$exe" "$OUT/LoadWireCheck-logic.swift" \
     $(kit_sources . "$OUT/logic-kit") $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
-    "$L/Background/LaunchAgents.swift" "$L/Background/BackgroundStore.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
-    "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" "$L/Sessions/SessionStop.swift" "$L/LoadStore.swift" \
-    "$L/LoadSnapshotKey.swift" "$L/LoadPalette.swift" "$load/LoadModel.swift" "$load/LoadWire.swift" -framework SwiftUI -framework AppKit 2>&1 | grep -E 'error' || true
+    "$L/Background/LaunchAgents.swift" "$L/Background/BackgroundStore.swift" "$L/Sessions/MuxProbe.swift" \
+    "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" "$L/Sessions/SessionStop.swift" "$L/LoadStore.swift" "$L/LoadSnapshotKey.swift" "$load/LoadWireLogic.swift" \
+    "$U/LoadTypes.swift" "$U/Native/Core/MemoryMap.swift" "$U/Native/Sessions/SessionModels.swift" "$U/Native/Sessions/MuxTypes.swift" \
+    "$U/Native/LiveStats.swift" "$U/Native/LoadPalette.swift" "$U/LoadModel.swift" "$U/LoadWire.swift" -framework SwiftUI -framework AppKit 2>&1 | grep -E 'error' || true
   [ -x "$exe" ]
 }
 
@@ -120,27 +121,27 @@ PY
   build_logic "$SRC" "$OUT/mut-check"
   "$OUT/mut-check" logic > "$OUT/mut.log" 2>&1 || { echo "ПРОВАЛ: без поломок логика не проходит"; grep '^FAIL' "$OUT/mut.log"; exit 1; }
   echo "ok   без поломок логика проходит"
-  mutation LoadWire.swift 'guard let shown = measure, shown.offers(target) else {' 'guard measure != nil else {' "цель не сверяется с экраном"
-  mutation LoadWire.swift 'guard target.rows.allSatisfy({ latest?.procs[$0.pid]?.uniqueID == $0.uniqueID }) else {' 'guard true else {' "uniqueID не сверяется со свежим замером"
-  mutation LoadWire.swift '$0.rowID == id && $0.stoppable && !$0.isSelf' '$0.rowID == id' "текущую сессию можно остановить"
-  mutation LoadWire.swift 'groups.contains { $0.members.contains { $0.rowID == id && $0.stoppable } }' 'groups.contains { $0.members.contains { $0.rowID == id } }' "строка без кнопки принимается"
-  mutation LoadWire.swift 'guard pendingStop?.id == planID else { return "Подтверждение устарело — попробуй ещё раз" }' 'guard pendingStop != nil else { return "Подтверждение устарело — попробуй ещё раз" }' "подтверждение остановки не сверяет id плана"
-  mutation LoadWire.swift 'guard pending?.id == planID else { return "Подтверждение устарело — попробуй ещё раз" }' 'guard pending != nil else { return "Подтверждение устарело — попробуй ещё раз" }' "подтверждение фонового не сверяет id плана"
+  mutation LoadWireLogic.swift 'guard let shown = measure, shown.offers(target) else {' 'guard measure != nil else {' "цель не сверяется с экраном"
+  mutation LoadWireLogic.swift 'guard target.rows.allSatisfy({ latest?.procs[$0.pid]?.uniqueID == $0.uniqueID }) else {' 'guard true else {' "uniqueID не сверяется со свежим замером"
+  mutation UI/LoadWire.swift '$0.rowID == id && $0.stoppable && !$0.isSelf' '$0.rowID == id' "текущую сессию можно остановить"
+  mutation UI/LoadWire.swift 'groups.contains { $0.members.contains { $0.rowID == id && $0.stoppable } }' 'groups.contains { $0.members.contains { $0.rowID == id } }' "строка без кнопки принимается"
+  mutation LoadWireLogic.swift 'guard pendingStop?.id == planID else { return "Подтверждение устарело — попробуй ещё раз" }' 'guard pendingStop != nil else { return "Подтверждение устарело — попробуй ещё раз" }' "подтверждение остановки не сверяет id плана"
+  mutation LoadWireLogic.swift 'guard pending?.id == planID else { return "Подтверждение устарело — попробуй ещё раз" }' 'guard pending != nil else { return "Подтверждение устарело — попробуй ещё раз" }' "подтверждение фонового не сверяет id плана"
   mutation Native/LoadStore.swift 'guard let plan = pendingStop, plan.id == planID, !stopRunning else { return }' 'guard let plan = pendingStop, !stopRunning else { return }' "модель выполняет план с чужим id"
   mutation Native/Background/BackgroundStore.swift 'guard let plan = pending, plan.id == planID, !running else { return }' 'guard let plan = pending, !running else { return }' "модель фонового выполняет план с чужим id"
-  mutation LoadWire.swift 'agent.verbs.contains(verb) else' 'true else' "действие агента, которого нет на кнопках"
-  mutation LoadWire.swift 'bot.actions.contains(verb) else' 'true else' "действие бота, которого нет на кнопках"
+  mutation LoadWireLogic.swift 'agent.verbs.contains(verb) else' 'true else' "действие агента, которого нет на кнопках"
+  mutation LoadWireLogic.swift 'bot.actions.contains(verb) else' 'true else' "действие бота, которого нет на кнопках"
   mutation Native/Background/BackgroundActions.swift 'if case .argv(let argv)? = spec.commands[verb] { shown = argv }' 'if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { shown = argv }' "команда бота сверяется с файлом, а не с показанной"
   mutation Native/Background/BackgroundActions.swift '{ shown = argv }' '{ shown = argv } else if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { shown = argv }' "план без команды запускает то, чего человек не видел"
   mutation Native/Background/BackgroundActions.swift 'cmd = BotRunner.shown(argv)' 'cmd = Exec.display(argv)' "команда в вопросе бота не очищена"
   mutation Native/Background/BackgroundActions.swift 'message: ScreenText.clean((cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"), BotRunner.maxShown),' 'message: (cmd.isEmpty ? "Выполнит команду из bots.toml." : "Выполнит \(cmd).") + (b.spec.note.isEmpty ? "" : " \(b.spec.note)"),' "текст вопроса бота не очищен"
-  mutation LoadWire.swift 'guard label.utf8.count <= LoadStore.maxIDBytes else { return "Непонятная команда" }' '' "длина метки не ограничена"
-  mutation LoadWire.swift 'guard !stopRunning else { return "Остановка уже идёт" }
+  mutation LoadWireLogic.swift 'guard label.utf8.count <= LoadStore.maxIDBytes else { return "Непонятная команда" }' '' "длина метки не ограничена"
+  mutation LoadWireLogic.swift 'guard !stopRunning else { return "Остановка уже идёт" }
             guard pendingStop?.id' 'guard pendingStop?.id' "второе подтверждение во время остановки"
   mutation Native/Core/LoadHistory.swift 'guard claimWriter() else {' 'guard true || claimWriter() else {' "второй писатель истории"
   mutation Native/Background/BotStatus.swift 'name: ScreenText.clean(spec.name, BotRunner.maxShown), state' 'name: spec.name, state' "имя бота в строке без очистки"
-  mutation LoadWire.swift 'guard watchers < Self.maxWatchers else { return "Экран и так открыт" }' '' "открытия экрана без предела"
-  mutation LoadWire.swift 'for i in m.sessions.claude.indices { m.sessions.claude[i].activity.lastPromptTS = nil }' '' "состояние не приведено к связи"
+  mutation LoadWireLogic.swift 'guard watchers < Self.maxWatchers else { return "Экран и так открыт" }' '' "открытия экрана без предела"
+  mutation UI/LoadWire.swift 'for i in m.sessions.claude.indices { m.sessions.claude[i].activity.lastPromptTS = nil }' '' "состояние не приведено к связи"
   rm -rf "$M"
   echo "поймано $caught, не поймано $missed"
   [ "$missed" -eq 0 ]

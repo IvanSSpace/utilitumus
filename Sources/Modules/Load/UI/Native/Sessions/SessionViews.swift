@@ -220,7 +220,7 @@ struct SessionCard: View {
                 if !s.children.isEmpty { children }
                 HStack(spacing: 8) {
                     // Команду копируют в терминал — повторная проверка sessionId даже при готовой строке.
-                    if !s.resumeCommand.isEmpty, s.sessionID.map(TranscriptReader.isSafeID) == true {
+                    if !s.resumeCommand.isEmpty, s.sessionID.map(SessionTexts.isSafeID) == true {
                         Text(s.resumeCommand).font(.caption.monospaced()).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         DSButton("", icon: "doc.on.doc", style: .plain, small: true) {
@@ -421,9 +421,9 @@ struct MuxSection: View {
 }
 
 struct OrphansSection: View {
-    let orphans: [Advice.Orphan]
+    let orphans: [AdviceOrphan]
     let stoppable: Set<Int32>
-    var onStop: (Advice.Orphan) -> Void
+    var onStop: (AdviceOrphan) -> Void
 
     var body: some View {
         DSSection("Сироты", trailing: SessionsHeader.summary(count: orphans.count, mb: orphans.reduce(0) { $0 + $1.memMB })) {

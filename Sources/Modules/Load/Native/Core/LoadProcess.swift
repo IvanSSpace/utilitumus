@@ -55,13 +55,6 @@ struct LoadProcess: Sendable, Identifiable {
     func age(now: TimeInterval) -> Double? { startTime > 0 ? now - startTime : nil }
 }
 
-/// Строка экрана, которую можно остановить: pid вместе с p_uniqueid, как его выдала сама «Нагрузка».
-/// В действии из связи принимается, только если такая строка есть на экране и процесс всё ещё тот же.
-struct LoadRowID: Sendable, Codable, Hashable {
-    var pid: Int32
-    var uniqueID: UInt64
-}
-
 /// Родители и дети по ppid.
 struct ProcessTree: Sendable {
     let children: [Int32: [Int32]]

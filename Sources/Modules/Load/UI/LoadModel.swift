@@ -20,7 +20,7 @@ extension LoadBackgroundModel {
     var hasContent: Bool { !data.isEmpty }
 }
 
-/// Всё, что экран «Нагрузка» берёт у своей модели. Работает ли модуль здесь же (`LoadStore`)
+/// Всё, что экран «Нагрузка» берёт у своей модели. Работает ли модуль здесь же
 /// или в утилите, экран не знает.
 @MainActor
 protocol LoadModel: ObservableObject {
