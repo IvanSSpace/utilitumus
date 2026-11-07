@@ -54,6 +54,8 @@ struct ClipCard: View {
     /// Вместо содержимого точки. Отдельно от модели, как и `spaces`: иначе карточка не перерисуется, когда скрытие сменится.
     let concealed: Bool
     var editingTitle = false
+    /// Сколько выбрано вместе с этой карточкой; 0 — она не в группе. Меню тогда про всех.
+    var groupCount = 0
     /// Плавающая копия при перетаскивании: только сама карточка, без рамки выбора и без меню.
     var isDragPreview = false
 
@@ -305,6 +307,22 @@ struct ClipCard: View {
     // MARK: Меню
 
     @ViewBuilder private var menu: some View {
+        if groupCount > 1 { groupMenu } else { singleMenu }
+    }
+
+    @ViewBuilder private var groupMenu: some View {
+        Button("Вставить \(groupCount)") { model.pasteSelected() }
+        Menu("В пространство") {
+            ForEach(spaces) { space in
+                Button(space.name) { model.pinSelected(to: space.id) }
+            }
+            if spaces.isEmpty { Text("Пространств нет — создай кнопкой + вверху") }
+        }
+        Divider()
+        Button("Удалить \(groupCount)", role: .destructive) { model.beginDeleteSelected() }
+    }
+
+    @ViewBuilder private var singleMenu: some View {
         Button("Вставить") { model.onPaste(item) }
         Button("Переименовать") { model.beginTitleEdit(item) }
         if ClipConcealment.isHidden(item, in: spaces) {

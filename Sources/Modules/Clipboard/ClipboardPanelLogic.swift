@@ -28,6 +28,43 @@ struct ClipClickTracker {
     mutating func reset() { last = nil }
 }
 
+/// Выбор нескольких карточек. Пусто или одна — обычный выбор, его держит `selected` модели; номера здесь не годятся, порядок ленты решает она сама.
+struct ClipSelection: Equatable {
+    private(set) var ids: Set<UUID> = []
+    /// От какой карточки считается диапазон.
+    private(set) var anchor: UUID?
+
+    var isMultiple: Bool { ids.count > 1 }
+
+    mutating func reset() {
+        ids = []
+        anchor = nil
+    }
+
+    /// Shift+клик и Shift+стрелка: всё от якоря до `target`. Первый раз якорь — текущая карточка.
+    mutating func extend(to target: UUID, from current: UUID?, in list: [UUID]) {
+        if anchor == nil || !list.contains(anchor!) { anchor = current ?? target }
+        guard let from = anchor.flatMap(list.firstIndex), let to = list.firstIndex(of: target) else { return }
+        ids = Set(list[min(from, to)...max(from, to)])
+    }
+
+    /// ⌘+клик: добавить или убрать одну. Возвращает карточку, на которой остаётся текущий выбор.
+    mutating func toggle(_ target: UUID, current: UUID?, in list: [UUID]) -> UUID {
+        if ids.isEmpty, let current { ids = [current] }
+        if ids.contains(target), ids.count > 1 {
+            ids.remove(target)
+            if anchor == target { anchor = nil }
+            return list.last { ids.contains($0) } ?? target
+        }
+        ids.insert(target)
+        anchor = target
+        return target
+    }
+
+    /// Слева направо, как в ленте: в таком порядке записи вставляются.
+    func ordered(in list: [UUID]) -> [UUID] { list.filter(ids.contains) }
+}
+
 /// Подписи карточки. `clipAgo` остаётся короткой для экрана утилиты и лаунчера, здесь полные слова.
 enum ClipPanelText {
     static func ago(_ date: Date, now: Date = Date()) -> String {
@@ -45,6 +82,7 @@ enum ClipPanelText {
         ("←→", "выбор"),
         ("⏎", "вставить"),
         ("Два клика", "вставить"),
+        ("⇧ или ⌘ + клик", "несколько"),
         ("⌘1–9", "быстро"),
         ("⇥", "вкладка"),
         ("Буква", "поиск"),

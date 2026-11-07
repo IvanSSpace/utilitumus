@@ -52,7 +52,8 @@ echo "ok   все кнопки панели без клавиатурного ф
 # ⌘V только через завершение ухода панели: иначе клавиши ушли бы в саму панель. Само поведение проверяет checkPasteAfterLeaving.
 SENDS="$(/usr/bin/grep -c 'sendPaste' Sources/Modules/Clipboard/ClipboardController.swift)"
 /usr/bin/grep -q 'pasteAfterLeaving(ClipboardPanelHost.shared, send: Self.sendPaste)' Sources/Modules/Clipboard/ClipboardController.swift \
-  && [ "$SENDS" = 2 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving"
+  && /usr/bin/grep -q 'send: @escaping @MainActor () -> Void = ClipboardController.sendPaste' Sources/Modules/Clipboard/ClipboardController.swift \
+  && [ "$SENDS" = 3 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving и pasteSequence"
 echo "ok   paste шлёт ⌘V только после ухода панели"
 
 . Tests/lib/incremental.sh
