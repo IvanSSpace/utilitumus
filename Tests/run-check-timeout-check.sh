@@ -46,8 +46,10 @@ echo $! > "$MARK/hung.bg"
 echo $! > "$MARK/hung.own-group"
 sleep 904
 EOF
-# SIGTERM игнорирует потомок на переднем плане: bash ждёт его и не выполнит trap, пока потомок жив.
+# SIGTERM игнорирует потомок на переднем плане. С trap на TERM, как в Tests/satellite-check-lib.sh, bash выполнит его, только
+# когда потомок умрёт (без такого trap bash умирает сразу и успевает выполнить trap на EXIT).
 fixture stubborn "" <<'EOF'
+trap 'exit 1' TERM
 trap 'echo $$ > "$MARK/stubborn.trap"' EXIT
 /usr/bin/perl -e '$SIG{TERM} = "IGNORE"; open(my $f, ">", "$ENV{MARK}/stubborn.child"); print $f $$; close $f; sleep 905'
 EOF
