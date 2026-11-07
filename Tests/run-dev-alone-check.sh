@@ -258,8 +258,9 @@ printf '#!/bin/bash\nexit 0\n' > "$RUN/shim/security"
 expect_build "нет сертификата" "" "$RUN/shim:$PATH"
 expect_build "нет сертификата, повтор" "" "$RUN/shim:$PATH"
 rm "$RUN/shim/security"
-expect_build "сертификат снова есть"
-expect_hit "сертификат снова есть, повтор"
+# Сборки выше кэш не трогали: без сертификата кэша нет, а с другим подпись не сошлась раньше записи.
+expect_hit "сертификат снова есть"
+verified && ok "подпись снова авторская" || bad "подпись после возврата сертификата"
 
 echo "== чужой и испорченный бандл"
 printf 'x' >> "$CACHE/Probe.app/Contents/MacOS/Probe"
