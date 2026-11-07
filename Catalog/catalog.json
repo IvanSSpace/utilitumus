@@ -3,134 +3,134 @@
   "apps": [
     {
       "id": "awake",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.2.0/Awake.zip",
-      "sha256": "53b0bf612a6a2b60610943869c3697658a4a767265561f341e42b75c86bf36bf",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.2.1/Awake.zip",
+      "sha256": "a8cdb1562adbac195c7ad476b4a8243b041029a91bd14303dfee551eb2bd4924",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "browser",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.2.0/Browser.zip",
-      "sha256": "68c69a24a09afe3849f854d5b0cc740a9e463d859fc61267deb51edc905b01ae",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.2.1/Browser.zip",
+      "sha256": "acadc645407a27e6dd7b7f11755bbe8237ffe4feef20b748d4a9caca0d1c408e",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "clipboard",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.2.0/Clipboard.zip",
-      "sha256": "677f19fc610dd55b7258b40acec038eb0c9c0e1f8a86a74193056305bf89df36",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.2.1/Clipboard.zip",
+      "sha256": "f422260667afccc1c26a5801e1f3a01a3c4516a15160823dc3637a8bee457095",
       "sizeMB": 2,
       "notes": [
-        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "fans",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.2.0/Fans.zip",
-      "sha256": "2118c9a9114685b592c797a6f26b418311f04d6bb5ed6b8f9e5938377c01432b",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/fans-v1.2.1/Fans.zip",
+      "sha256": "d986bd58672b56b654714ea692653eb09d3610745651218a770f668571f2d902",
       "sizeMB": 2,
       "notes": [
-        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "keyboard",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.2.0/Keyboard.zip",
-      "sha256": "28eec35d4a086c6251369d76a1dba15cd1305841fd6431afe6586c075eacaf2e",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.2.1/Keyboard.zip",
+      "sha256": "c46c844dab4e65acc22d27c12a54a2236c111115325f3e3c47c569e2454f82a7",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "load",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.2.0/Load.zip",
-      "sha256": "7204d8893384ffff5b661c3b5b3c433bb2d0c93aac014e9e80724de860b5fe6a",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.2.1/Load.zip",
+      "sha256": "f21d249e63703d6baf7d6c12a7b680551b429c96431ca0334b3ab5d8286de251",
       "sizeMB": 2,
       "notes": [
-        "Перед запуском бота команда сверяется с той, что показана в вопросе. Из имён убираются символы, которыми можно подменить текст"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "mixer",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.2.0/Mixer.zip",
-      "sha256": "57253dc00ab7fabb9666105a6388461e690159f80129eba02f2004f41e141e0d",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.2.1/Mixer.zip",
+      "sha256": "54f2f4cb0288c21f0e402288c9980b73b879e34c66369dca87aa4e0789b06b8a",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "mouse",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.2.0/Mouse.zip",
-      "sha256": "f9a39552faefda804ccaf95edf8d0c32705071ff158c98e8e1b21d8b97cb916a",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mouse-v1.2.1/Mouse.zip",
+      "sha256": "2535272af768fb1a831841a98dea42d2c315fe154ab2f120f7d3ec6cedd97544",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "sound",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.2.0/Sound.zip",
-      "sha256": "079975cd1371fff6b4250505fab235abc3ac3503f30fd8d47014efe84f280d06",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/sound-v1.2.1/Sound.zip",
+      "sha256": "4a6253232f81043121d1e4c05fe9a15138479e96feddad9d234f6b5b53bf88ef",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "stash",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.2.0/Stash.zip",
-      "sha256": "c0b90cd93f8bcb1540421fc589d88a02f4e0577ad5006ff0e7df60ec207d2ec6",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.2.1/Stash.zip",
+      "sha256": "12d4787920319f1a7384a3d99af8ecea971abf2814dd66de5d14c98bc35ee2e3",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "voice",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.0/Voice.zip",
-      "sha256": "7d22aed97bcb41153e0a0d36071807f38762d3346278528ba55b857784ef0c11",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.1/Voice.zip",
+      "sha256": "b2fa3ec546ad4fbd802d80e6ecadc60ca370f5714cdd39df2e76eb38288c290b",
       "sizeMB": 9,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
       "id": "bots",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.7.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.2.0/Bots.zip",
-      "sha256": "e48f0bf2be07fe727c3383297d54edfad7344c7c77a64914722063b0d46deb5d",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/bots-v1.2.1/Bots.zip",
+      "sha256": "b678d3d1daf6a7f55f048184b26d813e92d93046315a14c813450704f4b08006",
       "sizeMB": 2,
       "notes": [
-        "Быстрые действия сверяют команду точнее. Из имён убираются символы, которыми можно подменить текст"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     }
   ]
