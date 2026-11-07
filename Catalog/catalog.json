@@ -3,13 +3,13 @@
   "apps": [
     {
       "id": "awake",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.2.0/Awake.zip",
-      "sha256": "53b0bf612a6a2b60610943869c3697658a4a767265561f341e42b75c86bf36bf",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/awake-v1.2.1/Awake.zip",
+      "sha256": "a8cdb1562adbac195c7ad476b4a8243b041029a91bd14303dfee551eb2bd4924",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
