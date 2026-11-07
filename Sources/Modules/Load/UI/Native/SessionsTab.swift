@@ -1,8 +1,8 @@
 import SwiftUI
 
 // Вкладка «Сессии»: сессии Claude Code, вкладки терминалов, tmux, Docker и сироты. Данные собирает
-// `SessionsBuilder` (Sessions/) по замеру ядра, здесь — только отрисовка. Остановка — через
-// `requestStop(_ target:)` модели (Sessions/SessionStop.swift): подтверждение и защита — общие с остальными вкладками.
+// логика модуля по замеру ядра, здесь — только отрисовка. Остановка — через
+// `requestStop(_ target:)` модели: подтверждение и защита — общие с остальными вкладками.
 
 struct SessionsTab<Model: LoadModel>: View {
     @ObservedObject var store: Model

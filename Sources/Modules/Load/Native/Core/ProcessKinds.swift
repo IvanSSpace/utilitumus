@@ -1,10 +1,5 @@
 import Foundation
 
-/// Вид потомка: по нему решаем, что считать dev-сервером, сборкой и что показывать подписью.
-enum ProcessKind: String, Sendable, Codable {
-    case shell, mcp, devServer, build, other
-}
-
 /// Классификация процессов: приложения, шеллы, dev-серверы, Claude. Правила один в один с lambscape
 /// (attrib.py, procs.py, sessions.py), чтобы группы и подсказки совпадали с веб-версией.
 enum Kinds {

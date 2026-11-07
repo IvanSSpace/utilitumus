@@ -1,29 +1,5 @@
 import Foundation
 
-enum AdviceSeverity: Int, Sendable, Codable, Comparable {
-    case high = 0, med = 1, low = 2
-
-    static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
-
-    static func forMB(_ mb: Double) -> AdviceSeverity { mb >= 2048 ? .high : mb >= 500 ? .med : .low }
-}
-
-/// Подсказка «что выключить». Кнопка — остановка процесса `stopPid` (если можно).
-struct AdviceItem: Sendable, Codable, Equatable, Identifiable {
-    var id: String
-    var severity: AdviceSeverity
-    var title: String
-    var detail: String
-    var savesMB: Int
-    var stopPid: Int32?
-    var stopUniqueID: UInt64?
-
-    var stopID: LoadRowID? {
-        guard let stopPid, let stopUniqueID else { return nil }
-        return LoadRowID(pid: stopPid, uniqueID: stopUniqueID)
-    }
-}
-
 /// Правила подсказок lambscape (advice.py): долгоживущие dev-серверы и тяжёлые потомки сессий и вкладок
 /// терминала, простаивающие сессии Claude, сироты, одинаковые MCP в нескольких сессиях, модели ollama,
 /// рост свопа и высокое давление.
@@ -158,17 +134,7 @@ enum Advice {
 
     // MARK: Сироты
 
-    struct Orphan: Sendable, Codable, Equatable, Identifiable {
-        var pid: Int32
-        var name: String
-        var memMB: Double
-        var age: Double
-        /// Где запущен: проект и папка. nil — рабочую папку узнать не вышло.
-        var place: ProcessPlace?
-        var uniqueID: UInt64 = 0
-        var id: Int32 { pid }
-        var rowID: LoadRowID { LoadRowID(pid: pid, uniqueID: uniqueID) }
-    }
+    typealias Orphan = AdviceOrphan
 
     /// Свои процессы с ppid=1: не .app, не под launchd и похожи на node/python/bun/uv/deno/MCP.
     /// Без списка заданий launchd не отличить сироту от KeepAlive-бота, поэтому тогда их нет.

@@ -16,7 +16,7 @@ satellite_check_extra_cleanup() {
   rm -rf "$STAND_HOME/proj" "$STAND_HOME/Library/LaunchAgents"
 }
 
-forbid_timers Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModulePage.swift Sources/App/Satellites/RemoteBotsModel.swift Sources/App/Satellites/RemoteBotsPage.swift Sources/Modules/Bots/BotsView.swift Sources/Modules/Bots/BotsMonitor.swift Sources/Modules/Bots/BotsWire.swift
+forbid_timers Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModulePage.swift Sources/App/Satellites/RemoteBotsModel.swift Sources/App/Satellites/RemoteBotsPage.swift Sources/Modules/Bots/UI/BotsView.swift Sources/Modules/Bots/BotsMonitor.swift Sources/Modules/Bots/UI/BotsWire.swift
 
 # Команды бота запускает только BotRunner, и он спрашивает стенд.
 if grep -q 'Kit.standRefuses' Sources/Kit/BotExec.swift && ! grep -rn 'Exec.run' Sources/Modules/Bots Sources/Apps/Bots | grep -v 'Exec.launchctl' | grep -q .; then

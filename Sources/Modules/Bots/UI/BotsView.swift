@@ -136,7 +136,7 @@ struct BotCardView: View {
     let onAction: (BotVerb) -> Void
     @Environment(\.dsTheme) private var theme
 
-    private var link: URL? { bot.url.flatMap { BotsMonitor.safeURL($0) }.flatMap(URL.init(string:)) }
+    private var link: URL? { bot.url.flatMap { BotsText.safeURL($0) }.flatMap(URL.init(string:)) }
     private var on: Bool { bot.state == .running || bot.state == .partial }
 
     var body: some View {

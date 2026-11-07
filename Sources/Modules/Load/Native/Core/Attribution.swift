@@ -1,18 +1,5 @@
 import Foundation
 
-enum GroupKind: String, Sendable, Codable {
-    case project, app, system, other
-
-    var title: String {
-        switch self {
-        case .project: return "Проекты"
-        case .app: return "Приложения"
-        case .system: return "Система"
-        case .other: return "Прочее"
-        }
-    }
-}
-
 /// В какую группу попал процесс и почему.
 struct Assignment: Sendable {
     var groupID: String

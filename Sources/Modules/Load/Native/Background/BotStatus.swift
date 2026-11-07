@@ -2,25 +2,6 @@ import Foundation
 
 // Статус бота по замеру «Нагрузки»: процессы, дерево и launchd берутся из снимка.
 
-struct BotItem: Sendable, Codable, Equatable, Identifiable {
-    var id: String
-    var name: String
-    var state: BotState
-    var pids: [Int32]
-    var memMB: Int
-    var uptime: TimeInterval
-    var ports: [String]
-    var url: String?
-    var note: String
-    var actions: [BotVerb]
-    /// Команды из bots.toml: остаются в модуле, в связь не идут.
-    var spec = BotSpec.none
-
-    var isOn: Bool { state == .running || state == .partial }
-
-    private enum CodingKeys: String, CodingKey { case id, name, state, pids, memMB, uptime, ports, url, note, actions }
-}
-
 extension BotRegistry {
     /// Главные процессы бота: pid его меток launchd, запущенные .app с его bundle id и процессы из `watch_dir`.
     static func pids(of spec: BotSpec, procs: [Int32: LoadProcess], launchd: [String: Int32?]) -> [Int32] {

@@ -20,7 +20,7 @@ int main(void) {
 C
 clang -o "$OUT/child" "$OUT/child.c"
 cp Tests/ToolSpawnCheck.swift "$OUT/main.swift"
-swiftc -o "$OUT/check" "$OUT/main.swift" Sources/Modules/Load/Native/Core/Tool.swift Sources/Modules/Load/Native/Sessions/MuxProbe.swift
+swiftc -o "$OUT/check" "$OUT/main.swift" Sources/Modules/Load/Native/Core/Tool.swift Sources/Modules/Load/Native/Sessions/MuxProbe.swift Sources/Modules/Load/UI/Native/Sessions/MuxTypes.swift
 # Hardened runtime, как у приложения: dlsym и снятие ответственности должны работать и под ним.
 codesign --force --options runtime --sign - "$OUT/check" 2>/dev/null
 "$OUT/check" "$OUT/child" "$OUT/work"

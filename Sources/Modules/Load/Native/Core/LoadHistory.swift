@@ -15,32 +15,6 @@ struct HistorySample: Codable, Sendable {
     var groups: [String: Int]
 }
 
-/// Окно истории для графика: корзины по 5 минут, ряды — топ-5 групп и «прочее».
-struct HistoryWindow: Sendable, Codable, Equatable {
-    struct Series: Sendable, Codable, Identifiable, Equatable {
-        var key: String
-        var name: String
-        var id: String { key }
-    }
-
-    struct Point: Sendable, Codable, Identifiable, Equatable {
-        var ts: Int
-        var usedMB: Int
-        var swapMB: Int
-        var pressure: Int
-        /// По рядам `series`.
-        var values: [Int]
-        var id: Int { ts }
-    }
-
-    var stepSeconds: Int
-    var from: Int
-    var to: Int
-    var series: [Series]
-    var points: [Point]
-    var firstSample: Int?
-}
-
 /// История за сутки в памяти и в файле. Не потокобезопасна: живёт внутри `LoadEngine`.
 final class LoadHistory {
     static let keepSeconds = 24 * 3600

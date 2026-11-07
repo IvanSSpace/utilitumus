@@ -1,6 +1,6 @@
 import Foundation
 
-/// Всё, что экран «Боты» берёт у своей модели. Работает ли модуль здесь же (`BotsStore`) или в утилите, экран не знает.
+/// Всё, что экран «Боты» берёт у своей модели. Работает ли модуль здесь же или в утилите, экран не знает.
 @MainActor
 protocol BotsModel: ObservableObject {
     var state: BotsState { get }
@@ -17,6 +17,13 @@ protocol BotsModel: ObservableObject {
 }
 
 enum BotsText {
+    /// Ссылка на панель бота: только http и https, без логина и пароля в адресе.
+    static func safeURL(_ raw: String?) -> String? {
+        guard let raw, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased()),
+              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
+        return raw
+    }
+
     /// «2 из 3 работают» — строка статуса: по файлу и последнему замеру, без аптайма и памяти.
     static func summary(_ state: BotsState) -> String {
         switch state.file.kind {

@@ -75,12 +75,8 @@ enum BotsMonitor {
         return seen
     }
 
-    /// Ссылка на панель бота: только http и https, без логина и пароля в адресе.
-    static func safeURL(_ raw: String?) -> String? {
-        guard let raw, let url = URL(string: raw), ["http", "https"].contains(url.scheme?.lowercased()),
-              url.host?.isEmpty == false, url.user == nil, url.password == nil else { return nil }
-        return raw
-    }
+    /// Правило живёт в `BotsText`: его же применяет экран.
+    static func safeURL(_ raw: String?) -> String? { BotsText.safeURL(raw) }
 
     /// Файл целиком в состояние экрана; список ботов отдельно, чтобы экран не зависел от причины.
     static func fileState(_ file: BotRegistry.File) -> BotsFileState {
