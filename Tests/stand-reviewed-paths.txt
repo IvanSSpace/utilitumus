@@ -79,4 +79,5 @@ Sources/Modules/Voice/VoiceEngine.swift|.terminate()
 Sources/Modules/Voice/VoiceEngine.swift|Process()
 Sources/Modules/Voice/VoiceModels.swift|Process()
 Sources/Modules/Voice/VoiceModels.swift|removeItem
-Sources/Modules/Voice/VoiceModels.swift|urls(for:
+Sources/Modules/Voice/UI/VoiceTypes.swift|removeItem
+Sources/Modules/Voice/UI/VoiceTypes.swift|urls(for:

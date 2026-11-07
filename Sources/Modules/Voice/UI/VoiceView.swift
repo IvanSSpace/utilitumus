@@ -1,13 +1,12 @@
 import SwiftUI
 import AppKit
-import AVFoundation
 
 /// Экран модуля «Голос».
 struct VoiceView<Model: VoiceScreenModel>: View {
     @Environment(\.pageActive) private var pageActive
     @ObservedObject var voice: Model
     @StateObject private var recorder = HotKeyRecorder()
-    @State private var devices: [VoiceRecorder.InputDevice] = []
+    @State private var devices: [VoiceInputs.Device] = []
     @State private var testText = ""
     @FocusState private var testFocused: Bool
 
@@ -43,7 +42,7 @@ struct VoiceView<Model: VoiceScreenModel>: View {
         }
         .onPageActive { active in
             if active {
-                devices = VoiceRecorder.inputDevices()
+                devices = VoiceInputs.devices()
                 voice.refreshPermissions()
             } else {
                 recorder.stop()
@@ -61,7 +60,7 @@ struct VoiceView<Model: VoiceScreenModel>: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             guard pageActive else { return }
-            devices = VoiceRecorder.inputDevices()
+            devices = VoiceInputs.devices()
             voice.refreshPermissions()
         }
         // Выбранная модель не установлена, а другая есть — переключаемся на неё.
@@ -168,7 +167,7 @@ struct VoiceView<Model: VoiceScreenModel>: View {
             }
             DSRow(icon: "hand.tap.fill", title: "Режим",
                   subtitle: voice.mode == .toggle ? "Нажал, сказал, нажал ещё раз" : "Говорю, пока держу клавишу") {
-                DSSegmented(VoiceController.Mode.allCases, selection: $voice.mode) { $0.title }
+                DSSegmented(VoiceMode.allCases, selection: $voice.mode) { $0.title }
             }
             DSRow(icon: "mic.fill", title: "Микрофон", subtitle: micName) {
                 micMenu
@@ -324,5 +323,3 @@ private struct TintedChip: View {
     @Environment(\.dsTint) private var tint
     var body: some View { DSChip(text, color: tint) }
 }
-
-extension VoiceController: HotKeyTarget {}

@@ -32,10 +32,10 @@ BODY="$(awk '/private func insert\(_ text: String, session: TestSession\?\)/,/^ 
 echo "ok   вставка сначала отдаёт текст режиму проверки и в нём ничего не вставляет"
 # Встроенный модуль режим не включает: его модель экрана ничего не делает, включает только действие по связи.
 USES="$(grep -rlE 'beginTest\(|\.beginTest' Sources | sort | tr '\n' ' ')"
-EXPECTED="Sources/App/Satellites/RemoteVoiceModel.swift Sources/Modules/Voice/VoiceController.swift Sources/Modules/Voice/VoiceScreenModel.swift Sources/Modules/Voice/VoiceView.swift Sources/Modules/Voice/VoiceWire.swift "
+EXPECTED="Sources/App/Satellites/RemoteVoiceModel.swift Sources/Modules/Voice/UI/VoiceScreenModel.swift Sources/Modules/Voice/UI/VoiceView.swift Sources/Modules/Voice/UI/VoiceWire.swift Sources/Modules/Voice/VoiceController.swift Sources/Modules/Voice/VoiceLocalModel.swift "
 [ "$USES" = "$EXPECTED" ] || fail "режим проверки включается ещё где-то: $USES"
-grep -qE 'func beginTest\(\) \{\}' Sources/Modules/Voice/VoiceScreenModel.swift || fail "встроенная модель экрана включает режим проверки"
-grep -q 'controller.beginTest' Sources/Modules/Voice/VoiceScreenModel.swift && fail "встроенная модель зовёт контроллер"
+grep -qE 'func beginTest\(\) \{\}' Sources/Modules/Voice/VoiceLocalModel.swift || fail "встроенная модель экрана включает режим проверки"
+grep -q 'controller.beginTest' Sources/Modules/Voice/VoiceLocalModel.swift && fail "встроенная модель зовёт контроллер"
 echo "ok   встроенный модуль режим проверки не включает"
 # Экран закрыт или центр пропал (аренда экрана): запись проверки утилиты обрывается.
 awk '/func screenOpen\(_ open: Bool\)/,/^    }$/' Sources/Apps/Voice/VoiceModule.swift | grep -q 'controller.endTest()' || fail "закрытие экрана не обрывает запись проверки"

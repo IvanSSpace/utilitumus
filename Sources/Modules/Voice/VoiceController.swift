@@ -9,24 +9,13 @@ import Carbon.HIToolbox
 final class VoiceController: ObservableObject {
     static let shared = VoiceController()
 
-    enum Mode: String, CaseIterable, Identifiable {
-        case toggle
-        case hold
-        var id: String { rawValue }
-        var title: String { self == .toggle ? "Нажал — нажал" : "Пока держу" }
-    }
+    typealias Mode = VoiceMode
 
     enum Phase { case idle, recording, transcribing }
 
     // MARK: Настройки (UserDefaults "Voice.")
 
-    enum Key {
-        static let keyCode = "Voice.HotKeyCode"
-        static let modifiers = "Voice.HotKeyModifiers"
-        static let mode = "Voice.Mode"
-        static let mic = "Voice.MicUID"
-        static let excluded = "Voice.ExcludedApps"
-    }
+    typealias Key = VoiceKeys
 
     @Published private(set) var keyCode: UInt32
     @Published private(set) var modifiers: UInt32
