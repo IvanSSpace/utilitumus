@@ -26,7 +26,7 @@ chmod +x "$OUT/bin/gh" "$OUT/bin/codesign"
 
 # Подставная сборка: бандл с версией, меткой выпуска и помощниками из манифеста.
 mkdir -p "$FX/scripts" "$FX/Sources/Kit" "$FX/Resources" "$FX/Catalog" "$FX/Sources/Apps/Awake" "$FX/Sources/Apps/Fans" "$FX/Sources/Apps/Load" "$FX/Sources/Apps/Mouse"
-cp scripts/release-all.sh "$FX/scripts/"
+cp scripts/release-all.sh scripts/check-no-seam.sh "$FX/scripts/"
 cp Sources/Kit/KitSigning.swift "$FX/Sources/Kit/"
 cp Info.plist "$FX/Info.plist"
 HUB="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"

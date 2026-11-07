@@ -513,7 +513,9 @@ sleep 4
 rm -f "$OUT/agent.log"
 agent daemon "FAN_TEST_SMC_STUCK FAN_TEST_NO_START_RELEASE"
 "$OUT/hub" hold-manual 1 >/dev/null || true
-for _ in $(seq 1 45); do [ "$(state)" = "not running" ] && break; sleep 1; done
+# Служба выходит примерно за минуту: попытки идут по таймерам, а macOS откладывает их, когда за компьютером никого нет.
+# Проверяется конечность попыток, а не скорость: запас большой, но не бесконечный.
+for _ in $(seq 1 180); do [ "$(state)" = "not running" ] && break; sleep 1; done
 expect_state "not running" "SMC не принимает «Авто»: попытки конечны, служба вышла"
 grep -q 'выход отложен' "$OUT/agent.log" || fail "простой с ручным вентилятором: выход не откладывался: $(cat "$OUT/agent.log")"
 grep -q 'выход с вентилятором в ручном режиме' "$OUT/agent.log" || fail "после попыток нет записи в журнале: $(cat "$OUT/agent.log")"
