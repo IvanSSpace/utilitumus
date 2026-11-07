@@ -25,13 +25,13 @@
     },
     {
       "id": "clipboard",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.2.0/Clipboard.zip",
-      "sha256": "677f19fc610dd55b7258b40acec038eb0c9c0e1f8a86a74193056305bf89df36",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.2.1/Clipboard.zip",
+      "sha256": "f422260667afccc1c26a5801e1f3a01a3c4516a15160823dc3637a8bee457095",
       "sizeMB": 2,
       "notes": [
-        "Обновляется только по кнопке внутри приложения: новой версии может понадобиться пароль"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
