@@ -3,8 +3,7 @@ import SwiftUI
 
 // Вкладка «Браузер» в лаунчере: экран рисует центр из общего домена настроек, от утилиты только статус. Запуск: Tests/run-browser-remote-check.sh
 // Каркас — SatelliteCheckKit.swift и SatelliteStandKit.swift. Настройки только в тестовом домене, браузер по умолчанию не меняется.
-// Настоящей утилиты нет: вкладке нужен только её статус, его отдаёт стенд в том виде, как `BrowserModule`. Со швом утилита не собирается:
-// `BrowserRouter` зовёт `Kit.standRefuses`, а помощник ссылок собирается без Kit.
+// Настоящей утилиты нет: вкладке нужен только её статус, его отдаёт стенд в том виде, как `BrowserModule`.
 
 let probeURL = URL(string: "https://example.com")!
 let ruleDomain = "example.com"
