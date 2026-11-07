@@ -235,8 +235,3 @@ struct MixerView<Model: MixerModel>: View {
         .onPageActive { model.setScreenVisible($0) }
     }
 }
-
-extension MixerView where Model == MixerController {
-    /// Встроенный модуль: экран работает с контроллером в этом же процессе.
-    init() { self.init(model: .shared) }
-}

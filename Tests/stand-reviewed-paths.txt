@@ -64,7 +64,7 @@ Sources/Modules/Load/Native/Core/Tool.swift|kill(
 Sources/Modules/Load/Native/Sessions/MuxProbe.swift|NSHomeDirectory
 Sources/Modules/Load/Native/Sessions/SessionViews.swift|NSHomeDirectory
 Sources/Modules/Load/Native/Sessions/SessionsBuilder.swift|NSHomeDirectory
-Sources/Modules/Mixer/MixerView.swift|NSWorkspace.shared.open
+Sources/Modules/Mixer/UI/MixerView.swift|NSWorkspace.shared.open
 Sources/Modules/Mouse/MouseController.swift|NSWorkspace.shared.open
 Sources/Modules/Sound/AudioMonitor.swift|AudioObjectSetPropertyData
 Sources/Modules/Sound/MicGuardMigration.swift|UserDefaults(suiteName

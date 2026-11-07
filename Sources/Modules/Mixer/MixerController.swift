@@ -2,22 +2,6 @@ import AppKit
 import CoreAudio
 import Foundation
 
-/// Приложение в списке микшера.
-struct MixerApp: Identifiable, Equatable {
-    /// Bundle id приложения (или `exe:<имя>` у программ без бандла) — по нему
-    /// запоминается громкость.
-    let id: String
-    let name: String
-    let icon: NSImage
-    var volume: Double
-    var muted: Bool
-
-    /// Иконка в сравнение не входит: она не меняется, а сравнивать картинки дорого.
-    static func == (a: MixerApp, b: MixerApp) -> Bool {
-        a.id == b.id && a.name == b.name && a.volume == b.volume && a.muted == b.muted
-    }
-}
-
 /// Громкость каждого приложения отдельно. Тап создаётся только для приложений,
 /// у которых громкость не 100 % или включено «без звука»: пока микшером не
 /// пользуются, звук идёт мимо него. Состояние живёт на main thread, а обход

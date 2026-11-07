@@ -64,50 +64,25 @@ enum MixerAppIcon {
     }
 }
 
+/// Приложение в списке микшера.
+struct MixerApp: Identifiable, Equatable {
+    /// Bundle id приложения (или `exe:<имя>` у программ без бандла) — по нему
+    /// запоминается громкость.
+    let id: String
+    let name: String
+    let icon: NSImage
+    var volume: Double
+    var muted: Bool
+
+    /// Иконка в сравнение не входит: она не меняется, а сравнивать картинки дорого.
+    static func == (a: MixerApp, b: MixerApp) -> Bool {
+        a.id == b.id && a.name == b.name && a.volume == b.volume && a.muted == b.muted
+    }
+}
+
 extension MixerApp {
     /// Строка экрана из состояния, пришедшего по связи.
     @MainActor init(_ row: MixerAppState) {
         self.init(id: row.id, name: row.name, icon: MixerAppIcon.icon(for: row.id), volume: row.volume, muted: row.muted)
-    }
-}
-
-extension MixerController {
-    /// Ползунок меняет громкость сразу, а списки публикуются позже (`schedulePersist`): значения берём
-    /// живые, иначе ответ на шаг ползунка вернул бы прежнюю громкость.
-    var wireState: MixerState {
-        func rows(_ list: [MixerApp]) -> [MixerAppState] {
-            list.map { MixerAppState(id: $0.id, name: $0.name, volume: volume(for: $0.id), muted: isMuted($0.id)) }
-        }
-        return MixerState(apps: rows(apps), idleApps: rows(idleApps), presetApps: rows(presetApps), otherApps: rows(otherApps),
-                          permissionProblem: permissionProblem, lastError: lastError)
-    }
-
-    /// Действие из связи: сначала проверка, изменения только после неё. Вернёт текст ошибки или nil.
-    /// `id` принимается только из показанных списков: иначе в настройки можно дописать любой мусор.
-    func handle(_ action: MixerAction) -> String? {
-        let unknown = "Такого приложения нет в списке"
-        func issued(_ id: String) -> Bool {
-            [apps, idleApps, presetApps, otherApps].contains { $0.contains { $0.id == id } }
-        }
-        switch action {
-        case .setVolume(let id, let value):
-            guard value.isFinite else { return "Такой громкости нет" }
-            guard issued(id) else { return unknown }
-            setVolume(value, for: id) // Диапазон 0...1 держит сам setVolume.
-        case .setMuted(let id, let on):
-            guard issued(id) else { return unknown }
-            setMuted(on, for: id)
-        case .reset(let id):
-            guard issued(id) else { return unknown }
-            reset(id)
-        case .commitVolumes:
-            commitVolumes()
-        }
-        return nil
-    }
-
-    /// Действие из связи. Самое длинное настоящее — `setVolume` с bundle id, короче 512 байт.
-    func handle(_ data: Data) -> Data {
-        LinkWire.handle(data, as: MixerAction.self, limit: 512, state: { wireState }) { handle($0) }
     }
 }
