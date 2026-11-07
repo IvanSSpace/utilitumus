@@ -109,8 +109,9 @@ enum ClipHeaderTint {
         // Светлый оттенок при затемнении мутнеет (жёлтый станет болотным), поэтому при равных долях выигрывает тот,
         // которому темнеть меньше. Значок почти целиком одного цвета это не меняет.
         func score(_ i: Int) -> Double { counts[i] * min(1, average(i).contrastWithWhite / minContrast) }
-        guard opaque > 0, let top = counts.indices.max(by: { score($0) < score($1) }),
-              counts[top] / opaque >= minColorShare else { return neutral }
+        // Доля считается по всем цветным точкам: многоцветный значок на белом не должен стать бесцветным.
+        guard opaque > 0, counts.reduce(0, +) / opaque >= minColorShare,
+              let top = counts.indices.max(by: { score($0) < score($1) }) else { return neutral }
         return readable(average(top))
     }
 

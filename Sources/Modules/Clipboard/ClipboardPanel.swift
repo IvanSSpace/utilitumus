@@ -379,7 +379,8 @@ struct ClipboardPanelView: View {
         guard model.editor == nil else { return }
         searchFocused = true
         DispatchQueue.main.async {
-            (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil)
+            // Не только ключевое окно: панель может стать ключевой позже этого вызова.
+            for window in NSApp.windows { (window.firstResponder as? NSTextView)?.moveToEndOfDocument(nil) }
         }
     }
 

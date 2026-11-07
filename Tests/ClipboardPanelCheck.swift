@@ -252,6 +252,9 @@ func flat(_ count: Int, _ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8 = 255) ->
     check(ClipHeaderTint.dominant(rgba: flat(100, 240, 120, 60, 0)) == ClipHeaderTint.neutral, "прозрачный значок: нейтральная шапка")
     check(ClipHeaderTint.dominant(rgba: []) == ClipHeaderTint.neutral, "нет пикселей: нейтральная шапка")
     check(ClipHeaderTint.dominant(rgba: flat(95, 10, 10, 10) + flat(5, 250, 40, 40)) == ClipHeaderTint.neutral, "чёрный значок с цветной искрой: нейтральная шапка")
+    let many = ClipHeaderTint.dominant(rgba: flat(70, 250, 250, 250) + flat(10, 230, 60, 50) + flat(10, 60, 180, 80) + flat(10, 250, 210, 50))
+    check(!many.isGray && many.contrastWithWhite >= ClipHeaderTint.minContrast, "многоцветный значок на белом: шапка цветная")
+    check(abs(many.r - many.g) > 0.1, "многоцветный значок: жёлтый не выигрывает у соседей такой же доли")
     let mixed = ClipHeaderTint.dominant(rgba: flat(30, 20, 60, 230) + flat(70, 250, 250, 250))
     check(mixed.b > mixed.r, "белый значок с синей заливкой: синяя шапка")
     check(ClipHeaderTint.neutral.isGray && ClipHeaderTint.graphite.isGray, "нейтральная и графитовая шапка серые")
@@ -502,6 +505,13 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
     check(model.selected == 0, "клик по карточке во время поиска сработал")
     await key("к")
     check(model.query == "тек", "после клика по карточке буквы идут в поле (запрос «\(model.query)»)")
+    // Окошко забирало фокус и вернуло: при возврате поле выделяет весь текст, следующая буква не должна его стереть.
+    model.beginCreate()
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    model.closeEditor()
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    await key("с")
+    check(model.query == "текс", "после окошка буква дописалась к запросу (запрос «\(model.query)»)")
     Stand.window.contentView = nil
 }
 
