@@ -1,7 +1,7 @@
 import Foundation
 
-/// Всё, что экран «Микшер» берёт у своей модели. Работает ли модуль здесь же (`MixerController`)
-/// или в утилите, экран не знает.
+/// Всё, что экран «Микшер» берёт у своей модели. Кто за ней стоит, контроллер в утилите
+/// или `RemoteMixerModel` в центре, экран не знает.
 @MainActor
 protocol MixerModel: ObservableObject {
     var apps: [MixerApp] { get }

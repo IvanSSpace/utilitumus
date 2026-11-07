@@ -71,9 +71,9 @@ put() { cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/UtilitumusApp.swift"
 put "$OUT/UtilitumusApp.swift" "$CACHE/src/UtilitumusApp.swift"
 put Tests/DevScopeCheck.swift "$CACHE/src/main.swift"
+HUB_LIST="$(scripts/hub-sources.sh)"
 SOURCES=()
-while IFS= read -r f; do SOURCES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
-  -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift -not -name KitDefaults.swift | LC_ALL=C sort)
+while IFS= read -r f; do case "$f" in */UtilitumusApp.swift | */KitDefaults.swift) ;; *) SOURCES+=("$f") ;; esac; done <<<"$HUB_LIST"
 FRAMEWORKS=(-framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit -framework Vision)
 
 # Сборка с набором: тот самый файл, что пишет dev.sh, и тот самый флаг. Смена набора пересобирает один файл и линковку.

@@ -157,8 +157,8 @@ struct StoreWithSidebar: View {
 // MARK: - Чистая часть
 
 @MainActor func busyDecoding() {
-    func voice(recording: Bool = false, status: VoiceModelStore.Status = .installed) -> Data {
-        var state = VoiceController.storedState()
+    func voice(recording: Bool = false, status: VoiceModelStatus = .installed) -> Data {
+        var state = VoiceState.stored()
         state.recording = recording
         state.models = state.models.map { VoiceModelRow(model: $0.model, status: status) }
         return LinkWire.encoded(state)

@@ -340,7 +340,7 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
     // MARK: Занятые
     var botsBusy = BotsState.empty
     botsBusy.running = true
-    var voiceBusy = VoiceController.storedState()
+    var voiceBusy = VoiceState.stored()
     voiceBusy.recording = true
     await fresh([entry("awake"), entry("bots"), entry("voice"), entry("sound")])
     stage.setState("awake", awakeOn)

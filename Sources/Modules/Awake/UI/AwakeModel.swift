@@ -1,7 +1,7 @@
 import Foundation
 
-/// Всё, что экран «Не спать» берёт у своей модели. Работает ли модуль здесь же (`AwakeController`)
-/// или в утилите (`RemoteAwakeModel`), экран не знает.
+/// Всё, что экран «Не спать» берёт у своей модели. Кто за ней стоит, контроллер в утилите
+/// или `RemoteAwakeModel` в центре, экран не знает.
 @MainActor
 protocol AwakeModel: ObservableObject {
     var isActive: Bool { get }

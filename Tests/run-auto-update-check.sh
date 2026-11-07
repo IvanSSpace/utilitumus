@@ -130,9 +130,9 @@ sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$CACHE/UtilitumusApp.swift.
 update_if_changed "$CACHE/UtilitumusApp.swift.new" "$CACHE/src/UtilitumusApp.swift"
 update_if_changed Tests/AutoUpdateCheck.swift "$CACHE/src/main.swift"
 
+HUB_LIST="$(scripts/hub-sources.sh)"
 SOURCES=()
-while IFS= read -r file; do SOURCES+=("$file"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
-  -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift | LC_ALL=C sort)
+while IFS= read -r file; do case "$file" in */UtilitumusApp.swift) ;; *) SOURCES+=("$file") ;; esac; done <<<"$HUB_LIST"
 
 # build <кэш> <выход> [замены файлов: путь=путь]
 build() {
