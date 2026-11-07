@@ -92,10 +92,9 @@ enum PreviewApp {
             for index in model.allItems.indices where model.allItems[index].spaceID == id { model.allItems[index].spaceID = nil }
         }
         model.onOpenSettings = { PreviewNote.show("Открыл бы настройки Буфера") }
-        // Esc без поиска и окошка закрывает панель: здесь вернуть её нечем, поэтому показ завершается.
-        model.onClose = { NSApp.terminate(nil) }
-
         let host = ClipboardPanelHost.shared
+        // Esc без поиска и окошка закрывает панель с настоящей анимацией: здесь вернуть её нечем, поэтому затем показ завершается.
+        model.onClose = { host.hide { NSApp.terminate(nil) } }
         host.hidesOnOutsideClick = false
         let panel = host.present(model)
         // Автор может снять экран: записи выдуманные.

@@ -122,6 +122,7 @@ struct ClipCard: View {
                         Circle().fill(ClipPalette.color(space.colorID)).frame(width: 9, height: 9)
                             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
                             .help("Пространство «\(space.name)»")
+                            .transition(.scale(scale: 0.2).combined(with: .opacity))
                     }
                 }
                 Text(ClipPanelText.ago(item.date, now: now)).font(.system(size: 12))

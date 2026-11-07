@@ -306,14 +306,29 @@ final class ClipboardController: ObservableObject {
         lastChange = ownChange
         store.touch(item.id)
         sync()
-        ClipboardPanelHost.shared.hide()
         refreshPermissions()
         guard axTrusted else {
+            ClipboardPanelHost.shared.hide()
             VoiceHUD.shared.showMessage("Скопировано — вставь ⌘V")
             return
         }
-        // Дать панели исчезнуть, чтобы клавиши ушли в нужное окно.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { Self.sendPaste() }
+        Self.pasteAfterLeaving(ClipboardPanelHost.shared, send: Self.sendPaste)
+    }
+
+    /// Пауза между `orderOut` и ⌘V. Ключевым окно снова становится через оконный сервер, и сигнала об этом у нас нет.
+    /// 0,12 с — ровно столько проходило от `orderOut` до ⌘V в выпуске 1.3.0, где вставка работает. Меньше никто не проверял.
+    static let focusPause = 0.12
+
+    /// ⌘V только после полного ухода панели: иначе клавиши попали бы в её поле поиска. Открыли панель снова за это время — ⌘V не уходит.
+    static func pasteAfterLeaving(_ host: ClipboardPanelHost, send: @escaping @MainActor () -> Void) {
+        host.hide {
+            let presentation = host.presentation
+            DispatchQueue.main.asyncAfter(deadline: .now() + focusPause) {
+                MainActor.assumeIsolated {
+                    if host.presentation == presentation { send() }
+                }
+            }
+        }
     }
 
     private static func sendPaste() {

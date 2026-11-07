@@ -469,7 +469,7 @@ struct ClipboardPanelView: View {
         .help(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
-        .onDrop(of: [ClipDrag.recordType], isTargeted: nil) { dropCard($0, on: space.id) }
+        .modifier(ClipSpaceDropEffect(color: ClipPalette.color(space.colorID)) { dropCard($0, on: space.id) })
     }
 
     /// Категория на время поиска: только точка, название в подсказке.
@@ -486,7 +486,7 @@ struct ClipboardPanelView: View {
         .accessibilityLabel(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
-        .onDrop(of: [ClipDrag.recordType], isTargeted: nil) { dropCard($0, on: space.id) }
+        .modifier(ClipSpaceDropEffect(color: ClipPalette.color(space.colorID)) { dropCard($0, on: space.id) })
     }
 
     /// Перетащил карточку на категорию — запись закрепилась в ней. Принимается только свой тип и только своя запись.
@@ -494,7 +494,8 @@ struct ClipboardPanelView: View {
         guard let provider = ClipDrag.recordProvider(in: providers) else { return false }
         _ = provider.loadDataRepresentation(forTypeIdentifier: ClipDrag.recordType.identifier) { data, _ in
             guard let id = data.flatMap(ClipDrag.recordID) else { return }
-            DispatchQueue.main.async { model.acceptDroppedRecord(id, on: space) }
+            // Один анимированный переход на всё: точка на карточке и смыкание соседних, если запись ушла из открытой вкладки.
+            DispatchQueue.main.async { withAnimation(ClipMotion.settle) { model.acceptDroppedRecord(id, on: space) } }
         }
         return true
     }
@@ -588,6 +589,7 @@ struct ClipboardPanelView: View {
                                          selected: index == model.selected, searching: model.searchOpen,
                                          theme: model.theme, spaces: model.spaces, now: model.shownAt, model: model)
                                     .id(item.id)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
                                     // Один обработчик: второй, на двойной клик, заставил бы одиночный ждать.
                                     .onTapGesture { model.click(item, at: index) }
                             }
@@ -705,6 +707,26 @@ private final class ClipboardNSPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Источник `.onDrag` в SwiftUI разрешает только копирование, а приёмник категории предлагает перенос: операции вне разрешённых система
+/// не обязана принимать. Поэтому внутри программы разрешён и перенос, а наружу по-прежнему только копия: Finder не переместит настоящий файл.
+/// Метод SwiftUI закрыт для переопределения в Swift, селектор добавляется на этот подкласс, общий `NSHostingView` не меняется.
+final class ClipPanelHostingView: NSHostingView<ClipboardPanelView> {
+    private static let dragMask: Void = {
+        let selector = #selector(NSDraggingSource.draggingSession(_:sourceOperationMaskFor:))
+        guard let inherited = class_getInstanceMethod(ClipPanelHostingView.self, selector) else { return }
+        let mask: @convention(block) (AnyObject, AnyObject?, Int) -> UInt = { _, _, context in
+            let allowed: NSDragOperation = context == NSDraggingContext.withinApplication.rawValue ? [.copy, .move] : .copy
+            return allowed.rawValue
+        }
+        class_addMethod(ClipPanelHostingView.self, selector, imp_implementationWithBlock(mask), method_getTypeEncoding(inherited))
+    }()
+
+    static func make(_ root: ClipboardPanelView) -> ClipPanelHostingView {
+        _ = dragMask
+        return ClipPanelHostingView(rootView: root)
+    }
+}
+
 @MainActor
 final class ClipboardPanelHost {
     static let shared = ClipboardPanelHost()
@@ -714,14 +736,29 @@ final class ClipboardPanelHost {
     var settingsOpener: (() -> Void)?
     /// false — только для показа автору: панель не закрывается от кликов мимо и смены программы.
     var hidesOnOutsideClick = true
+    /// Стенд: где показать панель (иначе экран под курсором) и чем её сделать. Настоящая панель забрала бы клавиатуру у программы автора.
+    var standFrame: CGRect?
+    var panelMaker: (ClipboardPanelModel) -> NSPanel = { ClipboardPanelHost.makePanel($0) }
+    var reducesMotion: () -> Bool = { ClipMotion.reduced }
+
+    static let slideDuration = 0.16
+    static let slideDistance: CGFloat = 40
 
     private var panel: NSPanel?
     private var model: ClipboardPanelModel?
     private var keyMonitor: Any?
     private var globalClick: Any?
     private var activation: NSObjectProtocol?
+    /// Панель уезжает: окно ещё на экране, но для всех она уже закрыта, и горячая клавиша откроет её снова.
+    private var isLeaving = false
+    private var leftCallbacks: [() -> Void] = []
+    /// Куда панель приезжает при показе. Уход считается от него: при закрытии посреди открытия текущий кадр ещё на полпути.
+    private var shownFrame = CGRect.zero
+    /// Номер показа. Завершение анимации сверяет его: закрытие, которое отменили новым показом, ничего не скрывает.
+    private(set) var presentation = 0
 
-    var isVisible: Bool { panel?.isVisible == true }
+    var isVisible: Bool { panel?.isVisible == true && !isLeaving }
+    var monitorsInstalled: Bool { keyMonitor != nil }
 
     func toggle(controller: ClipboardController) {
         isVisible ? hide() : show(controller: controller)
@@ -743,33 +780,84 @@ final class ClipboardPanelHost {
         model.reset()
         model.refreshTheme()
 
-        let panel = self.panel ?? Self.makePanel(model)
+        let panel = self.panel ?? panelMaker(model)
         self.panel = panel
-        // Экран, где сейчас курсор; панель во всю его ширину над Dock.
-        let cursor = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(cursor) } ?? NSScreen.main
-        let area = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let frame = CGRect(x: screen?.frame.minX ?? 0, y: area.minY,
-                           width: screen?.frame.width ?? area.width, height: Self.height)
-        panel.setFrame(frame.offsetBy(dx: 0, dy: -40), display: false)
-        panel.alphaValue = 0
+        let frame = standFrame ?? Self.frameOnCursorScreen()
+        // Открыли посреди ухода на том же экране: панель едет обратно с того места, где она сейчас, без скачка.
+        let resuming = isLeaving && frame == shownFrame
+        presentation += 1
+        isLeaving = false
+        // Панель никуда не ушла, значит ждать нечего. ⌘V теперь попал бы в неё саму.
+        leftCallbacks = []
+        shownFrame = frame
+        panel.ignoresMouseEvents = false
+        if !resuming {
+            panel.setFrame(frame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
+            panel.alphaValue = 0
+        }
         panel.makeKeyAndOrderFront(nil)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            panel.animator().setFrame(frame, display: true)
-            panel.animator().alphaValue = 1
+        if reducesMotion() {
+            panel.setFrame(frame, display: true)
+            panel.alphaValue = 1
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = Self.slideDuration
+                panel.animator().setFrame(frame, display: true)
+                panel.animator().alphaValue = 1
+            }
         }
         installMonitors()
         return panel
     }
 
-    func hide() {
-        guard let panel, panel.isVisible else { return }
+    /// Экран, где сейчас курсор; панель во всю его ширину над Dock.
+    private static func frameOnCursorScreen() -> CGRect {
+        let cursor = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(cursor) } ?? NSScreen.main
+        let area = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        return CGRect(x: screen?.frame.minX ?? 0, y: area.minY,
+                      width: screen?.frame.width ?? area.width, height: height)
+    }
+
+    /// Закрытие, зеркальное показу. `left` зовётся один раз, когда окна уже нет на экране.
+    /// Если панель открыли снова раньше, `left` не зовётся совсем: уход не состоялся.
+    func hide(then left: (() -> Void)? = nil) {
+        guard let panel, panel.isVisible else {
+            left?()
+            return
+        }
+        if let left { leftCallbacks.append(left) }
+        guard !isLeaving else { return }
+        isLeaving = true
         removeMonitors()
+        // Второй клик по уезжающей карточке не должен вставить ещё раз. Клики за это время достаются программе под панелью.
+        panel.ignoresMouseEvents = true
+        if reducesMotion() {
+            finishLeaving(panel)
+            return
+        }
+        let presentation = self.presentation
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.slideDuration
+            panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: true)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.isLeaving, self.presentation == presentation else { return }
+                self.finishLeaving(panel)
+            }
+        }
+    }
+
+    private func finishLeaving(_ panel: NSPanel) {
+        isLeaving = false
         panel.orderOut(nil)
         panel.alphaValue = 0
         // Расшифрованным картинкам незачем лежать в памяти, пока панели нет.
         model?.forgetImages()
+        let callbacks = leftCallbacks
+        leftCallbacks = []
+        callbacks.forEach { $0() }
     }
 
     /// Панель держит копию данных; пока открыта, новые записи в ней не нужны.
@@ -850,7 +938,7 @@ final class ClipboardPanelHost {
         glass.layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         glass.layer?.masksToBounds = true
 
-        let host = NSHostingView(rootView: ClipboardPanelView(model: model))
+        let host = ClipPanelHostingView.make(ClipboardPanelView(model: model))
         host.translatesAutoresizingMaskIntoConstraints = false
         glass.addSubview(host)
         NSLayoutConstraint.activate([

@@ -343,7 +343,8 @@ final class FakeDrag: NSObject, NSDraggingInfo {
     var location = NSPoint.zero
     init(_ pasteboard: NSPasteboard, _ window: NSWindow) { self.pasteboard = pasteboard; self.window = window }
     var draggingDestinationWindow: NSWindow? { window }
-    var draggingSourceOperationMask: NSDragOperation { .every }
+    // Как у настоящего источника панели внутри программы, см. ClipPanelHostingView и checkDragSourceMask.
+    var draggingSourceOperationMask: NSDragOperation { [.copy, .move] }
     var draggingLocation: NSPoint { location }
     var draggedImageLocation: NSPoint { location }
     var draggedImage: NSImage? { nil }
@@ -369,9 +370,7 @@ final class FakeDrag: NSObject, NSDraggingInfo {
     let host = Stand.host(model, width: 1440)
     try? await Task.sleep(nanoseconds: 450_000_000)
     host.layoutSubtreeIfNeeded()
-    func targets(_ view: NSView) -> [NSView] { (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets) }
-    // Цель SwiftUI отличается от поля ввода типами: поле поиска тоже принимает брошенное, но это другой вид.
-    guard let target = targets(host).first(where: { $0.registeredDraggedTypes.map(\.rawValue).contains("public.data") }) else {
+    guard let target = dropTargets(in: host).first else {
         check(false, "цель броска SwiftUI найдена")
         return
     }
@@ -391,13 +390,17 @@ final class FakeDrag: NSObject, NSDraggingInfo {
     let y = ClipPanelMetrics.panelHeight - ClipPanelMetrics.topPadding - ClipPanelMetrics.barHeight / 2
     let ownDrag = FakeDrag(own, Stand.window)
     var found: NSPoint?
+    var proposal: NSDragOperation = []
     for x in stride(from: CGFloat(100), to: 1400, by: 12) {
         ownDrag.location = NSPoint(x: x, y: y)
-        if target.draggingEntered(ownDrag) != [] { found = ownDrag.location; break }
+        proposal = target.draggingEntered(ownDrag)
+        if proposal != [] { found = ownDrag.location; break }
         target.draggingExited(ownDrag)
     }
     check(found != nil, "настоящая цель: своя запись над категорией принимается")
     guard let found else { return }
+    check(proposal == .move, "настоящая цель: над категорией перенос, а не копирование, значка «+» нет (\(proposal.rawValue))")
+    check(target.draggingUpdated(ownDrag) == .move, "настоящая цель: перенос и при движении над категорией")
     check(target.prepareForDragOperation(ownDrag) && target.performDragOperation(ownDrag), "настоящая цель: бросок своей записи выполнен")
     target.concludeDragOperation(ownDrag)
     try? await Task.sleep(nanoseconds: 300_000_000)
@@ -417,6 +420,499 @@ final class FakeDrag: NSObject, NSDraggingInfo {
     model.acceptDroppedRecord(UUID(), on: ClipPanelFixture.spaces[0].id)
     check(pins.isEmpty, "чужой номер записи ничего не закрепил")
     Stand.window.contentView = nil
+}
+
+/// Что разрешает источник переноса в настоящем окне панели. Настоящего сеанса на стенде нет: вызов напрямую по селектору, сеанс источнику не нужен.
+@MainActor func checkDragSourceMask() {
+    let panel = ClipboardPanelHost.makePanel(ClipboardPanelModel())
+    guard let view = panel.contentView?.subviews.first(where: { $0 is ClipPanelHostingView }) else {
+        check(false, "в окне панели свой вид с разрешениями переноса")
+        return
+    }
+    let selector = #selector(NSDraggingSource.draggingSession(_:sourceOperationMaskFor:))
+    guard let found = class_getMethodImplementation(type(of: view), selector) else {
+        check(false, "источник отвечает на запрос разрешений")
+        return
+    }
+    typealias Mask = @convention(c) (AnyObject, Selector, AnyObject?, Int) -> UInt
+    let mask = unsafeBitCast(found, to: Mask.self)
+    func allowed(_ context: NSDraggingContext) -> NSDragOperation { NSDragOperation(rawValue: mask(view, selector, nil, context.rawValue)) }
+    check(allowed(.withinApplication) == [.copy, .move], "источник внутри программы разрешает перенос на категорию (\(allowed(.withinApplication).rawValue))")
+    check(allowed(.outsideApplication) == .copy, "наружу только копия: программа получает содержимое, настоящий файл не переместится (\(allowed(.outsideApplication).rawValue))")
+}
+
+/// Цели SwiftUI: у каждой категории свой вид, слева направо. Отличаются от поля ввода типами: поле поиска тоже принимает брошенное.
+/// Какую категорию выбрать, решает AppKit по виду, поэтому координата сеанса здесь ни на что не влияет.
+@MainActor func dropTargets(in view: NSView) -> [NSView] {
+    func targets(_ view: NSView) -> [NSView] { (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets) }
+    return targets(view).filter { $0.registeredDraggedTypes.map(\.rawValue).contains("public.data") }
+        .sorted { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX }
+}
+
+/// Где на снимке лежит цель: от левого верхнего угла, как у снимков.
+@MainActor func shotRect(_ target: NSView, in host: NSView, margin: CGFloat = 0) -> CGRect {
+    let rect = target.convert(target.bounds, to: host)
+    let top = host.isFlipped ? rect.minY : host.bounds.height - rect.maxY
+    return CGRect(x: rect.minX - margin, y: top - margin, width: rect.width + margin * 2, height: rect.height + margin * 2)
+}
+
+@MainActor func snapshot(_ host: NSView, _ name: String? = nil, out: String) -> Shot {
+    host.layoutSubtreeIfNeeded()
+    let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
+    host.cacheDisplay(in: host.bounds, to: bitmap)
+    if let name {
+        try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(out)/\(name).png"))
+    }
+    return Shot(bitmap: bitmap, scale: CGFloat(bitmap.pixelsWide) / host.bounds.width)
+}
+
+/// Сколько точек участка заметно отличается на двух снимках.
+func changed(_ a: Shot, _ b: Shot, in rect: CGRect) -> Int {
+    var n = 0
+    for y in stride(from: rect.minY, to: rect.maxY, by: 1) {
+        for x in stride(from: rect.minX, to: rect.maxX, by: 1) {
+            let p = a.rgb(x, y), q = b.rgb(x, y)
+            if abs(p.r - q.r) + abs(p.g - q.g) + abs(p.b - q.b) > 0.08 { n += 1 }
+        }
+    }
+    return n
+}
+
+func pause(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+
+/// Наведение и посадка на настоящей цели броска: события от подставного сеанса, панель за экраном.
+@MainActor func checkDropEffects(out: String) async {
+    for theme in ["graphite", "vivid"] {
+        let suffix = theme == "graphite" ? "graphite" : "color"
+        let model = panelModel(theme: theme)
+        // Как в настоящей панели: запись получает категорию и видна в новом списке.
+        model.onPin = { [weak model] id, space in
+            guard let model, let index = model.allItems.firstIndex(where: { $0.id == id }) else { return }
+            model.allItems[index].spaceID = space
+        }
+        let host = Stand.host(model, width: 1440)
+        await pause(0.45)
+        host.layoutSubtreeIfNeeded()
+        let spaces = dropTargets(in: host)
+        check(spaces.count == ClipPanelFixture.spaces.count, "\(suffix): все категории принимают перенос (\(spaces.count))")
+        guard spaces.count >= 2 else { continue }
+        let target = spaces[0]
+        let own = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)"))
+        let foreign = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.clipdrag.\(UUID().uuidString)"))
+        defer { own.releaseGlobally(); foreign.releaseGlobally() }
+        func carry(_ id: UUID) {
+            let item = NSPasteboardItem()
+            item.setData(ClipDrag.data(for: id), forType: NSPasteboard.PasteboardType(ClipDrag.recordType.identifier))
+            own.clearContents(); own.writeObjects([item])
+        }
+        let free = model.allItems.first { $0.spaceID == nil }!
+        carry(free.id)
+        let textItem = NSPasteboardItem()
+        textItem.setString("посторонний текст", forType: .string)
+        foreign.clearContents(); foreign.writeObjects([textItem])
+        let drag = FakeDrag(own, Stand.window)
+
+        // Запас под увеличение: вид растёт за свои границы.
+        let rect = shotRect(target, in: host, margin: 4)
+        let neighbour = shotRect(spaces[1], in: host)
+        await pause(0.5)
+        let rest = snapshot(host, out: out)
+
+        // Наведение и возврат.
+        _ = target.draggingEntered(drag)
+        await pause(0.6)
+        let hover = snapshot(host, "\(suffix)-drop-hover", out: out)
+        check(changed(rest, hover, in: rect) > 200, "\(suffix): категория под курсором подсветилась (\(changed(rest, hover, in: rect)) точек)")
+        check(changed(rest, hover, in: neighbour) == 0, "\(suffix): соседняя категория не сдвинулась и не подсветилась")
+        target.draggingExited(drag)
+        await pause(0.6)
+        check(changed(rest, snapshot(host, out: out), in: rect) == 0, "\(suffix): курсор ушёл, категория вернулась к обычному виду")
+
+        // Посторонние данные вид не меняют.
+        let stranger = FakeDrag(foreign, Stand.window)
+        check(target.draggingEntered(stranger) == [], "\(suffix): посторонний текст над категорией не принимается")
+        await pause(0.4)
+        check(changed(rest, snapshot(host, out: out), in: rect) == 0, "\(suffix): посторонний текст категорию не подсветил")
+        target.draggingExited(stranger)
+
+        // Посадка в общей вкладке: вспышка, точка на карточке, запись на месте.
+        let order = model.visible.map(\.id)
+        let index = order.firstIndex(of: free.id)!
+        _ = target.draggingEntered(drag)
+        await pause(0.4)
+        let hovered = snapshot(host, out: out)
+        check(target.prepareForDragOperation(drag) && target.performDragOperation(drag), "\(suffix): бросок выполнен")
+        target.concludeDragOperation(drag)
+        await pause(0.09)
+        let flash = snapshot(host, "\(suffix)-drop-flash", out: out)
+        check(changed(hovered, flash, in: rect) > 200, "\(suffix): при посадке категория вспыхнула сильнее наведения (\(changed(hovered, flash, in: rect)) точек)")
+        await pause(1)
+        let landed = snapshot(host, "\(suffix)-drop-landed", out: out)
+        check(changed(rest, landed, in: rect) == 0, "\(suffix): вспышка погасла")
+        check(model.allItems.first { $0.id == free.id }?.spaceID == ClipPanelFixture.spaces[0].id, "\(suffix): запись попала в категорию")
+        check(model.visible.map(\.id) == order, "\(suffix): в общей вкладке запись осталась на месте")
+        let origin = cardOrigin(index)
+        let title = CGRect(x: origin.x + 14, y: origin.y + 6, width: 120, height: 22)
+        check(changed(rest, landed, in: title) > 10, "\(suffix): на карточке появилась точка категории (\(changed(rest, landed, in: title)) точек)")
+
+        // Посадка из вкладки другой категории: запись уходит, соседние смыкаются.
+        model.selectTab(ClipPanelFixture.spaces[0].id)
+        await pause(0.4)
+        // Брошенная туда же, откуда взята, запись осталась бы: цель — соседняя категория.
+        let inTab = model.visible.map(\.id)
+        check(inTab.count >= 2, "\(suffix): во вкладке категории есть записи (\(inTab.count))")
+        let beforeLeave = snapshot(host, out: out)
+        carry(inTab[0])
+        let next = dropTargets(in: host)[1]
+        _ = next.draggingEntered(drag)
+        _ = next.prepareForDragOperation(drag)
+        _ = next.performDragOperation(drag)
+        next.concludeDragOperation(drag)
+        let cards = CGRect(x: 0, y: cardOrigin(0).y, width: 1440, height: ClipCard.height)
+        await pause(0.1)
+        let closing = snapshot(host, out: out)
+        await pause(1)
+        let closed = snapshot(host, "\(suffix)-drop-closed", out: out)
+        check(model.visible.map(\.id) == Array(inTab.dropFirst()), "\(suffix): запись ушла из открытой вкладки, порядок соседних прежний")
+        check(changed(beforeLeave, closed, in: cards) > 500, "\(suffix): лента перестроилась")
+        check(changed(closing, closed, in: cards) > 200 && changed(closing, beforeLeave, in: cards) > 200,
+              "\(suffix): соседние карточки смыкаются плавно, есть промежуточный кадр (\(changed(closing, closed, in: cards)) и \(changed(closing, beforeLeave, in: cards)) точек)")
+
+        // Сжатый вид на время поиска: цветная точка подсвечивается так же.
+        model.selectTab(nil)
+        model.openSearch()
+        await pause(0.5)
+        carry(free.id)
+        let dots = dropTargets(in: host)
+        check(dots.count == ClipPanelFixture.spaces.count, "\(suffix): при поиске все точки принимают перенос (\(dots.count))")
+        if let dot = dots.first {
+            let dotRect = shotRect(dot, in: host, margin: 3)
+            let quiet = snapshot(host, out: out)
+            check(dot.draggingEntered(drag) == .move, "\(suffix): над точкой тоже перенос")
+            await pause(0.6)
+            let glow = snapshot(host, "\(suffix)-drop-hover-search", out: out)
+            check(changed(quiet, glow, in: dotRect) > 100, "\(suffix): точка под курсором подсветилась (\(changed(quiet, glow, in: dotRect)) точек)")
+            dot.draggingExited(drag)
+            await pause(0.6)
+            check(changed(quiet, snapshot(host, out: out), in: dotRect) == 0, "\(suffix): курсор ушёл, точка вернулась")
+        }
+        Stand.window.contentView = nil
+    }
+}
+
+// MARK: - Закрытие панели
+
+/// Окно панели на стенде: за экраном и без настоящей клавиатуры, чтобы не забрать её у программы автора. Ключевым оно притворяется.
+final class StandPanel: NSPanel {
+    var fakeKey = false
+    override var canBecomeKey: Bool { false }
+    override var isKeyWindow: Bool { fakeKey }
+    override func makeKeyAndOrderFront(_ sender: Any?) {
+        fakeKey = true
+        orderFront(sender)
+    }
+    override func orderOut(_ sender: Any?) {
+        fakeKey = false
+        super.orderOut(sender)
+    }
+}
+
+@MainActor final class LeaveStand {
+    let host: ClipboardPanelHost
+    let model: ClipboardPanelModel
+    let frame = CGRect(x: -10000, y: 300, width: 1440, height: ClipPanelMetrics.panelHeight)
+    var panel: StandPanel?
+
+    /// Настоящее содержимое панели в окне стенда. `wired` — модель из настоящего `makeModel`: у неё настоящий Esc.
+    init(wired: Bool = false) {
+        let host = ClipboardPanelHost()
+        self.host = host
+        model = wired ? host.makeModel(ClipboardController.shared) : panelModel(theme: "vivid")
+        host.hidesOnOutsideClick = false
+        host.standFrame = frame
+        host.reducesMotion = { false }
+        host.panelMaker = { [weak self] model in
+            let real = ClipboardPanelHost.makePanel(model)
+            let content = real.contentView
+            real.contentView = nil
+            let panel = StandPanel(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.isReleasedWhenClosed = false
+            panel.contentView = content
+            self?.panel = panel
+            return panel
+        }
+    }
+
+    func open() async {
+        host.present(model)
+        await pause(0.3)
+    }
+
+    var settledOpen: Bool {
+        guard let panel else { return false }
+        return host.isVisible && panel.isVisible && panel.alphaValue == 1 && panel.frame == frame && !panel.ignoresMouseEvents
+    }
+
+    var settledGone: Bool {
+        guard let panel else { return false }
+        return !host.isVisible && !panel.isVisible && panel.alphaValue == 0
+    }
+
+    func close() {
+        panel?.orderOut(nil)
+        panel?.contentView = nil
+    }
+}
+
+func waitUntil(_ timeout: Double = 3, _ test: () -> Bool) async -> Bool {
+    let start = ProcessInfo.processInfo.systemUptime
+    while !test() {
+        if ProcessInfo.processInfo.systemUptime - start > timeout { return false }
+        await pause(0.01)
+    }
+    return true
+}
+
+@MainActor func checkPanelLeave() async {
+    let clock = { ProcessInfo.processInfo.systemUptime }
+
+    // Обычное закрытие: монитор снят сразу, окно уезжает и гаснет, колбэк один раз после ухода.
+    let stand = LeaveStand()
+    let picture = stand.model.allItems.first { $0.kind == .image }!
+    var loads = 0
+    let loader = stand.model.imageLoader
+    stand.model.imageLoader = { loads += 1; return loader($0) }
+    await stand.open()
+    guard let panel = stand.panel else {
+        check(false, "окно стенда создано")
+        return
+    }
+    check(stand.settledOpen, "панель открылась: альфа \(panel.alphaValue), кадр \(panel.frame)")
+    check(panel.frame.minX == -10000, "окно панели в проверке за экраном")
+    check(stand.host.monitorsInstalled, "пока панель открыта, монитор клавиш стоит")
+    _ = stand.model.image(picture)
+    loads = 0
+
+    struct Mark { var visible: Bool; var key: Bool; var alpha: CGFloat; var elapsed: Double }
+    var marks: [Mark] = []
+    var began = clock()
+    stand.host.hide { marks.append(Mark(visible: panel.isVisible, key: panel.isKeyWindow, alpha: panel.alphaValue, elapsed: clock() - began)) }
+    check(!stand.host.monitorsInstalled, "монитор клавиш снят сразу в начале закрытия")
+    check(!stand.host.isVisible, "isVisible при уходе уже false: для всех панель закрыта")
+    check(panel.isVisible && panel.alphaValue > 0.9, "окно ещё на экране, скрытия сразу нет")
+    check(panel.ignoresMouseEvents, "клики по уезжающей панели не вставляют второй раз")
+    check(marks.isEmpty, "колбэк не раньше конца анимации")
+    var alphas: [CGFloat] = []
+    var heights: [CGFloat] = []
+    while marks.isEmpty, clock() - began < 3 {
+        alphas.append(panel.alphaValue)
+        heights.append(panel.frame.minY)
+        _ = stand.model.image(picture)
+        await pause(0.012)
+    }
+    check(zip(alphas, alphas.dropFirst()).allSatisfy { $0 >= $1 } && alphas.contains { $0 > 0.05 && $0 < 0.95 }, "панель гаснет постепенно: \(alphas.count) замеров, \(alphas.prefix(8))")
+    check(zip(heights, heights.dropFirst()).allSatisfy { $0 >= $1 } && heights.contains { $0 < stand.frame.minY - 1 && $0 > stand.frame.minY - 39 },
+          "панель уезжает вниз постепенно: \(heights.prefix(8))")
+    check(loads == 0, "пока панель уезжает, картинки в памяти (загрузок \(loads))")
+    check(marks.count == 1, "колбэк пришёл один раз (\(marks.count))")
+    if let mark = marks.first {
+        check(!mark.visible, "в колбэке окна уже нет на экране")
+        check(!mark.key, "в колбэке окно уже не ключевое")
+        check(mark.alpha == 0, "в колбэке панель погасла (альфа \(mark.alpha))")
+        check(mark.elapsed >= 0.13, "колбэк после анимации 0,16 с, прошло \(mark.elapsed)")
+    }
+    await pause(0.3)
+    check(marks.count == 1, "колбэк не повторился")
+    check(stand.settledGone, "после ухода окно скрыто, альфа 0")
+    check(panel.frame.minY == stand.frame.minY - ClipboardPanelHost.slideDistance, "панель уехала ровно на \(ClipboardPanelHost.slideDistance) pt вниз (\(panel.frame.minY))")
+    loads = 0
+    _ = stand.model.image(picture)
+    check(loads == 1, "картинки забыты по завершении ухода")
+
+    // hide у скрытой панели: уходить нечему, колбэк сразу.
+    var count = 0
+    stand.host.hide { count += 1 }
+    check(count == 1 && stand.settledGone, "hide у скрытой панели зовёт колбэк сразу")
+
+    // Двойной hide: анимация одна, оба колбэка по разу в её конце.
+    await stand.open()
+    var first = 0, second = 0, third = 0
+    stand.host.hide { first += 1 }
+    await pause(0.08)
+    stand.host.hide { second += 1 }
+    stand.host.hide()
+    stand.host.hide { third += 1 }
+    check(first == 0 && second == 0 && third == 0 && !stand.host.isVisible, "повторный hide не завершает уход раньше времени")
+    let doubled = await waitUntil { first > 0 }
+    await pause(0.3)
+    check(doubled && first == 1 && second == 1 && third == 1, "двойной hide: каждый колбэк один раз (\(first), \(second), \(third))")
+    check(stand.settledGone, "после двойного hide панель скрыта")
+
+    // Повторное открытие посреди закрытия: старое завершение панель не скрывает, старый колбэк не приходит.
+    await stand.open()
+    var stale = 0
+    stand.host.hide { stale += 1 }
+    await pause(0.07)
+    let midAlpha = panel.alphaValue
+    stand.host.present(stand.model)
+    check(stand.host.isVisible && stand.host.monitorsInstalled && !panel.ignoresMouseEvents, "открытие посреди ухода сразу вернуло панель и монитор клавиш")
+    check(panel.alphaValue >= midAlpha - 0.2 || midAlpha == 0, "панель поехала обратно с текущего места, без скачка в ноль (было \(midAlpha), стало \(panel.alphaValue))")
+    await pause(0.5)
+    check(stand.settledOpen, "старое завершение не скрыло заново показанную панель: альфа \(panel.alphaValue), кадр \(panel.frame), видна \(panel.isVisible)")
+    check(stale == 0, "колбэк отменённого ухода не пришёл (\(stale))")
+    // Следующий уход после отмены обычный.
+    var after = 0
+    stand.host.hide { after += 1 }
+    let afterDone = await waitUntil { after > 0 }
+    await pause(0.3)
+    check(afterDone && after == 1 && stale == 0 && stand.settledGone, "следующий уход после отмены обычный (\(after), старый \(stale))")
+
+    // Открытие посреди ухода на другом экране: панель уходит с прежнего места и приезжает на новое целиком.
+    await stand.open()
+    var moved = 0
+    stand.host.hide { moved += 1 }
+    await pause(0.05)
+    let otherScreen = stand.frame.offsetBy(dx: -3000, dy: 100)
+    stand.host.standFrame = otherScreen
+    stand.host.present(stand.model)
+    await pause(0.5)
+    check(stand.host.isVisible && panel.isVisible && panel.alphaValue == 1 && panel.frame == otherScreen && moved == 0, "открытие посреди ухода на другом экране: панель там, колбэка нет (\(panel.frame), \(moved))")
+    stand.host.standFrame = stand.frame
+    stand.host.hide()
+    await pause(0.35)
+    check(stand.settledGone, "после этого панель закрывается")
+
+    // Быстрые открытия и закрытия подряд: каждое следующее отменяет предыдущее.
+    var rapid = [Int](repeating: 0, count: 6)
+    for i in rapid.indices {
+        stand.host.present(stand.model)
+        await pause(i % 2 == 0 ? 0 : 0.02)
+        stand.host.hide { rapid[i] += 1 }
+        await pause(i % 3 == 0 ? 0 : 0.03)
+    }
+    stand.host.present(stand.model)
+    await pause(0.5)
+    check(stand.settledOpen && rapid.allSatisfy { $0 == 0 }, "серия открыл-закрыл-открыл: панель открыта, старых колбэков нет \(rapid)")
+    stand.host.hide { rapid[0] += 1 }
+    await pause(0.02)
+    let gone = await waitUntil { rapid[0] == 1 }
+    check(gone && stand.settledGone, "после серии панель закрывается обычным порядком")
+    await pause(0.3)
+    check(rapid[0] == 1, "колбэк последнего ухода один")
+
+    // Закрытие сразу после открытия: уезжает на 40 pt от места показа, а не от середины пути.
+    stand.host.present(stand.model)
+    await pause(0.04)
+    var quick = 0
+    stand.host.hide { quick += 1 }
+    let quickDone = await waitUntil { quick > 0 }
+    check(quickDone && stand.settledGone && panel.frame.minY == stand.frame.minY - ClipboardPanelHost.slideDistance, "закрытие посреди открытия: панель на месте ухода (\(panel.frame.minY))")
+    await stand.open()
+    check(stand.settledOpen, "следующее открытие после быстрого закрытия обычное")
+
+    // Горячая клавиша: при открытой закрывает, во время ухода открывает снова.
+    let controller = ClipboardController.shared
+    stand.host.toggle(controller: controller)
+    check(!stand.host.isVisible && panel.isVisible, "клавиша при открытой панели начала уход")
+    await pause(0.05)
+    stand.host.toggle(controller: controller)
+    check(stand.host.isVisible, "клавиша во время ухода открывает панель снова")
+    await pause(0.5)
+    check(stand.settledOpen, "после этого панель открыта и осталась открытой")
+    stand.host.toggle(controller: controller)
+    let toggled = await waitUntil { stand.settledGone }
+    check(toggled, "клавиша закрыла панель до конца")
+    stand.host.toggle(controller: controller)
+    await pause(0.3)
+    check(stand.settledOpen, "клавиша при скрытой панели открывает")
+    stand.host.hide()
+    await pause(0.3)
+    stand.close()
+
+    // Esc идёт через настоящий обработчик модели; смена программы через настоящее уведомление.
+    let wired = LeaveStand(wired: true)
+    await wired.open()
+    _ = wired.model.handleKey(ClipPanelKey(code: esc, text: "\u{1b}"))
+    check(!wired.host.isVisible && wired.panel?.isVisible == true && !wired.host.monitorsInstalled, "Esc закрывает тем же уходом")
+    let escDone = await waitUntil { wired.settledGone }
+    check(escDone, "Esc: панель ушла до конца")
+    wired.host.hidesOnOutsideClick = true
+    await wired.open()
+    NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didActivateApplicationNotification, object: nil)
+    check(!wired.host.isVisible && wired.panel?.isVisible == true, "смена программы закрывает тем же уходом")
+    let switched = await waitUntil { wired.settledGone }
+    check(switched, "смена программы: панель ушла до конца")
+    wired.close()
+
+    // «Уменьшить движение»: без анимации, порядок тот же.
+    let still = LeaveStand()
+    still.host.reducesMotion = { true }
+    await still.open()
+    check(still.settledOpen, "уменьшенное движение: панель открыта сразу на месте")
+    var stillCount = 0
+    still.host.hide { stillCount += 1 }
+    check(stillCount == 1 && still.settledGone, "уменьшенное движение: закрытие сразу, колбэк один раз")
+    still.close()
+}
+
+/// Настоящий порядок вставки на подставном отправителе: настоящих событий нет, системный буфер не участвует.
+@MainActor func checkPasteAfterLeaving() async {
+    let clock = { ProcessInfo.processInfo.systemUptime }
+    let stand = LeaveStand()
+    await stand.open()
+    guard let panel = stand.panel else {
+        check(false, "окно стенда создано")
+        return
+    }
+    struct Sent { var visible: Bool; var key: Bool; var elapsed: Double }
+    var sent: [Sent] = []
+    var began = clock()
+    let send = { @MainActor in sent.append(Sent(visible: panel.isVisible, key: panel.isKeyWindow, elapsed: clock() - began)) }
+
+    check(ClipboardController.focusPause > 0 && ClipboardController.focusPause <= 0.2, "пауза для фокуса небольшая: \(ClipboardController.focusPause)")
+    ClipboardController.pasteAfterLeaving(stand.host, send: send)
+    check(sent.isEmpty && panel.isVisible, "⌘V не уходит сразу")
+    let goneFirst = await waitUntil { !panel.isVisible }
+    let goneAt = clock() - began
+    check(goneFirst && sent.isEmpty, "⌘V не уходит вместе с orderOut: нужна пауза для фокуса")
+    let arrived = await waitUntil { !sent.isEmpty }
+    await pause(0.3)
+    check(arrived && sent.count == 1, "⌘V ушёл один раз (\(sent.count))")
+    if let mark = sent.first {
+        check(!mark.visible && !mark.key, "к ⌘V окна нет на экране и оно не ключевое")
+        check(mark.elapsed >= goneAt + ClipboardController.focusPause - 0.01, "⌘V через паузу после ухода: ушло в \(goneAt), ⌘V в \(mark.elapsed)")
+        check(mark.elapsed >= ClipboardPanelHost.slideDuration - 0.03 + ClipboardController.focusPause, "⌘V после анимации и паузы: \(mark.elapsed)")
+    }
+
+    // Открыли панель посреди ухода: ⌘V попал бы в неё саму.
+    await stand.open()
+    sent = []
+    began = clock()
+    ClipboardController.pasteAfterLeaving(stand.host, send: send)
+    await pause(0.06)
+    stand.host.present(stand.model)
+    await pause(0.6)
+    check(sent.isEmpty && stand.settledOpen, "открыли посреди ухода: ⌘V не ушёл, панель открыта (\(sent.count))")
+
+    // Открыли панель в паузе после ухода.
+    sent = []
+    ClipboardController.pasteAfterLeaving(stand.host, send: send)
+    let gone = await waitUntil { !panel.isVisible }
+    stand.host.present(stand.model)
+    await pause(0.5)
+    check(gone && sent.isEmpty && stand.settledOpen, "открыли в паузе после ухода: ⌘V не ушёл (\(sent.count))")
+
+    // Открыли в паузе и сразу снова закрыли: окно уезжает, ⌘V старой вставки не должен попасть в него.
+    sent = []
+    ClipboardController.pasteAfterLeaving(stand.host, send: send)
+    let goneAgain = await waitUntil { !panel.isVisible }
+    stand.host.present(stand.model)
+    stand.host.hide()
+    await pause(0.5)
+    check(goneAgain && sent.isEmpty && stand.settledGone, "открыли и закрыли в паузе: старый ⌘V не ушёл (\(sent.count))")
+    stand.close()
 }
 
 /// Копия при перетаскивании: на цветной подложке углы дают подложку, синего нет. Настоящую копию рисует система, здесь её содержимое.
@@ -784,7 +1280,11 @@ enum Main {
             checkGeometry()
             await checkDrag()
             await checkLiveEvents()
+            checkDragSourceMask()
             await checkDropTarget()
+            await checkDropEffects(out: out)
+            await checkPanelLeave()
+            await checkPasteAfterLeaving()
             await checkDragPreview(out: out)
             await checkScreens(out: out)
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")

@@ -28,10 +28,12 @@ absent "проверка не называет настоящую связку, 
   Tests/ClipboardPanelCheck.swift Tests/ClipboardPanelFixture.swift
 
 PANEL=(Sources/Modules/Clipboard/ClipboardPanel.swift Sources/Modules/Clipboard/ClipboardPanelCard.swift Sources/Modules/Clipboard/ClipboardPanelLogic.swift Sources/Modules/Clipboard/ClipboardPanelDrag.swift)
+# Приёмник категории проходит те же стражи сети и активации. В страже масштаба его нет: страж про карточку, а масштаб категории под переносом задан.
+DROP=Sources/Modules/Clipboard/ClipboardPanelDrop.swift
 absent "панель не ходит в сеть: сайт не узнает, что скопировано" \
-  'URLSession|URLRequest|LinkPresentation|LPMetadata|WKWebView|WebKit|AsyncImage|NSImage\(contentsOf|Data\(contentsOf|dataTask' "${PANEL[@]}"
+  'URLSession|URLRequest|LinkPresentation|LPMetadata|WKWebView|WebKit|AsyncImage|NSImage\(contentsOf|Data\(contentsOf|dataTask' "${PANEL[@]}" "$DROP"
 absent "панель не активирует приложение и не открывает окон, которые могли бы" \
-  'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}"
+  'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}" "$DROP"
 absent "выделение не ждёт двойного клика системы" 'onTapGesture\(count' "${PANEL[@]}"
 absent "у выбора нет масштаба: карточка не дрожит" 'scaleEffect' "${PANEL[@]}"
 absent "перетаскивание не пишет содержимое ни в буфер, ни во временные файлы" 'NSPasteboard|temporaryDirectory|NSTemporaryDirectory|\.write\(' Sources/Modules/Clipboard/ClipboardPanelDrag.swift
@@ -41,11 +43,11 @@ BARE="$(/usr/bin/grep -n 'buttonStyle(.plain)' Sources/Modules/Clipboard/Clipboa
 [ -z "$BARE" ] || { echo "$BARE"; fail "кнопка панели без focusable(false)"; }
 echo "ok   все кнопки панели без клавиатурного фокуса"
 
-# hide() до ⌘V: иначе клавиши ушли бы в саму панель.
-HIDE="$(/usr/bin/grep -n 'ClipboardPanelHost.shared.hide()' Sources/Modules/Clipboard/ClipboardController.swift | tail -1 | cut -d: -f1)"
-SEND="$(/usr/bin/grep -n 'asyncAfter.*sendPaste' Sources/Modules/Clipboard/ClipboardController.swift | cut -d: -f1)"
-[ -n "$HIDE" ] && [ -n "$SEND" ] && [ "$HIDE" -lt "$SEND" ] || fail "paste: hide() должен идти до отправки ⌘V"
-echo "ok   paste прячет панель до ⌘V"
+# ⌘V только через завершение ухода панели: иначе клавиши ушли бы в саму панель. Само поведение проверяет checkPasteAfterLeaving.
+SENDS="$(/usr/bin/grep -c 'sendPaste' Sources/Modules/Clipboard/ClipboardController.swift)"
+/usr/bin/grep -q 'pasteAfterLeaving(ClipboardPanelHost.shared, send: Self.sendPaste)' Sources/Modules/Clipboard/ClipboardController.swift \
+  && [ "$SENDS" = 2 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving"
+echo "ok   paste шлёт ⌘V только после ухода панели"
 
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache clipboard-panel KIT_TEST_DEFAULTS)"
