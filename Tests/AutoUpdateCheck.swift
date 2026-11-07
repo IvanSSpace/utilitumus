@@ -226,7 +226,7 @@ let awakeOff = LinkWire.encoded(AwakeState(isActive: false, endDate: nil, keepDi
     func noticeModules() -> [Module] { updates.noticeRows.map(\.module) }
 
     // MARK: Сборка
-    check(AutoUpdate.liveBuildAllows == false, "сборка со швом сама не обновляет: настоящие утилиты вне опасности")
+    check(AutoUpdate.isInstalledRelease == false, "сборка со швом сама не обновляет: настоящие утилиты вне опасности")
     check(auto.buildAllows == false, "и значение по умолчанию у стенда такое же")
     check(SatelliteRegistry.installsOnItsOwn, "обычная сборка без флага пилота ставит сама (с флагом: разбор в скрипте)")
     await fresh([entry("sound")])

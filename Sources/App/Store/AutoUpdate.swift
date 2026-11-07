@@ -104,7 +104,7 @@ final class AutoUpdate: ObservableObject {
 
     /// Только установленный выпуск: пилот и `scripts/dev.sh` (`installsOnItsOwn`), сборка со швом, отмеченная дев-сборка и
     /// собранный руками центр вне «Программ» настоящие утилиты не трогают.
-    nonisolated static var liveBuildAllows: Bool {
+    nonisolated static var isInstalledRelease: Bool {
         #if KIT_TEST_DEFAULTS
         return false
         #else
@@ -115,7 +115,7 @@ final class AutoUpdate: ObservableObject {
     }
 
     /// Стенд подставляет своё; настоящая сборка их не меняет.
-    var buildAllows = AutoUpdate.liveBuildAllows
+    var buildAllows = AutoUpdate.isInstalledRelease
     var now: () -> Date = { Date() }
     /// Сеть после сна поднимается не сразу.
     var wakeDelay: Duration = .seconds(60)
