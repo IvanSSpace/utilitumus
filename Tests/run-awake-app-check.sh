@@ -312,7 +312,7 @@ wait_until "вышел" has_exited "$PID" || true
 echo "== центр без Dock появляется и выходит"
 reset_suite
 # Значок видит закреплённая утилита: по нему и видно, считает ли она центр запущенным.
-defaults write "$SUITE" "MenuBarIcon.$ID" -bool true
+defaults write "$SUITE" MenuBarIcon.awake -bool true
 defaults write "$SUITE" Test.HubBundleID -string "$FAKE_HUB_ID"
 defaults write "$SUITE" "ModuleOn.$ID" -bool true
 start_agent
