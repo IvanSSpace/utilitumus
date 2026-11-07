@@ -6,8 +6,9 @@
 #   stand_snapshot_compare "$OUT/before.txt"      # 0 — не менялось, 1 — менялось
 #
 # Настоящее Utilitumus (центр или любая настоящая утилита, например Вентиляторы со своим fans.log) может быть запущено
-# и само пишет свои журналы и настройки. Тогда расхождения в журналах и в local.utilitumus.plist только отмечаются
-# (ПРИМЕЧАНИЕ), остальное всё равно провал. Приложение не трогаем.
+# и само пишет свои журналы, настройки и историю Нагрузки (атомарно, поэтому меняется и время папки). Тогда расхождения в них
+# только отмечаются (ПРИМЕЧАНИЕ), остальное всё равно провал: новый файл в папке даст свою строку. Сборка со швом пишет историю
+# в свою временную папку (LoadHistory.defaultURL). Приложение не трогаем.
 
 STAND_REAL_LOCATIONS=(
   "$HOME/Library/Application Support/Utilitumus"
@@ -37,15 +38,16 @@ stand_real_app_running() {
 }
 
 stand_snapshot_compare() {
-  local before="$1" after changed noisy hard
+  local before="$1" after changed noisy hard pattern
   after="$(mktemp -t stand-snapshot)"
   stand_snapshot_take "$after"
   changed="$(diff "$before" "$after" | /usr/bin/grep -E '^[<>]' || true)"
   rm -f "$after"
   if [ -z "$changed" ]; then echo "ok   настоящие места не менялись ($(wc -l < "$before" | tr -d ' ') записей)"; return 0; fi
   if stand_real_app_running; then
-    noisy="$(echo "$changed" | /usr/bin/grep -E 'Library/Logs/Utilitumus|Preferences/local\.utilitumus\.plist' || true)"
-    hard="$(echo "$changed" | /usr/bin/grep -vE 'Library/Logs/Utilitumus|Preferences/local\.utilitumus\.plist' || true)"
+    pattern='Library/Logs/Utilitumus|Preferences/local\.utilitumus\.plist|Application Support/Utilitumus/load-history\.json\||Application Support/Utilitumus\|'
+    noisy="$(echo "$changed" | /usr/bin/grep -E "$pattern" || true)"
+    hard="$(echo "$changed" | /usr/bin/grep -vE "$pattern" || true)"
     [ -n "$noisy" ] && { echo "ПРИМЕЧАНИЕ: настоящее Utilitumus запущено, его журналы и настройки меняются само:"; echo "$noisy" | sed 's/^/   /'; }
   else
     hard="$changed"

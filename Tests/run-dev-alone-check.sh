@@ -110,7 +110,7 @@ for id in $IDS; do
   if [ "$id" = fans ]; then
     kill -USR1 "$pid" 2>/dev/null
     sleep 1
-    if grep -qaF "XPC настоящей службы вентиляторов" "$exe"; then ok "Вентиляторы: клиент службы отказывает"; else bad "Вентиляторы: нет отказа в клиенте службы"; fi
+    if LC_ALL=C grep -qaF "XPC настоящей службы вентиляторов" "$exe"; then ok "Вентиляторы: клиент службы отказывает"; else bad "Вентиляторы: нет отказа в клиенте службы"; fi
   fi
   if kill -0 "$pid" 2>/dev/null; then ok "копия жива до конца проверки"; else bad "$id: копия упала: $(tail -3 "$log")"; fi
   kill "$pid" 2>/dev/null
@@ -136,6 +136,23 @@ if [ -n "$first" ]; then
   echo "     $(head -1 "$RUN/again.out")"
   codesign --verify --deep --strict "${exe%/Contents/MacOS/*}" 2>/dev/null && ok "бандл после пересборки цел" || bad "подпись бандла после пересборки"
   same "повторная сборка: те же домен и команда" "$(sed -n 's/^  \(env .*\)$/\1/p' "$RUN/again.out")" "$line"
+fi
+
+# Кэш живёт по времени файлов: правка экрана обязана дойти до бинарника, иначе человек смотрит на старый экран.
+if [ -n "$first" ]; then
+  echo "== правка экрана в копии проекта"
+  EDIT="$RUN/edit-copy"
+  mkdir -p "$EDIT"
+  tar cf - Sources scripts Info.plist | (cd "$EDIT" && tar xf -)
+  ( cd "$EDIT" && scripts/dev.sh --alone mouse ) > "$RUN/edit1.out" 2>&1 || bad "копия: первая сборка"
+  edit_line="$(sed -n 's/^  \(env .*\)$/\1/p' "$RUN/edit1.out")"
+  edit_exe="${edit_line##* }"
+  if LC_ALL=C grep -qaF "dev-alone-probe-edit" "$edit_exe"; then bad "метка правки уже в бинарнике"; else ok "до правки метки нет"; fi
+  echo 'let devAloneProbeEdit = "dev-alone-probe-edit"' >> "$EDIT/Sources/Modules/Mouse/MouseView.swift"
+  ( cd "$EDIT" && scripts/dev.sh --alone mouse ) > "$RUN/edit2.out" 2>&1 || bad "копия: сборка после правки"
+  if LC_ALL=C grep -qaF "dev-alone-probe-edit" "$edit_exe"; then ok "правка дошла: $(head -1 "$RUN/edit2.out" | cut -d, -f1)"; else bad "правка файла экрана не дошла до бинарника"; fi
+  edit_suite="$(sed -n 's/.*KIT_TEST_SUITE=\([^ ]*\).*/\1/p' <<<"$edit_line")"
+  [ "$edit_suite" != "${suite:-}" ] && ok "у другой копии проекта свой домен настроек" || bad "домен настроек общий у копий проекта"
 fi
 
 echo "== настоящее"
@@ -222,7 +239,8 @@ changed "разрешения в манифесте"
 printf '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>com.apple.security.device.audio-input</key><true/></dict></plist>\n' > "$FX/Sources/Apps/Probe/E.entitlements"
 changed "файл разрешений"
 
-REAL_SWIFTC="$(command -v swiftc)"
+# type -P: swiftc здесь ещё и функция из Tests/lib/incremental.sh, а подставной должен звать настоящий файл, не себя.
+REAL_SWIFTC="$(type -P swiftc)"
 printf '#!/bin/bash\nif [ "${1:-}" = --version ]; then echo "другой компилятор"; exit 0; fi\nexec "%s" "$@"\n' "$REAL_SWIFTC" > "$RUN/shim/swiftc"
 chmod +x "$RUN/shim/swiftc"
 expect_build "другой компилятор" "" "$RUN/shim:$PATH"
@@ -230,7 +248,7 @@ expect_build "компилятор обратно"
 rm "$RUN/shim/swiftc"
 
 # Другой сертификат в списке: готовый не берётся. Подпись настоящая, поэтому и свежая сборка честно не сходится с ним.
-REAL_SECURITY="$(command -v security)"
+REAL_SECURITY="$(type -P security)"
 printf '#!/bin/bash\n"%s" "$@" | sed -E "s/[0-9A-F]{40}/0000000000000000000000000000000000000000/"\n' "$REAL_SECURITY" > "$RUN/shim/security"
 chmod +x "$RUN/shim/security"
 build "" "$RUN/shim:$PATH"
