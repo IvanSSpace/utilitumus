@@ -106,8 +106,8 @@ final class ClipboardPanelModel: ObservableObject {
             guard query != oldValue else { return }
             selected = 0
             clicks.reset()
-            scrollRequest = visible.first?.id
-            // Буква ушла в скрытое поле: поиск раскрывается сам. Стёртый текст поиск не закрывает, это делает Esc.
+            scrollToFirst()
+            // Текст мог прийти и мимо клавиш (вставка в поле). Стёртый текст поиск не закрывает, это делает Esc.
             if !query.isEmpty { searchOpen = true }
         }
     }
@@ -121,7 +121,10 @@ final class ClipboardPanelModel: ObservableObject {
     @Published var theme = DSTheme.dusk
     @Published var editor: ClipSpaceEditor?
     /// К чему прокрутить ленту. Только клавиатура и смена списка: карточка под курсором не должна уезжать между двумя кликами.
-    @Published private(set) var scrollRequest: UUID?
+    private(set) var scrollRequest: UUID?
+    @Published private(set) var scrollTick = 0
+    /// Момент показа: от него считается «N минут назад». Панель живёт между показами, и карточка иначе не обновила бы время.
+    @Published private(set) var shownAt = Date()
     /// Вернуть фокус в поле поиска.
     @Published private(set) var focusRequest = 0
     /// Лимит истории: для честной подписи при удалении пространства.
@@ -157,6 +160,12 @@ final class ClipboardPanelModel: ObservableObject {
         guard !list.isEmpty else { return }
         selected = min(max(selected + delta, 0), list.count - 1)
         scrollRequest = list[selected].id
+        scrollTick += 1
+    }
+
+    private func scrollToFirst() {
+        scrollRequest = visible.first?.id
+        scrollTick += 1
     }
 
     func quickPick(_ number: Int) {
@@ -169,7 +178,7 @@ final class ClipboardPanelModel: ObservableObject {
         tab = id
         selected = 0
         clicks.reset()
-        scrollRequest = visible.first?.id
+        scrollToFirst()
     }
 
     func cycleTab(_ delta: Int) {
@@ -191,6 +200,8 @@ final class ClipboardPanelModel: ObservableObject {
         selected = 0
         editor = nil
         clicks.reset()
+        shownAt = Date()
+        scrollToFirst()
         focusRequest += 1
     }
 
@@ -263,15 +274,21 @@ final class ClipboardPanelModel: ObservableObject {
             if let item = selectedItem { onDelete(item.id) }
             return true
         default:
-            // Поиск закрыт: в скрытое поле идут только буквы, раскрывающие его. Пробел, стрелки и Delete там незачем.
-            if !searchOpen, !key.command, !key.isPlainText { return true }
-            return false
+            guard !searchOpen, !key.command else { return false }
+            // Поиск раскрывается по самой клавише, а не по тексту в поле: у IME и мёртвых клавиш (символов нет) текст придёт позже,
+            // а набор должен быть виден сразу. Пробел, стрелки и Delete скрытому полю незачем.
+            if key.isPlainText || key.text?.isEmpty == true {
+                searchOpen = true
+                return false
+            }
+            return true
         }
     }
 
     // MARK: Пространства
 
-    var canAddSpace: Bool { spaces.count < ClipboardWireRules.maxSpaces }
+    /// Без хранилища новое пространство сохранить негде: кнопка не должна обещать.
+    var canAddSpace: Bool { storeError == nil && spaces.count < ClipboardWireRules.maxSpaces }
 
     func beginCreate() {
         guard canAddSpace else { return }
@@ -467,6 +484,7 @@ struct ClipboardPanelView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
         .onDrop(of: [.plainText], isTargeted: nil) { dropCard($0, on: space.id) }
@@ -584,7 +602,7 @@ struct ClipboardPanelView: View {
                             ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, number: index < 9 ? index + 1 : nil,
                                          selected: index == model.selected, searching: model.searchOpen,
-                                         theme: model.theme, spaces: model.spaces, model: model)
+                                         theme: model.theme, spaces: model.spaces, now: model.shownAt, model: model)
                                     .id(item.id)
                                     // Один обработчик: второй, на двойной клик, заставил бы одиночный ждать.
                                     .onTapGesture { model.click(item, at: index) }
@@ -592,7 +610,7 @@ struct ClipboardPanelView: View {
                         }
                         .padding(.horizontal, ClipPanelMetrics.ringRoom).padding(.vertical, ClipPanelMetrics.ringRoom)
                     }
-                    .onChange(of: model.scrollRequest) {
+                    .onChange(of: model.scrollTick) {
                         guard let target = model.scrollRequest else { return }
                         withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target, anchor: .center) }
                     }

@@ -88,15 +88,16 @@ let esc: UInt16 = 53, enter: UInt16 = 36, tab: UInt16 = 48, left: UInt16 = 123, 
     let list = model.visible
 
     check(!model.searchOpen, "панель открывается без раскрытого поиска")
-    check(!model.handleKey(ClipPanelKey(code: 0, text: "a")), "буква идёт в поле")
-    check(!model.handleKey(ClipPanelKey(code: 0, text: "ф")), "русская буква идёт в поле")
     check(model.handleKey(ClipPanelKey(code: del, text: "\u{7f}")), "Delete при закрытом поиске поле не трогает")
     check(model.handleKey(ClipPanelKey(code: space, text: " ")), "пробел при закрытом поиске поиск не открывает")
     check(model.handleKey(ClipPanelKey(code: 126, text: "\u{F700}")), "стрелка вверх при закрытом поиске поле не трогает")
     check(!model.searchOpen && model.query.isEmpty, "поиск всё ещё закрыт")
-
+    check(!model.handleKey(ClipPanelKey(code: 0, text: "ф")) && model.searchOpen, "русская буква идёт в поле и раскрывает поиск")
+    model.reset()
+    check(!model.handleKey(ClipPanelKey(code: 0, text: "")) && model.searchOpen, "мёртвая клавиша идёт в поле и раскрывает поиск")
+    model.reset()
     model.query = "а"
-    check(model.searchOpen, "буква в поле раскрыла поиск")
+    check(model.searchOpen, "текст в поле мимо клавиш тоже раскрывает поиск")
     model.query = "Текст"
     check(!model.handleKey(ClipPanelKey(code: del, text: "\u{7f}")), "в поиске Delete правит запрос")
     check(!model.handleKey(ClipPanelKey(code: space, text: " ")), "в поиске пробел идёт в запрос")
@@ -125,8 +126,18 @@ let esc: UInt16 = 53, enter: UInt16 = 36, tab: UInt16 = 48, left: UInt16 = 123, 
     model.typeIntoSearch("x")
     model.typeIntoSearch("y")
     check(model.query == "xy" && model.searchOpen, "запасной путь набора копит буквы")
+    let scrollBefore = model.scrollTick
+    let shownBefore = model.shownAt
+    model.selected = 3
     model.reset()
     check(!model.searchOpen && model.query.isEmpty && model.editor == nil, "новый показ панели без поиска и окошка")
+    check(model.scrollTick > scrollBefore && model.scrollRequest == model.visible.first?.id, "новый показ возвращает ленту к началу")
+    check(model.shownAt > shownBefore, "новый показ обновляет отсчёт «N минут назад»")
+    model.storeError = "нет хранилища"
+    check(!model.canAddSpace, "без хранилища кнопка + не обещает создать")
+    model.beginCreate()
+    check(model.editor == nil, "без хранилища окошко создания не открывается")
+    model.storeError = nil
 
     check(Set(ClipPanelText.hints.map(\.key)).isSuperset(of: ["←→", "⏎", "⌘1–9", "⇥", "Esc"]), "подсказки ушли в меню, все на месте")
 }

@@ -49,6 +49,7 @@ struct ClipCard: View {
     let theme: DSTheme
     /// Отдельно от модели: карточка без своей подписки на модель не перерисовывается при каждом нажатии.
     let spaces: [ClipSpace]
+    let now: Date
     let model: ClipboardPanelModel
 
     static let width = ClipboardPreview.cardWidth
@@ -104,7 +105,7 @@ struct ClipCard: View {
                             .help("Пространство «\(space.name)»")
                     }
                 }
-                Text(ClipPanelText.ago(item.date)).font(.system(size: 12))
+                Text(ClipPanelText.ago(item.date, now: now)).font(.system(size: 12))
             }
             .foregroundStyle(.white)
             .padding(.leading, ClipboardPreview.textInset)
