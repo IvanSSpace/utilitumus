@@ -47,13 +47,13 @@
     },
     {
       "id": "keyboard",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.2.0/Keyboard.zip",
-      "sha256": "28eec35d4a086c6251369d76a1dba15cd1305841fd6431afe6586c075eacaf2e",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/keyboard-v1.2.1/Keyboard.zip",
+      "sha256": "c46c844dab4e65acc22d27c12a54a2236c111115325f3e3c47c569e2454f82a7",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
