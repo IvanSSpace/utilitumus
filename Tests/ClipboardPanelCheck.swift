@@ -289,7 +289,16 @@ func flat(_ count: Int, _ r: UInt8, _ g: UInt8, _ b: UInt8, _ a: UInt8 = 255) ->
 @MainActor func checkGeometry() {
     let ratio = ClipCard.width / ClipCard.height
     check(ratio > 0.9 && ratio < 1.1, "карточка почти квадратная: \(ClipCard.width)×\(ClipCard.height)")
-    check(ClipPanelMetrics.panelHeight <= 400, "панель не выше 400 точек, экран 13 дюймов вмещает")
+    check(ClipCard.width == 242 && ClipCard.height == 244, "карточка как в референсе: \(ClipCard.width)×\(ClipCard.height)")
+    check(ClipPanelMetrics.panelHeight == 334, "панель как в референсе: \(ClipPanelMetrics.panelHeight)")
+    // Подпись и номер не налезают друг на друга: «1526 символов · ещё 20 строк» входит без сжатия, самая длинная — со сжатием.
+    let font = NSFont.systemFont(ofSize: ClipCard.captionSize)
+    func width(_ text: String) -> CGFloat { (text as NSString).size(withAttributes: [.font: font]).width }
+    check(width("1526 символов · ещё 20 строк") <= ClipCard.captionRoom, "обычная подпись входит рядом с ⌘5: \(width("1526 символов · ещё 20 строк")) из \(ClipCard.captionRoom)")
+    let longest = "20000 символов · ещё 19999 строк"
+    check(width(longest) * ClipCard.captionMinScale <= ClipCard.captionRoom, "самая длинная подпись входит со сжатием: \(width(longest)) × \(ClipCard.captionMinScale) из \(ClipCard.captionRoom)")
+    let numberWidth = ("⌘9" as NSString).size(withAttributes: [.font: font]).width
+    check(ClipboardPreview.textWidth - ClipCard.captionRoom >= numberWidth + 8, "место под номер: \(ClipboardPreview.textWidth - ClipCard.captionRoom) при номере \(numberWidth)")
     let model = ClipboardPanelModel()
     let panel = ClipboardPanelHost.makePanel(model)
     check(panel.styleMask.contains(.nonactivatingPanel), "панель не активирует приложение")
@@ -360,7 +369,7 @@ struct Shot {
 
 /// Где на снимке лежит карточка.
 func cardOrigin(_ index: Int) -> CGPoint {
-    CGPoint(x: 16 + ClipPanelMetrics.ringRoom + CGFloat(index) * (ClipCard.width + 16),
+    CGPoint(x: 16 + ClipPanelMetrics.ringRoom + CGFloat(index) * (ClipCard.width + ClipPanelMetrics.cardGap),
             y: ClipPanelMetrics.topPadding + ClipPanelMetrics.barHeight + ClipPanelMetrics.barGap + ClipPanelMetrics.ringRoom)
 }
 
@@ -369,7 +378,7 @@ func saturation(_ c: ClipRGB) -> Double { max(c.r, c.g, c.b) - min(c.r, c.g, c.b
 /// Полоса шапки правее текста и левее значка: там только заливка.
 func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
     let o = cardOrigin(card)
-    return shot.rgb(o.x + 180, o.y + ClipCard.headerHeight - 3)
+    return shot.rgb(o.x + 165, o.y + ClipCard.headerHeight - 3)
 }
 
 @MainActor func panelModel(theme: String, items: [ClipItem]? = nil) -> ClipboardPanelModel {
@@ -507,6 +516,15 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
         try? await Task.sleep(nanoseconds: 60_000_000)
     }
     check(Stand.window.firstResponder is NSTextView, "скрытое поле поиска держит клавиатуру с момента показа")
+    // Обход клавиатуры, как при «полном доступе с клавиатуры»: ни значок поиска, ни другая кнопка не должны взять фокус.
+    let opening = Stand.window.firstResponder
+    Stand.window.selectNextKeyView(nil)
+    try? await Task.sleep(nanoseconds: 60_000_000)
+    check(Stand.window.firstResponder is NSTextView, "обход клавиатуры вперёд не уводит фокус на кнопку (\(String(describing: Stand.window.firstResponder.map { type(of: $0) })))")
+    Stand.window.selectPreviousKeyView(nil)
+    try? await Task.sleep(nanoseconds: 60_000_000)
+    check(Stand.window.firstResponder is NSTextView, "обход клавиатуры назад не уводит фокус на кнопку (\(String(describing: Stand.window.firstResponder.map { type(of: $0) })))")
+    _ = opening
     check(!model.searchOpen, "до первой буквы поиск закрыт")
     await key("т")
     check(model.query == "т" && model.searchOpen, "буква раскрыла поиск с этой буквой (запрос «\(model.query)»)")

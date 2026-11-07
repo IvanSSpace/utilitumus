@@ -7,6 +7,15 @@ import ImageIO
 // Реальный буфер обмена и Keychain пользователя не трогаются: свой NSPasteboard, свой каталог, свой сервис.
 // Связка здесь только в памяти (`testKeychain()`); настоящую связку этот файл называть не может: страж в run-clipboard-check.sh.
 
+// Отдельный процесс-потребитель для раздела 12: буфер именованный, читает его чужой процесс, как настоящая программа.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "pb-read" {
+    let pb = NSPasteboard(name: NSPasteboard.Name(CommandLine.arguments[2]))
+    let png = pb.data(forType: .png).map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "нет"
+    let tiff = pb.availableType(from: [.tiff]) == .tiff ? pb.data(forType: .tiff).flatMap { NSBitmapImageRep(data: $0)?.pixelsWide } : nil
+    print("\(png)|\(tiff ?? -1)|\(NSImage(pasteboard: pb).map { Int($0.size.width) } ?? -1)")
+    exit(0)
+}
+
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
     print((ok ? "ok   " : "FAIL ") + name)
@@ -461,6 +470,191 @@ do {
     check(ClipboardPreview.caption(for: lines(10)).hasSuffix(" символов · ещё 1 строка"), "подпись: ещё 1 строка")
     let words = [1: "строка", 2: "строки", 4: "строки", 5: "строк", 11: "строк", 12: "строк", 21: "строка", 22: "строки", 111: "строк"]
     for (n, word) in words { check(ClipboardPreview.hiddenCaption(n) == "ещё \(n) \(word)", "склонение: ещё \(n) \(word)") }
+}
+
+// 12. Картинки: что захватилось и что получит программа-потребитель. Буферы именованные, системный не трогается.
+do {
+    func encoded(_ uti: String, width: Int = 64, height: Int = 48) -> Data? {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.9, green: 0.4, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(srgbRed: 0.1, green: 0.3, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 8, y: 8, width: width / 2, height: height / 2))
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, uti as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        return CGImageDestinationFinalize(destination) ? out as Data : nil
+    }
+    func type(_ raw: String) -> NSPasteboard.PasteboardType { NSPasteboard.PasteboardType(raw) }
+    func sha(_ data: Data?) -> String { data.map { SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined() } ?? "нет" }
+    func pixelWidth(_ data: Data?) -> Int? { data.flatMap { NSBitmapImageRep(data: $0)?.pixelsWide } }
+
+    let png = encoded("public.png")!, tiff = encoded("public.tiff")!, jpeg = encoded("public.jpeg")!, gif = encoded("com.compuserve.gif")!
+    let heic = encoded("public.heic")
+    let url = "https://example.com/picture.png"
+    let html = Data("<img src=\"https://example.com/picture.png\">".utf8)
+    let words = "Настоящий текст абзаца\tи ячейка таблицы"
+    let fileDir = root.appendingPathComponent("files")
+    try! FileManager.default.createDirectory(at: fileDir, withIntermediateDirectories: true)
+    let imageFile = fileDir.appendingPathComponent("снимок.png")
+    try! png.write(to: imageFile)
+
+    struct Source {
+        let name: String
+        var data: [(NSPasteboard.PasteboardType, Data)] = []
+        var text: String?
+        var file: URL?
+        /// Что должно получиться.
+        let kind: ClipKind
+        /// PNG источника должен вернуться байт в байт.
+        var sameBytes = false
+    }
+    var sources = [
+        Source(name: "только png", data: [(.png, png)], kind: .image, sameBytes: true),
+        Source(name: "только tiff", data: [(.tiff, tiff)], kind: .image),
+        Source(name: "jpeg", data: [(type("public.jpeg"), jpeg)], kind: .image),
+        Source(name: "gif", data: [(type("com.compuserve.gif"), gif)], kind: .image),
+        Source(name: "png + текст-адрес", data: [(.png, png), (.URL, Data(url.utf8))], text: url, kind: .image, sameBytes: true),
+        Source(name: "tiff + текст-адрес", data: [(.tiff, tiff), (.URL, Data(url.utf8))], text: url, kind: .image),
+        Source(name: "png + html без текста", data: [(.png, png), (.html, html)], kind: .image, sameBytes: true),
+        Source(name: "png + пробелы", data: [(.png, png)], text: "  \n ", kind: .image, sameBytes: true),
+        Source(name: "настоящий текст + png (Word)", data: [(.png, png), (.rtf, Data("{\\rtf1 x}".utf8))], text: words, kind: .text),
+        Source(name: "настоящий текст + tiff (Excel)", data: [(.tiff, tiff), (.tabularText, Data(words.utf8))], text: words, kind: .text),
+        Source(name: "файл-картинка", file: imageFile, kind: .file),
+    ]
+    if let heic { sources.insert(Source(name: "heic", data: [(type("public.heic"), heic)], kind: .image), at: 4) }
+
+    print("     | источник | запись | сохранён PNG | типы после записи | .png | .tiff | NSImage |")
+    for (index, source) in sources.enumerated() {
+        let pb = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        pb.clearContents()
+        if let file = source.file {
+            pb.writeObjects([file as NSURL])
+        } else {
+            let item = NSPasteboardItem()
+            for (kind, data) in source.data { item.setData(data, forType: kind) }
+            if let text = source.text { item.setString(text, forType: .string) }
+            pb.writeObjects([item])
+        }
+        let store = ClipboardStore(directory: root.appendingPathComponent("matrix-\(index)"), key: key)
+        let saved = store.ingest(ClipboardPasteboard.snapshot(of: pb))
+        let item = store.items.first
+        check(saved && item?.kind == source.kind, "\(source.name): запись вида \(source.kind.title), вышло \(item?.kind.title ?? "ничего")")
+        guard let item else {
+            print("     | \(source.name) | ничего | нет | нет | нет | нет | нет |")
+            continue
+        }
+        let stored = store.imageData(item)
+        if source.sameBytes { check(sha(stored) == sha(png), "\(source.name): хранится PNG источника байт в байт") }
+        if source.kind == .image {
+            check(pixelWidth(stored) == 64, "\(source.name): сохранённый PNG читается, ширина 64")
+            check(item.imageWidth == 64 && item.imageHeight == 48, "\(source.name): размер записан")
+        }
+
+        let target = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+        defer { target.releaseGlobally() }
+        let change = ClipboardPasteboard.write(item, imageData: stored, to: target)
+        check(change == target.changeCount, "\(source.name): запись вернула свой changeCount")
+        let types = (target.types ?? []).map(\.rawValue)
+        let asPNG = target.data(forType: .png)
+        let asTIFF = target.data(forType: .tiff)
+        let asImage = NSImage(pasteboard: target)
+        check(target.changeCount == change, "\(source.name): чтение потребителем не меняет changeCount, ownChange узнаёт своё")
+        if source.kind == .image {
+            check(sha(asPNG) == sha(stored), "\(source.name): потребитель .png получает те же байты, что хранятся")
+            if source.sameBytes { check(sha(asPNG) == sha(png), "\(source.name): потребитель .png получает байты источника") }
+            check(pixelWidth(asTIFF) == 64, "\(source.name): потребитель .tiff получает картинку")
+            check(asImage != nil, "\(source.name): NSImage читает картинку")
+            // Своя же запись, прочитанная снова, не даёт второй записи в истории.
+            let before = store.items.count
+            let again = store.ingest(ClipboardPasteboard.snapshot(of: target))
+            check(again && store.items.count == before && sha(store.imageData(store.items[0])) == sha(stored), "\(source.name): повтор той же картинки не дублируется")
+        }
+        if source.kind == .text {
+            check(item.text == words, "\(source.name): текст сохранён целиком")
+            check(target.string(forType: .string) == words && asPNG == nil, "\(source.name): вернулся текст")
+        }
+        if source.kind == .file { check(item.filePaths == [imageFile.path], "\(source.name): запись-файл с прежним путём") }
+        let shown = sha(stored) == "нет" ? "нет" : (source.sameBytes && sha(stored) == sha(png) ? "байт в байт" : "перекодирован")
+        print("     | \(source.name) | \(item.kind.title) | \(shown) | \(types.count) | \(asPNG == nil ? "нет" : (sha(asPNG) == sha(stored) ? "те же байты" : "другие")) | \(pixelWidth(asTIFF).map { "\($0)px" } ?? "нет") | \(asImage.map { "\(Int($0.size.width))pt" } ?? "нет") |")
+    }
+
+    // Файл исчез: запись-файл остаётся путём, картинка из неё больше не читается. Это прежнее поведение и граница записи-файла.
+    do {
+        let target = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+        defer { target.releaseGlobally() }
+        let gone = fileDir.appendingPathComponent("временный.png")
+        try! png.write(to: gone)
+        let item = ClipItem(id: UUID(), hash: "", kind: .file, filePaths: [gone.path], date: Date())
+        ClipboardPasteboard.write(item, imageData: nil, to: target)
+        try! FileManager.default.removeItem(at: gone)
+        print("     файл-картинка после удаления файла: NSImage \(NSImage(pasteboard: target) == nil ? "нет" : "есть"), .png \(target.data(forType: .png) == nil ? "нет" : "есть")")
+    }
+
+    // Разжатие только после проверки размера. PNG и JPEG на 72 Мпикс: файл маленький, память нет.
+    func ms(_ work: () -> Void) -> Double {
+        let start = Date()
+        work()
+        return Date().timeIntervalSince(start) * 1000
+    }
+    let hugeWidth = 9000, hugeHeight = 8000
+    func huge(_ uti: String) -> Data {
+        let context = CGContext(data: nil, width: hugeWidth, height: hugeHeight, bitsPerComponent: 8, bytesPerRow: hugeWidth,
+                                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, uti as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return out as Data
+    }
+    let target = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+    defer { target.releaseGlobally() }
+    let hugeJPEG = huge("public.jpeg")
+    target.clearContents(); target.setData(hugeJPEG, forType: type("public.jpeg"))
+    var fromJPEG: Data?
+    let jpegTime = ms { fromJPEG = ClipboardPasteboard.snapshot(of: target).imagePNG }
+    check(fromJPEG == nil && jpegTime < 200, "72 Мпикс JPEG (\(hugeJPEG.count) байт) не декодируется: \(Int(jpegTime)) мс")
+
+    let hugePNG = huge("public.png")
+    check(hugePNG.count <= ClipboardPolicy.maxImageBytes, "сжатый PNG на 72 Мпикс проходит предел в байтах: \(hugePNG.count)")
+    let hugeItem = ClipItem(id: UUID(), hash: "", kind: .image, imageFile: "x", date: Date())
+    ClipboardPasteboard.write(hugeItem, imageData: hugePNG, to: target)
+    check(target.pasteboardItems?.first?.types == [.png], "запись объявляет только PNG: своего разжатия нет, память не тратится")
+    check(sha(target.data(forType: .png)) == sha(hugePNG), "PNG на 72 Мпикс отдаётся байт в байт")
+
+    // Потребитель в другом процессе: `.tiff` без своего разжатия, те же байты в `.png`, changeCount записи не меняется.
+    let plainItem = ClipItem(id: UUID(), hash: "", kind: .image, imageFile: "x", date: Date())
+    let change = ClipboardPasteboard.write(plainItem, imageData: png, to: target)
+    let reader = Process()
+    let output = Pipe()
+    reader.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    reader.arguments = ["pb-read", target.name.rawValue]
+    reader.standardOutput = output
+    try! reader.run()
+    reader.waitUntilExit()
+    let line = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    check(line == "\(sha(png))|64|64", "другой процесс: .png те же байты, .tiff 64 px, NSImage 64 pt (вышло \(line))")
+    check(target.changeCount == change, "чтение другим процессом не меняет changeCount")
+
+    // Сверх предела: адрес рядом остаётся ссылкой, картинка не появляется; без адреса записи нет, как и было.
+    let big = Data(count: ClipboardPolicy.maxImageBytes + 1)
+    target.clearContents()
+    let bigItem = NSPasteboardItem()
+    bigItem.setData(big, forType: .png)
+    bigItem.setString(url, forType: .string)
+    target.writeObjects([bigItem])
+    let limitStore = ClipboardStore(directory: root.appendingPathComponent("matrix-limit"), key: key)
+    check(limitStore.ingest(ClipboardPasteboard.snapshot(of: target)) && limitStore.items.first?.kind == .link, "PNG сверх предела с адресом рядом: остаётся ссылка, запись не пропала")
+    target.clearContents(); target.setData(big, forType: .png)
+    check(!limitStore.ingest(ClipboardPasteboard.snapshot(of: target)), "PNG сверх предела без адреса не запоминается, лимит прежний")
+
+    // Настоящий текст важнее картинки и в самой записи, даже если снимок её принёс.
+    check(ClipboardStore.imageOutranks(text: nil) && ClipboardStore.imageOutranks(text: " \n") && ClipboardStore.imageOutranks(text: url), "картинка важнее пустоты и адреса")
+    check(!ClipboardStore.imageOutranks(text: "см. https://example.com") && !ClipboardStore.imageOutranks(text: words), "настоящий текст важнее картинки")
+    let both = ClipSnapshot(types: [], text: words, imagePNG: png)
+    check(limitStore.ingest(both) && limitStore.items.first?.kind == .text, "снимок с текстом и картинкой: запись-текст")
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")

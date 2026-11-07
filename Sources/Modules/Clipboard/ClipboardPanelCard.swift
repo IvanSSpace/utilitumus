@@ -54,7 +54,7 @@ struct ClipCard: View {
 
     static let width = ClipboardPreview.cardWidth
     static let height = ClipPanelMetrics.cardHeight
-    static let headerHeight: CGFloat = 54
+    static let headerHeight: CGFloat = 52
     private static let radius: CGFloat = 16
 
     private var tint: Color { Self.headerColor(item, theme: theme).color }
@@ -109,7 +109,7 @@ struct ClipCard: View {
             }
             .foregroundStyle(.white)
             .padding(.leading, ClipboardPreview.textInset)
-            .padding(.trailing, 62)
+            .padding(.trailing, 58)
             .lineLimit(1)
         }
         .frame(height: Self.headerHeight)
@@ -120,9 +120,9 @@ struct ClipCard: View {
     @ViewBuilder private var sourceIcon: some View {
         if let icon = ClipSourceIcon.largeImage(item.sourceBundleID) {
             Image(nsImage: icon).resizable().interpolation(.high)
-                .frame(width: 78, height: 78)
-                .offset(x: 12, y: -4)
-                .frame(width: 62, height: Self.headerHeight, alignment: .leading)
+                .frame(width: 74, height: 74)
+                .offset(x: 11, y: -4)
+                .frame(width: 58, height: Self.headerHeight, alignment: .leading)
         } else {
             Image(systemName: "app.dashed").font(.system(size: 22)).foregroundStyle(.white.opacity(0.35))
                 .padding(.trailing, 14)
@@ -144,7 +144,7 @@ struct ClipCard: View {
             ZStack {
                 tint.opacity(0.72)
                 if let icon = ClipSourceIcon.largeImage(item.sourceBundleID) {
-                    Image(nsImage: icon).resizable().interpolation(.high).frame(width: 76, height: 76)
+                    Image(nsImage: icon).resizable().interpolation(.high).frame(width: 68, height: 68)
                 } else {
                     Image(systemName: "link").font(.system(size: 44, weight: .light)).foregroundStyle(.white.opacity(0.9))
                 }
@@ -161,7 +161,7 @@ struct ClipCard: View {
             }
         case .file:
             VStack(alignment: .leading, spacing: 7) {
-                ForEach(Array((item.filePaths ?? []).prefix(6)), id: \.self) { path in
+                ForEach(Array((item.filePaths ?? []).prefix(5)), id: \.self) { path in
                     HStack(spacing: 7) {
                         Image(systemName: "doc.fill").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
                         Text((path as NSString).lastPathComponent).font(.system(size: ClipboardPreview.fontSize))
@@ -176,8 +176,12 @@ struct ClipCard: View {
 
     // MARK: Низ
 
-    private static let footerHeight: CGFloat = 34
-    private static let linkFooterHeight: CGFloat = 54
+    static let footerHeight: CGFloat = 34
+    static let captionSize: CGFloat = 12
+    static let captionMinScale: CGFloat = 0.8
+    /// Место под подпись: ширина текста минус номер и зазор до него.
+    static let captionRoom = ClipboardPreview.textWidth - 30
+    private static let linkFooterHeight: CGFloat = 52
 
     @ViewBuilder private var footer: some View {
         if item.kind == .link {
@@ -185,7 +189,9 @@ struct ClipCard: View {
         } else {
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
-                Text(caption).font(.system(size: 12)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                // Подпись о скрытых строках нельзя обрезать: в конце самое важное. Номер не сжимается, подпись ужимается сама.
+                Text(caption).font(.system(size: Self.captionSize)).foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1).minimumScaleFactor(Self.captionMinScale)
                 Spacer(minLength: 0)
                 numberLabel
             }

@@ -338,14 +338,15 @@ final class ClipboardPanelModel: ObservableObject {
 
 /// Высоты панели: окно задаёт высоту, карточка получает всё, что осталось под верхним рядом.
 enum ClipPanelMetrics {
-    static let panelHeight: CGFloat = 350
+    static let panelHeight: CGFloat = 334
     static let topPadding: CGFloat = 12
     static let barHeight: CGFloat = 36
-    static let barGap: CGFloat = 8
-    static let bottomPadding: CGFloat = 8
+    static let barGap: CGFloat = 13
+    static let bottomPadding: CGFloat = 17
     /// Запас вокруг карточки под рамку выбора.
     static let ringRoom: CGFloat = 6
     static let cardHeight = panelHeight - topPadding - barHeight - barGap - bottomPadding - ringRoom * 2
+    static let cardGap: CGFloat = 24
     static let searchWidth: CGFloat = 440
 }
 
@@ -357,6 +358,12 @@ private struct ClipAnchorKey: PreferenceKey {
 }
 
 private extension View {
+    /// Кнопка панели без системной рамки и без клавиатурного фокуса: клавиатура всегда у поля поиска или поля окошка,
+    /// управление идёт через монитор клавиш. Иначе при «полном доступе с клавиатуры» окно отдаёт фокус первой кнопке ряда.
+    func clipPanelButton() -> some View {
+        buttonStyle(.plain).focusable(false)
+    }
+
     /// Запомнить, где лежит кнопка: окошко категории откроется под ней.
     func clipAnchor(_ name: String) -> some View {
         background(GeometryReader { geometry in
@@ -386,6 +393,7 @@ struct ClipboardPanelView: View {
         .coordinateSpace(name: "clipPanel")
         .onPreferenceChange(ClipAnchorKey.self) { anchors = $0 }
         .environment(\.colorScheme, .dark)
+        .focusEffectDisabled()
         .onAppear { focusSearch() }
         .onChange(of: model.focusRequest) { focusSearch() }
     }
@@ -434,7 +442,7 @@ struct ClipboardPanelView: View {
                     .frame(width: 22, height: 28)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .clipPanelButton()
             .help("Поиск")
             TextField("Поиск", text: $model.query)
                 .textFieldStyle(.plain)
@@ -465,7 +473,7 @@ struct ClipboardPanelView: View {
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ink.opacity(active ? 0.14 : 0)))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .clipPanelButton()
         .help("Буфер обмена")
     }
 
@@ -483,7 +491,7 @@ struct ClipboardPanelView: View {
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ink.opacity(active ? 0.14 : 0)))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .clipPanelButton()
         .help(space.name)
         .clipAnchor(space.id.uuidString)
         .contextMenu { spaceMenu(space) }
@@ -499,7 +507,7 @@ struct ClipboardPanelView: View {
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(ink.opacity(active ? 0.16 : 0)))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .clipPanelButton()
         .help(space.name)
         .accessibilityLabel(space.name)
         .clipAnchor(space.id.uuidString)
@@ -530,7 +538,7 @@ struct ClipboardPanelView: View {
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .clipPanelButton()
         .disabled(!model.canAddSpace)
         .help("Новое пространство")
         .clipAnchor(Self.plusAnchor)
@@ -553,6 +561,7 @@ struct ClipboardPanelView: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .focusable(false)
         .fixedSize()
         .help("Подсказки и настройки")
     }
@@ -598,7 +607,7 @@ struct ClipboardPanelView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(spacing: 16) {
+                        LazyHStack(spacing: ClipPanelMetrics.cardGap) {
                             ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, number: index < 9 ? index + 1 : nil,
                                          selected: index == model.selected, searching: model.searchOpen,
@@ -670,7 +679,7 @@ private struct ClipSpaceEditorView: View {
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .clipPanelButton()
                 .help(entry.name)
                 .accessibilityLabel(entry.name)
             }
@@ -708,7 +717,7 @@ private struct ClipSpaceEditorView: View {
                         : prominent ? model.theme.accent(.clipboard).opacity(0.75) : Color.white.opacity(0.1)))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .clipPanelButton()
     }
 }
 

@@ -33,6 +33,10 @@ absent "панель не активирует приложение и не от
   'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}"
 absent "выделение не ждёт двойного клика системы" 'onTapGesture\(count' "${PANEL[@]}"
 absent "у выбора нет масштаба: карточка не дрожит" 'scaleEffect' "${PANEL[@]}"
+# Кнопки только через clipPanelButton: иначе у новой кнопки вернётся системная рамка фокуса.
+BARE="$(/usr/bin/grep -n 'buttonStyle(.plain)' Sources/Modules/Clipboard/ClipboardPanel.swift | /usr/bin/grep -v 'buttonStyle(.plain).focusable(false)' || true)"
+[ -z "$BARE" ] || { echo "$BARE"; fail "кнопка панели без focusable(false)"; }
+echo "ok   все кнопки панели без клавиатурного фокуса"
 
 # hide() до ⌘V: иначе клавиши ушли бы в саму панель.
 HIDE="$(/usr/bin/grep -n 'ClipboardPanelHost.shared.hide()' Sources/Modules/Clipboard/ClipboardController.swift | tail -1 | cut -d: -f1)"

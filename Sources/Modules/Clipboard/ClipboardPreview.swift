@@ -6,7 +6,7 @@ enum ClipboardPreview {
     static let maxCharacters = 400
     static let maxLines = 9
     static let fontSize: CGFloat = 13
-    static let cardWidth: CGFloat = 264
+    static let cardWidth: CGFloat = 242
     static let textInset: CGFloat = 14
     static let textWidth: CGFloat = cardWidth - textInset * 2
 

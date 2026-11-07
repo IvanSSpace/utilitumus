@@ -131,6 +131,13 @@ final class ClipboardStore {
 
     // MARK: Запись из буфера
 
+    /// Текст рядом с картинкой не важнее её, только если это пусто или просто адрес (копирование картинки из браузера).
+    /// Настоящий текст с картинкой рядом остаётся текстом, иначе копирование из Word и Excel станет картинками.
+    static func imageOutranks(text: String?) -> Bool {
+        guard let text else { return true }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || ClipboardPolicy.isLink(text)
+    }
+
     /// Запоминает снимок буфера. Возвращает false, если запись пропущена (скрытый тип, пусто, слишком большое).
     @discardableResult
     func ingest(_ snap: ClipSnapshot, now: Date = Date()) -> Bool {
@@ -142,7 +149,7 @@ final class ClipboardStore {
             item.kind = .file
             item.filePaths = snap.filePaths
             item.hash = Self.hash("file", Data(snap.filePaths.joined(separator: "\n").utf8))
-        } else if let data = snap.imagePNG, snap.text?.isEmpty != false {
+        } else if let data = snap.imagePNG, Self.imageOutranks(text: snap.text) {
             guard data.count <= ClipboardPolicy.maxImageBytes else { return false }
             item.kind = .image
             png = data
