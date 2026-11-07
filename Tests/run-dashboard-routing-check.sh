@@ -10,15 +10,22 @@ OUT="${DASHBOARD_ROUTING_CHECK_DIR:-${TMPDIR:-/tmp}/dashboard-routing-check}"
 BIN="dashboard-routing-stand"
 SUITE="local.utilitumus.test.kit.dashboard-routing"
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache dashboard-routing "$TARGET" KIT_TEST_DEFAULTS)"
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/work"
 sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
 cp Tests/DashboardRoutingCheck.swift "$OUT/src/main.swift"
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+for f in main.swift UtilitumusApp.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
 # shellcheck disable=SC2046
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name DashboardRoutingStand -o "$OUT/$BIN" \
-  "$OUT/src/main.swift" "$OUT/src/UtilitumusApp.swift" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-    -not -name UtilitumusApp.swift) \
+FILES=("$CACHE/src/main.swift" "$CACHE/src/UtilitumusApp.swift" $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
+  -not -name UtilitumusApp.swift | sort))
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name DashboardRoutingStand -o "$OUT/$BIN" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 defaults delete "$BIN" >/dev/null 2>&1 || true

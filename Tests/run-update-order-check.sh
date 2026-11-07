@@ -8,6 +8,10 @@ OUT="${UPDATE_ORDER_CHECK_DIR:-${TMPDIR:-/tmp}/update-order-check}"
 SIGN_NAME="Utilitumus Signing"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache update-order "$TARGET" KIT_TEST_DEFAULTS)"
+
 scripts/unlock-signing.sh
 if ! security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   echo "ПРОВАЛ: нет сертификата «$SIGN_NAME»"
@@ -37,11 +41,16 @@ PLIST
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier local.utilitumus "$APP"
 
 cp Tests/UpdateOrderCheck.swift "$OUT/main.swift"
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+cmp -s "$OUT/main.swift" "$CACHE/src/main.swift" || cp "$OUT/main.swift" "$CACHE/src/main.swift"
 # Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек,
 # и FanController записал бы туда настройки вентиляторов.
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" "$OUT/main.swift" \
-  Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
-  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift -framework AppKit
+FILES=("$CACHE/src/main.swift" Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
+  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" \
+  "${FILES[@]}" -framework AppKit
 
 if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnection'; then
   echo "ПРОВАЛ: стенд мог бы дойти до настоящего SMC или службы"

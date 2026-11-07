@@ -31,6 +31,9 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache store-catalog "$TARGET")"
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/fixture/Awake.app/Contents/MacOS"
 
@@ -80,11 +83,15 @@ chmod -R go-w "$OUT/fixture"
 ditto -c -k --keepParent "$OUT/fixture/Awake.app" "$OUT/fixture/Awake.zip"
 
 cp Tests/StoreCatalogCheck.swift "$OUT/src/main.swift"
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+for f in main.swift KitDefaults.swift UtilitumusApp.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
 # shellcheck disable=SC2046
-swiftc -target "$TARGET" -module-name StoreCatalogStand -o "$OUT/$BIN" \
-  "$OUT/src/main.swift" "$OUT/src/KitDefaults.swift" "$OUT/src/UtilitumusApp.swift" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-    -not -name KitDefaults.swift -not -name UtilitumusApp.swift) \
+FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" "$CACHE/src/UtilitumusApp.swift" $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
+  -not -name KitDefaults.swift -not -name UtilitumusApp.swift | sort))
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name StoreCatalogStand -o "$OUT/$BIN" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
 # Домен настроек стенда — по имени бинарника: чистый на входе, снят на выходе.
