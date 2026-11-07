@@ -84,7 +84,7 @@ done
 HUB=""
 [ "$ID" != hub ] || HUB=1
 if [ -n "$HUB" ]; then
-  NAME="лаунчер"
+  NAME="лаунчера"
   OLD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
   TAG="v$OLD_VERSION"
 else
@@ -113,7 +113,10 @@ if [ ${#FIX_REFUSED[@]} -gt 0 ]; then
   for line in "${FIX_REFUSED[@]}"; do echo "  $line" >&2; done
   fail "Здесь быстрый путь не годится: нужен полный прогон проверок и обычный выпуск, scripts/release-all.sh (утилиты и центр) или scripts/release.sh (центр)."
 fi
-[ ${#FIX_OWN[@]} -gt 0 ] || fail "С ${TAG} в ${NAME} ничего не менялось: выпускать нечего."
+if [ ${#FIX_OWN[@]} -eq 0 ]; then
+  [ -z "$HUB" ] || fail "С ${TAG} в лаунчере ничего не менялось: выпускать нечего."
+  fail "С ${TAG} в ${NAME} ничего не менялось: выпускать нечего."
+fi
 WHOSE="утилиты"
 [ -z "$HUB" ] || WHOSE="лаунчера"
 echo "Выпуск ${NAME} ${OLD_VERSION} → ${VERSION}. Файлы ${WHOSE} с ${TAG} (${#FIX_OWN[@]}):"

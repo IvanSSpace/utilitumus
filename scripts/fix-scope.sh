@@ -21,7 +21,8 @@ fix_checks_of() {
     stash) echo run-own-identity-check run-stash-module-check run-stash-remote-check run-stash-title-check run-stash-wire-check ;;
     voice) echo run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check ;;
     # Лаунчер (fix.sh hub): оболочка и следы утилит в ней, боковая панель, дашборд и меню-бар, значки меню (раздел настроек), Стор,
-    # обновление центра и утилит, следы шва в бандле. Отдельной проверки окна настроек нет: его снимок входит в menu-icons.
+    # обновление центра и утилит, следы шва в бандле. Окна настроек целиком проверкой не охвачено: menu-icons снимает раздел «Значки в меню»,
+    # auto-update — раздел «Обновления».
     hub) echo run-hub-shell-check run-sidebar-check run-dashboard-routing-check run-menu-icons-check run-store-catalog-check run-update-bundle-check run-update-all-check run-auto-update-check run-seam-check ;;
     *) return 1 ;;
   esac
