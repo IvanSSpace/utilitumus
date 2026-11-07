@@ -170,7 +170,7 @@ final class ClipboardController: ObservableObject {
 
     // MARK: Слежение
 
-    private func poll() {
+    func poll() {
         let pasteboard = Kit.pasteboard
         let count = pasteboard.changeCount
         guard count != lastChange else { return }
@@ -309,12 +309,8 @@ final class ClipboardController: ObservableObject {
 
     /// Кладёт запись в буфер и шлёт ⌘V в программу, которая была впереди (панель её не активирует).
     func paste(_ item: ClipItem) {
-        guard let store else { return }
-        let pasteboard = Kit.pasteboard
-        ownChange = ClipboardPasteboard.write(item, imageData: store.imageData(item), to: pasteboard)
-        lastChange = ownChange
-        store.touch(item.id)
-        sync()
+        guard store != nil else { return }
+        writeOwn(item)
         refreshPermissions()
         guard axTrusted else {
             ClipboardPanelHost.shared.hide()
@@ -322,6 +318,60 @@ final class ClipboardController: ObservableObject {
             return
         }
         Self.pasteAfterLeaving(ClipboardPanelHost.shared, send: Self.sendPaste)
+    }
+
+    /// В буфер своей записью: опрос её не примет за новую. Для каждой записи очереди отдельно: номер меняется при каждой.
+    private func writeOwn(_ item: ClipItem) {
+        guard let store else { return }
+        ownChange = ClipboardPasteboard.write(item, imageData: store.imageData(item), to: Kit.pasteboard)
+        lastChange = ownChange
+        store.touch(item.id)
+        sync()
+    }
+
+    /// Предел одной очереди: при 20 записях она идёт 5 с, а отменить её нечем, кроме нового открытия панели.
+    static let maxPasteMany = 20
+    /// Пауза после ⌘V до следующей записи: программа читает буфер, когда дойдёт до клавиши, и новая запись не должна её опередить.
+    static let pasteGap = 0.25
+
+    /// Несколько записей слева направо. Панель уходит один раз, затем запись в буфер и ⌘V для каждой; Enter не шлётся, в чат ничего не уходит.
+    /// Без Универсального доступа ⌘V слать нельзя: в буфере первая запись и честное сообщение.
+    func pasteMany(_ items: [ClipItem], host: ClipboardPanelHost = .shared, send: @escaping @MainActor () -> Void = ClipboardController.sendPaste) {
+        guard store != nil, let first = items.first else { return }
+        refreshPermissions()
+        guard axTrusted else {
+            writeOwn(first)
+            host.hide()
+            VoiceHUD.shared.showMessage("В буфере только первая из \(items.count): вставка нескольких требует Универсального доступа")
+            return
+        }
+        let queue = Array(items.prefix(Self.maxPasteMany))
+        Self.pasteSequence(host, count: queue.count, write: { [weak self] in self?.writeOwn(queue[$0]) }, send: send) {
+            if items.count > queue.count { VoiceHUD.shared.showMessage("Вставлено \(queue.count) из \(items.count): за раз не больше \(Self.maxPasteMany)") }
+        }
+    }
+
+    /// Очередь после ухода панели. Панель открыли снова — следующие записи не идут: ⌘V попал бы в неё саму.
+    static func pasteSequence(_ host: ClipboardPanelHost, count: Int, write: @escaping @MainActor (Int) -> Void,
+                              send: @escaping @MainActor () -> Void, finished: @escaping @MainActor () -> Void = {}) {
+        host.hide {
+            let presentation = host.presentation
+            @MainActor func step(_ index: Int) {
+                guard host.presentation == presentation else { return }
+                guard index < count else {
+                    finished()
+                    return
+                }
+                write(index)
+                send()
+                DispatchQueue.main.asyncAfter(deadline: .now() + pasteGap) {
+                    MainActor.assumeIsolated { step(index + 1) }
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + focusPause) {
+                MainActor.assumeIsolated { step(0) }
+            }
+        }
     }
 
     /// Пауза между `orderOut` и ⌘V. Ключевым окно снова становится через оконный сервер, и сигнала об этом у нас нет.
@@ -340,7 +390,7 @@ final class ClipboardController: ObservableObject {
         }
     }
 
-    private static func sendPaste() {
+    static func sendPaste() {
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)

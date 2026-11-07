@@ -48,6 +48,7 @@ struct ClipSpaceEditor: Equatable {
     enum Mode: Equatable {
         case edit(UUID)
         case confirmDelete(UUID)
+        case confirmDeleteRecords([UUID])
     }
 
     var mode: Mode
@@ -77,6 +78,7 @@ final class ClipboardPanelModel: ObservableObject {
         didSet {
             guard query != oldValue else { return }
             selected = 0
+            selection.reset()
             clicks.reset()
             scrollToFirst()
             // Текст мог прийти и мимо клавиш (вставка в поле). Стёртый текст поиск не закрывает, это делает Esc.
@@ -99,6 +101,11 @@ final class ClipboardPanelModel: ObservableObject {
     @Published private(set) var shownAt = Date()
     /// Вернуть фокус в поле поиска.
     @Published private(set) var focusRequest = 0
+    @Published private(set) var selection = ClipSelection()
+    /// Клавиши при клике: жест их не сообщает. Проверка подставляет свои.
+    var modifiers: () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }
+    /// Клик по одной из выбранных: сбросить до неё, если второго клика не будет.
+    private var pendingCollapse: UUID?
     @Published var titleEdit: ClipTitleEdit?
     /// Записи скрытых категорий, открытые на время. Только до закрытия панели.
     @Published private(set) var revealed: Set<UUID> = []
@@ -111,6 +118,7 @@ final class ClipboardPanelModel: ObservableObject {
     private(set) var draggedSpace: UUID?
     /// Прокрутка в обрез, а не к центру: при переносе лента едет, только когда курсор у края.
     private(set) var scrollsMinimally = false
+    private(set) var scrollAnimated = true
     /// Курсор в координатах панели, от левого верхнего угла. Панель даёт его сама, проверка подставляет свой.
     var pointer: () -> CGPoint? = { nil }
     var isMouseDown: () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
@@ -127,6 +135,8 @@ final class ClipboardPanelModel: ObservableObject {
     /// Как достать сохранённые байты картинки для переноса наружу. Возвращает загрузчик: сама расшифровка только по запросу программы.
     var imageBytes: (ClipItem) -> @Sendable () -> Data? = { _ in { nil } }
     var onPaste: (ClipItem) -> Void = { _ in }
+    /// Несколько записей по очереди, слева направо.
+    var onPasteMany: ([ClipItem]) -> Void = { _ in }
     var onPin: (UUID, UUID?) -> Void = { _, _ in }
     var onDelete: (UUID) -> Void = { _ in }
     var onClose: () -> Void = {}
@@ -149,37 +159,99 @@ final class ClipboardPanelModel: ObservableObject {
     /// В «Истории» видно всё, что есть; во вкладке пространства — только его записи.
     var visible: [ClipItem] { ClipboardStore.filter(allItems, space: tab, query: query, spaces: spaces) }
 
+    /// Что показывает лента: вкладка и запрос.
+    var stripIdentity: String { "\(tab?.uuidString ?? "")|\(query)" }
+
     var selectedItem: ClipItem? {
         let list = visible
         return list.indices.contains(selected) ? list[selected] : nil
     }
 
-    func move(_ delta: Int) {
+    /// `extending` — Shift+стрелка: диапазон от якоря тянется вслед за выбором.
+    func move(_ delta: Int, extending: Bool = false) {
         let list = visible
         guard !list.isEmpty else { return }
+        let current = list.indices.contains(selected) ? list[selected].id : nil
         selected = min(max(selected + delta, 0), list.count - 1)
+        if extending {
+            selection.extend(to: list[selected].id, from: current, in: list.map(\.id))
+        } else {
+            selection.reset()
+        }
+        pendingCollapse = nil
         requestScroll(to: list[selected].id)
     }
 
-    private func scrollToFirst() {
-        requestScroll(to: visible.first?.id)
+    var isMultiSelected: Bool { selection.isMultiple }
+
+    /// Рамка: на всех выбранных или на единственной текущей.
+    func hasRing(_ item: ClipItem, at index: Int) -> Bool {
+        selection.isMultiple ? selection.ids.contains(item.id) : index == selected
     }
 
-    private func requestScroll(to id: UUID?, minimally: Bool = false) {
+    /// Выбранные слева направо.
+    var selectedItems: [ClipItem] {
+        guard selection.isMultiple else { return selectedItem.map { [$0] } ?? [] }
+        return visible.filter { selection.ids.contains($0.id) }
+    }
+
+    func clearSelection() {
+        selection.reset()
+        pendingCollapse = nil
+    }
+
+    /// Вставить все выбранные: по одной, слева направо. Одна — обычная вставка.
+    func pasteSelected() {
+        let items = selectedItems
+        if items.count > 1 {
+            onPasteMany(items)
+        } else if let item = items.first {
+            onPaste(item)
+        }
+    }
+
+    func pinSelected(to space: UUID) {
+        let ids = selectedItems.map(\.id)
+        clearSelection()
+        withAnimation(ClipMotion.move) {
+            for id in ids {
+                revealed.remove(id)
+                onPin(id, space)
+            }
+        }
+    }
+
+    /// «Удалить N»: подтверждение тем же окошком, что у категории, без модального окна.
+    func beginDeleteSelected() {
+        let ids = selectedItems.map(\.id)
+        guard ids.count > 1 else { return }
+        commitInlineEdit()
+        editor = ClipSpaceEditor(mode: .confirmDeleteRecords(ids))
+    }
+
+    private func scrollToFirst() {
+        // Новое содержимое появляется сразу с начала: прокрутка анимацией тащила бы через него карточки.
+        requestScroll(to: visible.first?.id, animated: false)
+    }
+
+    private func requestScroll(to id: UUID?, minimally: Bool = false, animated: Bool = true) {
         scrollRequest = id
         scrollsMinimally = minimally
+        scrollAnimated = animated
         scrollTick += 1
     }
 
     func quickPick(_ number: Int) {
         let list = visible
         guard list.indices.contains(number - 1) else { return }
+        clearSelection()
         onPaste(list[number - 1])
     }
 
     func selectTab(_ id: UUID?) {
         tab = id
         selected = 0
+        clearSelection()
         clicks.reset()
         scrollToFirst()
     }
@@ -191,9 +263,47 @@ final class ClipboardPanelModel: ObservableObject {
     }
 
     /// Клик по карточке: выделение сразу, вставка только вторым кликом в пределах окна.
+    /// Shift и ⌘ только выбирают, вторым кликом вставки не считаются. Второй клик по одной из выбранных вставляет все, а первый
+    /// сбрасывает до неё, только если второго не было: иначе двойной клик по выбранным вставил бы одну.
     func click(_ item: ClipItem, at index: Int, time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        pendingCollapse = nil
+        let flags = modifiers()
+        if flags.contains(.shift) {
+            let list = visible
+            selection.extend(to: item.id, from: selectedItem?.id, in: list.map(\.id))
+            selected = index
+            clicks.reset()
+            return
+        }
+        if flags.contains(.command) {
+            let list = visible
+            let focus = selection.toggle(item.id, current: selectedItem?.id, in: list.map(\.id))
+            if let at = list.firstIndex(where: { $0.id == focus }) { selected = at }
+            clicks.reset()
+            return
+        }
+        if selection.isMultiple, selection.ids.contains(item.id) {
+            selected = index
+            if clicks.click(item.id, at: time) == .paste {
+                pasteSelected()
+            } else {
+                pendingCollapse = item.id
+                DispatchQueue.main.asyncAfter(deadline: .now() + ClipClickTracker.pasteWindow) { [weak self] in
+                    MainActor.assumeIsolated { self?.collapsePending(item.id) }
+                }
+            }
+            return
+        }
+        selection.reset()
         selected = index
         if clicks.click(item.id, at: time) == .paste { onPaste(item) }
+    }
+
+    /// Второго клика не было: выбор сжимается до той карточки, по которой кликнули.
+    func collapsePending(_ id: UUID) {
+        guard pendingCollapse == id else { return }
+        pendingCollapse = nil
+        selection.reset()
     }
 
     func reset() {
@@ -204,6 +314,7 @@ final class ClipboardPanelModel: ObservableObject {
         editor = nil
         titleEdit = nil
         spaceNameEdit = nil
+        clearSelection()
         forgetTemporary()
         clicks.reset()
         shownAt = Date()
@@ -255,14 +366,25 @@ final class ClipboardPanelModel: ObservableObject {
     func conceal(_ id: UUID) { revealed.remove(id) }
 
     /// Закрепить запись. Открытая на время в другой категории в новой снова скрыта.
+    /// Один анимированный переход на всё: точка на карточке и смыкание соседних, если запись ушла из открытой вкладки.
     func pin(_ id: UUID, to space: UUID?) {
         revealed.remove(id)
-        onPin(id, space)
+        withAnimation(ClipMotion.move) { onPin(id, space) }
+    }
+
+    /// Удалить запись: соседние смыкаются.
+    func delete(_ id: UUID) {
+        withAnimation(ClipMotion.move) { onDelete(id) }
     }
 
     // MARK: Перетаскивание
 
     func dragProvider(for item: ClipItem) -> NSItemProvider {
+        // Переносится только одна карточка: выбор сжимается до неё.
+        if selection.isMultiple {
+            clearSelection()
+            if let index = visible.firstIndex(where: { $0.id == item.id }) { selected = index }
+        }
         draggedRecord = canReorderRecords ? item.id : nil
         draggedSpace = nil
         startDragTracking()
@@ -339,7 +461,10 @@ final class ClipboardPanelModel: ObservableObject {
         ClipDragLog.log.info("перенос окончен: место записи \(toRecord ?? -1), категории \(toSpace ?? -1)")
         draggedRecord = nil
         draggedSpace = nil
-        withAnimation(ClipMotion.settle) {
+        // Без анимации: соседи уже стоят на новых местах, порядок только подтверждает то, что видно.
+        var settled = Transaction()
+        settled.disablesAnimations = true
+        withTransaction(settled) {
             keepingSelection {
                 recordSlot = nil
                 spaceSlot = nil
@@ -355,13 +480,16 @@ final class ClipboardPanelModel: ObservableObject {
             let slot = point.flatMap(recordSlot(under:))
             guard slot != recordSlot else { return }
             ClipDragLog.log.info("место записи \(slot ?? -1)")
-            withAnimation(ClipMotion.settle) { recordSlot = slot }
-            // У края лента едет, открывая следующих соседей.
-            if let slot, visible.indices.contains(slot) { requestScroll(to: visible[slot].id, minimally: true) }
+            withAnimation(ClipMotion.move) { recordSlot = slot }
+            // Только у края: лента едет, открывая следующих соседей. Иначе прокрутка шла бы поверх движения соседей.
+            if let slot, visible.indices.contains(slot), let strip = stripFrames[ClipStripKey.strip], let content = stripFrames[ClipStripKey.content] {
+                let x = content.minX + ClipPanelMetrics.ringRoom + CGFloat(slot) * (ClipCard.width + ClipPanelMetrics.cardGap)
+                if x < strip.minX || x + ClipCard.width > strip.maxX { requestScroll(to: visible[slot].id, minimally: true) }
+            }
         } else if draggedSpace != nil {
             let slot = point.flatMap(spaceSlot(under:))
             guard slot != spaceSlot else { return }
-            withAnimation(ClipMotion.settle) { spaceSlot = slot }
+            withAnimation(ClipMotion.move) { spaceSlot = slot }
         }
     }
 
@@ -403,7 +531,8 @@ final class ClipboardPanelModel: ObservableObject {
 
     /// Клик по заголовку: у выбранной карточки правка, а второй клик здесь не вставляет. У остальных обычный клик по карточке.
     func clickTitle(_ item: ClipItem, time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        if selectedItem?.id == item.id {
+        let plain = modifiers().intersection([.shift, .command]).isEmpty && !selection.isMultiple
+        if plain, selectedItem?.id == item.id {
             beginTitleEdit(item)
         } else if let index = visible.firstIndex(where: { $0.id == item.id }) {
             click(item, at: index, time: time)
@@ -517,17 +646,17 @@ final class ClipboardPanelModel: ObservableObject {
             return true
         }
         switch key.code {
-        case 123: move(-1); return true               // ←
-        case 124: move(1); return true                // →
+        case 123: move(-1, extending: key.shift); return true  // ←
+        case 124: move(1, extending: key.shift); return true   // →
         case 36, 76:                                  // Enter
-            if let item = selectedItem { onPaste(item) }
+            pasteSelected()
             return true
-        case 53:                                      // Esc
-            if searchOpen { closeSearch() } else { onClose() }
+        case 53:                                      // Esc: сначала выбор, потом поиск, потом панель
+            if selection.isMultiple { clearSelection() } else if searchOpen { closeSearch() } else { onClose() }
             return true
         case 48: cycleTab(key.shift ? -1 : 1); return true  // Tab
         case 51 where key.command:                    // ⌘⌫ — удалить запись
-            if let item = selectedItem { onDelete(item.id) }
+            if selection.isMultiple { beginDeleteSelected() } else if let item = selectedItem { delete(item.id) }
             return true
         default:
             guard !searchOpen, !key.command else { return false }
@@ -584,13 +713,19 @@ final class ClipboardPanelModel: ObservableObject {
                 // Сняли и поставили снова: открытые раньше записи опять скрыты.
                 revealed = []
             }
-        case .confirmDelete:
+        case .confirmDelete, .confirmDeleteRecords:
             return
         }
         closeEditor()
     }
 
     func confirmDelete() {
+        if case .confirmDeleteRecords(let ids)? = editor?.mode {
+            clearSelection()
+            withAnimation(ClipMotion.move) { ids.forEach(onDelete) }
+            closeEditor()
+            return
+        }
         guard case .confirmDelete(let id)? = editor?.mode else { return }
         onDeleteSpace(id)
         if tab == id { selectTab(nil) }
@@ -724,14 +859,13 @@ struct ClipboardPanelView: View {
                     // Ряд мог не влезть: новая категория должна быть видна.
                     .onChange(of: model.spaceNameEdit?.id) {
                         guard let id = model.spaceNameEdit?.id else { return }
-                        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
+                        DispatchQueue.main.async { proxy.scrollTo(id) }
                     }
                 }
             }
             moreMenu
         }
         .frame(height: ClipPanelMetrics.barHeight)
-        .animation(.easeOut(duration: 0.14), value: model.searchOpen)
     }
 
     private var rowGap: CGFloat { model.searchOpen ? 10 : ClipPanelMetrics.spaceGap }
@@ -822,6 +956,9 @@ struct ClipboardPanelView: View {
     private func spaceTab(_ space: ClipSpace) -> some View {
         let active = model.tab == space.id
         return spaceLabel(space, active: active)
+        // Приёмник и кадр в ряду снаружи: сдвинутая вкладка не уносит их из-под курсора.
+        .opacity(model.spaceSlot != nil && model.draggedSpace == space.id ? 0 : 1)
+        .offset(x: model.spaceShift(space.id))
         .accessibilityAddTraits(.isButton)
         .onTapGesture { model.selectTab(space.id) }
         .onDrag {
@@ -836,8 +973,6 @@ struct ClipboardPanelView: View {
         .contextMenu { spaceMenu(space) }
         // Половина зазора с каждой стороны: приёмники смыкаются, и между соседними вкладками бросок не пропадает.
         .modifier(spaceDropEffect(space, reach: ClipPanelMetrics.spaceGap / 2))
-        .opacity(model.spaceSlot != nil && model.draggedSpace == space.id ? 0.35 : 1)
-        .offset(x: model.spaceShift(space.id))
     }
 
     /// Категория на время поиска: только точка, название в подсказке.
@@ -862,8 +997,7 @@ struct ClipboardPanelView: View {
         guard let provider = ClipDrag.recordProvider(in: providers) else { return false }
         _ = provider.loadDataRepresentation(forTypeIdentifier: ClipDrag.recordType.identifier) { data, _ in
             guard let id = data.flatMap(ClipDrag.recordID) else { return }
-            // Один анимированный переход на всё: точка на карточке и смыкание соседних, если запись ушла из открытой вкладки.
-            DispatchQueue.main.async { withAnimation(ClipMotion.settle) { model.acceptDroppedRecord(id, on: space) } }
+            DispatchQueue.main.async { model.acceptDroppedRecord(id, on: space) }
         }
         return true
     }
@@ -916,7 +1050,9 @@ struct ClipboardPanelView: View {
         GeometryReader { geometry in
             let width: CGFloat = 300
             let anchor = editorAnchor
-            let x = min(max(anchor.midX, width / 2 + 12), geometry.size.width - width / 2 - 12)
+            // Подтверждение для нескольких карточек — над лентой по центру: одного места у них нет.
+            let center: Bool = { if case .confirmDeleteRecords? = model.editor?.mode { return true } else { return false } }()
+            let x = center ? geometry.size.width / 2 : min(max(anchor.midX, width / 2 + 12), geometry.size.width - width / 2 - 12)
             ZStack(alignment: .topLeading) {
                 // Клик мимо окошка закрывает его, а не срабатывает по карточке под ним.
                 Color.black.opacity(0.001)
@@ -955,14 +1091,15 @@ struct ClipboardPanelView: View {
                         LazyHStack(spacing: ClipPanelMetrics.cardGap) {
                             ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
                                 ClipCard(item: item, number: index < 9 ? index + 1 : nil,
-                                         selected: index == model.selected, searching: model.searchOpen,
+                                         selected: model.hasRing(item, at: index), searching: model.searchOpen,
                                          theme: model.theme, spaces: model.spaces, now: model.shownAt, model: model,
-                                         concealed: model.isConcealed(item), editingTitle: model.titleEdit?.id == item.id)
+                                         concealed: model.isConcealed(item), editingTitle: model.titleEdit?.id == item.id,
+                                         groupCount: model.isMultiSelected && model.selection.ids.contains(item.id) ? model.selection.ids.count : 0)
                                     .id(item.id)
-                                    // Место, куда встанет переносимая карточка, и соседи вокруг него.
-                                    .opacity(model.recordSlot != nil && index == from ? 0.3 : 1)
+                                    // Сама она летит под курсором, здесь пустое место, вокруг которого расступаются соседи.
+                                    .opacity(model.recordSlot != nil && index == from ? 0 : 1)
                                     .offset(x: model.recordShift(at: index, draggedAt: from))
-                                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                                    .transition(.opacity.animation(ClipMotion.fade))
                                     // Один обработчик: второй, на двойной клик, заставил бы одиночный ждать.
                                     .onTapGesture { model.click(item, at: index) }
                                     // Половина зазора с каждой стороны: цели смыкаются, между карточками бросок не пропадает.
@@ -977,12 +1114,21 @@ struct ClipboardPanelView: View {
                     .clipStripFrame(ClipStripKey.strip)
                     .onChange(of: model.scrollTick) {
                         guard let target = model.scrollRequest else { return }
-                        withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(target, anchor: model.scrollsMinimally ? nil : .center) }
+                        let anchor: UnitPoint? = model.scrollsMinimally ? nil : .center
+                        if model.scrollAnimated {
+                            withAnimation(ClipMotion.fade) { proxy.scrollTo(target, anchor: anchor) }
+                        } else {
+                            proxy.scrollTo(target, anchor: anchor)
+                        }
                     }
                 }
+                // Другая вкладка или выдача — другая лента: содержимое меняется затуханием, карточки никуда не летят.
+                .id(model.stripIdentity)
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(ClipMotion.fade, value: model.stripIdentity)
     }
 
     private var emptyText: String {
@@ -1004,6 +1150,8 @@ private struct ClipSpaceEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             if case .confirmDelete(let id)? = model.editor?.mode {
                 confirmation(id)
+            } else if case .confirmDeleteRecords(let ids)? = model.editor?.mode {
+                recordsConfirmation(ids.count)
             } else {
                 form
             }
@@ -1067,6 +1215,17 @@ private struct ClipSpaceEditorView: View {
         }
     }
 
+    @ViewBuilder private func recordsConfirmation(_ count: Int) -> some View {
+        Text("Удалить \(count) \(ClipboardPreview.word(count, "запись", "записи", "записей"))?").font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white).lineLimit(2)
+        Text("Удалятся навсегда, и из категорий тоже.").font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.75))
+        HStack {
+            Spacer()
+            actionButton("Отмена", prominent: false) { model.closeEditor() }
+            actionButton("Удалить", prominent: true, destructive: true) { model.confirmDelete() }
+        }
+    }
+
     private func actionButton(_ title: String, prominent: Bool, destructive: Bool = false,
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -1095,6 +1254,15 @@ private final class ClipboardNSPanel: NSPanel {
 /// не обязана принимать. Поэтому внутри программы разрешён и перенос, а наружу по-прежнему только копия: Finder не переместит настоящий файл.
 /// Метод SwiftUI закрыт для переопределения в Swift, селектор добавляется на этот подкласс, общий `NSHostingView` не меняется.
 final class ClipPanelHostingView: NSHostingView<ClipboardPanelView> {
+    #if KIT_TEST_DEFAULTS
+    /// Сколько раз вид пересчитал раскладку: при движении окна её быть не должно.
+    static var layoutCount = 0
+    override func layout() {
+        Self.layoutCount += 1
+        super.layout()
+    }
+    #endif
+
     private static let dragMask: Void = {
         let selector = #selector(NSDraggingSource.draggingSession(_:sourceOperationMaskFor:))
         guard let inherited = class_getInstanceMethod(ClipPanelHostingView.self, selector) else { return }
@@ -1181,15 +1349,29 @@ final class ClipboardPanelHost {
             panel.setFrame(frame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
             panel.alphaValue = 0
         }
+        // Раскладка новых данных здесь, а не посреди движения: иначе первый шаг анимации опаздывает и окно прыгает.
+        panel.contentView?.layoutSubtreeIfNeeded()
         panel.makeKeyAndOrderFront(nil)
+        // Первый показ рисуется долго: пусть это случится при нулевой альфе, отсчёт движения начнётся после.
+        panel.displayIfNeeded()
         if reducesMotion() {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
         } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.slideDuration
-                panel.animator().setFrame(frame, display: true)
-                panel.animator().alphaValue = 1
+            // В следующем такте: отсчёт анимации идёт от начала текущего, и всё, что сделано выше (30–80 мс), она считала бы прошедшим.
+            // На ленте окно появлялось уже на 90% пути.
+            let presentation = self.presentation
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.presentation == presentation, !self.isLeaving else { return }
+                    NSAnimationContext.runAnimationGroup { context in
+                        context.duration = Self.slideDuration
+                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                        // Окно только едет: размер тот же, перерисовка и раскладка не нужны.
+                        panel.animator().setFrame(frame, display: false)
+                        panel.animator().alphaValue = 1
+                    }
+                }
             }
         }
         installMonitors()
@@ -1231,7 +1413,8 @@ final class ClipboardPanelHost {
         let presentation = self.presentation
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.slideDuration
-            panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: true)
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().setFrame(shownFrame.offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
             panel.animator().alphaValue = 0
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
@@ -1263,6 +1446,7 @@ final class ClipboardPanelHost {
             return { store?.imageData(item) }
         }
         model.onPaste = { [weak controller] item in controller?.paste(item) }
+        model.onPasteMany = { [weak controller] items in controller?.pasteMany(items) }
         model.onPin = { [weak self, weak controller] id, space in
             controller?.pin(id, to: space)
             self?.refresh(controller)

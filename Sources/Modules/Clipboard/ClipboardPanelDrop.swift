@@ -2,23 +2,26 @@ import SwiftUI
 import AppKit
 import os
 
-/// Движение панели. Образец — `SidebarMotion` лаунчера: «Уменьшение движения» убирает пружину, всё встаёт сразу.
 /// Что происходит с переносом на настоящем сеансе: проверка его не видит. Только места и признаки, без содержимого записей.
 /// Смотреть: `log stream --info --predicate 'subsystem == "local.utilitumus.clipboard"'`.
 enum ClipDragLog {
     static let log = Logger(subsystem: "local.utilitumus.clipboard", category: "drag")
 }
 
+/// Все движения панели, одна таблица. Образец — `SidebarMotion` лаунчера: «Уменьшение движения» убирает их, всё встаёт сразу.
+/// Анимация идёт только там, где движется конкретный элемент. Смена вкладки, фильтра, выбора и поиска её не включают.
 enum ClipMotion {
     static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-    /// Наведение на категорию и возврат.
-    static var hover: Animation? { reduced ? nil : .spring(response: 0.26, dampingFraction: 0.68) }
-    /// Вспышка при посадке: быстрее наведения и с отскоком.
-    static var landing: Animation? { reduced ? nil : .spring(response: 0.2, dampingFraction: 0.5) }
-    /// Сколько вспышка держится, прежде чем погаснуть: столько нужно пружине, чтобы дойти до пика.
-    static let flashHold = 0.18
-    /// Точка на карточке и смыкание соседних карточек.
-    static var settle: Animation? { reduced ? nil : .spring(response: 0.34, dampingFraction: 0.84) }
+    /// Перемещение: соседи при переносе, смыкание после снятия и удаления. Пружина без отскока.
+    static let moveTime = 0.2
+    static var move: Animation? { reduced ? nil : .smooth(duration: moveTime) }
+    /// Затухание: содержимое вкладки и фильтра, подсветка категории, прокрутка стрелками.
+    static let fadeTime = 0.12
+    static var fade: Animation? { reduced ? nil : .easeOut(duration: fadeTime) }
+    /// Вспышка при посадке на категорию, единственное место с лёгким отскоком.
+    static var flash: Animation? { reduced ? nil : .spring(response: 0.18, dampingFraction: 0.7) }
+    /// Сколько вспышка держится, прежде чем погаснуть.
+    static let flashHold = 0.1
 }
 
 /// Приёмник карточки на категории. `.move` вместо копирования: у своего типа над категорией нет значка «+».
@@ -38,12 +41,12 @@ struct ClipSpaceDropDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         if carriesSpace(info) { return }
-        withAnimation(ClipMotion.hover) { hovered = true }
+        withAnimation(ClipMotion.fade) { hovered = true }
     }
 
     func dropExited(info: DropInfo) {
         if carriesSpace(info) { return }
-        withAnimation(ClipMotion.hover) { hovered = false }
+        withAnimation(ClipMotion.fade) { hovered = false }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
@@ -58,22 +61,22 @@ struct ClipSpaceDropDelegate: DropDelegate {
             return true
         }
         guard accept(info.itemProviders(for: [ClipDrag.recordType])) else {
-            withAnimation(ClipMotion.hover) { hovered = false }
+            withAnimation(ClipMotion.fade) { hovered = false }
             return false
         }
-        withAnimation(ClipMotion.landing) {
+        withAnimation(ClipMotion.flash) {
             hovered = false
             flashing = true
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + ClipMotion.flashHold) {
-            withAnimation(ClipMotion.hover) { flashing = false }
+            withAnimation(ClipMotion.fade) { flashing = false }
         }
         return true
     }
 }
 
 /// Вид категории под переносом: и вкладка с названием, и точка на время поиска. Состояние своё: ряд и карточки не перерисовываются.
-/// Масштаб не меняет раскладку: соседние категории стоят на месте, а цель броска не дрожит под курсором.
+/// Масштаб только во вспышке и не меняет раскладку: соседние категории стоят на месте.
 struct ClipSpaceDropEffect: ViewModifier {
     let color: Color
     let reach: CGFloat
@@ -85,7 +88,7 @@ struct ClipSpaceDropEffect: ViewModifier {
     private var fill: Double { flashing ? 0.8 : hovered ? 0.32 : 0 }
     private var scale: CGFloat {
         if ClipMotion.reduced { return 1 }
-        return flashing ? 1.12 : hovered ? 1.06 : 1
+        return flashing ? 1.06 : 1
     }
 
     func body(content: Content) -> some View {

@@ -1187,6 +1187,7 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
     model.allItems = items ?? ClipPanelFixture.items()
     model.spaces = ClipPanelFixture.spaces
     model.imageLoader = ClipPanelFixture.image
+    model.modifiers = { [] }
     model.refreshTheme()
     return model
 }
@@ -1335,6 +1336,304 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
 
 // MARK: - Перестановка
 
+// MARK: - Несколько карточек
+
+func checkSelectionLogic() {
+    let a = UUID(), b = UUID(), c = UUID(), d = UUID(), e = UUID()
+    let list = [a, b, c, d, e]
+    var s = ClipSelection()
+    check(!s.isMultiple && s.ids.isEmpty, "сначала выбора нет")
+    s.extend(to: d, from: b, in: list)
+    check(s.ids == [b, c, d] && s.anchor == b && s.isMultiple, "Shift: диапазон от текущей")
+    s.extend(to: a, from: d, in: list)
+    check(s.ids == [a, b] && s.anchor == b, "Shift в другую сторону: от того же якоря")
+    check(s.ordered(in: list) == [a, b], "порядок как в ленте")
+    s.reset()
+    _ = s.toggle(c, current: a, in: list)
+    check(s.ids == [a, c] && s.anchor == c, "⌘ добавил к текущей, якорь на добавленной")
+    s.extend(to: e, from: c, in: list)
+    check(s.ids == [c, d, e], "Shift после ⌘: диапазон от якоря")
+    s.reset()
+    _ = s.toggle(a, current: a, in: list)
+    check(s.ids == [a] && !s.isMultiple, "⌘ по единственной: она остаётся, это не множество")
+    let focus = s.toggle(b, current: a, in: list)
+    check(focus == b && s.isMultiple, "⌘ добавил вторую")
+    let back = s.toggle(b, current: b, in: list)
+    check(back == a && s.ids == [a] && !s.isMultiple, "⌘ убрал её, выбор на оставшейся")
+}
+
+@MainActor func checkMultiSelect(out: String) async {
+    let model = panelModel(theme: "vivid")
+    var flags: NSEvent.ModifierFlags = []
+    model.modifiers = { flags }
+    var one: [UUID] = [], many: [[UUID]] = [], closed = 0
+    model.onPaste = { one.append($0.id) }
+    model.onPasteMany = { many.append($0.map(\.id)) }
+    model.onClose = { closed += 1 }
+    let list = model.visible
+    let t: TimeInterval = 5000
+    model.click(list[1], at: 1, time: t)
+    flags = .shift
+    model.click(list[3], at: 3, time: t + 0.1)
+    check(model.selection.ids == Set(list[1...3].map(\.id)) && model.selected == 3 && one.isEmpty, "Shift+клик: диапазон, вставки нет")
+    check(model.hasRing(list[1], at: 1) && model.hasRing(list[2], at: 2) && model.hasRing(list[3], at: 3) && !model.hasRing(list[0], at: 0), "рамка на каждой выбранной")
+    model.click(list[3], at: 3, time: t + 0.2)
+    model.click(list[3], at: 3, time: t + 0.25)
+    check(one.isEmpty && many.isEmpty, "Shift+клик второй раз подряд не вставляет")
+    flags = .command
+    model.click(list[5], at: 5, time: t + 0.3)
+    check(model.selection.ids.contains(list[5].id) && model.selection.ids.count == 4 && model.selected == 5, "⌘+клик добавил одну")
+    model.click(list[5], at: 5, time: t + 0.35)
+    check(!model.selection.ids.contains(list[5].id) && model.selection.ids.count == 3 && one.isEmpty && many.isEmpty, "⌘+клик убрал её и не вставил")
+    flags = []
+    // Обычный клик мимо группы сбрасывает сразу.
+    model.click(list[7], at: 7, time: t + 1)
+    check(!model.isMultiSelected && model.selected == 7, "обычный клик мимо группы: одна")
+    // Shift-стрелки.
+    model.selected = 2
+    model.clearSelection()
+    let shiftRight = ClipPanelKey(code: right, shift: true, text: "\u{F703}"), shiftLeft = ClipPanelKey(code: left, shift: true, text: "\u{F702}")
+    check(model.handleKey(shiftRight) && model.handleKey(shiftRight), "Shift+→ забирает панель")
+    check(model.selection.ids == Set(list[2...4].map(\.id)) && model.selected == 4, "Shift+→ расширяет")
+    _ = model.handleKey(shiftLeft)
+    check(model.selection.ids == Set(list[2...3].map(\.id)) && model.selected == 3, "Shift+← сжимает к якорю")
+    // Enter вставляет все, слева направо.
+    check(model.handleKey(ClipPanelKey(code: enter, text: "\r")) && many.last == list[2...3].map(\.id) && one.isEmpty, "Enter вставляет все выбранные слева направо")
+    // Второй клик по выбранной вставляет все; первый сжимает, только если второго не было.
+    many = []
+    model.click(list[3], at: 3, time: t + 3)
+    check(model.isMultiSelected, "первый клик по выбранной пока не сжимает")
+    model.click(list[2], at: 2, time: t + 3.1)
+    check(model.isMultiSelected && many.isEmpty, "клик по другой выбранной: это ещё не второй клик")
+    model.click(list[2], at: 2, time: t + 3.2)
+    check(many.last == list[2...3].map(\.id), "второй клик по одной из выбранных вставил все")
+    model.click(list[3], at: 3, time: t + 10)
+    await pause(ClipClickTracker.pasteWindow + 0.1)
+    check(!model.isMultiSelected && model.selected == 3, "второго клика не было: выбор сжался до неё")
+    // Esc, смена вкладки, фильтра, стрелка без Shift.
+    _ = model.handleKey(shiftRight)
+    check(model.isMultiSelected, "снова несколько")
+    check(model.handleKey(ClipPanelKey(code: esc, text: "\u{1b}")) && !model.isMultiSelected && closed == 0, "Esc снял выбор, панель открыта")
+    check(model.handleKey(ClipPanelKey(code: esc, text: "\u{1b}")) && closed == 1, "второй Esc закрыл панель")
+    _ = model.handleKey(shiftRight)
+    model.selectTab(ClipPanelFixture.spaces[0].id)
+    check(!model.isMultiSelected, "смена вкладки сбрасывает")
+    model.selectTab(nil)
+    _ = model.handleKey(shiftRight)
+    model.query = "а"
+    check(!model.isMultiSelected, "смена фильтра сбрасывает")
+    model.closeSearch()
+    _ = model.handleKey(shiftRight)
+    _ = model.handleKey(ClipPanelKey(code: right, text: "\u{F703}"))
+    check(!model.isMultiSelected, "стрелка без Shift сбрасывает")
+    // Перенос: только одна.
+    _ = model.handleKey(shiftRight)
+    let carried = model.selectedItems[0]
+    let provider = model.dragProvider(for: carried)
+    check(!model.isMultiSelected && model.selectedItem?.id == carried.id, "перенос сжал выбор до самой карточки")
+    check(provider.registeredTypeIdentifiers.contains("public.utf8-plain-text") || !provider.registeredTypeIdentifiers.isEmpty, "и отдаёт её")
+    // Клик по заголовку при группе правку не открывает.
+    _ = model.handleKey(shiftRight)
+    model.clickTitle(model.visible[model.selected], time: t + 20)
+    check(model.titleEdit == nil, "заголовок при группе: без правки")
+    model.clearSelection()
+    flags = .shift
+    model.clickTitle(model.visible[0], time: t + 30)
+    check(model.titleEdit == nil && model.isMultiSelected, "Shift+клик по заголовку выбирает диапазон")
+    flags = []
+    model.clearSelection()
+
+    // Удаление: подтверждение окошком, не модальным.
+    var deleted: [UUID] = []
+    model.onDelete = { deleted.append($0) }
+    model.selected = 0
+    _ = model.handleKey(shiftRight)
+    _ = model.handleKey(shiftRight)
+    check(model.handleKey(ClipPanelKey(code: del, command: true, text: "\u{7f}")) && deleted.isEmpty, "⌘⌫ при группе ничего не удалил сразу")
+    if case .confirmDeleteRecords(let ids)? = model.editor?.mode { check(ids.count == 3, "спрашивает про все три") } else { check(false, "открыто подтверждение") }
+    check(model.handleKey(ClipPanelKey(code: enter, text: "\r")) && deleted.isEmpty, "Enter удаление не подтверждает")
+    let host = Stand.host(model, width: 1440)
+    await pause(0.4)
+    _ = snapshot(host, "color-multi-delete", out: out)
+    model.confirmDelete()
+    check(deleted.count == 3 && model.editor == nil && !model.isMultiSelected, "подтвердили: удалены три")
+    Stand.window.contentView = nil
+
+    // В пространство.
+    var pinned: [UUID] = []
+    let pinModel = panelModel(theme: "vivid")
+    pinModel.modifiers = { [] }
+    pinModel.onPin = { id, _ in pinned.append(id) }
+    _ = pinModel.handleKey(shiftRight)
+    let target = pinModel.selectedItems.map(\.id)
+    pinModel.pinSelected(to: ClipPanelFixture.spaces[0].id)
+    check(pinned == target && !pinModel.isMultiSelected, "«В пространство» для всех выбранных")
+
+    // Снимки: рамка на каждой, настоящий клик с Shift.
+    for theme in ["graphite", "vivid"] {
+        let shot = panelModel(theme: theme)
+        shot.modifiers = { [] }
+        shot.selected = 0
+        _ = shot.handleKey(shiftRight)
+        _ = shot.handleKey(shiftRight)
+        let host = Stand.host(shot, width: 1440)
+        await pause(0.4)
+        let picture = snapshot(host, "\(theme == "graphite" ? "graphite" : "color")-multi", out: out)
+        func ring(_ i: Int) -> ClipRGB { picture.rgb(cardOrigin(i).x - 3, cardOrigin(i).y + ClipCard.height / 2) }
+        let backdrop = picture.rgb(cardOrigin(3).x - 3, cardOrigin(3).y + ClipCard.height / 2)
+        for i in 0..<3 {
+            check(abs(ring(i).r - backdrop.r) + abs(ring(i).g - backdrop.g) + abs(ring(i).b - backdrop.b) > 0.3, "\(theme): рамка на карточке \(i + 1)")
+        }
+        Stand.window.contentView = nil
+    }
+    let live = panelModel(theme: "vivid")
+    var liveFlags: NSEvent.ModifierFlags = []
+    live.modifiers = { liveFlags }
+    var livePaste = 0
+    live.onPaste = { _ in livePaste += 1 }
+    _ = Stand.host(live, width: 1440)
+    await pause(0.45)
+    await windowClick(stripPoint(slot: 0))
+    await pause(0.5)
+    liveFlags = .shift
+    await windowClick(stripPoint(slot: 2))
+    await windowClick(stripPoint(slot: 2))
+    check(live.selection.ids.count == 3 && livePaste == 0, "настоящий Shift+клик: диапазон, вставки нет")
+    liveFlags = .command
+    await windowClick(stripPoint(slot: 4))
+    check(live.selection.ids.count == 4 && livePaste == 0, "настоящий ⌘+клик добавил")
+    Stand.window.contentView = nil
+}
+
+/// Очередь вставки: настоящая запись в буфер стенда, настоящий опрос контроллера, подставной отправитель.
+@MainActor func checkPasteMany() async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-many-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    for text in ["четвёртая", "третья", "вторая", "первая"] {
+        store.ingest(ClipSnapshot(types: [], text: text, sourceBundleID: "test.source.\(text)", sourceName: "Источник"))
+    }
+    let space = store.addSpace(name: "скрытая", colorID: "red", hidesContent: true)
+    store.pin(store.items[1].id, to: space.id)
+    let controller = ClipboardController.shared
+    controller.observesSystem = false
+    controller.attach(store)
+    controller.start()
+    defer { controller.stop(); controller.detachStore() }
+    let board = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.test.pasteboard"))
+    Kit.defaults.set(true, forKey: "Test.AXTrusted")
+    defer { Kit.defaults.removeObject(forKey: "Test.AXTrusted") }
+    let stand = LeaveStand()
+    await stand.open()
+    guard let panel = stand.panel else { return check(false, "окно стенда") }
+    let before = store.items.map(\.id).sorted { $0.uuidString < $1.uuidString }
+    let items = Array(store.items.prefix(3))
+    var sent: [String] = []
+    var windowGone = true
+    let send = { @MainActor in
+        if panel.isVisible { windowGone = false }
+        sent.append(board.string(forType: .string) ?? "")
+        // Опрос в самый неудобный момент: сразу после каждой записи.
+        controller.poll()
+    }
+    let began = ProcessInfo.processInfo.systemUptime
+    controller.pasteMany(items, host: stand.host, send: send)
+    check(sent.isEmpty && panel.isVisible, "сначала панель уходит, ⌘V ещё нет")
+    let finished = await waitUntil(5) { sent.count == 3 }
+    let total = ProcessInfo.processInfo.systemUptime - began
+    await pause(0.4)
+    check(finished && sent == items.compactMap(\.text), "порядок вставки слева направо: \(sent)")
+    check(windowGone, "к каждому ⌘V окна уже нет")
+    check(total >= ClipboardPanelHost.slideDuration + ClipboardController.focusPause + 2 * ClipboardController.pasteGap - 0.05, "между записями пауза (\(total))")
+    check(board.string(forType: .string) == items.last?.text, "в буфере последняя запись")
+    check(store.items.map(\.id).sorted { $0.uuidString < $1.uuidString } == before, "новых записей в истории нет")
+    check(items.allSatisfy { item in store.items.first { $0.id == item.id }?.sourceBundleID == item.sourceBundleID }, "опрос не принял записи за новые: источник прежний")
+    check(sent.contains("третья") || sent.contains("вторая"), "скрытые вставляются как обычные")
+
+    // Прерывание: панель открыли снова посреди очереди.
+    sent = []
+    await stand.open()
+    controller.pasteMany(items, host: stand.host, send: send)
+    _ = await waitUntil(3) { sent.count == 1 }
+    await stand.open()
+    await pause(ClipboardController.pasteGap * 3)
+    check(sent.count == 1, "повторное открытие прервало очередь: ушла \(sent.count)")
+
+    // Без разрешения: только первая и без ⌘V.
+    stand.host.hide()
+    _ = await waitUntil { stand.settledGone }
+    Kit.defaults.set(false, forKey: "Test.AXTrusted")
+    await stand.open()
+    sent = []
+    controller.pasteMany(items, host: stand.host, send: send)
+    await pause(0.6)
+    check(sent.isEmpty, "без разрешения ⌘V не уходит")
+    check(board.string(forType: .string) == items[0].text, "в буфере первая запись")
+    check(store.items.map(\.id).sorted { $0.uuidString < $1.uuidString } == before, "и ничего не потеряно")
+    Kit.defaults.set(true, forKey: "Test.AXTrusted")
+
+    // Предел.
+    var many: [ClipItem] = []
+    for i in 0..<25 {
+        store.ingest(ClipSnapshot(types: [], text: "запись \(i)"))
+        many.append(store.items[0])
+    }
+    controller.attach(store)
+    check(ClipboardController.maxPasteMany == 20, "предел 20")
+    var counted = 0
+    await stand.open()
+    ClipboardController.pasteSequence(stand.host, count: min(many.count, ClipboardController.maxPasteMany), write: { _ in counted += 1 }, send: {})
+    _ = await waitUntil(8) { counted == 20 }
+    await pause(ClipboardController.pasteGap * 2)
+    check(counted == 20, "очередь не длиннее предела: \(counted)")
+    stand.close()
+}
+
+/// Правила движения: короткие значения, выбор и смена вкладки не двигают ничего вокруг.
+@MainActor func checkMotionRules(out: String) async {
+    check((0.12...0.22).contains(ClipMotion.moveTime) && (0.12...0.22).contains(ClipMotion.fadeTime) && (0.12...0.22).contains(ClipboardPanelHost.slideDuration), "движения короткие: 0,12–0,22 с")
+    let model = panelModel(theme: "vivid")
+    let host = Stand.host(model, width: 1440)
+    await pause(0.45)
+    let rest = snapshot(host, out: out)
+    func body(_ i: Int) -> CGRect { CGRect(x: cardOrigin(i).x + 8, y: cardOrigin(i).y + 8, width: ClipCard.width - 16, height: ClipCard.height - 16) }
+    // Выбор: кадры сразу после клика, пока могла бы идти анимация.
+    model.selected = 2
+    var moved = 0
+    for _ in 0..<6 {
+        await pause(0.02)
+        let shot = snapshot(host, out: out)
+        moved += (0..<4).reduce(0) { $0 + changed(rest, shot, in: body($1)) }
+    }
+    check(moved == 0, "выбор меняет только рамку: внутри карточек ни одной другой точки (\(moved))")
+    let ring = snapshot(host, out: out)
+    check(changed(rest, ring, in: CGRect(x: cardOrigin(2).x - 4, y: cardOrigin(2).y, width: 3, height: ClipCard.height)) > 100, "и рамка на новой карточке")
+    // Поиск раскрывается сразу: ни наложений в ряду, ни движения ленты.
+    model.selected = 0
+    await pause(0.05)
+    let before = snapshot(host, out: out)
+    model.openSearch()
+    await pause(0.03)
+    let opened = snapshot(host, out: out)
+    await pause(0.4)
+    let settled = snapshot(host, out: out)
+    check(changed(opened, settled, in: CGRect(x: 0, y: 0, width: 1440, height: ClipPanelMetrics.panelHeight)) == 0, "поиск раскрылся сразу, без промежуточных кадров")
+    check((0..<4).reduce(0) { $0 + changed(before, settled, in: body($1)) } == 0, "содержимое карточек при этом не шевельнулось")
+    model.closeSearch()
+    // Смена вкладки: затухание на месте. Ни один промежуточный кадр не показывает карточку не на своём месте: край ленты слева всегда на месте.
+    await pause(0.1)
+    model.selectTab(ClipPanelFixture.spaces[0].id)
+    var edgeMoved = false
+    for _ in 0..<6 {
+        await pause(0.02)
+        let shot = snapshot(host, out: out)
+        if shot.count(in: CGRect(x: cardOrigin(0).x - 12, y: cardOrigin(0).y + 60, width: 6, height: 100), where: { min($0.r, $0.g, $0.b) > 0.5 }) > 0 { edgeMoved = true }
+    }
+    check(!edgeMoved, "смена вкладки: карточки не летят мимо своего места")
+    await pause(ClipMotion.fadeTime + 0.3)
+    Stand.window.contentView = nil
+}
+
 @MainActor func checkReorderLogic() {
     let panelFrame = CGRect(x: -1000, y: 300, width: 1440, height: 334)
     check(ClipboardPanelHost.pointInPanel(CGPoint(x: -900, y: 584), frame: panelFrame) == CGPoint(x: 100, y: 50), "курсор экрана в координатах панели, и на втором экране левее основного")
@@ -1380,6 +1679,7 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
         model.refreshTheme()
         model.imageLoader = ClipPanelFixture.image
         model.onPaste = { [unowned self] in pasted.append($0.id) }
+        model.modifiers = { [] }
     }
 
     func sync() {
@@ -2280,6 +2580,8 @@ enum Main {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         Task { @MainActor in
+            // Ленты кадров вместо проверок: Tests/ClipboardPanelFilm.swift.
+            if let films = ProcessInfo.processInfo.environment["CLIPBOARD_FILM_DIR"] { await runFilms(out: films) }
             checkTracker()
             checkModelClicks()
             checkKeys()
@@ -2295,7 +2597,11 @@ enum Main {
             await checkPanelLeave()
             await checkPasteAfterLeaving()
             await checkDragPreview(out: out)
+            checkSelectionLogic()
+            await checkMultiSelect(out: out)
+            await checkPasteMany()
             checkReorderLogic()
+            await checkMotionRules(out: out)
             await checkRecordOrder(out: out)
             await checkSpaceOrder(out: out)
             await checkTitle(out: out)

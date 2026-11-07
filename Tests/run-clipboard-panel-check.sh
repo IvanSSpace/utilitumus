@@ -25,7 +25,7 @@ absent() { # имя, шаблон, файлы...
 
 absent "проверка не называет настоящую связку, каталог истории и общий буфер" \
   'SystemClipboardKeyring|ClipboardKeychain\.system|NSPasteboard\.general|Kit\.pasteboard|SecItem(Copy|Add|Delete|Update)|defaultDirectory|Application Support|history-key|\.paste\(' \
-  Tests/ClipboardPanelCheck.swift Tests/ClipboardPanelFixture.swift
+  Tests/ClipboardPanelCheck.swift Tests/ClipboardPanelFixture.swift Tests/ClipboardPanelFilm.swift
 
 PANEL=(Sources/Modules/Clipboard/ClipboardPanel.swift Sources/Modules/Clipboard/ClipboardPanelCard.swift Sources/Modules/Clipboard/ClipboardPanelLogic.swift Sources/Modules/Clipboard/ClipboardPanelDrag.swift)
 # Приёмник категории проходит те же стражи сети и активации. В страже масштаба его нет: страж про карточку, а масштаб категории под переносом задан.
@@ -36,6 +36,11 @@ absent "панель не активирует приложение и не от
   'NSApp\.activate|NSRunningApplication\.current\.activate|\.popover\(|\.sheet\(|\.alert\(|runModal|setActivationPolicy' "${PANEL[@]}" "$DROP"
 absent "выделение не ждёт двойного клика системы" 'onTapGesture\(count' "${PANEL[@]}"
 absent "у выбора нет масштаба: карточка не дрожит" 'scaleEffect' "${PANEL[@]}"
+# Движения панели только из одной таблицы (ClipMotion): разные пружины в разных местах были главной причиной странных анимаций.
+absent "движения панели только из таблицы ClipMotion" '\.spring\(|\.easeOut\(|\.easeIn\(|\.easeInOut\(|\.linear\(|\.smooth\(|\.bouncy|\.snappy|matchedGeometry' "${PANEL[@]}"
+DIRECT="$(/usr/bin/grep -nE '\.animation\(' "${PANEL[@]}" | /usr/bin/grep -vE 'value: model\.stripIdentity|\.opacity\.animation\(ClipMotion\.fade\)' || true)"
+[ -z "$DIRECT" ] || { echo "$DIRECT"; fail "анимация высоко в дереве задевает всех детей: разрешена только смена ленты"; }
+echo "ok   в панели нет .animation на дереве, кроме смены ленты"
 absent "подсказки карточки не называют содержимое" 'help\(.*(item\.(text|filePaths|host|imageFile)|linkTitle|caption)' Sources/Modules/Clipboard/ClipboardPanelCard.swift
 absent "перетаскивание не пишет содержимое ни в буфер, ни во временные файлы" 'NSPasteboard|temporaryDirectory|NSTemporaryDirectory|\.write\(' Sources/Modules/Clipboard/ClipboardPanelDrag.swift
 # Кнопки только через clipPanelButton: иначе у новой кнопки вернётся системная рамка фокуса. Проверка по исходникам:
@@ -47,18 +52,19 @@ echo "ok   все кнопки панели без клавиатурного ф
 # ⌘V только через завершение ухода панели: иначе клавиши ушли бы в саму панель. Само поведение проверяет checkPasteAfterLeaving.
 SENDS="$(/usr/bin/grep -c 'sendPaste' Sources/Modules/Clipboard/ClipboardController.swift)"
 /usr/bin/grep -q 'pasteAfterLeaving(ClipboardPanelHost.shared, send: Self.sendPaste)' Sources/Modules/Clipboard/ClipboardController.swift \
-  && [ "$SENDS" = 2 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving"
+  && /usr/bin/grep -q 'send: @escaping @MainActor () -> Void = ClipboardController.sendPaste' Sources/Modules/Clipboard/ClipboardController.swift \
+  && [ "$SENDS" = 3 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving и pasteSequence"
 echo "ok   paste шлёт ⌘V только после ухода панели"
 
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache clipboard-panel KIT_TEST_DEFAULTS)"
 mkdir -p "$CACHE/src"
-for name in ClipboardPanelCheck ClipboardPanelFixture; do
+for name in ClipboardPanelCheck ClipboardPanelFixture ClipboardPanelFilm; do
   cmp -s "Tests/$name.swift" "$CACHE/src/$name.swift" || cp "Tests/$name.swift" "$CACHE/src/$name.swift"
 done
 export KIT_TEST_SUITE="local.utilitumus.test.kit.clipboardpanel"
 trap 'defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"' EXIT
-FILES=("$CACHE/src/ClipboardPanelCheck.swift" "$CACHE/src/ClipboardPanelFixture.swift")
+FILES=("$CACHE/src/ClipboardPanelCheck.swift" "$CACHE/src/ClipboardPanelFixture.swift" "$CACHE/src/ClipboardPanelFilm.swift")
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Clipboard Sources/Kit -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 rm -f "$OUT/check"

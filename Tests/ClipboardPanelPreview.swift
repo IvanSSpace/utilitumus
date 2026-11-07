@@ -66,6 +66,7 @@ enum PreviewApp {
             let what = item.text ?? item.filePaths?.first ?? item.kind.title
             PreviewNote.show("Вставил бы: " + what.replacingOccurrences(of: "\n", with: " "))
         }
+        model.onPasteMany = { items in PreviewNote.show("Вставил бы по очереди: \(items.count)") }
         model.onPin = { [weak model] id, space in
             guard let model, let index = model.allItems.firstIndex(where: { $0.id == id }) else { return }
             model.allItems[index].spaceID = space

@@ -260,7 +260,7 @@ struct ClipboardView<Model: ClipboardModel>: View {
 private enum SpaceRowHeight {
     static let value: CGFloat = 40
     static var spring: Animation? {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.82)
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.2)
     }
 }
 
@@ -300,7 +300,8 @@ private struct SpaceRow<Model: ClipboardModel>: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
         .frame(minHeight: SpaceRowHeight.value)
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(isDragged ? 0.12 : 0)))
+        // Заливка плотная: тень у строки, а не у каждой буквы.
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color(white: 0.24).opacity(isDragged ? 1 : 0)))
         .contentShape(Rectangle())
         .shadow(color: .black.opacity(isDragged ? 0.35 : 0), radius: 8, y: 3)
         .offset(y: shift)

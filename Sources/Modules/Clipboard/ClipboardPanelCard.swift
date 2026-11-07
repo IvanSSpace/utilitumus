@@ -54,6 +54,8 @@ struct ClipCard: View {
     /// Вместо содержимого точки. Отдельно от модели, как и `spaces`: иначе карточка не перерисуется, когда скрытие сменится.
     let concealed: Bool
     var editingTitle = false
+    /// Сколько выбрано вместе с этой карточкой; 0 — она не в группе. Меню тогда про всех.
+    var groupCount = 0
     /// Плавающая копия при перетаскивании: только сама карточка, без рамки выбора и без меню.
     var isDragPreview = false
 
@@ -125,7 +127,7 @@ struct ClipCard: View {
                         Circle().fill(ClipPalette.color(space.colorID)).frame(width: 9, height: 9)
                             .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
                             .help("Пространство «\(space.name)»")
-                            .transition(.scale(scale: 0.2).combined(with: .opacity))
+                            .transition(.opacity)
                     }
                 }
                 Text(subtitle).font(.system(size: 12))
@@ -281,9 +283,11 @@ struct ClipCard: View {
 
     @ViewBuilder private var numberLabel: some View {
         if let number {
+            // Номер меняется сразу: в общей анимации смыкания старый и новый просвечивали бы друг через друга.
             Text("⌘\(number)").font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.6))
                 .fixedSize()
+                .contentTransition(.identity)
         }
     }
 
@@ -303,6 +307,22 @@ struct ClipCard: View {
     // MARK: Меню
 
     @ViewBuilder private var menu: some View {
+        if groupCount > 1 { groupMenu } else { singleMenu }
+    }
+
+    @ViewBuilder private var groupMenu: some View {
+        Button("Вставить \(groupCount)") { model.pasteSelected() }
+        Menu("В пространство") {
+            ForEach(spaces) { space in
+                Button(space.name) { model.pinSelected(to: space.id) }
+            }
+            if spaces.isEmpty { Text("Пространств нет — создай кнопкой + вверху") }
+        }
+        Divider()
+        Button("Удалить \(groupCount)", role: .destructive) { model.beginDeleteSelected() }
+    }
+
+    @ViewBuilder private var singleMenu: some View {
         Button("Вставить") { model.onPaste(item) }
         Button("Переименовать") { model.beginTitleEdit(item) }
         if ClipConcealment.isHidden(item, in: spaces) {
@@ -322,7 +342,7 @@ struct ClipCard: View {
             Button("Убрать из пространства") { model.pin(item.id, to: nil) }
         }
         Divider()
-        Button("Удалить", role: .destructive) { model.onDelete(item.id) }
+        Button("Удалить", role: .destructive) { model.delete(item.id) }
     }
 }
 
