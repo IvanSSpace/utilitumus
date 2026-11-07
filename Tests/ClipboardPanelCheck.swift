@@ -516,15 +516,6 @@ func headerFill(_ shot: Shot, card: Int) -> ClipRGB {
         try? await Task.sleep(nanoseconds: 60_000_000)
     }
     check(Stand.window.firstResponder is NSTextView, "скрытое поле поиска держит клавиатуру с момента показа")
-    // Обход клавиатуры, как при «полном доступе с клавиатуры»: ни значок поиска, ни другая кнопка не должны взять фокус.
-    let opening = Stand.window.firstResponder
-    Stand.window.selectNextKeyView(nil)
-    try? await Task.sleep(nanoseconds: 60_000_000)
-    check(Stand.window.firstResponder is NSTextView, "обход клавиатуры вперёд не уводит фокус на кнопку (\(String(describing: Stand.window.firstResponder.map { type(of: $0) })))")
-    Stand.window.selectPreviousKeyView(nil)
-    try? await Task.sleep(nanoseconds: 60_000_000)
-    check(Stand.window.firstResponder is NSTextView, "обход клавиатуры назад не уводит фокус на кнопку (\(String(describing: Stand.window.firstResponder.map { type(of: $0) })))")
-    _ = opening
     check(!model.searchOpen, "до первой буквы поиск закрыт")
     await key("т")
     check(model.query == "т" && model.searchOpen, "буква раскрыла поиск с этой буквой (запрос «\(model.query)»)")
