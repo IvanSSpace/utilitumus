@@ -47,13 +47,13 @@ same() { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1: ждали «$3», по
 
 mkdir -p "$OUT/src"
 [ -f Sources/Apps/Awake/Info.plist ] || { echo "ПРОВАЛ: нет Sources/Apps/Awake"; exit 1; }
-scripts/build-app.sh "$ID" Awake 1.2.3 "$OUT" --test-seam
+. Tests/lib/incremental.sh
+build_seam_utility "$ID" Awake 1.2.3 "$OUT" --test-seam
 
 same "LSUIElement" "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$APP/Contents/Info.plist")" "true"
 same "bundle id" "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" "$IDENTIFIER"
 
 # Инкрементальная сборка клиента. Кэш не тот, что у run-satellite-role-check: здесь ещё и плист. Подробности в Tests/lib/incremental.sh.
-. Tests/lib/incremental.sh
 CACHE="$(incremental_cache awake-app-client KIT_TEST_DEFAULTS)"
 mkdir -p "$CACHE/src"
 cmp -s Tests/SatelliteRoleCheck.swift "$CACHE/src/main.swift" || cp Tests/SatelliteRoleCheck.swift "$CACHE/src/main.swift"

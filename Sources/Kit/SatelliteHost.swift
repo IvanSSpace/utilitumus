@@ -12,9 +12,16 @@ enum SatelliteMain {
 
     @MainActor static func run(_ module: SatelliteModule) {
         let host = SatelliteHost(module)
+        #if KIT_DEV_ALONE
+        // Дев-копия одна на свои настройки и ни с кем не связана: пересылать окно некому. Отказ без подставного дома здесь.
+        _ = Kit.defaults
+        let app = NSApplication.shared
+        app.setActivationPolicy(Kit.standWindowHidden ? .accessory : .regular)
+        #else
         if host.currentMode() == .forwardAndExit { host.forwardOpenWindowAndExit() }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        #endif
         delegate = SatelliteAppDelegate(host)
         app.delegate = delegate
         app.run()
@@ -32,6 +39,11 @@ private final class SatelliteAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { host.terminating() }
     }
+
+    #if KIT_DEV_ALONE
+    /// Значка в строке меню и центра нет: окно не открыть заново, закрыли его — значит, закончили.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    #endif
 }
 
 #if KIT_TEST_DEFAULTS
@@ -85,8 +97,14 @@ final class SatelliteHost: ObservableObject, LinkHandler {
     }
 
     func currentMode() -> SatelliteRole.Mode {
-        SatelliteRole.decide(
-            launchedByLaunchd: ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == label,
+        #if KIT_DEV_ALONE
+        // Запускает человек из терминала, launchd о копии не знает.
+        let launchedByLaunchd = true
+        #else
+        let launchedByLaunchd = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == label
+        #endif
+        return SatelliteRole.decide(
+            launchedByLaunchd: launchedByLaunchd,
             hubRunning: SatelliteHub.isRunning,
             hubVersion: SatelliteHub.version,
             hubModuleOn: Kit.defaults.bool(forKey: SatelliteRole.hubModuleOnKey(id)),
@@ -125,9 +143,12 @@ final class SatelliteHost: ObservableObject, LinkHandler {
             MainActor.assumeIsolated { CustomPaletteStore.shared.reload() }
         })
 
+        // Дев-копия ни с кем не говорит: служб launchd у неё нет, слушать нечего.
+        #if !KIT_DEV_ALONE
         let server = LinkServer(id: id, handler: self)
         server.resume()
         self.server = server
+        #endif
         // Центр мог спросить раньше, чем сервис поднялся, и теперь показывает «Не отвечает».
         postStatus()
 
@@ -135,6 +156,9 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         installTestSignals()
         #else
         scheduleUpdateChecks()
+        #endif
+        #if KIT_DEV_ALONE
+        showWindow()
         #endif
     }
 
@@ -305,20 +329,28 @@ final class SatelliteHost: ObservableObject, LinkHandler {
         self.window = window
         #if KIT_TEST_DEFAULTS
         // Стенд: окно не показывается пользователю, картинку снимает cacheDisplay.
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.setFrameOrigin(NSPoint(x: -10000, y: 0))
-        window.orderBack(nil)
+        if Kit.standWindowHidden {
+            window.alphaValue = 0
+            window.ignoresMouseEvents = true
+            window.setFrameOrigin(NSPoint(x: -10000, y: 0))
+            window.orderBack(nil)
+        } else {
+            bringToFront(window)
+        }
         #else
-        // Активацию система может не дать: окно всё равно должно выйти вперёд.
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
+        bringToFront(window)
         #endif
         windowOpen = true
         syncScreen()
         let frame = window.frame
         fputs("\(title): окно показано \(Int(frame.width))x\(Int(frame.height)) x=\(Int(frame.minX))\n", stderr)
+    }
+
+    /// Активацию система может не дать: окно всё равно должно выйти вперёд.
+    private func bringToFront(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     private func makeWindow() -> NSWindow {

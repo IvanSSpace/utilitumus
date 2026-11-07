@@ -82,7 +82,7 @@ forbid_timers() {
 }
 
 build_utility() {
-  scripts/build-app.sh "$ID" "$NAME" 1.2.3 "$OUT" --test-seam
+  build_seam_utility "$ID" "$NAME" 1.2.3 "$OUT" --test-seam
 }
 
 # Подставной файл в кэше сборки, содержимое со стандартного ввода. То же содержимое не меняет время изменения: иначе его перекомпилируют зря.

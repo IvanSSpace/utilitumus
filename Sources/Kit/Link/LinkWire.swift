@@ -4,7 +4,9 @@ import Foundation
 /// Исключение — `KIT_TEST_REAL_ID`: сквозной проверке нужен плист, который пишет настоящий установщик.
 enum LinkIdentity {
     static func id(_ module: String) -> String {
-        #if KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
+        #if KIT_DEV_ALONE
+        "\(module).dev"
+        #elseif KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
         "test.\(module)"
         #else
         module
@@ -12,7 +14,9 @@ enum LinkIdentity {
     }
 
     static func label(_ module: String) -> String {
-        #if KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
+        #if KIT_DEV_ALONE
+        KitLink.bundleID(id(module))
+        #elseif KIT_TEST_DEFAULTS && !KIT_TEST_REAL_ID
         "\(Kit.hubBundleID).test.\(module)"
         #else
         KitLink.bundleID(module)
