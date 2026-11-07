@@ -1,23 +1,19 @@
 import SwiftUI
 
-/// Экран модуля: содержимое — или, пока модуль выключен, описание с кнопкой «Включить»,
-/// а если включён, но обязательный шаг настройки не сделан (или чек-лист открыли явно), — чек-лист настройки.
+/// Экран модуля, который ведёт утилита: содержимое — или, если обязательный шаг настройки не сделан
+/// (или чек-лист открыли явно), — чек-лист настройки. Выключенную утилиту до экрана не пускает её страница.
 /// Над содержимым — плашка «Настройка: 2 из 3», пока что-то не готово.
 /// «Как это работает» и переключатель «Включён» модуля рисует шапка `DSPage`. Экран, ещё не переведённый
 /// на `DSPage`, получает вместо неё компактную полоску с теми же кнопками.
-/// Выключенный модуль ничего не делает и экран его не запускает.
 struct ModuleScreen<Content: View>: View {
     let module: Module
     @ViewBuilder var content: Content
-    @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var access = AccessState.shared
     @ObservedObject private var flow = SetupFlow.shared
     @State private var hasPage = false
 
     var body: some View {
-        if !modules.isOn(module) {
-            ModuleOffView(module: module) { modules.setOn(module, true) } more: { modules.infoModule = module }
-        } else if flow.forced.contains(module) || (access.blocked.contains(module) && !flow.deferred.contains(module)) {
+        if flow.forced.contains(module) || (access.blocked.contains(module) && !flow.deferred.contains(module)) {
             SetupChecklistView(module: module)
         } else {
             VStack(spacing: 0) {
