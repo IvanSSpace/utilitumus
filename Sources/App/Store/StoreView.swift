@@ -135,12 +135,17 @@ private struct StoreMeta: View {
     let module: Module
     var short = false
 
+    @ObservedObject private var store = StoreModel.shared
+
     var body: some View {
         let needs = StoreCatalog.needs(module)
         HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Image(systemName: StoreCatalog.downloads(module) == nil ? "checkmark.circle" : "arrow.down.circle")
-                Text(StoreCatalog.sizeText(module, short: short))
+            // Без записи в каталоге размера не знаем.
+            if let app = store.satellites.catalogApp(module) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle")
+                    Text(short ? "+\(app.sizeMB) МБ" : "+\(app.sizeMB) МБ приложение")
+                }
             }
             if !needs.isEmpty {
                 HStack(spacing: 5) {
@@ -225,9 +230,7 @@ private struct StoreTile: View {
                 Text(StoreCatalog.line(module)).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.62))
                     .lineLimit(1)
                 if installed {
-                    if let progress = store.pendingSetup(module) {
-                        StoreSetupChip(module: module, progress: progress)
-                    } else if let note = store.updateNotes(module).first {
+                    if let note = store.updateNotes(module).first {
                         StoreUpdateTeaser(note: note)
                     } else {
                         HStack(spacing: 4) {
@@ -293,26 +296,6 @@ private struct StoreTileInstall: View {
     }
 }
 
-/// Мелкая плашка на плитке: «Настройка 1 из 3 · Настроить». Нажатие открывает чек-лист модуля.
-struct StoreSetupChip: View {
-    let module: Module
-    let progress: SetupProgress
-    @ObservedObject private var store = StoreModel.shared
-
-    var body: some View {
-        Button { store.configure(module) } label: {
-            Text("Настройка \(progress.done) из \(progress.total) · Настроить")
-                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.orange)
-                .lineLimit(1).minimumScaleFactor(0.75)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Capsule().fill(Color.orange.opacity(0.16)))
-        }
-        .buttonStyle(.plain)
-        .focusEffectDisabled()
-        .help("Открыть чек-лист настройки модуля")
-    }
-}
-
 /// Подтверждение внизу Стора после установки: без перехода, исчезает само.
 private struct StoreToast: View {
     let module: Module
@@ -343,10 +326,6 @@ private struct StoreFailureToast: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text("\(failure.module.title): \(failure.message)").fontWeight(.medium).lineLimit(2)
-            if failure.offersBuiltIn {
-                DSButton("Поставить встроенный", style: .secondary, small: true) { store.installBuiltIn(failure.module) }
-                    .fixedSize()
-            }
             DSButton("", icon: "xmark", style: .plain, small: true) { store.dismissFailure() }
                 .help("Закрыть")
         }
@@ -406,26 +385,19 @@ private struct StoreSoonTile: View {
     }
 }
 
-/// Нижняя полоса: что получится в сборке и какие доступы придётся выдать.
+/// Нижняя полоса: сколько установлено и скачано.
 private struct StoreBar: View {
     @ObservedObject private var store = StoreModel.shared
 
     var body: some View {
         let count = store.buildModules.count
-        let new = store.newPermissions
         HStack(spacing: 8) {
             Image(systemName: "shippingbox.fill").foregroundStyle(.white.opacity(0.6))
             if count > 0 { Text("Установлено:").fontWeight(.semibold) }
             if count == 0 {
                 Text("Пока ничего не установлено").foregroundStyle(.white.opacity(0.7))
             } else {
-                Text("\(count) \(Self.plural(count)) · скачано \(store.buildMegabytes) МБ · ждут доступа:")
-                    .foregroundStyle(.white.opacity(0.7))
-                if new.isEmpty {
-                    Text("нет").foregroundStyle(.white.opacity(0.7))
-                } else {
-                    ForEach(new, id: \.rawValue) { DSChip($0.title, color: .orange, icon: $0.icon) }
-                }
+                Text("\(count) \(Self.plural(count)) · скачано \(store.buildMegabytes) МБ").foregroundStyle(.white.opacity(0.7))
             }
             Spacer(minLength: 0)
             // Плашка в панели появляется сама; здесь проверить вручную и увидеть «всё обновлено».
@@ -475,7 +447,7 @@ struct StoreGlyph: View {
     }
 }
 
-/// Главная кнопка по состоянию: Установить / Докачать модель / «Установлен» / процент.
+/// Главная кнопка по состоянию: Установить / Обновить / «Установлен» / процент.
 struct StoreActionButton: View {
     let module: Module
     var small = true
@@ -491,12 +463,7 @@ struct StoreActionButton: View {
                 .help("Отменить скачивание")
         case .installed:
             if store.hasUpdate(module) {
-                DSButton(store.satellites.hasBundle(module) ? "Обновить" : "Обновить ресурсы",
-                         icon: "arrow.triangle.2.circlepath", style: .primary, small: small) {
-                    store.downloadResources(module)
-                }
-            } else if let progress = store.pendingSetup(module) {
-                StoreSetupChip(module: module, progress: progress)
+                DSButton("Обновить", icon: "arrow.triangle.2.circlepath", style: .primary, small: small) { store.update(module) }
             } else {
                 DSChip("Установлен", color: .green, icon: "checkmark")
             }

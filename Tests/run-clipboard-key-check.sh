@@ -14,6 +14,15 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Перед удалением утилиты центр ключ не просит: своя запись утилиты остаётся. Обработчики в утилите только для старого центра.
+status=0
+FOUND="$(grep -rnE 'ClipboardKeyReturn|returnKey|dropKey' Sources/App Sources/Modules/Clipboard/UI)" || status=$?
+case "$status" in
+  0) echo "ПРОВАЛ: центр снова просит ключ перед удалением утилиты:"; echo "$FOUND"; exit 1 ;;
+  1) echo "ok   центр не просит ключ перед удалением утилиты" ;;
+  *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
+esac
+
 # Инкрементальная сборка: кэш вне папки стенда, копия с тем же содержимым не меняет время изменения. Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache clipboard-key KIT_TEST_DEFAULTS)"

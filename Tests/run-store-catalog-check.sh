@@ -62,6 +62,13 @@ if ! grep -q 'UserDefaults = true' "$OUT/src/KitDefaults.swift"; then
   exit 1
 fi
 
+# Папка моделей: стенд удаляет модели через Стор, поэтому только временная, как у сборки со швом. Остальное без шва, настройки выше.
+sed 's/^ *#if KIT_TEST_DEFAULTS$/#if true/' Sources/Modules/Voice/UI/VoiceTypes.swift > "$OUT/src/VoiceTypes.swift"
+if ! grep -q '^#if true$' "$OUT/src/VoiceTypes.swift"; then
+  echo "ПРОВАЛ: подмена папки моделей не сработала"
+  exit 1
+fi
+
 # Точка входа у стенда своя.
 sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
 if grep -q '^@main' "$OUT/src/UtilitumusApp.swift"; then
@@ -85,18 +92,21 @@ ditto -c -k --keepParent "$OUT/fixture/Awake.app" "$OUT/fixture/Awake.zip"
 cp Tests/StoreCatalogCheck.swift "$OUT/src/main.swift"
 # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
 mkdir -p "$CACHE/src"
-for f in main.swift KitDefaults.swift UtilitumusApp.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
-# KitDefaults.swift и UtilitumusApp.swift у стенда свои.
+for f in main.swift KitDefaults.swift UtilitumusApp.swift VoiceTypes.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
+# KitDefaults.swift, UtilitumusApp.swift и VoiceTypes.swift у стенда свои.
 HUB_LIST="$(scripts/hub-sources.sh)"
-FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" "$CACHE/src/UtilitumusApp.swift")
-while IFS= read -r f; do case "$f" in */KitDefaults.swift | */UtilitumusApp.swift) ;; *) FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
+FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" "$CACHE/src/UtilitumusApp.swift" "$CACHE/src/VoiceTypes.swift")
+while IFS= read -r f; do case "$f" in */KitDefaults.swift | */UtilitumusApp.swift | */VoiceTypes.swift) ;; *) FILES+=("$f") ;; esac; done <<<"$HUB_LIST"
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name StoreCatalogStand -o "$OUT/$BIN" \
   "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
 
-# Домен настроек стенда — по имени бинарника: чистый на входе, снят на выходе.
-defaults delete "$BIN" >/dev/null 2>&1 || true
-trap 'defaults delete "$BIN" >/dev/null 2>&1 || true' EXIT
+# Домен настроек стенда — по имени бинарника: чистый на входе, снят на выходе. Как и временная папка моделей.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.storecatalog"
+MODELS="${TMPDIR:-/tmp}/utilitumus-test-models/$KIT_TEST_SUITE"
+cleanup() { defaults delete "$BIN" >/dev/null 2>&1 || true; rm -rf "$MODELS"; }
+cleanup
+trap cleanup EXIT
 cd "$OUT"
 "./$BIN" "$OUT/work" "$OUT/fixture/Awake.zip" "$(shasum -a 256 "$OUT/fixture/Awake.zip" | cut -d' ' -f1)" "$OUT/png"

@@ -65,7 +65,7 @@ struct ClipboardKeyResolver: Sendable {
 }
 
 extension ClipboardKeyResolver {
-    /// Утилита отдаёт центру свой ключ перед удалением. Отдаёт только тот, что открывает историю (или истории нет):
+    /// Утилита отдаёт старому центру свой ключ перед удалением. Отдаёт только тот, что открывает историю (или истории нет):
     /// чужой ключ центр у себя не поселит. Записи не меняются. Своей записи нет — отдавать нечего.
     func keyToReturn() -> ClipboardKeyReturnReply {
         switch keyring.read(.own) {
@@ -94,7 +94,8 @@ extension ClipboardKeyResolver {
     }
 }
 
-/// Просьбы центра перед удалением утилиты: отдать ключ обратно и потом удалить свою запись. Не действия экрана,
+/// Просьбы старого центра перед удалением утилиты: отдать ключ обратно и потом удалить свою запись. Нынешний центр
+/// их не шлёт: запись утилиты переживает удаление, и новая установка находит её сама. Не действия экрана,
 /// принимает их только соединение центра (`LinkCaller.isHub`).
 enum ClipboardKeyReturnMessage: Codable, Equatable {
     case returnKey
@@ -127,78 +128,6 @@ enum ClipboardKeyReturnMessage: Codable, Equatable {
 struct ClipboardKeyReturnReply: Codable, Equatable {
     let key: Data?
     let error: String?
-}
-
-/// Удаление утилиты после передачи: ключ живёт только в её записи, а центр её прочитать не может. Поэтому сначала
-/// утилита отдаёт ключ, центр кладёт его в прежнюю запись и проверяет чтением и индексом, и только потом утилита
-/// удаляет свою. Любой сбой — отказ, оба экземпляра ключа остаются на месте и встроенный модуль нового не создаст.
-struct ClipboardKeyReturn: Sendable {
-    enum Result: Equatable {
-        case done
-        /// У утилиты своей записи нет: возвращать нечего.
-        case nothingToReturn
-        /// Утилита не ответила: ключ остался у неё.
-        case unreachable
-        case failed(String)
-    }
-
-    let keyring: ClipboardKeyring
-    let directory: URL
-    /// Отправить байты утилите и вернуть ответ.
-    let send: @Sendable (Data) async throws -> Data
-
-    func run() async -> Result {
-        let reply: ClipboardKeyReturnReply
-        do {
-            let answer = try await send(LinkWire.encoded(ClipboardKeyReturnMessage.returnKey))
-            guard let decoded = try? JSONDecoder().decode(ClipboardKeyReturnReply.self, from: answer) else {
-                return .failed("Утилита ответила непонятно")
-            }
-            reply = decoded
-        } catch {
-            return .unreachable
-        }
-        if let error = reply.error { return .failed(error) }
-        guard let key = reply.key else { return .nothingToReturn }
-        guard key.count == 32 else { return .failed("Ключ от утилиты неверной длины") }
-        // Ключ, который историю не открывает, в связку центра не попадёт.
-        switch ClipboardStore.indexCheck(directory: directory, key: SymmetricKey(data: key)) {
-        case .noIndex, .readable: break
-        case .unreadable: return .failed("Ключ утилиты не открывает историю")
-        case .unknown: return .failed("Не удалось проверить файл истории")
-        }
-        let keyring = keyring
-        let stored = await Task.detached { Self.store(key, in: keyring) }.value
-        if let failure = stored { return .failed(failure) }
-        do {
-            let answer = try await send(LinkWire.encoded(ClipboardKeyReturnMessage.dropKey))
-            guard let decoded = try? JSONDecoder().decode(ClipboardKeyReturnReply.self, from: answer) else {
-                return .failed("Утилита ответила непонятно")
-            }
-            if let error = decoded.error { return .failed(error) }
-            return .done
-        } catch {
-            return .failed("Утилита не ответила: ключ остался и у неё, и у Utilitumus")
-        }
-    }
-
-    /// Кладёт ключ в прежнюю запись. Своё чужим не затирает: если там уже что-то лежит, это должен быть тот же ключ.
-    private static func store(_ key: Data, in keyring: ClipboardKeyring) -> String? {
-        switch keyring.read(.legacy) {
-        case .found(let existing):
-            return existing == key ? nil : "В записи Utilitumus лежит другой ключ: ничего не изменено"
-        case .failure(let status):
-            return "Связка ключей не отдала запись Utilitumus (код \(status))"
-        case .absent:
-            let status = keyring.add(.legacy, key: key)
-            guard status == errSecSuccess else { return "Связка ключей не приняла ключ (код \(status))" }
-            guard keyring.read(.legacy) == .found(key) else {
-                _ = keyring.delete(.legacy)
-                return "Ключ в Связке ключей не читается назад"
-            }
-            return nil
-        }
-    }
 }
 
 #if KIT_TEST_DEFAULTS

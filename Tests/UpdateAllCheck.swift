@@ -298,12 +298,12 @@ struct StoreWithSidebar: View {
     check(store.failure?.module == .sound && installedVersion("Sound") == "1.0.0", "удаление во время обновления: отказ, бандл цел")
     check(!Kit.defaults.bool(forKey: ModuleMigration.removedKey("sound")), "и утилита не считается удалённой")
     store.dismissFailure()
-    store.downloadResources(.sound)
+    store.update(.sound)
     try? await registry.install(.sound, app: registry.catalogApp(.sound)!)
     check(stage.downloads.filter { $0 == "sound" }.count == 1, "кнопка и переход поверх идущего обновления не качают второй раз")
 
     // Кнопка в Сторе для того, кто ещё в очереди: очередь дождётся и не повторит.
-    store.downloadResources(.clipboard)
+    store.update(.clipboard)
     await Task.yield()
     check(store.isOperating(.clipboard), "обновление из Стора для стоящего в очереди идёт своим ходом")
 
@@ -383,7 +383,7 @@ struct StoreWithSidebar: View {
         check(installedVersion("Bots") == "1.0.0" && !stage.quits.contains { $0.hasPrefix("bots") }, "занялась во время скачивания: не остановлена")
     } else { check(false, "боты: ждали ожидание") }
     // Кнопка в Сторе у занятой утилиты: та же проверка, понятный текст, ничего не оборвано.
-    store.downloadResources(.bots)
+    store.update(.bots)
     await waitUntil("отказа кнопки") { store.failure != nil }
     check(store.failure?.message.contains("Сейчас нельзя") == true && !stage.quits.contains { $0.hasPrefix("bots") }, "кнопка в Сторе: «\(store.failure?.message ?? "")»")
     store.dismissFailure()

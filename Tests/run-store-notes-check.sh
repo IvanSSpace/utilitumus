@@ -79,6 +79,9 @@ if [ -z "${STORE_NOTES_REUSE_BASE:-}" ] || [ ! -d "$OUT/base/png" ]; then
   # Обратный патч с запасом по строкам: позже в тех же файлах правили и другое.
   /usr/bin/git diff "$NOTES_COMMIT^" "$NOTES_COMMIT" -- Sources > "$OUT/base/notes.diff"
   [ -s "$OUT/base/notes.diff" ] || { echo "ПРОВАЛ: коммит $NOTES_COMMIT не меняет Sources"; exit 1; }
+  # Коммит писался, когда у плитки перед заметкой стояла ветка чек-листа и комментарий другой: приводим к его форме обе стороны.
+  sed -i '' 's|^+    /// Что изменилось в версии, которая ждёт установки\..*|+    /// Что изменилось в версии, которая ждёт установки.|' "$OUT/base/notes.diff"
+  perl -0pi -e 's/if installed \{\n(\s*)if let note = store\.updateNotes\(module\)\.first \{/if installed {\n$1if false {\n$1    EmptyView()\n$1} else if let note = store.updateNotes(module).first {/ or die "нет ветки заметки на плитке\n"' "$OUT/base/tree/Sources/App/Store/StoreView.swift"
   (cd "$OUT/base/tree" && patch -R -p1 -F3 --no-backup-if-mismatch < "$OUT/base/notes.diff" > "$OUT/base/patch.log") \
     || { echo "ПРОВАЛ: заметки не отделились от нынешних исходников"; cat "$OUT/base/patch.log"; exit 1; }
   # «Обновить всё» появилось позже коммита заметок и читает те же поля каталога: в BASE строка обновления без заметок.

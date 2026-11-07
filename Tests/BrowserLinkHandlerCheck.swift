@@ -104,7 +104,7 @@ func disabledChecks() {
     check(!disabled { $0.set(true, forKey: "App.browser.Enabled") }, "утилита отдельно, без центра: её выключатель")
     check(disabled { $0.set(false, forKey: "App.browser.Enabled") }, "утилита отдельно, выключена")
     check(disabled { $0.set(true, forKey: "App.browser.Enabled"); $0.set(false, forKey: "ModuleOn.browser") }, "не передан: тумблер центра главнее залежавшегося ключа утилиты")
-    // Утилиту удалили: центр снимает передачу, и встроенный снова ведёт тумблер.
+    // Утилиту удалили: центр снимает передачу, и тумблер снова читает общий ключ.
     check(disabled { $0.set(false, forKey: "ModuleOn.browser"); $0.removeObject(forKey: "App.browser.HandedOver"); $0.set(true, forKey: "App.browser.Enabled") }, "после удаления утилиты тумблер центра главный")
 }
 

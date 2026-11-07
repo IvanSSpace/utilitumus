@@ -1,15 +1,11 @@
 import SwiftUI
-import AVFoundation
-import ApplicationServices
 import Combine
 
-// Стор: витрина-настройщик. Код модулей уже в приложении, «установлен» = модуль включён (скрыт он из панели
-// или нет, не важно). Установка включает модуль, ставит его в панель и качает ресурсы (пока это модель «Голоса»),
-// но остаётся в Сторе: настройку и переход в модуль человек выбирает сам.
-// Удаление выключает модуль, стирает скачанное и снимает скрытие; настройки модуля остаются.
+// Стор: витрина утилит. Каждый модуль ставится отдельным приложением через `SatelliteRegistry`, «установлен» = утилита
+// есть (скрыта её строка из панели или нет, не важно). Установка остаётся в Сторе: настройку и переход в модуль
+// человек выбирает сам. Каталог недоступен или записи нет: поставить нечего, отказ виден внизу Стора.
+// Удаление убирает утилиту, стирает скачанное и снимает скрытие; настройки модуля остаются.
 // «Скрыть из панели» — отдельное действие, на «установлен» не влияет.
-// Модуль с записью в каталоге ставится отдельным приложением через `SatelliteRegistry`; плитка та же, разница
-// только в том, что делает «＋». Каталог недоступен или записи нет — всё как у встроенного.
 
 // MARK: - Разрешения
 
@@ -23,17 +19,6 @@ enum StorePermission: String, CaseIterable {
         case .inputMonitoring: return "Мониторинг ввода"
         case .rootHelper: return "Root-помощник"
         case .systemAudio: return "Запись системного звука"
-        }
-    }
-
-    /// Выдано ли сейчас: те же проверки, что в `ModuleRequirements`. nil — заранее не проверить (система спросит сама).
-    @MainActor var isGranted: Bool? {
-        switch self {
-        case .accessibility: return AXIsProcessTrusted()
-        case .microphone: return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        case .inputMonitoring: return CGPreflightListenEventAccess()
-        case .rootHelper: return FanHelperInstaller.shared.status != .notInstalled
-        case .systemAudio: return nil
         }
     }
 
@@ -55,31 +40,10 @@ struct StoreNeed: Identifiable {
     var id: String { permission.rawValue }
 }
 
-/// Что скачивается при установке и куда ложится.
-struct StoreDownload {
-    let megabytes: Int
-    let kind: String
-    let path: String
-    /// Подпись под размером, например какая именно модель.
-    let name: String
-    /// Что ещё можно докачать по желанию, уже внутри модуля.
-    var optional: String?
-}
-
 // MARK: - Каталог
 
 enum StoreCatalog {
     static func megabytes(_ model: VoiceModel) -> Int { Int((Double(model.sizeBytes) / 1_000_000).rounded()) }
-
-    /// Что скачается при установке. У «Голоса» — выбранная модель (по умолчанию GigaAM), размер из `VoiceModels`.
-    @MainActor static func downloads(_ m: Module) -> StoreDownload? {
-        guard m == .voice else { return nil }
-        let model = VoiceModelStore.shared.selected
-        let other = VoiceModel.allCases.first { $0 != model }
-        return StoreDownload(megabytes: megabytes(model), kind: "модель", path: "~/Library/Application Support/Utilitumus/Voice/Models/",
-                             name: model.title,
-                             optional: other.map { "\($0.title) — ещё \(megabytes($0)) МБ, по желанию в самом модуле" })
-    }
 
     static func needs(_ m: Module) -> [StoreNeed] {
         switch m {
@@ -121,7 +85,7 @@ enum StoreCatalog {
         }
         if m == .voice {
             // С диска, а не из статусов стора: их мог изменить процесс утилиты.
-            for model in VoiceModel.allCases where VoiceModelStore.isInstalled(model) {
+            for model in VoiceModel.allCases where VoiceModelFiles.isInstalled(model) {
                 items.append("Скачанная модель \(model.title) (\(megabytes(model)) МБ)")
             }
         }
@@ -129,12 +93,6 @@ enum StoreCatalog {
             items.append("Root-помощник останется в системе: его убирают вручную")
         }
         return items
-    }
-
-    /// Короткая подпись размера для плитки и карточки.
-    @MainActor static func sizeText(_ m: Module, short: Bool = false) -> String {
-        if short { return downloads(m).map { "+\($0.megabytes) МБ" } ?? "без загрузки" }
-        return downloads(m).map { "+\($0.megabytes) МБ \($0.kind)" } ?? "ничего не скачивает"
     }
 }
 
@@ -236,8 +194,6 @@ enum StoreState: Equatable {
 struct StoreFailure: Equatable {
     let module: Module
     let message: String
-    /// Отдельное приложение поставить не вышло не по его вине: можно взять встроенный вариант.
-    var offersBuiltIn = false
 }
 
 enum StoreTab: String, CaseIterable, Hashable {
@@ -264,7 +220,6 @@ final class StoreModel: ObservableObject {
     private var toastTask: Task<Void, Never>?
 
     private let modules = ModuleManager.shared
-    private let voice = VoiceModelStore.shared
     let satellites = SatelliteRegistry.shared
     @Published private(set) var failure: StoreFailure?
     /// Идущие установки и удаления: отсюда их отменяет кнопка с процентом. Запись появляется сразу, раньше
@@ -276,30 +231,23 @@ final class StoreModel: ObservableObject {
     static let featured: Module = .voice
 
     init() {
-        // Состояние берём у менеджера модулей и стора моделей: их изменения перерисовывают стор.
+        // Состояние берём у менеджера модулей и утилиты «Голоса»: их изменения перерисовывают стор.
         subs.append(modules.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
-        subs.append(voice.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
         subs.append(RemoteVoiceModel.shared.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
         if modules.isExternal(.voice) { RemoteVoiceModel.shared.refresh() }
         subs.append(satellites.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
     }
 
-    // Пока модуль ведёт утилита, модели скачивает она: стор спрашивает и просит её, а не свой `VoiceModelStore`.
-    // Созданный в центре, тот стёр бы ей идущую загрузку и не узнал о готовой.
-    private var voiceExternal: Bool { modules.isExternal(.voice) }
-    private var voiceSelected: VoiceModel { voiceExternal ? RemoteVoiceModel.shared.selected : voice.selected }
-    private func voiceStatus(_ model: VoiceModel) -> VoiceModelStore.Status {
-        voiceExternal ? RemoteVoiceModel.shared.status(model) : voice.status(model)
-    }
-
-    /// «Установлен» = модуль включён.
-    func isInstalled(_ module: Module) -> Bool { modules.isInstalled(module) }
+    /// «Установлен» = утилита есть. Включённый модуль без неё только ждёт установки: его ставит тот же «＋».
+    func isInstalled(_ module: Module) -> Bool { modules.isExternal(module) || satellites.hasBundle(module) }
 
     func state(_ module: Module) -> StoreState {
-        // Установщик долю не сообщает: только этап.
-        if operations[module] != nil { return .installing(.download, 0) }
-        if module == .voice {
-            switch voiceStatus(voiceSelected) {
+        // Установщик долю не сообщает: только этап. Не установленный может ставить и переход при запуске: «＋» там молчал бы.
+        if operations[module] != nil || (!isInstalled(module) && satellites.busy.contains(module)) { return .installing(.download, 0) }
+        // Модели скачивает утилита, Стор только показывает ход.
+        if module == .voice, modules.isExternal(.voice) {
+            let voice = RemoteVoiceModel.shared
+            switch voice.status(voice.selected) {
             case .downloading(let p): return .installing(.download, p)
             case .verifying: return .installing(.verify, 0)
             default: break
@@ -308,13 +256,9 @@ final class StoreModel: ObservableObject {
         return isInstalled(module) ? .installed : .available
     }
 
-    /// Установленному модулю не хватает ресурсов: у «Голоса» не скачана модель.
-    func hasUpdate(_ module: Module) -> Bool {
-        if satellites.hasBundle(module) { return satellites.hasUpdate(module) }
-        return module == .voice && isInstalled(.voice) && !VoiceModelStore.isInstalled(voiceSelected)
-    }
+    func hasUpdate(_ module: Module) -> Bool { satellites.hasUpdate(module) }
 
-    /// Что изменилось в версии, которая ждёт установки. Только у утилиты: у встроенного «обновление» значит нехватку модели.
+    /// Что изменилось в версии, которая ждёт установки.
     func updateNotes(_ module: Module) -> [String] {
         guard satellites.hasUpdate(module) else { return [] }
         return satellites.catalogApp(module)?.notes ?? []
@@ -340,50 +284,27 @@ final class StoreModel: ObservableObject {
     /// Сколько реально лежит на диске из скачанного.
     var buildMegabytes: Int {
         buildModules.contains(.voice)
-            ? VoiceModel.allCases.filter { VoiceModelStore.isInstalled($0) }.reduce(0) { $0 + StoreCatalog.megabytes($1) } : 0
-    }
-
-    /// Доступы установленных модулей, которых ещё нет (системе придётся о них спросить).
-    var newPermissions: [StorePermission] {
-        // Доступы утилиты выдаются ей, а не центру.
-        let all = Set(buildModules.filter { !modules.isExternal($0) }.flatMap { StoreCatalog.needs($0).map(\.permission) })
-        return StorePermission.allCases.filter { all.contains($0) && $0.isGranted != true }
+            ? VoiceModel.allCases.filter { VoiceModelFiles.isInstalled($0) }.reduce(0) { $0 + StoreCatalog.megabytes($1) } : 0
     }
 
     // MARK: Действия
 
-    /// Включить, поставить в панель и скачать ресурсы. Остаёмся в Сторе: плитка станет «Установлен»,
-    /// недостающая настройка — в плашке «Настроить», переход в модуль — кнопка «Открыть».
+    /// Поставить утилиту и показать строку в панели. Остаёмся в Сторе: плитка станет «Установлен»,
+    /// переход в модуль — кнопка «Открыть». Записи в каталоге нет: ничего не меняем, говорим почему.
     func install(_ module: Module) {
-        if let app = satellites.catalogApp(module) {
-            modules.setHidden(module, false)
-            runInstall(module, app)
+        guard let app = satellites.catalogApp(module) else {
+            failure = StoreFailure(module: module, message: unavailableMessage(module))
+            // «Попробуй ещё раз» должно быть правдой: сеть могла вернуться, а опрос идёт только при открытии Стора.
+            satellites.refresh()
             return
         }
-        installBuiltIn(module)
-    }
-
-    /// Встроенный вариант: сразу, без сети. Его же предлагает ошибка установки отдельного приложения.
-    func installBuiltIn(_ module: Module) {
-        failure = nil
         modules.setHidden(module, false)
-        modules.setOn(module, true)
-        downloadResources(module)
-        showToast(module)
+        runInstall(module, app)
     }
 
-    /// Незавершённая настройка установленного модуля: «Настройка 1 из 3». nil — всё готово или шагов нет.
-    func pendingSetup(_ module: Module) -> SetupProgress? {
-        // Чек-лист утилиты у неё самой, здесь были бы доступы центра.
-        guard isInstalled(module), !modules.isExternal(module) else { return nil }
-        let progress = module.setupProgress
-        return progress.total > 0 && !progress.allDone ? progress : nil
-    }
-
-    /// Открыть чек-лист модуля поверх его экрана.
-    func configure(_ module: Module) {
-        SetupFlow.shared.show(module)
-        openInApp(module)
+    private func unavailableMessage(_ module: Module) -> String {
+        if let held = satellites.heldByHub[module] { return "Сначала обнови Utilitumus: нужна версия \(held.minHub) или новее" }
+        return satellites.catalogFailed ? "Каталог недоступен: проверь сеть и попробуй ещё раз" : "Этой утилиты пока нет в каталоге"
     }
 
     /// Перейти в модуль в главном окне.
@@ -444,9 +365,7 @@ final class StoreModel: ObservableObject {
     private func show(_ error: Error, module: Module, fallback: String) {
         if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
         NSLog("Utilitumus: модуль %@: %@", module.rawValue, String(describing: error))
-        // Бандл есть — сорвалось обновление: встроенный рядом с живой утилитой работал бы дважды.
-        failure = StoreFailure(module: module, message: Self.failureMessage(error, fallback: fallback),
-                               offersBuiltIn: Self.offersBuiltIn(error) && !satellites.hasBundle(module))
+        failure = StoreFailure(module: module, message: Self.failureMessage(error, fallback: fallback))
     }
 
     func dismissFailure() { failure = nil }
@@ -461,8 +380,6 @@ final class StoreModel: ObservableObject {
             return error.errorDescription ?? fallback
         case let error as KitSigning.Failure:
             return error.userMessage ?? fallback
-        case let error as ClipboardKeyReturnError:
-            return error.message
         case is LinkError:
             return "Модуль не ответил после запуска, прежняя версия возвращена"
         case is URLError:
@@ -471,15 +388,6 @@ final class StoreModel: ObservableObject {
             return "Нет прав на запись в папку «Программы»"
         default:
             return fallback
-        }
-    }
-
-    /// Только сеть и права: это не говорит ничего плохого о самом приложении. Чужая подпись, не та контрольная
-    /// сумма и плохой архив встроенным не лечатся: человек должен увидеть именно эту ошибку.
-    static func offersBuiltIn(_ error: Error) -> Bool {
-        switch error {
-        case is URLError, SatelliteInstallError.server: return true
-        default: return isPermissionFailure(error)
         }
     }
 
@@ -501,21 +409,15 @@ final class StoreModel: ObservableObject {
         }
     }
 
-    /// Скачивание ресурсов модуля; там, где их нет, ничего не делает.
-    func downloadResources(_ module: Module) {
-        if satellites.hasUpdate(module), let app = satellites.catalogApp(module) {
-            runInstall(module, app)
-            return
-        }
-        guard module == .voice, !VoiceModelStore.isInstalled(voiceSelected) else { return }
-        if voiceExternal { RemoteVoiceModel.shared.download(voiceSelected) } else { voice.download(voice.selected) }
+    /// Кнопка «Обновить».
+    func update(_ module: Module) {
+        guard satellites.hasUpdate(module), let app = satellites.catalogApp(module) else { return }
+        runInstall(module, app)
     }
 
     func cancel(_ module: Module) {
         operations[module]?.cancel()
-        if module == .voice {
-            if voiceExternal { RemoteVoiceModel.shared.cancel(voiceSelected) } else { voice.cancel(voice.selected) }
-        }
+        if module == .voice, modules.isExternal(.voice) { RemoteVoiceModel.shared.cancel(RemoteVoiceModel.shared.selected) }
     }
 
     /// Выход из центра: всё, что идёт через установщик. Отмена после остановки утилиты возвращает прежнюю версию (откат).
@@ -525,29 +427,30 @@ final class StoreModel: ObservableObject {
 
     func requestRemoval(_ module: Module) { pendingRemoval = module }
 
-    /// Выключить, стереть скачанное, снять скрытие (иначе модуль висел бы в «Скрытых»). Настройки модуля не трогаем.
+    /// Убрать утилиту, стереть скачанное, снять скрытие (иначе модуль висел бы в «Скрытых»). Настройки модуля не трогаем.
+    /// Утилиты нет у включённого модуля, который ждёт установки: тогда уходит только его строка.
     func remove(_ module: Module) {
-        guard satellites.hasBundle(module) else {
-            removeBuiltIn(module)
-            return
-        }
         pendingRemoval = nil
         guard !isOperating(module) else {
             failure = StoreFailure(module: module, message: "Модуль сейчас обновляется, удалить можно, когда закончится")
             return
         }
+        guard satellites.hasBundle(module) else {
+            finishRemoval(module)
+            return
+        }
         run(module, fallback: "Не удалось удалить модуль") {
             try await self.satellites.uninstall(module)
-            self.removeBuiltIn(module)
+            self.finishRemoval(module)
         }
     }
 
-    private func removeBuiltIn(_ module: Module) {
+    private func finishRemoval(_ module: Module) {
         modules.setOn(module, false)
         modules.setHidden(module, false)
         if module == .voice {
             // Утилиты к этому часу уже нет, папки моделей удаляет центр сам.
-            for model in VoiceModel.allCases where VoiceModelStore.isInstalled(model) { voice.delete(model) }
+            for model in VoiceModel.allCases where VoiceModelFiles.isInstalled(model) { VoiceModelFiles.delete(model) }
         }
         pendingRemoval = nil
         if justInstalled == module { justInstalled = nil }
