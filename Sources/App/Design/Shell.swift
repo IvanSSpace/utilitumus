@@ -315,7 +315,7 @@ private struct TrafficLightProbe: NSViewRepresentable {
     }
 }
 
-/// Внизу панели: обновление, «Стор», «Что нового», «Настройки», «О проекте», версия.
+/// Внизу панели: обновление, «Стор», «Настройки», «О проекте», версия.
 struct DSSidebarFooter: View {
     @ObservedObject var updater = Updater.shared
     @ObservedObject private var modules = ModuleManager.shared
@@ -363,7 +363,6 @@ struct DSSidebarFooter: View {
                 showAbout = false
                 showStore = true
             }
-            FooterLink(icon: "sparkles", title: "Что нового") { WhatsNew.shared.isShown = true }
             // Оформление, Dock и режим страниц; без этой строки туда попадали только через Cmd+, или контекстное меню.
             FooterLink(icon: "gearshape", title: "Настройки") { modules.settingsShown = true }
             FooterLink(icon: "info.circle", title: "О проекте", selected: showAbout) { showStore = false; showAbout = true }

@@ -5,7 +5,6 @@ struct DSModuleControls: View {
     let module: Module
     @ObservedObject private var modules = ModuleManager.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
-    @ObservedObject private var icons = ModuleMenuIcons.shared
 
     /// Утилита ещё не ответила — не «выключен»: через миг ответ заменил бы надпись на глазах.
     private var on: Bool {
@@ -17,7 +16,6 @@ struct DSModuleControls: View {
         HStack(spacing: 10) {
             DSButton("Как это работает", icon: "info.circle", style: .plain, small: true) { modules.infoModule = module }
                 .help("Что умеет модуль и как им пользоваться")
-            DSMenuIconSwitch(isOn: Binding(get: { icons.isOn(module) }, set: { icons.set(module, $0) }))
             HStack(spacing: 7) {
                 Text(on ? "Включён" : "Выключен")
                     .font(.system(size: 12, weight: .medium))

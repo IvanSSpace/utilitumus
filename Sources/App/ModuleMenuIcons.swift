@@ -132,25 +132,3 @@ struct MenuIconNotice: View {
         }
     }
 }
-
-/// «Значки в строке меню»: у каждого модуля с утилитой свой переключатель. Без утилиты значок рисовать некому.
-struct MenuIconsSection: View {
-    @ObservedObject private var icons = ModuleMenuIcons.shared
-    @ObservedObject private var modules = ModuleManager.shared
-
-    var body: some View {
-        let switchable = AppMenuBarScene.switchable(modules)
-        if !switchable.isEmpty {
-            DSSection("Значки в строке меню") {
-                ForEach(switchable) { module in
-                    DSRow(icon: module.icon, title: module.title, iconTint: module.tint) {
-                        DSToggle("Значок «\(module.title)» в строке меню",
-                                 isOn: Binding(get: { icons.isOn(module) }, set: { icons.set(module, $0) }))
-                            .disabled(icons.isFull && !icons.isOn(module))
-                    }
-                }
-                MenuIconNotice()
-            }
-        }
-    }
-}
