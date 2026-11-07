@@ -5,9 +5,10 @@ import AppKit
 enum ClipboardPreview {
     static let maxCharacters = 400
     static let maxLines = 9
-    static let fontSize: CGFloat = 12.5
-    static let cardWidth: CGFloat = 206
-    static let textWidth: CGFloat = cardWidth - 24
+    static let fontSize: CGFloat = 13
+    static let cardWidth: CGFloat = 242
+    static let textInset: CGFloat = 14
+    static let textWidth: CGFloat = cardWidth - textInset * 2
 
     static func shownText(_ text: String) -> String { String(text.prefix(maxCharacters)) }
 
@@ -28,19 +29,22 @@ enum ClipboardPreview {
         return rest.last?.isNewline == true ? lines - 1 : lines
     }
 
-    static func hiddenCaption(_ lines: Int) -> String {
-        let word: String
-        switch (lines % 10, lines % 100) {
-        case (1, let h) where h != 11: word = "строка"
-        case (2...4, let h) where !(12...14).contains(h): word = "строки"
-        default: word = "строк"
+    /// Склонение по числу: 1 минуту, 4 минуты, 8 минут, 21 минуту, 11 минут.
+    static func word(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        switch (n % 10, n % 100) {
+        case (1, let h) where h != 11: return one
+        case (2...4, let h) where !(12...14).contains(h): return few
+        default: return many
         }
-        return "ещё \(lines) \(word)"
+    }
+
+    static func hiddenCaption(_ lines: Int) -> String {
+        "ещё \(lines) \(word(lines, "строка", "строки", "строк"))"
     }
 
     /// Подпись карточки: число символов и то, что не видно.
     static func caption(for text: String) -> String {
-        let count = "\(text.count) симв."
+        let count = "\(text.count) \(word(text.count, "символ", "символа", "символов"))"
         let hidden = hiddenLines(in: text)
         return hidden > 0 ? "\(count) · \(hiddenCaption(hidden))" : count
     }

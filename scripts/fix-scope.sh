@@ -11,7 +11,7 @@ fix_checks_of() {
     awake) echo run-awake-app-check run-awake-remote-check run-awake-settings-check ;;
     bots) echo run-bots-remote-check ;;
     browser) echo run-browser-routing-check run-browser-link-handler-check run-browser-remote-check ;;
-    clipboard) echo run-clipboard-check run-clipboard-key-check run-clipboard-remote-check run-clipboard-wire-check ;;
+    clipboard) echo run-clipboard-check run-clipboard-key-check run-clipboard-panel-check run-clipboard-remote-check run-clipboard-wire-check ;;
     fans) echo run-fan-gate-check run-fan-helper-check run-fan-version-check run-fans-remote-check run-fans-wire-check ;;
     keyboard) echo run-fn-restore-check run-keyboard-remote-check run-keyboard-wire-check ;;
     load) echo run-load-remote-check run-load-safety-check run-load-wire-check run-own-identity-check run-tool-spawn-check ;;

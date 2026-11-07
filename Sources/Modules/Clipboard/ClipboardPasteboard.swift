@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import UniformTypeIdentifiers
 
 /// Чтение и запись NSPasteboard. Отдельно от контроллера, чтобы проверять на своём именованном буфере.
 enum ClipboardPasteboard {
@@ -21,26 +22,37 @@ enum ClipboardPasteboard {
                                                options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         snap.filePaths = fileURLs.map(\.path)
         snap.text = pasteboard.string(forType: .string).map(ClipboardPolicy.trimmedText)
-        if snap.filePaths.isEmpty, snap.text?.isEmpty != false {
+        // Настоящий текст с картинкой рядом (Word, Excel) остаётся текстом: картинку здесь даже не читаем.
+        if snap.filePaths.isEmpty, ClipboardStore.imageOutranks(text: snap.text) {
             snap.imagePNG = pngData(from: pasteboard)
         }
         return snap
     }
 
+    /// nil и у картинки сверх предела: запись тогда остаётся ссылкой, если адрес был рядом, а не пропадает.
     private static func pngData(from pasteboard: NSPasteboard) -> Data? {
         if let png = pasteboard.data(forType: .png) { return png.count <= ClipboardPolicy.maxImageBytes ? png : nil }
-        guard let tiff = pasteboard.data(forType: .tiff), tiffFits(tiff), let rep = NSBitmapImageRep(data: tiff) else { return nil }
-        return rep.representation(using: .png, properties: [:])
+        // TIFF система достраивает из любого формата и разжимает прямо при чтении `.tiff`, поэтому исходный файл
+        // проверяется раньше: JPEG меньше мегабайта может развернуться в сотни мегабайт.
+        let declared = pasteboard.pasteboardItems?.first?.types ?? []
+        if !declared.contains(.tiff) {
+            for type in declared where UTType(type.rawValue)?.conforms(to: .image) == true {
+                guard let source = pasteboard.data(forType: type), imageFits(source) else { return nil }
+            }
+        }
+        guard let tiff = pasteboard.data(forType: .tiff), imageFits(tiff), let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return nil }
+        return png.count <= ClipboardPolicy.maxImageBytes ? png : nil
     }
 
     /// Размер читается из заголовка, без декодирования: маленький файл может распаковаться в гигабайты.
-    private static func tiffFits(_ tiff: Data) -> Bool {
-        guard tiff.count <= ClipboardPolicy.maxTIFFBytes,
-              let source = CGImageSourceCreateWithData(tiff as CFData, nil),
+    private static func imageFits(_ data: Data) -> Bool {
+        guard data.count <= ClipboardPolicy.maxTIFFBytes,
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int else { return false }
-        return ClipboardPolicy.tiffFits(bytes: tiff.count, width: width, height: height)
+        return ClipboardPolicy.tiffFits(bytes: data.count, width: width, height: height)
     }
 
     /// Кладёт запись в буфер. Возвращает changeCount после записи — контроллер по нему узнаёт «своё».
@@ -51,6 +63,7 @@ enum ClipboardPasteboard {
         case .text, .link:
             pasteboard.setString(item.text ?? "", forType: .string)
         case .image:
+            // Только PNG, те же байты. `.tiff` потребителю достраивает система в его процессе (см. Tests/ClipboardCheck.swift, раздел 12).
             if let imageData { pasteboard.setData(imageData, forType: .png) }
         case .file:
             pasteboard.writeObjects((item.filePaths ?? []).map { URL(fileURLWithPath: $0) as NSURL })
