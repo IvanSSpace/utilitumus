@@ -11,7 +11,7 @@ CACHE="$(incremental_cache stash-title KIT_TEST_DEFAULTS)"
 mkdir -p "$CACHE/src"
 cmp -s Tests/StashTitleCheck.swift "$CACHE/src/main.swift" || cp Tests/StashTitleCheck.swift "$CACHE/src/main.swift"
 # Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек.
-FILES=("$CACHE/src/main.swift" Sources/Modules/Stash/StashStore.swift)
+FILES=("$CACHE/src/main.swift" Sources/Modules/Stash/StashStore.swift Sources/Modules/Stash/UI/StashTypes.swift)
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -D KIT_TEST_DEFAULTS -module-name StashTitleCheck -o "$OUT/check" "${FILES[@]}"

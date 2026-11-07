@@ -10,7 +10,7 @@ struct StashProgram: Identifiable {
     var id: String { bundleID }
 }
 
-/// Всё, что экран Стеша берёт у своей модели. Работает ли модуль здесь же (`StashStore`)
+/// Всё, что экран Стеша берёт у своей модели. Работает ли модуль здесь же
 /// или в утилите, экран не знает.
 @MainActor
 protocol StashModel: ObservableObject {
@@ -56,17 +56,4 @@ extension StashModel {
     func runningPrograms(of scenario: StashScenario) -> [StashProgram] {
         runningPrograms.filter { scenario.bundleIDs.contains($0.bundleID) }
     }
-}
-
-extension StashStore: StashModel {
-    var runningPrograms: [StashProgram] { running.map(StashProgram.init) }
-    var stubbornPrograms: [StashProgram] { stubborn.map(StashProgram.init) }
-    var stashedPrograms: [StashProgram] {
-        stashed.map { StashProgram(bundleID: $0.bundleID, name: $0.name, icon: icon(forPath: $0.path), windowCount: $0.windows.count) }
-    }
-    var selectedNames: [String] { selected.compactMap(\.localizedName) }
-}
-
-private extension StashProgram {
-    init(_ entry: RunningEntry) { self.init(bundleID: entry.bundleID, name: entry.name, icon: entry.icon) }
 }

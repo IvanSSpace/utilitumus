@@ -53,7 +53,7 @@ cmp -s Tests/OwnIdentityCheck.swift "$CACHE/src/main.swift" || cp Tests/OwnIdent
 L=Sources/Modules/Load/Native
 FILES=("$CACHE/src/main.swift" "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
   "$L/Background/LaunchAgents.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
-  "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift)
+  "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift Sources/Modules/Stash/UI/StashTypes.swift)
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit "$L/Core" -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name OwnIdentityCheck -o "$OUT/check" "${FILES[@]}"

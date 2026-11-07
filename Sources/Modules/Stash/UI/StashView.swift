@@ -521,8 +521,3 @@ struct StashView<Model: StashModel>: View {
         }
     }
 }
-
-extension StashView where Model == StashStore {
-    /// Встроенный экран: модуль работает здесь же.
-    init() { self.init(store: StashStore.shared) }
-}
