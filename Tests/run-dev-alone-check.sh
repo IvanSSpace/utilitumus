@@ -6,6 +6,7 @@
 #      На подставном репозитории с крошечной утилитой: правки настоящих исходников проверка не делает.
 # Папка: DEV_ALONE_CHECK_DIR, иначе $TMPDIR/dev-alone-check.noindex; кэш дев-копий живёт в ней между запусками (dev/).
 # Какие утилиты собирать: DEV_ALONE_CHECK_IDS, пусто — только часть 2. Окна только за экраном, снимки в png/. Нужен сертификат «Utilitumus Signing» (часть 2).
+source "$(dirname "$0")/lib/check-limit.sh"
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -148,7 +149,7 @@ if [ -n "$first" ]; then
   edit_line="$(sed -n 's/^  \(env .*\)$/\1/p' "$RUN/edit1.out")"
   edit_exe="${edit_line##* }"
   if LC_ALL=C grep -qaF "dev-alone-probe-edit" "$edit_exe"; then bad "метка правки уже в бинарнике"; else ok "до правки метки нет"; fi
-  echo 'let devAloneProbeEdit = "dev-alone-probe-edit"' >> "$EDIT/Sources/Modules/Mouse/MouseView.swift"
+  echo 'let devAloneProbeEdit = "dev-alone-probe-edit"' >> "$EDIT/Sources/Modules/Mouse/UI/MouseView.swift"
   ( cd "$EDIT" && scripts/dev.sh --alone mouse ) > "$RUN/edit2.out" 2>&1 || bad "копия: сборка после правки"
   if LC_ALL=C grep -qaF "dev-alone-probe-edit" "$edit_exe"; then ok "правка дошла: $(head -1 "$RUN/edit2.out" | cut -d, -f1)"; else bad "правка файла экрана не дошла до бинарника"; fi
   edit_suite="$(sed -n 's/.*KIT_TEST_SUITE=\([^ ]*\).*/\1/p' <<<"$edit_line")"

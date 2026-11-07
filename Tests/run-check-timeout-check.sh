@@ -20,7 +20,8 @@ dead() { if alive "$2"; then bad "$1 жив: $(ps -o command= -p "$2")"; kill -9
 echo "== у каждой проверки есть лимит, и он идёт до set и cd"
 for f in Tests/run-*.sh; do
   case "$f" in Tests/run-satellite-mutations.sh) continue ;; esac
-  first="$(/usr/bin/grep -nE '^(CHECK_LIMIT=[0-9]+ )?source "\$\(dirname "\$0"\)/lib/check-limit\.sh"$' "$f" | cut -d: -f1 | head -1)"
+  # Без строки лимита grep вернёт 1: под set -e и pipefail скрипт молча вышел бы, не назвав файл.
+  first="$(/usr/bin/grep -nE '^(CHECK_LIMIT=[0-9]+ )?source "\$\(dirname "\$0"\)/lib/check-limit\.sh"$' "$f" | cut -d: -f1 | head -1 || true)"
   other="$(/usr/bin/grep -nvE '^(#|$)' "$f" | cut -d: -f1 | head -1)"
   [ "$first" = "$other" ] || bad "$f: первая команда не лимит"
 done
