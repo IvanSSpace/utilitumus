@@ -4,7 +4,7 @@ import Combine
 final class LockState: ObservableObject {
     static let shared = LockState()
 
-    private static let key = "MicGuardBluetoothLocked"
+    private static let key = SoundShared.bluetoothLockedKey
 
     @Published var isLocked: Bool {
         didSet { Kit.defaults.set(isLocked, forKey: Self.key) }
@@ -13,19 +13,12 @@ final class LockState: ObservableObject {
     var isUnlocked: Bool { !isLocked }
 
     private init() {
-        isLocked = Self.stored()
-    }
-
-    private static func stored() -> Bool {
-        if Kit.defaults.object(forKey: key) == nil {
-            Kit.defaults.set(true, forKey: key)
-        }
-        return Kit.defaults.bool(forKey: key)
+        isLocked = SoundShared.storedBluetoothLocked()
     }
 
     /// Пока модуль вёл другой процесс, настройка менялась там.
     func reload() {
-        let new = Self.stored()
+        let new = SoundShared.storedBluetoothLocked()
         if new != isLocked { isLocked = new }
     }
 }

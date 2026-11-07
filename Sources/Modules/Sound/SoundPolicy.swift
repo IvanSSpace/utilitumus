@@ -1,21 +1,6 @@
 import Foundation
 import CoreAudio
 
-enum Transport: String, Codable, Sendable {
-    case builtIn
-    case usb
-    case bluetooth
-    case airplay
-    /// HDMI / DisplayPort: динамики монитора или телевизора.
-    case display
-    case virtual
-    case other
-
-    /// Настоящее железо, которое можно выбрать основным. Виртуальные и
-    /// неопознанные устройства (Loopback, Zoom, агрегаты) — чужая песочница.
-    var isPhysical: Bool { self != .virtual && self != .other }
-}
-
 struct AudioDeviceInfo {
     let id: AudioDeviceID
     let uid: String
@@ -23,19 +8,7 @@ struct AudioDeviceInfo {
     let transport: Transport
 }
 
-protocol SoundDevice {
-    var uid: String { get }
-    var transport: Transport { get }
-}
-
 extension AudioDeviceInfo: SoundDevice {}
-
-/// Выбор основного выхода. `.system` — не вмешиваться, решает macOS.
-enum OutputChoice: Codable, Equatable, Sendable {
-    case system
-    case builtIn
-    case device(String)
-}
 
 /// Время, когда набор откатов считается «борьбой» с системой.
 /// macOS ставит Bluetooth-гарнитуру ВРЕМЕННЫМ default input на время звонка
@@ -64,15 +37,11 @@ struct CorrectionThrottle {
 /// Чистые решения без обращений к CoreAudio и UserDefaults: список устройств
 /// и настройки на входе, на выходе — что поставить или nil («не трогать»).
 enum SoundPolicy {
-    // UID встроенных устройств содержат эти слова (BuiltInMicrophoneDevice,
-    // BuiltInSpeakerDevice). У встроенного бывает несколько устройств (вход/выход
-    // для разъёма наушников), поэтому ищем нужное по слову, а не берём первое.
-    static let microphoneMarker = "Microphone"
-    static let speakerMarker = "Speaker"
+    static let microphoneMarker = SoundShared.microphoneMarker
+    static let speakerMarker = SoundShared.speakerMarker
 
     static func builtIn<D: SoundDevice>(in devices: [D], marker: String) -> D? {
-        let builtIns = devices.filter { $0.transport == .builtIn }
-        return builtIns.first { $0.uid.contains(marker) } ?? builtIns.first
+        SoundShared.builtIn(in: devices, marker: marker)
     }
 
     /// Вход: основной, если он подключён и не заблокирован; иначе микрофон MacBook.

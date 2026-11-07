@@ -67,7 +67,7 @@ Sources/Modules/Load/Native/Sessions/SessionsBuilder.swift|NSHomeDirectory
 Sources/Modules/Mixer/UI/MixerView.swift|NSWorkspace.shared.open
 Sources/Modules/Mouse/MouseController.swift|NSWorkspace.shared.open
 Sources/Modules/Sound/AudioMonitor.swift|AudioObjectSetPropertyData
-Sources/Modules/Sound/MicGuardMigration.swift|UserDefaults(suiteName
+Sources/Modules/Sound/UI/MicGuardMigration.swift|UserDefaults(suiteName
 Sources/Modules/Stash/StashStore.swift|.terminate()
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.open
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.openApplication

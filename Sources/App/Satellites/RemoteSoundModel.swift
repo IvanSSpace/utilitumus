@@ -8,9 +8,9 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
         super.init(id: id,
                    initial: SoundState(currentInputName: "—", currentInputIsBluetooth: false, currentOutputName: "—",
                                        displayInputs: [], displayOutputs: [],
-                                       primaryInputUID: PrimaryInputStore.shared.primaryUID,
-                                       outputChoice: PrimaryOutputStore.shared.choice,
-                                       isBluetoothLocked: LockState.shared.isLocked),
+                                       primaryInputUID: SoundShared.storedPrimaryInput().uid,
+                                       outputChoice: SoundShared.storedOutputChoice(),
+                                       isBluetoothLocked: SoundShared.storedBluetoothLocked()),
                    dashboardWatch: .changes, link: link, canRead: canRead,
                    // Выбор виден сразу, как у встроенного. Отказ утилиты (нет устройства, Bluetooth под замком) откатит его.
                    optimistic: { state, action in
@@ -19,12 +19,12 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
                            let physical = state.displayInputs.filter { $0.transport.isPhysical }
                            guard let device = physical.first(where: { $0.uid == uid }),
                                  !(device.transport == .bluetooth && state.isBluetoothLocked) else { return }
-                           let builtIn = SoundPolicy.builtIn(in: physical, marker: SoundPolicy.microphoneMarker)
+                           let builtIn = SoundShared.builtIn(in: physical, marker: SoundShared.microphoneMarker)
                            state.primaryInputUID = uid == builtIn?.uid ? nil : uid
                        case .selectOutput(let uid):
                            let physical = state.displayOutputs.filter { $0.transport.isPhysical }
                            guard physical.contains(where: { $0.uid == uid }) else { return }
-                           let builtIn = SoundPolicy.builtIn(in: physical, marker: SoundPolicy.speakerMarker)
+                           let builtIn = SoundShared.builtIn(in: physical, marker: SoundShared.speakerMarker)
                            state.outputChoice = uid == builtIn?.uid ? .builtIn : .device(uid)
                        case .selectSystemOutput:
                            state.outputChoice = .system

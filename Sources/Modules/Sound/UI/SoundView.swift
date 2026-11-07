@@ -129,11 +129,11 @@ struct SoundView<Model: SoundModel>: View {
     }
 
     private var builtInInput: DisplayDevice? {
-        SoundPolicy.builtIn(in: physicalInputs, marker: SoundPolicy.microphoneMarker)
+        SoundShared.builtIn(in: physicalInputs, marker: SoundShared.microphoneMarker)
     }
 
     private var builtInOutput: DisplayDevice? {
-        SoundPolicy.builtIn(in: physicalOutputs, marker: SoundPolicy.speakerMarker)
+        SoundShared.builtIn(in: physicalOutputs, marker: SoundShared.speakerMarker)
     }
 
     private func inputRow(_ device: DisplayDevice) -> some View {
@@ -245,9 +245,4 @@ struct SoundView<Model: SoundModel>: View {
             }
         }
     }
-}
-
-/// Встроенный модуль: экран берёт модель этого процесса.
-extension SoundView where Model == SoundController {
-    init() { self.init(model: .shared) }
 }
