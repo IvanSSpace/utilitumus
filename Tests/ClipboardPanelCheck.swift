@@ -1486,22 +1486,22 @@ func checkSelectionLogic() {
         }
         Stand.window.contentView = nil
     }
-    let live = panelModel(theme: "vivid")
-    var liveFlags: NSEvent.ModifierFlags = []
-    live.modifiers = { liveFlags }
-    var livePaste = 0
-    live.onPaste = { _ in livePaste += 1 }
-    _ = Stand.host(live, width: 1440)
+    let clickModel = panelModel(theme: "vivid")
+    var heldFlags: NSEvent.ModifierFlags = []
+    clickModel.modifiers = { heldFlags }
+    var pasteCount = 0
+    clickModel.onPaste = { _ in pasteCount += 1 }
+    _ = Stand.host(clickModel, width: 1440)
     await pause(0.45)
     await windowClick(stripPoint(slot: 0))
     await pause(0.5)
-    liveFlags = .shift
+    heldFlags = .shift
     await windowClick(stripPoint(slot: 2))
     await windowClick(stripPoint(slot: 2))
-    check(live.selection.ids.count == 3 && livePaste == 0, "настоящий Shift+клик: диапазон, вставки нет")
-    liveFlags = .command
+    check(clickModel.selection.ids.count == 3 && pasteCount == 0, "настоящий Shift+клик: диапазон, вставки нет")
+    heldFlags = .command
     await windowClick(stripPoint(slot: 4))
-    check(live.selection.ids.count == 4 && livePaste == 0, "настоящий ⌘+клик добавил")
+    check(clickModel.selection.ids.count == 4 && pasteCount == 0, "настоящий ⌘+клик добавил")
     Stand.window.contentView = nil
 }
 
