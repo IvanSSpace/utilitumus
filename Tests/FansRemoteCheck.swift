@@ -89,7 +89,8 @@ func wirePure() {
     let model = RemoteFansModel.shared
     let registry = SatelliteRegistry.shared
     await model.read()
-    kill(utility, SIGKILL)
+    // Одного SIGKILL мало: launchd поднял бы утилиту по первому обращению, и «не отвечает» зависело бы от того, сколько она прожила.
+    killUtilityForGood(utility)
     await pause(0.5)
     await registry.update()
     check(await until(6) { !model.responding }, "утилита убита: модель говорит «не отвечает»")
