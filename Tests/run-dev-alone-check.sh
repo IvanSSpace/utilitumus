@@ -250,7 +250,8 @@ rm "$RUN/shim/swiftc"
 
 # Другой сертификат в списке: готовый не берётся. Подпись настоящая, поэтому и свежая сборка честно не сходится с ним.
 REAL_SECURITY="$(type -P security)"
-printf '#!/bin/bash\n"%s" "$@" | sed -E "s/[0-9A-F]{40}/0000000000000000000000000000000000000000/"\n' "$REAL_SECURITY" > "$RUN/shim/security"
+# Разблокировку не пропускать: unlock-signing.sh при подставном security вызвал бы настоящий без пароля, и тот ждал бы ввода вечно.
+printf '#!/bin/bash\n[ "${1:-}" = unlock-keychain ] && exit 0\n"%s" "$@" | sed -E "s/[0-9A-F]{40}/0000000000000000000000000000000000000000/"\n' "$REAL_SECURITY" > "$RUN/shim/security"
 chmod +x "$RUN/shim/security"
 build "" "$RUN/shim:$PATH"
 if from_cache; then bad "другой сертификат: взят готовый"; else ok "другой сертификат: готовый не взят"; fi
