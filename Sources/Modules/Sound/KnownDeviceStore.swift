@@ -9,14 +9,6 @@ struct KnownDevice: Codable {
     var transport: Transport
 }
 
-/// Устройство для отображения в UI: может быть сейчас не подключено.
-struct DisplayDevice: SoundDevice, Codable, Equatable, Sendable {
-    let uid: String
-    let name: String
-    let transport: Transport
-    let isConnected: Bool
-}
-
 /// Когда-либо виденные устройства, ключуются по persistent device UID (не по
 /// AudioDeviceID — тот меняется при каждом переподключении). Порядок записей
 /// у входов — старый приоритет, из него переносится основной микрофон.

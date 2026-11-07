@@ -18,6 +18,6 @@ trap cleanup EXIT
 mkdir -p "$OUT/src"
 cp Tests/AwakeSettingsCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/src/main.swift" \
-  Sources/Modules/Awake/AwakeController.swift Sources/Modules/Awake/AwakeModel.swift Sources/Kit/KitDefaults.swift \
+  Sources/Modules/Awake/AwakeController.swift Sources/Modules/Awake/UI/AwakeModel.swift Sources/Modules/Awake/UI/AwakeTypes.swift Sources/Kit/KitDefaults.swift \
   -framework IOKit
 "$OUT/check"

@@ -21,7 +21,8 @@ prepare() {
   local from="$1" to="$2"
   rm -rf "$to"
   mkdir -p "$to"
-  cp "$from"/Sources/Modules/Mixer/*.swift "$from/Sources/App/Design/Pages.swift" "$to/"
+  find "$from/Sources/Modules/Mixer" -name '*.swift' -exec cp {} "$to/" \;
+  cp "$from/Sources/App/Design/Pages.swift" "$to/"
   sed -i '' -E 's/UserDefaults\.standard|Kit\.defaults/mixerStandDefaults/g' "$to/MixerController.swift"
   sed -i '' 's/@State private var showOthers = false/@State private var showOthers = standShowOthers/' "$to/MixerView.swift"
   grep -q 'showOthers = standShowOthers' "$to/MixerView.swift" || { echo "ПРОВАЛ: стенд не открыл «Остальные»"; exit 1; }

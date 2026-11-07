@@ -52,7 +52,7 @@ struct AwakeView<Model: AwakeModel>: View {
     @ViewBuilder private var status: some View {
         if let end = model.endDate {
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text("Осталось \(AwakeController.remainingText(until: end, now: context.date))")
+                Text("Осталось \(AwakeKeys.remainingText(until: end, now: context.date))")
                     .font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.5))
             }
         } else {

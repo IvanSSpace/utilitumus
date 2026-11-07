@@ -5,8 +5,8 @@ import Foundation
 final class PrimaryInputStore: ObservableObject {
     static let shared = PrimaryInputStore()
 
-    private static let key = "UtilitumusPrimaryInput"
-    private static let builtInValue = "builtin"
+    private static let key = SoundShared.primaryInputKey
+    private static let builtInValue = SoundShared.builtInValue
     // Ключи старого приоритета (MicGuard), из них считается миграция.
     private static let legacyDisabledKey = "MicGuardDisabledDeviceUIDs"
 
@@ -16,17 +16,12 @@ final class PrimaryInputStore: ObservableObject {
     private var isDecided: Bool
 
     private init() {
-        (primaryUID, isDecided) = Self.stored()
-    }
-
-    private static func stored() -> (uid: String?, decided: Bool) {
-        guard let saved = Kit.defaults.string(forKey: key) else { return (nil, false) }
-        return (saved == builtInValue ? nil : saved, true)
+        (primaryUID, isDecided) = SoundShared.storedPrimaryInput()
     }
 
     /// Пока модуль вёл другой процесс, выбор менялся там.
     func reload() {
-        let (uid, decided) = Self.stored()
+        let (uid, decided) = SoundShared.storedPrimaryInput()
         if uid != primaryUID { primaryUID = uid }
         isDecided = decided
     }
@@ -56,30 +51,20 @@ final class PrimaryInputStore: ObservableObject {
 final class PrimaryOutputStore: ObservableObject {
     static let shared = PrimaryOutputStore()
 
-    private static let key = "UtilitumusPrimaryOutput"
-    private static let systemValue = "system"
-    private static let builtInValue = "builtin"
-    private static let devicePrefix = "uid:"
+    private static let key = SoundShared.primaryOutputKey
+    private static let systemValue = SoundShared.systemValue
+    private static let builtInValue = SoundShared.builtInValue
+    private static let devicePrefix = SoundShared.devicePrefix
 
     @Published private(set) var choice: OutputChoice
 
     private init() {
-        choice = Self.stored()
-    }
-
-    private static func stored() -> OutputChoice {
-        let saved = Kit.defaults.string(forKey: key)
-        switch saved {
-        case systemValue: return .system
-        case let value? where value.hasPrefix(devicePrefix):
-            return .device(String(value.dropFirst(devicePrefix.count)))
-        default: return .builtIn
-        }
+        choice = SoundShared.storedOutputChoice()
     }
 
     /// Пока модуль вёл другой процесс, выбор менялся там.
     func reload() {
-        let new = Self.stored()
+        let new = SoundShared.storedOutputChoice()
         if new != choice { choice = new }
     }
 
