@@ -64,10 +64,26 @@ func wirePure() {
     check(after == before, "после этого состояние то же, байт в байт")
 }
 
-/// Утилите кладут выдуманные записи; встроенный экран получает те же. Снимки сравниваются по пикселям.
+/// Экран утилиты на её контроллере в той же рамке, что страница центра: с ним сверяется вкладка.
+/// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
+@MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
+    let container = Stand.container()
+    container.show(.module(.clipboard), animated: false) { _, active in
+        AnyView(ModuleScreen(module: .clipboard) { ClipboardView(model: ClipboardController.shared) }
+            .environment(\.pageActive, active)
+            .environment(\.dsTint, theme.accent(.clipboard))
+            .environment(\.moduleControls, DSModuleControls.forEnvironment)
+            .background(ZStack { DSBackground(module: .clipboard, neutral: false); theme.card })
+            .dsThemed()
+            .ignoresSafeArea())
+    }
+    await pause(0.5)
+    return Stand.snapshot(container)
+}
+
+/// Утилите кладут выдуманные записи; контроллер утилиты в стенде получает те же. Снимки сравниваются по пикселям.
 @MainActor func pixels(utility: Int32) async {
     let model = RemoteClipboardModel.shared
-    let modules = ModuleManager.shared
     let registry = SatelliteRegistry.shared
     kill(utility, SIGUSR1)
     // Утилита сообщает о записях только тому, кто смотрит на экран; стенд читает сам, пока записи не придут.
@@ -85,24 +101,31 @@ func wirePure() {
     ClipboardStandFixture.seed(local)
     ClipboardController.shared.attach(local)
     check(ClipboardController.shared.axTrusted == model.axTrusted, "разрешение Универсального доступа у центра и утилиты одно: иначе пиксели разойдутся")
-    check(ClipboardController.shared.items.count == 6 && ClipboardController.shared.spaces.count == 2, "встроенный экран получил те же записи")
+    check(ClipboardController.shared.items.count == 6 && ClipboardController.shared.spaces.count == 2, "контроллер утилиты получил те же записи")
+    // Доступа в стенде нет: без «Позже» на месте экрана мог бы быть чек-лист, и сверялись бы два чек-листа.
+    await registry.update()
+    SetupFlow.shared.postpone(.clipboard)
 
     var shots: [NSBitmapImageRep] = []
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
-        modules.setExternal(.clipboard, false)
-        let builtIn = await Stand.open(theme)
-        Stand.save(builtIn, "\(themeName)-local")
-        modules.setExternal(.clipboard, true)
+        let screen = await openLocal(theme)
+        Stand.save(screen, "\(themeName)-local")
         await registry.update()
         check(registry.isEnabled(.clipboard), "\(themeName): реестр видит утилиту включённой")
         let remote = await Stand.open(theme)
         Stand.save(remote, "\(themeName)-remote")
-        let diff = differingPixels(builtIn, remote)
-        check(diff == 0, "\(themeName): снимки совпали, разных пикселей \(diff) из \(builtIn.pixelsWide * builtIn.pixelsHigh)")
+        let diff = differingPixels(screen, remote)
+        check(diff == 0, "\(themeName): снимки совпали, разных пикселей \(diff) из \(screen.pixelsWide * screen.pixelsHigh)")
         shots.append(remote)
     }
     check(differingPixels(shots[0], shots[1]) > 0, "две темы выглядят по-разному, снимки не пустые")
+    // Сверка видит записи: контроллер без них на снимок вкладки не похож.
+    Kit.defaults.set("dusk", forKey: DSTheme.storageKey)
+    ClipboardController.shared.attach(ClipboardStore(directory: directory.appendingPathComponent("empty"), key: SymmetricKey(size: .bits256)))
+    let emptied = await openLocal(.dusk)
+    Stand.save(emptied, "dusk-empty-local")
+    check(differingPixels(emptied, shots[0]) > 0, "контроллер без записей сверка замечает: разных пикселей \(differingPixels(emptied, shots[0]))")
     // Записи утилиты с другим пространством выглядят иначе: сравнение что-то различает.
     await model.perform(.deleteSpace(id: model.spaces[0].id))
     await model.read()
