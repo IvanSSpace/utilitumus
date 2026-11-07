@@ -28,14 +28,21 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache browser-link-handler "$TARGET" KIT_TEST_DEFAULTS)"
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/work"
 cp Tests/BrowserLinkHandlerCheck.swift "$OUT/src/main.swift"
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name BrowserLinkHandlerCheck -o "$OUT/check" "$OUT/src/main.swift" \
-  $(find Sources/Kit Sources/Modules/Browser -name '*.swift') \
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+for f in main.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
+FILES=("$CACHE/src/main.swift" $(find Sources/Kit Sources/Modules/Browser -name '*.swift' | sort) \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleHandover.swift \
-  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Clipboard/ClipboardKeyring.swift Sources/Modules/Clipboard/ClipboardStore.swift Sources/Modules/Clipboard/ClipboardModels.swift \
-  -framework SwiftUI -framework AppKit
+  Sources/App/Satellites/BrowserSatelliteHooks.swift Sources/Apps/Browser/BrowserModule.swift Sources/Modules/Clipboard/ClipboardKeyring.swift Sources/Modules/Clipboard/ClipboardStore.swift Sources/Modules/Clipboard/ClipboardModels.swift)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name BrowserLinkHandlerCheck -o "$OUT/check" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit
 
 # Свои настройки проверки: домен local.utilitumus.test.browserlink.
 "$OUT/check" "$OUT/work"

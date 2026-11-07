@@ -17,6 +17,9 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+# У основной сборки и каждой мутации свой кэш: набор файлов разный, а общий кэш пересобирал бы мутацию при каждой смене.
+. Tests/lib/incremental.sh
 rm -rf "$OUT"
 mkdir -p "$OUT/src"
 
@@ -30,13 +33,24 @@ cp Tests/ModuleMigrationCheck.swift "$OUT/src/main.swift"
 
 # $1 — имя, $2 — файл с кодом миграции.
 build() {
-  swiftc -target "$TARGET" -module-name ModuleMigrationCheck -o "$OUT/$1" "$OUT/src/main.swift" "$OUT/src/KitDefaults.swift" \
-    $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift) \
+  local cache f
+  cache="$(incremental_cache "module-migration-$1" "$TARGET")"
+  mkdir -p "$cache/src"
+  # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+  for f in main.swift KitDefaults.swift; do cmp -s "$OUT/src/$f" "$cache/src/$f" || cp "$OUT/src/$f" "$cache/src/$f"; done
+  local migration="$2"
+  if [ "$migration" = "$OUT/src/Mutant.swift" ]; then
+    migration="$cache/src/Mutant.swift"
+    cmp -s "$OUT/src/Mutant.swift" "$migration" || cp "$OUT/src/Mutant.swift" "$migration"
+  fi
+  local files=("$cache/src/main.swift" "$cache/src/KitDefaults.swift" $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift | sort) \
     Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
     Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
     Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
-    Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift "$2" \
-    -framework SwiftUI -framework AppKit -framework Carbon
+    Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift "$migration")
+  incremental_flags "$cache" "${files[@]}"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name ModuleMigrationCheck -o "$OUT/$1" \
+    "${files[@]}" -framework SwiftUI -framework AppKit -framework Carbon
 }
 
 build module-migration-check Sources/App/Satellites/ModuleMigration.swift

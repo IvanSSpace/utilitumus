@@ -30,11 +30,16 @@ esac
 CATALOG_BEFORE="$(shasum -a 256 < Catalog/catalog.json)"
 same "формат каталога прежний" "$(sed -n 's/.*catalog.schema == \([0-9]*\).*/\1/p' Sources/Kit/SatelliteCatalog.swift)" 1
 
-# build <папка с исходниками> <папка стенда> [флаги swiftc]
+# Инкрементальная сборка: у каждой из двух сборок свой кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE_BASE="$(incremental_cache store-notes-base "$TARGET" BASE_BUILD)"
+CACHE_NEW="$(incremental_cache store-notes "$TARGET")"
+
+# build <папка с исходниками> <папка стенда> <кэш> [флаги swiftc]
 build() {
-  local from="$1" to="$2"
-  shift 2
-  mkdir -p "$to/src" "$to/png"
+  local from="$1" to="$2" cache="$3" f
+  shift 3
+  mkdir -p "$to/src" "$to/png" "$cache/src"
   # Код Kit вне центра читал бы настоящий домен local.utilitumus: здесь Kit.defaults — домен самого бинарника.
   sed 's/Bundle\.main\.bundleIdentifier == hubBundleID/true/' "$from/Sources/Kit/KitDefaults.swift" > "$to/src/KitDefaults.swift"
   grep -q 'UserDefaults = true' "$to/src/KitDefaults.swift" || { echo "ПРОВАЛ: подмена Kit.defaults не сработала"; exit 1; }
@@ -46,12 +51,16 @@ build() {
   if grep -q 'var quit: (String) async' "$from/Sources/App/Satellites/SatelliteInstaller.swift"; then
     sed -i '' 's/quit: { _, _ in }/quit: { _ in }/' "$to/src/main.swift"
   fi
+  # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+  for f in main.swift KitDefaults.swift UtilitumusApp.swift; do cmp -s "$to/src/$f" "$cache/src/$f" || cp "$to/src/$f" "$cache/src/$f"; done
   # shellcheck disable=SC2046
-  (cd "$from" && swiftc -target "$TARGET" -module-name StoreNotesStand -o "$to/$BIN" "$@" \
-    "$to/src/main.swift" "$to/src/KitDefaults.swift" "$to/src/UtilitumusApp.swift" \
-    $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
-      -not -name KitDefaults.swift -not -name UtilitumusApp.swift) \
-    -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit)
+  (cd "$from"
+    FILES=("$cache/src/main.swift" "$cache/src/KitDefaults.swift" "$cache/src/UtilitumusApp.swift" $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' \
+      -not -name KitDefaults.swift -not -name UtilitumusApp.swift | sort))
+    incremental_flags "$cache" "${FILES[@]}"
+    swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name StoreNotesStand -o "$to/$BIN" "$@" \
+      "${FILES[@]}" \
+      -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit)
 }
 
 # Домен настроек стенда — по имени бинарника: чистый на входе, снят на выходе. У обеих сборок одно имя.
@@ -75,12 +84,16 @@ if [ -z "${STORE_NOTES_REUSE_BASE:-}" ] || [ ! -d "$OUT/base/png" ]; then
   sed -i '' 's/notes: held\.notes,/notes: [],/; s/notes: app\.notes,/notes: [],/' "$OUT/base/tree/Sources/App/Store/UpdateAll.swift"
   ! grep -rq 'updateNotes\|StoreUpdateNotes' "$OUT/base/tree/Sources" || { echo "ПРОВАЛ: в BASE остался код заметок"; exit 1; }
   echo "== сборка из HEAD без кода заметок"
-  build "$OUT/base/tree" "$OUT/base" -D BASE_BUILD
+  # Дерево BASE распаковывается заново при каждом запуске: в кэш копируются только файлы с другим содержимым
+  # (время изменения прочих не меняется), а удалённые из него убираются.
+  mkdir -p "$CACHE_BASE/tree"
+  rsync -rc --delete "$OUT/base/tree/" "$CACHE_BASE/tree/"
+  build "$CACHE_BASE/tree" "$OUT/base" "$CACHE_BASE" -D BASE_BUILD
   run "$OUT/base"
 fi
 
 echo "== нынешняя сборка"
 rm -rf "$OUT/new"
-build "$ROOT" "$OUT/new"
+build "$ROOT" "$OUT/new" "$CACHE_NEW"
 run "$OUT/new"
 same "настоящий каталог не изменён" "$(shasum -a 256 < "$ROOT/Catalog/catalog.json")" "$CATALOG_BEFORE"

@@ -19,6 +19,9 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Инкрементальная сборка: кэш вне папки проверки (её чистят). Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache module-handover "$TARGET")"
 rm -rf "$OUT"
 mkdir -p "$OUT/src"
 
@@ -30,12 +33,16 @@ if ! grep -q 'UserDefaults = true' "$OUT/src/KitDefaults.swift"; then
 fi
 
 cp Tests/ModuleHandoverCheck.swift "$OUT/src/main.swift"
-swiftc -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" "$OUT/src/main.swift" "$OUT/src/KitDefaults.swift" \
-  $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift) \
+# Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
+mkdir -p "$CACHE/src"
+for f in main.swift KitDefaults.swift; do cmp -s "$OUT/src/$f" "$CACHE/src/$f" || cp "$OUT/src/$f" "$CACHE/src/$f"; done
+FILES=("$CACHE/src/main.swift" "$CACHE/src/KitDefaults.swift" $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift | sort) \
   Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
-  Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift \
-  -framework SwiftUI -framework AppKit -framework Carbon
+  Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit -framework Carbon
 
 "$OUT/module-handover-check" "$OUT/work"

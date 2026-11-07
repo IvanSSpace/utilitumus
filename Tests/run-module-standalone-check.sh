@@ -20,12 +20,19 @@ else
 fi
 [ ${#MODULES[@]} -gt 0 ] || { echo "ПРОВАЛ: нет модулей"; exit 1; }
 
+# Инкрементальная сборка: у каждого модуля свой кэш. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+
 failed=0
 for module in "${MODULES[@]}"; do
   [ -d "Sources/Modules/$module" ] || { echo "ПРОВАЛ $module: нет папки"; failed=$((failed + 1)); continue; }
   # shellcheck disable=SC2046 # пути без пробелов, как и в остальных проверках
-  if log="$(swiftc -typecheck -parse-as-library -target "$TARGET" \
-      $(find "Sources/Modules/$module" Sources/Kit -name '*.swift') $(extras "$module") 2>&1)"; then
+  files=($(find "Sources/Modules/$module" Sources/Kit -name '*.swift' | sort) $(extras "$module"))
+  incremental_flags "$(incremental_cache "module-standalone-$module" "$TARGET")" "${files[@]}"
+  # У -typecheck нет объектов, поэтому и нечего переиспользовать: в инкрементальном режиме объекты собираются, но не компонуются.
+  mode=(-typecheck)
+  [ -n "${INCREMENTAL_OFF:-}" ] || mode=(-c "${INC_FLAGS[@]}" -module-name "Standalone$module")
+  if log="$(swiftc "${mode[@]}" -parse-as-library -target "$TARGET" "${files[@]}" 2>&1)"; then
     echo "ok     $module"
   else
     echo "ПРОВАЛ $module"
