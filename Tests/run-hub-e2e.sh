@@ -4,6 +4,7 @@
 # Бандл и плист — в папке стенда. Утилита собрана со швом (--test-seam-real-id): настройки в suite стенда,
 # состояние центра подставное, значка нет, окно за экраном и прозрачное. Настоящие Utilitumus и настройки не трогаются.
 # Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 umask 022
 cd "$(dirname "$0")/.."

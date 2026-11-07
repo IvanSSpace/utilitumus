@@ -3,6 +3,7 @@
 # проверка файла bots.toml (права, битый, нет), замеры только под арендой экрана, команды ботов стенд не запускает.
 # Настоящие подписанная утилита, launchd и связь. bots.toml стенда лежит во временной папке; настоящих ботов, настоящих меток
 # и настоящего файла проверка не касается. Папка стенда: SATELLITE_CHECK_DIR; снимки в bots/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup bots Bots

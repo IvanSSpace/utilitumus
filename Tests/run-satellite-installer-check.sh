@@ -2,6 +2,7 @@
 # Каталог и установщик утилит: подставные launchctl, download и связь с утилитой, настоящие zip и codesign.
 # /Applications и ~/Library/LaunchAgents не трогаются: все пути — в папке стенда.
 # Папка стенда: $SATELLITE_CHECK_DIR/satellite-installer-check, иначе $TMPDIR/satellite-installer-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

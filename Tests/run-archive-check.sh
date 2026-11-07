@@ -2,6 +2,7 @@
 # Распаковка архивов обновления (KitArchive, install.sh): ссылки и пути за пределы папки отвергаются до записи на диск.
 # Архивы составлены вручную из python3 zipfile; подписи не нужны, настоящие приложения и launchd не затрагиваются.
 # Папка стенда: ARCHIVE_CHECK_DIR, иначе $TMPDIR/archive-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${ARCHIVE_CHECK_DIR:-${TMPDIR:-/tmp}/archive-check}"

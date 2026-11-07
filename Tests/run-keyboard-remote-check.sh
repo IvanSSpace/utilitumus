@@ -3,6 +3,7 @@
 # Все фишки выключены в домене стенда ДО запуска утилиты и центра: tap не создаётся, ничего не пишется в com.apple.HIToolbox
 # и com.apple.symbolichotkeys, TextInputSwitcher не трогается, раскладка не меняется (для этого в проверке нет ни одного
 # действия, включающего фишку). Разрешение «Мониторинг ввода» проверяется руками. Папка стенда: SATELLITE_CHECK_DIR.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup keyboard Keyboard

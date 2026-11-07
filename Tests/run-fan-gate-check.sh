@@ -1,5 +1,6 @@
 #!/bin/bash
 # Проверка гистерезиса и сглаживания вентиляторов (чистая логика, без SMC и помощника).
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${TMPDIR:-/tmp}/fan-gate-check"

@@ -2,6 +2,7 @@
 # Роль утилиты и её включённость: чистая логика, UserDefaults только в тестовом suite.
 # Самообновление: настоящий текст из SatelliteHost.swift на стенде с подставной сетью (Tests/SelfUpdateHostStand.swift).
 # --mutations: собрать сломанные варианты самообновления и показать, что проверка на них краснеет.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

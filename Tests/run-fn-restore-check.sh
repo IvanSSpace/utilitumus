@@ -2,6 +2,7 @@
 # Возврат системного действия 🌐 «Клавиатурой» (настоящий InputSources.swift со швом). Система не трогается:
 # AppleFnUsageType и горячие клавиши подменены ключами Test.* тестового домена.
 # FN_RESTORE_OLD=<коммит> собирает проверку со старым InputSources.swift (показать, что она падала).
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"

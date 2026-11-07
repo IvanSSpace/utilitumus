@@ -5,6 +5,7 @@
 # совпасть попиксельно, а BASE заодно показывает, как каталог с заметками читает центр без их кода. Настройки: Kit.defaults подменён на домен бинарника, настоящий домен и настоящие пути не трогаются.
 # Папка: STORE_NOTES_CHECK_DIR, иначе $TMPDIR/store-notes-check. PNG остаются в ней: base/png, new/png.
 # STORE_NOTES_REUSE_BASE=1 берёт снимки BASE с прошлого запуска.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

@@ -3,6 +3,7 @@
 # Связка ключей и буфер обмена не создаются и не читаются. Окно за экраном и прозрачное, настроек стенд не пишет.
 # Экран «до» — ClipboardView из коммита перед переходом на модель, на такой же подделке.
 # Папка стенда: CLIPBOARD_WIRE_DIR, иначе $TMPDIR/clipboard-wire-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

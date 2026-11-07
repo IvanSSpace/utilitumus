@@ -1,6 +1,7 @@
 #!/bin/bash
 # Вкладка, карточка дашборда и пункт меню «Не спать»: рисует центр, работает утилита. Настоящие подписанная утилита, launchd, связь и pmset.
 # Не запускать вместе с run-awake-app-check.sh: у них одна метка. Папка стенда: SATELLITE_CHECK_DIR; снимки в awake/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup awake Awake

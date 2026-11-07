@@ -1,5 +1,6 @@
 #!/bin/bash
 # Проверка логики модуля «Буфер»: собирает Tests/ClipboardCheck.swift с нужными исходниками и запускает.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${TMPDIR:-/tmp}/clipboard-check"

@@ -2,6 +2,7 @@
 # Клавиатура: состояние, действия и их проверки, экран до и после переноса на модель. Окно за экраном и прозрачное.
 # Настоящий InputSources.swift и App в стенд не собираются (Tests/KeyboardWireStubs.swift): 🌐, диктовка,
 # TextInputSwitcher и текущая раскладка недоступны стенду. Настройки: домен самого файла и suite шва. Папка: KEYBOARD_WIRE_DIR.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

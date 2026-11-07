@@ -2,6 +2,7 @@
 # Вкладка «Стеш программ»: рисует центр, работает утилита. Настоящие подписанная утилита, launchd и связь.
 # Программ у стенда нет (список пуст), закрыть и запустить настоящую нельзя; записи кладёт скрипт в тестовый домен.
 # Не запускать вместе с другими проверками Стеша на одной метке. Папка стенда: SATELLITE_CHECK_DIR; снимки в stash/png.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup stash Stash

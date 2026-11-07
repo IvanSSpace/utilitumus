@@ -3,6 +3,7 @@
 # Службы вентиляторов нет и не ставится: окна пароля, AppleScript и записи в SMC здесь не бывает (SMC только читается).
 # Не запускать вместе с другими проверками «Вентиляторов» под этой меткой. Папка стенда: SATELLITE_CHECK_DIR; снимки в fans/png.
 # Нужен сертификат «Utilitumus Signing»: без него проверка не идёт (NOT RUN).
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup fans Fans

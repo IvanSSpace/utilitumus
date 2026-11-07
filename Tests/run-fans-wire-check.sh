@@ -3,6 +3,7 @@
 # В сборке нет ни SMC.swift, ни FanHelperClient.swift, ни FanHelperInstaller.swift: ниже это проверяется и по nm.
 # База пикселей: старый FansView из коммита FANS_BASE_REF (по умолчанию тот, что был до модели) с той же подделкой.
 # Папка стенда: FANS_WIRE_DIR, иначе $TMPDIR/fans-wire-check. FANS_SKIP_BASE=1: базу не пересобирать, если она уже снята.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${FANS_WIRE_DIR:-${TMPDIR:-/tmp}/fans-wire-check}"

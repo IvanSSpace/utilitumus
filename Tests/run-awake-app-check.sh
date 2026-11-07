@@ -3,6 +3,7 @@
 # Сборка со швом KIT_TEST_DEFAULTS: настройки только в suite стенда, состояние центра подставное, значка и видимых
 # окон нет. Настоящие Utilitumus и его настройки не трогаются. Нужен сертификат «Utilitumus Signing».
 # Папка стенда: AWAKE_CHECK_DIR, иначе $TMPDIR/awake-app-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

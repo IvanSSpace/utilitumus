@@ -1,6 +1,7 @@
 #!/bin/bash
 # Защита от остановки, метки и подписи агентов, журнал действий. Только чистая логика и файл в папке стенда.
 # Папка стенда: LOAD_CHECK_DIR, иначе $TMPDIR/load-safety-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="${LOAD_CHECK_DIR:-${TMPDIR:-/tmp}/load-safety-check}"

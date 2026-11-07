@@ -3,6 +3,7 @@
 # подставные репозиторий с локальным origin, gh, codesign, сборка и проверки; настоящие только fix.sh, fix-scope.sh, dev-scope.sh,
 # release-app.sh, check-no-seam.sh и with-check-lock.sh. Подпись не нужна.
 # Папка стенда: FIX_CHECK_DIR, иначе $TMPDIR/fix-script-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

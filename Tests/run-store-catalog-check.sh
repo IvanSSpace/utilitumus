@@ -2,6 +2,7 @@
 # Стор и каталог: стенд за экраном (x: -10000) из всей сборки центра, подставные launchctl, загрузка, связь и каталог,
 # пути в папке стенда. Настройки: Kit.defaults подменён на домен бинарника, у которого своё имя.
 # Папка: STORE_CATALOG_CHECK_DIR, иначе $TMPDIR/store-catalog-check. PNG остаются в ней, в png/.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

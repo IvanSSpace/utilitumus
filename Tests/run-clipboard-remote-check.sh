@@ -3,6 +3,7 @@
 # пассивная утилита остановлена, смерть утилиты, передача ключа только от центра (не от копии утилиты и не от чужого).
 # Настоящие подписанная утилита, launchd и связь; Связка ключей только в памяти, история во временной папке, буфер не опрашивается.
 # Нужен сертификат «Utilitumus Signing», поэтому запускать через очередь сборок. Папка стенда: SATELLITE_CHECK_DIR.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 source "$(dirname "$0")/satellite-check-lib.sh"
 satellite_check_setup clipboard Clipboard

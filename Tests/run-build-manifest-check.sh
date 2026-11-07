@@ -4,6 +4,7 @@
 # вентиляторов (без SMC и launchd) и install.sh <id> --dry-run. У копии Links убраны обработчики http и html:
 # такая сборка не может стать браузером по умолчанию, в LaunchServices её никто не регистрирует.
 # Папка стенда: BUILD_MANIFEST_CHECK_DIR, иначе $TMPDIR/build-manifest-check.noindex. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

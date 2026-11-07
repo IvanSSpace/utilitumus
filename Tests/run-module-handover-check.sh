@@ -2,6 +2,7 @@
 # Передача модуля от центра утилите: таблица решений, ModuleManager, опрос и очередь установщика в SatelliteRegistry.
 # launchctl, загрузка и связь подставные, пути в папке теста, настройки в своём suite.
 # Папка: MODULE_HANDOVER_CHECK_DIR, иначе $TMPDIR/module-handover-check.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -2,6 +2,7 @@
 # Общий выпуск, только --dry-run и отказы: подставные репозиторий с локальным origin, gh, codesign и сборка.
 # gh при вызове проваливает проверку, ничего не пушится в настоящий репозиторий, настоящий каталог не трогается.
 # Папка: RELEASE_ALL_CHECK_DIR, иначе $TMPDIR/release-all-check.
+CHECK_LIMIT=3600 source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"

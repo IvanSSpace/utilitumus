@@ -2,6 +2,7 @@
 # «Голос»: состояние, действия, отказы, режим проверки, экран за кадром, встроенный экран до и после правки.
 # Без микрофона, горячей клавиши, вставки, сети и настоящих моделей. Папка стенда: VOICE_WIRE_DIR.
 # VOICE_WIRE_BASE — коммит для снимков «до»; VOICE_WIRE_NO_BASE=1 — без них, если гит недоступен.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 T="${TMPDIR:-/tmp}"; OUT="${VOICE_WIRE_DIR:-${T%/}/voice-wire-check}"

@@ -2,6 +2,7 @@
 # Направление версии помощника вентиляторов: таблица версий, два клиента на разных версиях, и скрипт установки
 # на подставных путях. Настоящих установок нет: ни AppleScript, ни пароля, ни launchctl, ни chown, ни SMC, пути в стенде.
 # Папка стенда (удаляется): FAN_VERSION_CHECK_DIR, иначе $TMPDIR/fan-version-check. Нужен сертификат «Utilitumus Signing».
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

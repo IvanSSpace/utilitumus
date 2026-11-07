@@ -1,5 +1,6 @@
 #!/bin/bash
 # Ловушки инкрементальной сборки проверок: чужая программа на месте выхода, кэш другой копии проекта и другого набора флагов.
+source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
 . Tests/lib/incremental.sh
