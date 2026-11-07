@@ -113,13 +113,13 @@
     },
     {
       "id": "voice",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.0/Voice.zip",
-      "sha256": "7d22aed97bcb41153e0a0d36071807f38762d3346278528ba55b857784ef0c11",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/voice-v1.2.1/Voice.zip",
+      "sha256": "b2fa3ec546ad4fbd802d80e6ecadc60ca370f5714cdd39df2e76eb38288c290b",
       "sizeMB": 9,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
