@@ -95,7 +95,8 @@ run_stand() { (cd "$OUT" && KIT_TEST_SUITE="$SUITE" "./$BIN" "$OUT/work" "$OUT/p
 echo "== набор awake,load"
 build_scoped awake load
 run_stand "" seed
-strings -a "$OUT/$BIN" | grep -qF "$MARK=awake,load" && ok "строка набора в бинарнике" || fail "в бинарнике нет строки набора"
+# Без strings в конвейере: grep -q закрывает его раньше, и pipefail считал бы это провалом.
+grep -aqF "$MARK=awake,load" "$OUT/$BIN" && ok "строка набора в бинарнике" || fail "в бинарнике нет строки набора"
 run_stand "awake,load" scoped
 
 echo "== пустой набор (--hub)"
