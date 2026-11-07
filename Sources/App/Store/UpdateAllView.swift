@@ -3,6 +3,7 @@ import SwiftUI
 /// Плашка внизу боковой панели. Появляется, только когда есть что сказать; тишина — когда обновлять нечего.
 struct UpdateAllNotice: View {
     @ObservedObject private var updates = UpdateAll.shared
+    @ObservedObject private var auto = AutoUpdate.shared
 
     private struct Content {
         let icon: String
@@ -13,30 +14,34 @@ struct UpdateAllNotice: View {
     }
 
     private var content: Content? {
-        if updates.running {
+        // Автоматический проход плашку не занимает: она мигала бы при каждом обновлении.
+        if updates.visiblyRunning {
             let current = updates.current?.title
             return Content(icon: "arrow.triangle.2.circlepath", tint: .accentColor,
                            title: "Обновляю: \(updates.finished + 1) из \(updates.total)", subtitle: current,
                            progress: Double(updates.finished) / Double(max(updates.total, 1)))
         }
-        let rows = updates.rows
+        let rows = updates.noticeRows
         guard !rows.isEmpty else { return nil }
-        if updates.failedCount > 0 {
-            return Content(icon: "exclamationmark.triangle.fill", tint: .orange, title: "Не вышло: \(updates.failedCount)",
+        let failed = rows.filter { if case .failed = $0.phase { return true }; return false }
+        if !failed.isEmpty {
+            return Content(icon: "exclamationmark.triangle.fill", tint: .orange, title: "Не вышло: \(failed.count)",
                            subtitle: "Открой, чтобы повторить")
         }
-        let startable = updates.startable
+        let startable = rows.filter { $0.phase == .ready }.map(\.module)
         if !startable.isEmpty {
             let names = startable.prefix(2).map(\.title).joined(separator: ", ")
             let more = startable.count > 2 ? " и ещё \(startable.count - 2)" : ""
             return Content(icon: "arrow.down.circle.fill", tint: .orange, title: "Обновления: \(startable.count)", subtitle: names + more)
         }
-        if updates.waitingCount > 0 {
-            return Content(icon: "hourglass", tint: .white.opacity(0.7), title: "Ждут: \(updates.waitingCount)",
+        let waiting = rows.filter { if case .waiting = $0.phase { return true }; return false }
+        if !waiting.isEmpty {
+            return Content(icon: "hourglass", tint: .white.opacity(0.7), title: "Ждут: \(waiting.count)",
                            subtitle: "Обновятся, когда освободятся")
         }
-        if updates.doneCount > 0 {
-            return Content(icon: "checkmark.circle.fill", tint: .green, title: "Обновлено: \(updates.doneCount)")
+        let done = rows.filter { $0.phase == .done }
+        if !done.isEmpty {
+            return Content(icon: "checkmark.circle.fill", tint: .green, title: "Обновлено: \(done.count)")
         }
         return Content(icon: "arrow.up.circle", tint: .white.opacity(0.7), title: "Есть новые версии",
                        subtitle: "Сначала обнови Utilitumus")
@@ -72,6 +77,7 @@ struct UpdateAllNotice: View {
 struct UpdateAllSheet: View {
     @ObservedObject private var updates = UpdateAll.shared
     @ObservedObject private var satellites = SatelliteRegistry.shared
+    @ObservedObject private var auto = AutoUpdate.shared
 
     var body: some View {
         let rows = updates.rows
@@ -80,6 +86,10 @@ struct UpdateAllSheet: View {
                 Text("Обновления утилит").font(.system(size: 18, weight: .bold, design: .rounded))
                 Spacer()
                 if updates.checking { ProgressView().controlSize(.small) }
+            }
+            if let line = auto.lastLine {
+                Text(verbatim: line).font(DS.rowSubtitle).foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if satellites.catalogFailed { catalogNote }
             if rows.isEmpty {

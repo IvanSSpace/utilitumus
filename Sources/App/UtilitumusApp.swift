@@ -296,6 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ModuleManager.shared.startEnabled()
         SatelliteRegistry.shared.start()
         SatelliteRegistry.shared.startMigration()
+        AutoUpdate.shared.start()
         // Чтобы вкладка с первого открытия показывала настоящее состояние, а не сохранённые настройки.
         RemoteModules.external(ModuleManager.shared).forEach { $0.1.refresh() }
         Updater.shared.check(quiet: true)
@@ -319,6 +320,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for copy in BrowserHelper.knownCopies() { links.register(copy) }
         links.noteDefault()
         BrowserOrphanOffer.present(links)
+    }
+
+    /// Cmd+Q посреди установки утилиты: сначала довести до состояния, где утилита работает.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            guard UpdateAll.shared.installing else { return .terminateNow }
+            UpdateAll.shared.stopForQuit { sender.reply(toApplicationShouldTerminate: true) }
+            return .terminateLater
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

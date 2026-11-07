@@ -397,7 +397,7 @@ struct DSSidebarFooter: View {
         .padding(.horizontal, 10)
         // Воздух снизу и слева такой же, как у карточки страницы (10 pt).
         .padding(.bottom, 10)
-        // Таймера нет: каталог перечитывается, когда человек вернулся в центр.
+        // Каталог перечитывается, когда человек вернулся в центр. Редкий таймер только у `AutoUpdate`.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             updates.checkIfStale()
         }

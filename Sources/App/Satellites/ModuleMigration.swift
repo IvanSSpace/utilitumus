@@ -63,15 +63,21 @@ enum ModuleMigration {
 }
 
 extension SatelliteRegistry {
+    /// В пилоте и в дев-сборке (`scripts/dev.sh`) автор ставит сам: и видит Стор, и не отдаёт утилитам то, что проверяется
+    /// при нём. Иначе локальный каталог поставил бы дев-сборку в настоящую папку утилит. Этим же решением пользуется `AutoUpdate`.
+    nonisolated static var installsOnItsOwn: Bool {
+        #if KIT_PILOT_CATALOG
+        return false
+        #else
+        return true
+        #endif
+    }
+
     /// Запуск центра, после `start()`. Вне главного потока: каталог и скачивание не должны его занимать.
     func startMigration() {
-        // В пилоте автор ставит сам: и видит Стор, и не отдаёт утилитам то, что проверяется при нём.
-        #if KIT_PILOT_CATALOG
-        return
-        #else
+        guard Self.installsOnItsOwn else { return }
         let env = ModuleMigrationEnvironment.live(self)
         Task.detached(priority: .utility) { await ModuleMigration.run(env) }
-        #endif
     }
 }
 

@@ -124,8 +124,10 @@ final class SatelliteInstaller {
     }
 
     /// `beforeQuit` — последний шаг перед остановкой работающей утилиты: скачивание долгое, за это время она могла занять себя.
-    /// Ошибка отсюда оставляет всё как было.
-    func install(_ app: CatalogApp, name: String, beforeQuit: @Sendable () async throws -> Void = {}) async throws {
+    /// Ошибка отсюда оставляет всё как было. `checkStaged` получает проверенный новый бандл и путь установленного:
+    /// автообновление добавляет здесь свои отказы, обойти проверки выше оно не может.
+    func install(_ app: CatalogApp, name: String, beforeQuit: @Sendable () async throws -> Void = {},
+                 checkStaged: @Sendable (URL, URL) throws -> Void = { _, _ in }) async throws {
         try Self.check(id: app.id)
         try Self.check(name: name)
         let archive = try await download(app.url)
@@ -145,6 +147,7 @@ final class SatelliteInstaller {
         let executable = try checkInfo(of: staged, against: app)
 
         let bundle = bundleURL(name)
+        try checkStaged(staged, bundle)
         let agent = agentURL(app.id)
         let hadBundle = fm.fileExists(atPath: bundle.path)
         let oldAgent = try? Data(contentsOf: agent)
@@ -155,6 +158,8 @@ final class SatelliteInstaller {
         if hadBundle { try fm.copyItem(at: bundle, to: oldBundle) }
 
         if updating {
+            // Отменили (выход из центра) до остановки: утилиту незачем трогать.
+            try Task.checkCancellation()
             try await beforeQuit()
             await link.quit(app.id, .update)
         }

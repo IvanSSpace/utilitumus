@@ -24,6 +24,7 @@ struct SettingsView: View {
                         ThemeSection()
                         DockSection()
                         MenuIconsSection()
+                        AutoUpdateSection()
                         PageModeSection()
                     }
                 }
@@ -128,6 +129,26 @@ private struct ThemeSection: View {
                 .overlay(Circle().stroke(.white.opacity(selected ? 0.95 : 0), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// «Обновления»: утилиты обновляются сами. Включено и у тех, кто ключа ещё не видел.
+private struct AutoUpdateSection: View {
+    @AppStorage(AutoUpdatePolicy.enabledKey, store: Kit.defaults) private var on = true
+    @ObservedObject private var auto = AutoUpdate.shared
+
+    var body: some View {
+        DSSection("Обновления") {
+            DSRow(icon: "arrow.triangle.2.circlepath", title: "Обновлять утилиты автоматически",
+                  subtitle: "Тихо и когда утилита свободна. То, что может спросить пароль или разрешение, обновляется только по кнопке"
+                    + (auto.lastLine.map { ". \($0)" } ?? "")) {
+                DSToggle("Обновлять утилиты автоматически", isOn: $on)
+            }
+        }
+        .onChange(of: on) {
+            auto.objectWillChange.send()
+            if on { Task { await auto.tick() } }
+        }
     }
 }
 
