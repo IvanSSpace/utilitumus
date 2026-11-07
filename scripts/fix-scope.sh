@@ -15,7 +15,7 @@ fix_checks_of() {
     fans) echo run-fan-gate-check run-fan-helper-check run-fan-version-check run-fans-remote-check run-fans-wire-check ;;
     keyboard) echo run-fn-restore-check run-keyboard-remote-check run-keyboard-wire-check ;;
     load) echo run-load-remote-check run-load-safety-check run-load-wire-check run-own-identity-check run-tool-spawn-check ;;
-    mixer) echo run-mixer-remote-check run-mixer-wire-check ;;
+    mixer) echo run-mixer-eq-check run-mixer-remote-check run-mixer-wire-check ;;
     mouse) echo run-mouse-remote-check run-mouse-wire-check ;;
     sound) echo run-sound-remote-check run-sound-wire-check ;;
     stash) echo run-own-identity-check run-stash-module-check run-stash-remote-check run-stash-title-check run-stash-wire-check ;;

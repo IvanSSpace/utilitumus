@@ -97,7 +97,7 @@ echo '// общий' > "$FX/Sources/Shared/SMC.swift"
 echo '# пилот' > "$FX/scripts/build-pilot.sh"
 echo '# доки' > "$FX/docs/a.md"
 # Проверка стенда пишет своё имя в журнал. FAKE_RED — кому покраснеть.
-for name in run-mixer-remote-check run-mixer-wire-check run-awake-app-check run-awake-remote-check run-awake-settings-check \
+for name in run-mixer-eq-check run-mixer-remote-check run-mixer-wire-check run-awake-app-check run-awake-remote-check run-awake-settings-check \
   run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check run-module-defaults-guard $(fix_checks_of hub); do
   cat > "$FX/Tests/$name.sh" <<EOF
 #!/bin/bash
@@ -266,7 +266,7 @@ HEAD_BEFORE="$("${G[@]}" rev-parse HEAD)"
 CATALOG_BEFORE="$(shasum -a 256 "$FX/Catalog/catalog.json")"
 PLAN="$OUT/plan.txt"
 fix mixer --note "Первая" --note "Вторая" --dry-run > "$PLAN" 2>&1 || { cat "$PLAN"; bad "--dry-run упал"; }
-same "проверки только этой утилиты" "$(LC_ALL=C sort "$CHECK_LOG" | tr '\n' ' ')" "run-mixer-remote-check run-mixer-wire-check run-module-defaults-guard "
+same "проверки только этой утилиты" "$(LC_ALL=C sort "$CHECK_LOG" | tr '\n' ' ')" "run-mixer-eq-check run-mixer-remote-check run-mixer-wire-check run-module-defaults-guard "
 same "версия: патч выше каталожной" "$(cut -d' ' -f1-3 "$RELEASE_MARK")" "mixer Mixer 1.1.1"
 same "сборка без шва: четыре аргумента" "$(awk '{print NF}' "$RELEASE_MARK")" 4
 check "предупреждение про экран в лаунчере" has "$PLAN" "вкладку в лаунчере рисует центр"

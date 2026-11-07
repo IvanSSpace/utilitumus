@@ -2,8 +2,8 @@ import AppKit
 import CoreAudio
 import Foundation
 
-/// Громкость каждого приложения отдельно. Тап создаётся только для приложений,
-/// у которых громкость не 100 % или включено «без звука»: пока микшером не
+/// Громкость и эквалайзер каждого приложения отдельно. Тап создаётся только для приложений,
+/// у которых громкость не 100 %, включено «без звука» или эквалайзер включён и не ровный: пока микшером не
 /// пользуются, звук идёт мимо него. Состояние живёт на main thread, а обход
 /// процессов HAL (`MixerHAL.processes()`) считается в фоне; реалтайм-часть — в `ProcessTap`.
 @MainActor
@@ -56,6 +56,8 @@ final class MixerController: MixerModel {
     private var sessions: [String: Session] = [:]
     private var volumes: [String: Double]
     private var muted: Set<String>
+    /// Только настроенные: выключенный со значениями помнится, ненастроенный не хранится.
+    private var equalizers: [String: MixerEqSetting]
     private var timer: Timer?
     /// Опрос раз в секунду, пока экран открыт; в фоне реже: новый процесс, смена
     /// устройства и включение звука у известного процесса приходят событиями.
@@ -98,6 +100,7 @@ final class MixerController: MixerModel {
     private init() {
         volumes = Kit.defaults.dictionary(forKey: Self.volumesKey) as? [String: Double] ?? [:]
         muted = Set(Kit.defaults.stringArray(forKey: Self.mutedKey) ?? [])
+        equalizers = MixerEqSettings.read(from: Kit.defaults)
     }
 
     func start() {
@@ -126,6 +129,7 @@ final class MixerController: MixerModel {
 
     func volume(for id: String) -> Double { volumes[id] ?? 1 }
     func isMuted(_ id: String) -> Bool { muted.contains(id) }
+    func equalizer(for id: String) -> MixerEqSetting { equalizers[id] ?? .off }
 
     /// Экран показан или скрыт (`onAppear` / `onDisappear`). При показе сразу
     /// досчитываем списки молчащих.
@@ -160,11 +164,21 @@ final class MixerController: MixerModel {
         persist()
     }
 
-    /// Вернуть приложению 100 % и звук (кнопка в «Настроены заранее»).
+    /// Шаг регулятора: как у ползунка громкости, звук меняется сразу, а списки и диск позже (`commitVolumes`).
+    func setEqualizer(_ setting: MixerEqSetting, for id: String) {
+        guard setting.isValid else { return }
+        let before = wantsTap(id)
+        equalizers[id] = setting == .off ? nil : setting
+        applyChange(id, wantsTapBefore: before)
+        schedulePersist()
+    }
+
+    /// Вернуть приложению 100 %, звук и ровный эквалайзер (кнопка в «Настроены заранее»).
     func reset(_ id: String) {
         let before = wantsTap(id)
         volumes[id] = nil
         muted.remove(id)
+        equalizers[id] = nil
         applyChange(id, wantsTapBefore: before)
         publishValues()
         persist()
@@ -176,7 +190,7 @@ final class MixerController: MixerModel {
         persist()
     }
 
-    private func wantsTap(_ id: String) -> Bool { volume(for: id) != 1 || muted.contains(id) }
+    private func wantsTap(_ id: String) -> Bool { volume(for: id) != 1 || muted.contains(id) || equalizer(for: id).isActive }
 
     private func applyChange(_ id: String, wantsTapBefore: Bool) {
         let wants = wantsTap(id)
@@ -189,6 +203,7 @@ final class MixerController: MixerModel {
         if wants != wantsTapBefore { session.failedAt = nil }
         if let tap = session.tap, wants {
             tap.setGain(muted.contains(id) ? 0 : Float(volume(for: id)))
+            tap.setEqualizer(equalizer(for: id).soundingBands)
         } else if (session.tap != nil) != wants, wants != wantsTapBefore || session.failedAt == nil {
             // Тап нужно создать или убрать: это уже работа для полного прохода по снимку.
             processSnapshot()
@@ -202,10 +217,11 @@ final class MixerController: MixerModel {
             var result = list
             var changed = false
             for i in result.indices {
-                let v = volume(for: result[i].id), m = muted.contains(result[i].id)
-                if result[i].volume != v || result[i].muted != m {
+                let v = volume(for: result[i].id), m = muted.contains(result[i].id), e = equalizer(for: result[i].id)
+                if result[i].volume != v || result[i].muted != m || (result[i].eq != nil && result[i].eq != e) {
                     result[i].volume = v
                     result[i].muted = m
+                    if result[i].eq != nil { result[i].eq = e }
                     changed = true
                 }
             }
@@ -232,6 +248,7 @@ final class MixerController: MixerModel {
         persistTask = nil
         Kit.defaults.set(volumes, forKey: Self.volumesKey)
         Kit.defaults.set(Array(muted), forKey: Self.mutedKey)
+        MixerEqSettings.write(equalizers, to: Kit.defaults)
     }
 
     /// Выключение модуля или выход: снести все тапы и агрегаты, чтобы звук
@@ -275,6 +292,8 @@ final class MixerController: MixerModel {
         volumes = [:]
         for app in all where app.volume != 1 { volumes[app.id] = app.volume }
         muted = Set(all.filter(\.muted).map(\.id))
+        equalizers = [:]
+        for app in all { if let eq = app.eq, eq != .off { equalizers[app.id] = eq } }
     }
     #endif
 
@@ -378,7 +397,7 @@ final class MixerController: MixerModel {
 
         let list = sessions.map { key, session in
             MixerApp(id: key, name: session.name, icon: session.icon,
-                     volume: volume(for: key), muted: muted.contains(key))
+                     volume: volume(for: key), muted: muted.contains(key), eq: equalizer(for: key))
         }.sorted(by: Self.byName)
         // Публикуем только изменения, иначе SwiftUI перерисовывает экран раз в секунду зря.
         if list != apps { apps = list }
@@ -386,7 +405,7 @@ final class MixerController: MixerModel {
         // Молчащие и пресеты нужны только открытому экрану.
         guard screenVisible else { return }
         let (quiet, preset) = quietApps(excluding: Set(sessions.keys), me: me)
-        let configured = Set(volumes.keys).union(muted)
+        let configured = configuredIDs
         let likely = quiet.filter { heard.contains($0.id) || configured.contains($0.id) || Self.isMediaApp($0.id) }
         let likelyIDs = Set(likely.map(\.id))
         let other = quiet.filter { !likelyIDs.contains($0.id) }
@@ -394,6 +413,8 @@ final class MixerController: MixerModel {
         if other != otherApps { otherApps = other }
         if preset != presetApps { presetApps = preset }
     }
+
+    private var configuredIDs: Set<String> { Set(volumes.keys).union(muted).union(equalizers.filter(\.value.isActive).keys) }
 
     private static func byName(_ a: MixerApp, _ b: MixerApp) -> Bool {
         (a.name.localizedLowercase, a.id) < (b.name.localizedLowercase, b.id)
@@ -412,15 +433,15 @@ final class MixerController: MixerModel {
             guard !active.contains(id), seen.insert(id).inserted else { continue }
             idle.append(MixerApp(id: id, name: app.localizedName ?? id,
                                  icon: app.icon ?? Self.genericIcon,
-                                 volume: volume(for: id), muted: muted.contains(id)))
+                                 volume: volume(for: id), muted: muted.contains(id), eq: equalizer(for: id)))
         }
 
-        let configured = Set(volumes.keys).union(muted)
+        let configured = configuredIDs
         let preset = configured.subtracting(active).subtracting(running).map { id in
             let meta = presetMeta[id] ?? Self.lookupMeta(id)
             presetMeta[id] = meta
             return MixerApp(id: id, name: meta.name, icon: meta.icon,
-                            volume: volume(for: id), muted: muted.contains(id))
+                            volume: volume(for: id), muted: muted.contains(id), eq: equalizer(for: id))
         }
         return (idle.sorted(by: Self.byName), preset.sorted(by: Self.byName))
     }
@@ -452,12 +473,12 @@ final class MixerController: MixerModel {
     }
 
     private func apply(_ key: String, _ session: Session, outputUID: String?, now: Date) {
-        let wantsTap = volume(for: key) != 1 || muted.contains(key)
+        let wanted = wantsTap(key)
         let gain = muted.contains(key) ? 0 : Float(volume(for: key))
 
         // Тап прибит к набору процессов и к устройству вывода: изменились — пересобираем.
         if let tap = session.tap,
-           !wantsTap || tap.processObjectIDs != session.objectIDs || tap.outputUID != outputUID {
+           !wanted || tap.processObjectIDs != session.objectIDs || tap.outputUID != outputUID {
             tap.destroy()
             session.tap = nil
         }
@@ -472,14 +493,15 @@ final class MixerController: MixerModel {
                 lastError = "Тап не получает звук"
             } else {
                 tap.setGain(gain)
+                tap.setEqualizer(equalizer(for: key).soundingBands)
             }
             return
         }
 
-        guard Self.capturing, wantsTap, let outputUID, !session.objectIDs.isEmpty else { return }
+        guard Self.capturing, wanted, let outputUID, !session.objectIDs.isEmpty else { return }
         if let failedAt = session.failedAt, now.timeIntervalSince(failedAt) < Self.retrySeconds { return }
         do {
-            session.tap = try ProcessTap(processObjectIDs: session.objectIDs, outputUID: outputUID, gain: gain)
+            session.tap = try ProcessTap(processObjectIDs: session.objectIDs, outputUID: outputUID, gain: gain, equalizer: equalizer(for: key).soundingBands)
             session.failedAt = nil
         } catch {
             session.failedAt = now

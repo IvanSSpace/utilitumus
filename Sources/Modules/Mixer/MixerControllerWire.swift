@@ -5,7 +5,7 @@ extension MixerController {
     /// живые, иначе ответ на шаг ползунка вернул бы прежнюю громкость.
     var wireState: MixerState {
         func rows(_ list: [MixerApp]) -> [MixerAppState] {
-            list.map { MixerAppState(id: $0.id, name: $0.name, volume: volume(for: $0.id), muted: isMuted($0.id)) }
+            list.map { MixerAppState(id: $0.id, name: $0.name, volume: volume(for: $0.id), muted: isMuted($0.id), eq: equalizer(for: $0.id)) }
         }
         return MixerState(apps: rows(apps), idleApps: rows(idleApps), presetApps: rows(presetApps), otherApps: rows(otherApps),
                           permissionProblem: permissionProblem, lastError: lastError)
@@ -31,11 +31,16 @@ extension MixerController {
             reset(id)
         case .commitVolumes:
             commitVolumes()
+        case .setEqualizer(let id, let enabled, let preset, let bands):
+            let setting = MixerEqSetting(enabled: enabled, preset: preset, bands: bands)
+            guard setting.isValid else { return "Таких значений эквалайзера нет" }
+            guard issued(id) else { return unknown }
+            setEqualizer(setting, for: id)
         }
         return nil
     }
 
-    /// Действие из связи. Самое длинное настоящее — `setVolume` с bundle id, короче 512 байт.
+    /// Действие из связи. Самое длинное настоящее — `setEqualizer` с bundle id, короче 512 байт: значения идут с шагом 0,5.
     func handle(_ data: Data) -> Data {
         LinkWire.handle(data, as: MixerAction.self, limit: 512, state: { wireState }) { handle($0) }
     }

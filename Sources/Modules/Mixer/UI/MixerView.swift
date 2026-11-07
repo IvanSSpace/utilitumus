@@ -28,15 +28,39 @@ private struct MixerRow: View, Equatable {
     let onVolume: (Double) -> Void
     let onCommit: () -> Void
     let onToggleMute: () -> Void
+    let onEqualizer: (MixerEqSetting) -> Void
     @Environment(\.dsTint) private var tint
     /// Значение под пальцем: слайдер двигается сразу, а список публикуется позже.
     @State private var dragging: Double?
+    @State private var eqOpen = false
+    /// То же для регуляторов эквалайзера.
+    @State private var draggingEq: MixerEqSetting?
 
     static func == (a: MixerRow, b: MixerRow) -> Bool { a.app == b.app }
 
     private var shownVolume: Double { dragging ?? app.volume }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            controls
+            if eqOpen, let eq = draggingEq ?? app.eq {
+                EqualizerPanel(setting: eq, onChange: { setting in
+                    draggingEq = setting
+                    onEqualizer(setting)
+                }, onCommit: {
+                    onCommit()
+                    draggingEq = nil
+                })
+                .padding(.top, 6).padding(.bottom, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .modifier(RowDivider())
+        .onChange(of: app.volume) { dragging = nil }
+        .onChange(of: app.eq) { draggingEq = nil }
+    }
+
+    private var controls: some View {
         HStack(spacing: 8) {
             AppIcon(image: app.icon)
             VStack(alignment: .leading, spacing: 2) {
@@ -67,6 +91,13 @@ private struct MixerRow: View, Equatable {
                 .foregroundStyle(.white.opacity(0.7))
                 .frame(width: 40, alignment: .trailing)
 
+            // Нет значений — на той стороне старый Микшер, кнопки нет.
+            if let eq = app.eq {
+                EqualizerButton(active: (draggingEq ?? eq).isActive, open: eqOpen) {
+                    withAnimation(.easeOut(duration: 0.15)) { eqOpen.toggle() }
+                }
+            }
+
             Button {
                 onToggleMute()
             } label: {
@@ -80,8 +111,180 @@ private struct MixerRow: View, Equatable {
             .focusEffectDisabled()
             .help(app.muted ? "Вернуть звук" : "Выключить звук")
         }
-        .modifier(RowDivider())
-        .onChange(of: app.volume) { dragging = nil }
+    }
+}
+
+/// Кнопка эквалайзера в строке: размер постоянный, активный вид меняет только цвет и подложку, раскладка стоит на месте.
+private struct EqualizerButton: View {
+    let active: Bool
+    let open: Bool
+    let action: () -> Void
+    @Environment(\.dsTint) private var tint
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "slider.vertical.3")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(active ? tint : .white.opacity(open ? 0.85 : 0.6))
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(active ? tint.opacity(0.18) : .white.opacity(open ? 0.08 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusEffectDisabled()
+        .help(active ? "Эквалайзер включён" : "Эквалайзер")
+    }
+}
+
+/// Раскрытая часть строки, на всю её ширину: выключатель и режим, ниже регуляторы полос.
+private struct EqualizerPanel: View {
+    let setting: MixerEqSetting
+    let onChange: (MixerEqSetting) -> Void
+    let onCommit: () -> Void
+
+    private func change(_ next: MixerEqSetting) {
+        onChange(next)
+        onCommit()
+    }
+
+    private var presetTitle: String { MixerEq.presets.first { $0.id == setting.preset }?.title ?? "" }
+
+    private var presetMenu: some View {
+        Menu {
+            ForEach(MixerEq.presets, id: \.id) { preset in
+                Button {
+                    change(setting.choosing(preset))
+                } label: {
+                    if preset.id == setting.preset { Label(preset.title, systemImage: "checkmark") } else { Text(preset.title) }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text(presetTitle).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white.opacity(0.92))
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(.white.opacity(0.14)))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                DSToggle("Эквалайзер", isOn: Binding(get: { setting.enabled }, set: {
+                    var next = setting
+                    next.enabled = $0
+                    change(next)
+                }))
+                Text("Эквалайзер").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                Spacer(minLength: 8)
+                HStack(spacing: 8) {
+                    Text("Режим").font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.5))
+                    presetMenu
+                }
+                .disabled(!setting.enabled)
+                .opacity(setting.enabled ? 1 : 0.5)
+            }
+            HStack(spacing: 0) {
+                ForEach(0..<MixerEq.bandCount, id: \.self) { band in
+                    EqualizerSlider(title: MixerEq.bandTitles[band], value: setting.bands[band], onChange: { value in
+                        onChange(setting.editing(band: band, to: value))
+                    }, onCommit: onCommit)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            // Выключенный эквалайзер виден, но не правится: значения ждут включения.
+            .allowsHitTesting(setting.enabled)
+            .opacity(setting.enabled ? 1 : 0.4)
+            .animation(.easeOut(duration: 0.15), value: setting.enabled)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.white.opacity(0.05)))
+    }
+}
+
+/// Вертикальный регулятор с насечками и средней линией. Свой, а не повёрнутый `Slider`: у того на macOS 26 меняются размеры и засечки.
+/// Двигается относительно места нажатия, поэтому щелчок значение не меняет, а двойной щелчок возвращает 0.
+private struct EqualizerSlider: View {
+    let title: String
+    let value: Double
+    let onChange: (Double) -> Void
+    let onCommit: () -> Void
+    @State private var dragStart: Double?
+
+    private static let height: CGFloat = 92
+    private static let knob: CGFloat = 16
+    private static let span = MixerEq.maxGain - MixerEq.minGain
+
+    private func y(_ gain: Double) -> CGFloat {
+        Self.knob / 2 + CGFloat((MixerEq.maxGain - gain) / Self.span) * (Self.height - Self.knob)
+    }
+
+    private func clamped(_ raw: Double) -> Double {
+        min(max((raw / MixerEq.step).rounded() * MixerEq.step, MixerEq.minGain), MixerEq.maxGain)
+    }
+
+    private var shownValue: String {
+        value == 0 ? "0" : (value > 0 ? "+" : "−") + abs(value).formatted(.number.precision(.fractionLength(0...1)))
+    }
+
+    private var scale: some View {
+        Canvas { context, size in
+            let x = size.width / 2
+            context.fill(Path(roundedRect: CGRect(x: x - 1.5, y: 0, width: 3, height: size.height), cornerRadius: 1.5), with: .color(.white.opacity(0.18)))
+            // Насечки по обе стороны дорожки каждые 3 дБ, через одну длиннее, и средняя линия на нуле.
+            for gain in stride(from: MixerEq.minGain, through: MixerEq.maxGain, by: 3) where gain != 0 {
+                let long = gain.truncatingRemainder(dividingBy: 6) == 0
+                let width: CGFloat = long ? 5 : 3
+                let line = y(gain)
+                for side in [x - 7 - width, x + 7] {
+                    context.fill(Path(CGRect(x: side, y: line - 0.5, width: width, height: 1)), with: .color(.white.opacity(long ? 0.26 : 0.16)))
+                }
+            }
+            context.fill(Path(CGRect(x: x - 12, y: y(0) - 0.75, width: 24, height: 1.5)), with: .color(.white.opacity(0.6)))
+            let here = y(value)
+            context.fill(Path(ellipseIn: CGRect(x: x - Self.knob / 2, y: here - Self.knob / 2, width: Self.knob, height: Self.knob)), with: .color(.white))
+            context.fill(Path(ellipseIn: CGRect(x: x - 3, y: here - 3, width: 6, height: 6)), with: .color(.black.opacity(0.8)))
+        }
+        .frame(width: 40, height: Self.height)
+        .contentShape(Rectangle())
+        .gesture(DragGesture(minimumDistance: 1)
+            .onChanged { drag in
+                let start = dragStart ?? value
+                dragStart = start
+                let next = clamped(start - Double(drag.translation.height / (Self.height - Self.knob)) * Self.span)
+                if next != value { onChange(next) }
+            }
+            .onEnded { _ in
+                dragStart = nil
+                onCommit()
+            })
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            if value != 0 { onChange(0) }
+            onCommit()
+        })
+        .help("\(title) Гц: \(shownValue) дБ. Двойной щелчок вернёт 0")
+        .accessibilityElement()
+        .accessibilityLabel("\(title) герц")
+        .accessibilityValue("\(shownValue) дБ")
+        .accessibilityAdjustableAction { direction in
+            onChange(clamped(value + (direction == .increment ? 1 : -1)))
+            onCommit()
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            scale
+            VStack(spacing: 0) {
+                Text(title).font(.system(size: 10.5, weight: .semibold).monospacedDigit()).foregroundStyle(.white.opacity(0.75))
+                Text("Гц").font(.system(size: 10)).foregroundStyle(.white.opacity(0.4))
+            }
+        }
     }
 }
 
@@ -97,6 +300,9 @@ private struct PresetRow: View, Equatable {
             AppIcon(image: app.icon)
             Text(app.name).font(DS.rowTitle).foregroundStyle(.white.opacity(0.95)).lineLimit(1)
             Spacer(minLength: 6)
+            if app.eq?.isActive == true {
+                Image(systemName: "slider.vertical.3").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).help("Настроен эквалайзер")
+            }
             Text(app.muted ? "без звука" : "\(Int((app.volume * 100).rounded())) %")
                 .font(.system(size: 12.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
@@ -148,7 +354,8 @@ struct MixerView<Model: MixerModel>: View {
             app: app,
             onVolume: { model.setVolume($0, for: id) },
             onCommit: { model.commitVolumes() },
-            onToggleMute: { model.setMuted(!model.isMuted(id), for: id) }
+            onToggleMute: { model.setMuted(!model.isMuted(id), for: id) },
+            onEqualizer: { model.setEqualizer($0, for: id) }
         ).equatable()
     }
 

@@ -15,6 +15,7 @@ protocol MixerModel: ObservableObject {
     func isMuted(_ id: String) -> Bool
     func setVolume(_ value: Double, for id: String)
     func setMuted(_ value: Bool, for id: String)
+    func setEqualizer(_ setting: MixerEqSetting, for id: String)
     func reset(_ id: String)
     func commitVolumes()
     func setScreenVisible(_ value: Bool)

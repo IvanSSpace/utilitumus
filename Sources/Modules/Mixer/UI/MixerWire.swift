@@ -6,6 +6,9 @@ struct MixerAppState: Codable, Equatable, Sendable {
     var name: String
     var volume: Double
     var muted: Bool
+    /// Нет поля — на той стороне старый Микшер без эквалайзера: экран прячет кнопку.
+    /// Старый лаунчер новое поле просто не читает: синтезированный разбор чужих ключей не видит.
+    var eq: MixerEqSetting? = nil
 }
 
 /// То, что экран показывает.
@@ -24,6 +27,7 @@ enum MixerAction: Codable, Equatable, Sendable {
     case setMuted(id: String, muted: Bool)
     case reset(id: String)
     case commitVolumes
+    case setEqualizer(id: String, enabled: Bool, preset: String, bands: [Double])
 
     init(from decoder: Decoder) throws {
         let wire = try LinkActionFields(from: decoder)
@@ -40,6 +44,9 @@ enum MixerAction: Codable, Equatable, Sendable {
         case "commitVolumes":
             try wire.none()
             self = .commitVolumes
+        case "setEqualizer":
+            try wire.fields("id", "enabled", "preset", "bands")
+            self = .setEqualizer(id: try wire.field("id"), enabled: try wire.field("enabled"), preset: try wire.field("preset"), bands: try wire.field("bands"))
         default:
             throw wire.refuse()
         }
@@ -73,16 +80,18 @@ struct MixerApp: Identifiable, Equatable {
     let icon: NSImage
     var volume: Double
     var muted: Bool
+    /// nil — эквалайзер недоступен, кнопки в строке нет.
+    var eq: MixerEqSetting? = nil
 
     /// Иконка в сравнение не входит: она не меняется, а сравнивать картинки дорого.
     static func == (a: MixerApp, b: MixerApp) -> Bool {
-        a.id == b.id && a.name == b.name && a.volume == b.volume && a.muted == b.muted
+        a.id == b.id && a.name == b.name && a.volume == b.volume && a.muted == b.muted && a.eq == b.eq
     }
 }
 
 extension MixerApp {
     /// Строка экрана из состояния, пришедшего по связи.
     @MainActor init(_ row: MixerAppState) {
-        self.init(id: row.id, name: row.name, icon: MixerAppIcon.icon(for: row.id), volume: row.volume, muted: row.muted)
+        self.init(id: row.id, name: row.name, icon: MixerAppIcon.icon(for: row.id), volume: row.volume, muted: row.muted, eq: row.eq)
     }
 }

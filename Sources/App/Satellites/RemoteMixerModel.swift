@@ -20,13 +20,20 @@ final class RemoteMixerModel: RemoteModuleModel<MixerState, MixerAction>, MixerM
                        switch action {
                        case .setVolume(let id, let value): if value.isFinite { edit(id) { $0.volume = min(max(value, 0), 1) } }
                        case .setMuted(let id, let on): edit(id) { $0.muted = on }
-                       case .reset(let id): edit(id) { $0.volume = 1; $0.muted = false }
+                       case .reset(let id): edit(id) { $0.volume = 1; $0.muted = false; if $0.eq != nil { $0.eq = .off } }
                        case .commitVolumes: break
+                       // Строка без `eq` — старый Микшер: показывать там нечего.
+                       case .setEqualizer(let id, let enabled, let preset, let bands):
+                           let setting = MixerEqSetting(enabled: enabled, preset: preset, bands: bands)
+                           if setting.isValid { edit(id) { if $0.eq != nil { $0.eq = setting } } }
                        }
                    },
                    coalesceKey: { action in
-                       if case .setVolume(let id, _) = action { return "volume:" + id }
-                       return nil
+                       switch action {
+                       case .setVolume(let id, _): return "volume:" + id
+                       case .setEqualizer(let id, _, _, _): return "equalizer:" + id
+                       default: return nil
+                       }
                    })
     }
 
@@ -43,6 +50,9 @@ final class RemoteMixerModel: RemoteModuleModel<MixerState, MixerAction>, MixerM
     }
     func setVolume(_ value: Double, for id: String) { send(.setVolume(id: id, value: value)) }
     func setMuted(_ value: Bool, for id: String) { send(.setMuted(id: id, muted: value)) }
+    func setEqualizer(_ setting: MixerEqSetting, for id: String) {
+        send(.setEqualizer(id: id, enabled: setting.enabled, preset: setting.preset, bands: setting.bands))
+    }
     func reset(_ id: String) { send(.reset(id: id)) }
     func commitVolumes() { send(.commitVolumes) }
     func setScreenVisible(_ value: Bool) {}

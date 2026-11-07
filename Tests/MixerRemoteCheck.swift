@@ -3,6 +3,7 @@ import SwiftUI
 
 // Вкладка «Микшер» в лаунчере, работа в утилите. Запуск: Tests/run-mixer-remote-check.sh
 // Звук не перехватывается: утилита стенда собрана со швом, тапы в ней не создаются. Захват проверяется руками.
+// MIXER_PAIR=old-utility: на том конце настоящий Микшер 1.3.0, собранный скриптом из тега.
 
 let moduleID = "test.mixer"
 /// Не одно известное действие: разбор отказывает, сколько бы известного в этом ни было.
@@ -15,7 +16,18 @@ let notOneAction: [(String, String)] = [
     ("pid вместо id", #"{"reset":{"id":4242}}"#),
     ("старое действие экрана", #"{"setScreenVisible":{"visible":true}}"#),
     ("commitVolumes не объект", #"{"commitVolumes":1}"#),
+    ("эквалайзер без выключателя", #"{"setEqualizer":{"bands":[0,0,0,0,0,0,0,0,0,0],"id":"a","preset":"flat"}}"#),
+    ("эквалайзер: чужой ключ", #"{"setEqualizer":{"bands":[0,0,0,0,0,0,0,0,0,0],"enabled":true,"id":"a","preset":"flat","x":1}}"#),
+    ("эквалайзер: строки", #"{"setEqualizer":{"bands":["0"],"enabled":true,"id":"a","preset":"flat"}}"#),
 ]
+/// Разбираются, но значения чужие: отказ утилиты. Строка настоящая: иначе отказ был бы за неизвестный id.
+func refusedEqualizer(_ id: String) -> [(String, String)] {
+    let wire = { (bands: String, preset: String) in "{\"setEqualizer\":{\"bands\":[\(bands)],\"enabled\":true,\"id\":\"\(id)\",\"preset\":\"\(preset)\"}}" }
+    let ones = { (n: Int) in Array(repeating: "1", count: n).joined(separator: ",") }
+    return [("9 полос", wire(ones(9), "custom")), ("11 полос", wire(ones(11), "custom")), ("13 полос", wire(ones(13), "custom")),
+            ("значение 13 дБ", wire("13," + ones(9), "custom")), ("значение −99", wire("-99," + ones(9), "custom")),
+            ("чужой режим", wire(ones(10), "чужой")), ("пустой режим", wire(ones(10), ""))]
+}
 
 @MainActor func allRows(_ state: MixerState) -> [MixerAppState] { state.apps + state.idleApps + state.presetApps + state.otherApps }
 
@@ -36,7 +48,9 @@ func wirePure() {
 }
 
 @MainActor func garbage() async {
-    await checkBadActions(MixerState.self, id: moduleID, extra: notOneAction.map { ($0.0, Data($0.1.utf8)) })
+    await RemoteMixerModel.shared.read()
+    let id = allRows(RemoteMixerModel.shared.state).first?.id ?? "нет"
+    await checkBadActions(MixerState.self, id: moduleID, extra: (notOneAction + refusedEqualizer(id)).map { ($0.0, Data($0.1.utf8)) })
 }
 
 @MainActor func actions() async {
@@ -73,6 +87,58 @@ func wirePure() {
     await model.perform(.commitVolumes)
 }
 
+/// Эквалайзер по настоящей связи: значения, выключатель, режим, чужой id, шаги регулятора, запись на диск утилиты.
+@MainActor func equalizer() async {
+    let model = RemoteMixerModel.shared
+    await model.read()
+    let rows = allRows(model.state)
+    check(!rows.isEmpty && rows.allSatisfy { $0.eq == .off }, "все строки нового Микшера со значениями эквалайзера")
+    guard let target = (model.state.idleApps + model.state.otherApps).first else { return check(false, "нет строки для эквалайзера") }
+    let row = { allRows(model.state).first { $0.id == target.id } }
+    await model.perform(.setEqualizer(id: "com.evil.app", enabled: true, preset: "voice", bands: MixerEq.flat))
+    check(model.actionError != nil && !allRows(model.state).contains { $0.id == "com.evil.app" }, "эквалайзер, чужой id: отказ («\(model.actionError ?? "нет")»)")
+    let voice = MixerEqSetting(enabled: true, preset: "voice", bands: MixerEq.presets[3].bands!)
+    await model.perform(.setEqualizer(id: target.id, enabled: true, preset: "voice", bands: voice.bands))
+    await model.perform(.commitVolumes)
+    check(model.actionError == nil, "эквалайзер принят без текста ошибки")
+    await model.read()
+    check(row()?.eq == voice, "значения и режим видны в состоянии утилиты")
+    check(await until(3) { Kit.defaults.synchronize(); return MixerEqSettings.read(from: Kit.defaults)[target.id] == voice }, "утилита записала их в свои настройки")
+    await model.perform(.setEqualizer(id: target.id, enabled: false, preset: "voice", bands: voice.bands))
+    await model.read()
+    check(row()?.eq?.enabled == false && row()?.eq?.bands == voice.bands, "выключатель не теряет значения")
+    model.setEqualizer(voice.editing(band: 0, to: 3), for: target.id)
+    check(row()?.eq?.preset == MixerEq.customID, "правка видна сразу: режим «Свой»")
+    // Шаги регулятора: в пути одно на ключ, доходит последнее.
+    for step in 0...12 { model.setEqualizer(voice.editing(band: 0, to: Double(step)), for: target.id) }
+    await Task.yield()
+    check(row()?.eq?.bands[0] == 12, "регулятор: сразу виден последний шаг")
+    check(await until(3) { row()?.eq?.bands[0] == 12 && model.actionError == nil }, "регулятор: ответ утилиты совпал с последним шагом")
+    await model.perform(.reset(id: target.id))
+    await model.read()
+    check(row()?.eq == .off, "reset снимает эквалайзер")
+    await model.perform(.commitVolumes)
+}
+
+/// Настоящий Микшер 1.3.0 с этим лаунчером: всё, что он умел, работает, экран тот же, эквалайзера нет.
+@MainActor func oldUtility() async {
+    let model = RemoteMixerModel.shared
+    await model.read()
+    check(model.responding, "Микшер 1.3.0 отвечает новому лаунчеру")
+    let rows = allRows(model.state)
+    check(!rows.isEmpty && rows.allSatisfy { $0.eq == nil }, "в его строках эквалайзера нет: \(rows.count) строк, кнопок не будет")
+    await actions()
+    guard let target = (model.state.idleApps + model.state.otherApps).first else { return check(false, "нет строки для проверки") }
+    // Экран такого не пошлёт, но если придёт, старый Микшер откажет и останется жив.
+    let before = model.state
+    await model.perform(.setEqualizer(id: target.id, enabled: true, preset: "voice", bands: MixerEq.flat))
+    check(model.actionError == "Непонятная команда" && model.state == before, "действие эквалайзера: отказ («\(model.actionError ?? "нет")»), состояние то же")
+    await model.read()
+    check(model.responding, "после отказа Микшер 1.3.0 отвечает")
+    await pixels(equalizerVariant: false)
+    await model.perform(.commitVolumes)
+}
+
 /// Вид на контроллере утилиты в той же рамке, что страница центра: с ним сверяется вкладка.
 /// Не `Stand.open`: страница модуля без утилиты опрашивает реестр, он видит бандл и передачу, и снимок выходил снимком самой вкладки.
 @MainActor func openLocal(_ theme: DSTheme) async -> NSBitmapImageRep {
@@ -90,7 +156,7 @@ func wirePure() {
     return Stand.snapshot(container)
 }
 
-@MainActor func pixels() async {
+@MainActor func pixels(equalizerVariant: Bool = true) async {
     let model = RemoteMixerModel.shared
     let registry = SatelliteRegistry.shared
     let local = MixerController.shared
@@ -99,9 +165,14 @@ func wirePure() {
     for (themeName, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
         Kit.defaults.set(themeName, forKey: DSTheme.storageKey)
         var shots: [NSBitmapImageRep] = []
-        for variant in ["live", "volume"] {
+        for variant in equalizerVariant ? ["live", "volume", "equalizer"] : ["live", "volume"] {
             let target = (model.state.idleApps + model.state.otherApps).first
             await model.perform(.setVolume(id: target?.id ?? "", value: variant == "volume" ? 0.4 : 1))
+            if equalizerVariant {
+                // Подсвеченная кнопка в строке: вкладка и контроллер утилиты должны совпасть и здесь.
+                let lit = variant == "equalizer"
+                await model.perform(.setEqualizer(id: target?.id ?? "", enabled: lit, preset: lit ? "voice" : "flat", bands: lit ? MixerEq.presets[3].bands! : MixerEq.flat))
+            }
             await model.perform(.commitVolumes)
             await model.read()
             let known = model.state
@@ -120,6 +191,7 @@ func wirePure() {
             shots.append(remoteShot)
         }
         check(differingPixels(shots[0], shots[1]) > 0, "\(themeName): громкость утилиты меняет снимок, он не пустой")
+        if equalizerVariant { check(differingPixels(shots[0], shots[2]) > 0, "\(themeName): эквалайзер утилиты подсвечивает кнопку на снимке") }
     }
     // Те же списки с другими двумя текстами: сверка видит и это.
     local.runsInUtility = false
@@ -184,9 +256,14 @@ enum Main {
     static func main() {
         MainActor.assumeIsolated {
             ModuleCheck.main(.mixer, foreignAction: LinkWire.encoded(MixerAction.commitVolumes)) { utility in
+                if ProcessInfo.processInfo.environment["MIXER_PAIR"] == "old-utility" {
+                    await oldUtility()
+                    return
+                }
                 wirePure()
                 await garbage()
                 await actions()
+                await equalizer()
                 await pixels()
                 await passive()
                 await death(utility: utility)
