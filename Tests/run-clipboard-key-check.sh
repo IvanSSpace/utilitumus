@@ -14,13 +14,18 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
-cp Tests/ClipboardKeyCheck.swift "$OUT/main.swift"
+# Инкрементальная сборка: кэш вне папки стенда, копия с тем же содержимым не меняет время изменения. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache clipboard-key KIT_TEST_DEFAULTS)"
+mkdir -p "$CACHE/src"
+cmp -s Tests/ClipboardKeyCheck.swift "$CACHE/src/main.swift" || cp Tests/ClipboardKeyCheck.swift "$CACHE/src/main.swift"
 # Сборка со швом: настройки в своём suite, модуль без опроса буфера и горячей клавиши.
 export KIT_TEST_SUITE="local.utilitumus.test.kit.clipboardkey"
 trap 'defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"' EXIT
-swiftc -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/main.swift" \
-  Sources/Apps/Clipboard/ClipboardModule.swift \
-  $(find Sources/Modules/Clipboard -name '*.swift') \
-  $(find Sources/Kit -name '*.swift') \
+FILES=("$CACHE/src/main.swift" Sources/Apps/Clipboard/ClipboardModule.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Clipboard Sources/Kit -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+rm -f "$OUT/check"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -D KIT_TEST_DEFAULTS -module-name ClipboardKeyCheck -o "$OUT/check" "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CryptoKit -framework Security -framework Carbon
 "$OUT/check"

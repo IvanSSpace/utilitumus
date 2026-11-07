@@ -27,6 +27,9 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 
+# Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
 rm -rf "$OUT/src" "$OUT/Check.app"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/Check.app/Contents/MacOS"
 OUT="$(cd "$OUT" && pwd -P)"
@@ -35,10 +38,13 @@ EXE="$OUT/Check.app/Contents/MacOS/check"
 
 if [ "${STASH_WIRE_LOGIC:-}" = 1 ]; then
   export KIT_TEST_SUITE="$SUITE"
-  swiftc -parse-as-library -target "$TARGET" -D STASH_NO_SCREEN -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \
-    "$OUT/src/StashWireCheck.swift" Sources/Modules/Stash/StashStore.swift \
-    Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift \
-    $(find Sources/Kit -name '*.swift') -framework AppKit -framework SwiftUI -framework IOKit
+  CACHE="$(incremental_cache stash-wire-logic STASH_NO_SCREEN KIT_TEST_DEFAULTS)"
+  incremental_sync "$OUT/src" "$CACHE/src"
+  FILES=("$CACHE/src/StashWireCheck.swift" Sources/Modules/Stash/StashStore.swift Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift)
+  while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
+  incremental_flags "$CACHE" "${FILES[@]}"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D STASH_NO_SCREEN -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \
+    "${FILES[@]}" -framework AppKit -framework SwiftUI -framework IOKit
   "$EXE"
   exit 0
 fi
@@ -54,9 +60,12 @@ export KIT_TEST_SUITE="$SUITE"
   > "$OUT/src/LegacyStashView.swift"
 grep -q 'init(store: StashStore)' "$OUT/src/LegacyStashView.swift" || { echo "ПРОВАЛ: прежний экран не подготовлен"; exit 1; }
 
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \
-  "$OUT/src/StashWireCheck.swift" "$OUT/src/StashStore.swift" "$OUT/src/LegacyStashView.swift" \
-  Sources/Modules/Stash/StashView.swift Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift \
-  $(find Sources/Kit -name '*.swift') \
-  -framework SwiftUI -framework AppKit -framework IOKit
+CACHE="$(incremental_cache stash-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+FILES=("$CACHE/src/StashWireCheck.swift" "$CACHE/src/StashStore.swift" "$CACHE/src/LegacyStashView.swift"
+  Sources/Modules/Stash/StashView.swift Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit -framework IOKit
 "$EXE" "$OUT"

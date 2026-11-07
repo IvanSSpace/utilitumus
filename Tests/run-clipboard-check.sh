@@ -14,11 +14,18 @@ case "$status" in
   *) echo "ПРОВАЛ: grep завершился с кодом $status"; exit 1 ;;
 esac
 # Без -parse-as-library: код верхнего уровня лежит в файле, который называется не main.swift.
-cp Tests/ClipboardCheck.swift "$OUT/main.swift"
-swiftc -o "$OUT/check" "$OUT/main.swift" \
-  Sources/Modules/Clipboard/ClipboardModels.swift \
-  Sources/Modules/Clipboard/ClipboardStore.swift \
-  Sources/Modules/Clipboard/ClipboardPasteboard.swift \
-  Sources/Modules/Clipboard/ClipboardPreview.swift \
+# Инкрементальная сборка: кэш вне папки стенда, копия с тем же содержимым не меняет время изменения. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache clipboard)"
+mkdir -p "$CACHE/src"
+cmp -s Tests/ClipboardCheck.swift "$CACHE/src/main.swift" || cp Tests/ClipboardCheck.swift "$CACHE/src/main.swift"
+FILES=("$CACHE/src/main.swift"
+  Sources/Modules/Clipboard/ClipboardModels.swift
+  Sources/Modules/Clipboard/ClipboardStore.swift
+  Sources/Modules/Clipboard/ClipboardPasteboard.swift
+  Sources/Modules/Clipboard/ClipboardPreview.swift)
+incremental_flags "$CACHE" "${FILES[@]}"
+rm -f "$OUT/check"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -module-name ClipboardCheck -o "$OUT/check" "${FILES[@]}" \
   -framework AppKit -framework CryptoKit -framework Security
 "$OUT/check"

@@ -29,9 +29,18 @@ grep -q ClipboardController "$OUT/src/LegacyClipboardView.swift" \
   && { echo "ПРОВАЛ: старый экран всё ещё смотрит на настоящий контроллер"; exit 1; }
 sed '/^@main$/d' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
 
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ClipboardWireCheck -o "$OUT/check" \
-  "$OUT/src/ClipboardWireCheck.swift" "$OUT/src/LegacyClipboardView.swift" "$OUT/src/UtilitumusApp.swift" \
-  $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/VoiceHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
+# Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+. Tests/lib/incremental-sync.sh
+CACHE="$(incremental_cache clipboard-wire KIT_TEST_DEFAULTS)"
+incremental_sync "$OUT/src" "$CACHE/src"
+FILES=("$CACHE/src/ClipboardWireCheck.swift" "$CACHE/src/LegacyClipboardView.swift" "$CACHE/src/UtilitumusApp.swift")
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/VoiceHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+# Файл стенда не оставляем: компоновку с другим Tests/EmbeddedInfoSeam.plist инкрементальная сборка сама не заметит.
+rm -f "$OUT/check"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ClipboardWireCheck -o "$OUT/check" \
+  "${FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 "$OUT/check" "$OUT"
