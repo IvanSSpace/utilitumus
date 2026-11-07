@@ -35,7 +35,7 @@ esac
 forbid 'UserDefaults|Kit\.defaults' Sources/App/Satellites/SatelliteInstaller.swift Sources/Kit/KitArchive.swift 'настройки в установщике'
 
 rm -rf "$OUT"
-mkdir -p "$OUT/src" "$F"
+mkdir -p "$F"
 
 # Подпись как в build.sh.
 scripts/unlock-signing.sh
@@ -100,9 +100,15 @@ mkdir -p "$F/plist-id"; bundle "$F/plist-id" 2.0.0
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier local.utilitumus.app.test.other" "$F/plist-id/$NAME.app/Contents/Info.plist"
 sign "$F/plist-id/$NAME.app" "$SIGN_NAME" "$IDENT"; pack plist-id
 
-cp Tests/SatelliteInstallerCheck.swift "$OUT/src/main.swift"
-swiftc -target "$TARGET" -module-name SatelliteInstallerCheck -o "$OUT/check" "$OUT/src/main.swift" \
-  Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/KitArchive.swift Sources/Kit/SatelliteCatalog.swift \
-  $(find Sources/Kit/Link -name '*.swift') Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift
+# Инкрементальная сборка: кэш вне папки стенда, её чистят. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache satellite-installer)"
+mkdir -p "$CACHE/src"
+cmp -s Tests/SatelliteInstallerCheck.swift "$CACHE/src/main.swift" || cp Tests/SatelliteInstallerCheck.swift "$CACHE/src/main.swift"
+FILES=("$CACHE/src/main.swift" Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift Sources/Kit/KitArchive.swift Sources/Kit/SatelliteCatalog.swift \
+  Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit/Link -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name SatelliteInstallerCheck -o "$OUT/check" "${FILES[@]}"
 
 "$OUT/check" "$F" "$OUT/work" Catalog/catalog.json

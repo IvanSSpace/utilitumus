@@ -45,12 +45,18 @@ stub evil local.utilitumus.evil
 "$OUT/ours.app/Contents/MacOS/stub" & OURS=$!; PIDS+=("$OURS")
 "$OUT/evil.app/Contents/MacOS/stub" & EVIL=$!; PIDS+=("$EVIL")
 
-cp Tests/OwnIdentityCheck.swift "$OUT/main.swift"
+# Инкрементальная сборка: кэш вне временной папки проверки, её удаляют. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache own-identity KIT_TEST_DEFAULTS)"
+mkdir -p "$CACHE/src"
+cmp -s Tests/OwnIdentityCheck.swift "$CACHE/src/main.swift" || cp Tests/OwnIdentityCheck.swift "$CACHE/src/main.swift"
 L=Sources/Modules/Load/Native
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/main.swift" $(find Sources/Kit -name '*.swift') \
-  $(find "$L/Core" -name '*.swift') "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
+FILES=("$CACHE/src/main.swift" "$L/Background/BackgroundActions.swift" "$L/Background/BotStatus.swift" \
   "$L/Background/LaunchAgents.swift" "$L/Sessions/MuxProbe.swift" "$L/Sessions/SessionModels.swift" \
-  "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift
+  "$L/Sessions/SessionsBuilder.swift" "$L/Sessions/Transcripts.swift" Sources/Modules/Stash/StashStore.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit "$L/Core" -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name OwnIdentityCheck -o "$OUT/check" "${FILES[@]}"
 
 # id, которые реально получают бандлы: список в Kit не должен разойтись со сборкой.
 REAL=()

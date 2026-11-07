@@ -15,6 +15,7 @@ satellite_check_setup() {
   MODULE="$1"
   NAME="$2"
   cd "$(dirname "${BASH_SOURCE[0]}")/.."
+  . Tests/lib/incremental.sh
   TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
   OUT="${SATELLITE_CHECK_DIR:-${TMPDIR:-/tmp}/satellite-check}/$MODULE"
   DOMAIN="gui/$(id -u)"
@@ -41,7 +42,7 @@ satellite_check_setup() {
   failures=0
   # Подпись как в build.sh. Без этого codesign ждёт разблокировку связки и висит молча.
   scripts/unlock-signing.sh
-  mkdir -p "$OUT/src" "$OUT/png" "$STAND_HOME/Library"
+  mkdir -p "$OUT/png" "$STAND_HOME/Library"
   rm -f "$OUT"/png/*.png
   trap 'exit 1' HUP INT TERM
   trap satellite_check_cleanup EXIT
@@ -84,15 +85,29 @@ build_utility() {
   scripts/build-app.sh "$ID" "$NAME" 1.2.3 "$OUT" --test-seam
 }
 
+# Подставной файл в кэше сборки, содержимое со стандартного ввода. То же содержимое не меняет время изменения: иначе его перекомпилируют зря.
+cache_put() {
+  mkdir -p "$(dirname "$1")"
+  cat > "$1.new"
+  cmp -s "$1.new" "$1" || mv "$1.new" "$1"
+  rm -f "$1.new"
+}
+
 # Центр стенда из всех исходников центра. Подпись: $HUB как центр, $FOREIGN с чужим identifier.
+# Сборка инкрементальная, кэш свой у каждой проверки (Tests/lib/incremental.sh).
 build_module_hub() {
-  local check="$1"
+  local check="$1" cache f
+  cache="$(incremental_cache "hub-$MODULE-$(basename "$check" .swift)" KIT_TEST_DEFAULTS)"
   # Настоящий `ModuleDetail` из настоящего файла; точка входа у стенда своя.
-  sed '/^@main$/d' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
-  cp "$check" Tests/SatelliteCheckKit.swift Tests/SatelliteStandKit.swift "$OUT/src/"
-  swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name "${NAME}ModuleCheck" -o "$OUT/hub-build" \
-    "$OUT/src/$(basename "$check")" "$OUT/src/SatelliteCheckKit.swift" "$OUT/src/SatelliteStandKit.swift" "$OUT/src/UtilitumusApp.swift" \
-    $(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift) \
+  sed '/^@main$/d' Sources/App/UtilitumusApp.swift | cache_put "$cache/src/UtilitumusApp.swift"
+  local files=("$check" Tests/SatelliteCheckKit.swift Tests/SatelliteStandKit.swift "$cache/src/UtilitumusApp.swift")
+  while IFS= read -r f; do files+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' \
+    -not -path 'Sources/Apps/*' -not -name UtilitumusApp.swift | sort)
+  incremental_flags "$cache" "${files[@]}"
+  # Плист вшивает линковщик, а swiftc за ним не следит: при готовом бинарнике и тех же объектах правка плиста не дошла бы.
+  rm -f "$OUT/hub-build"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name "${NAME}ModuleCheck" -o "$OUT/hub-build" \
+    "${files[@]}" \
     -framework SwiftUI -framework AppKit -framework Charts -framework CoreAudio -framework AudioToolbox -framework IOKit \
     -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
   sign_hub

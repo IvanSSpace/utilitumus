@@ -8,14 +8,25 @@ cd "$(dirname "$0")/.."
 OUT="${SEAM_CHECK_DIR:-${TMPDIR:-/tmp}/seam-check}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 rm -rf "$OUT"
-mkdir -p "$OUT/src"
+mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd -P)"
 fail() { echo "ПРОВАЛ: $1"; exit 1; }
 ok() { echo "ok   $1"; }
 
-cp Tests/SeamCheck.swift "$OUT/src/main.swift"
-swiftc -target "$TARGET" -o "$OUT/check-prod" "$OUT/src/main.swift" Sources/Kit/KitSigning.swift
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check-seam" "$OUT/src/main.swift" Sources/Kit/KitSigning.swift
+# Инкрементальная сборка самой проверки: у сборки без шва и со швом свой кэш, объекты не смешиваются (Tests/lib/incremental.sh).
+# Настоящая утилита ниже собирается как всегда, через build-app.sh с -O: следы шва ищем именно в такой сборке.
+. Tests/lib/incremental.sh
+build_check() { # <выходной файл> <имя кэша> [-D флаг]
+  local out="$1" name="$2"; shift 2
+  local cache; cache="$(incremental_cache "$name" "$@")"
+  mkdir -p "$cache/src"
+  cmp -s Tests/SeamCheck.swift "$cache/src/main.swift" || cp Tests/SeamCheck.swift "$cache/src/main.swift"
+  local files=("$cache/src/main.swift" Sources/Kit/KitSigning.swift)
+  incremental_flags "$cache" "${files[@]}"
+  swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" ${1+-D "$1"} -module-name SeamCheck -o "$out" "${files[@]}"
+}
+build_check "$OUT/check-prod" seam-prod
+build_check "$OUT/check-seam" seam-seam KIT_TEST_DEFAULTS
 "$OUT/check-prod" "$OUT" || fail "боевая сборка проверки"
 "$OUT/check-seam" "$OUT" || fail "сборка проверки со швом"
 

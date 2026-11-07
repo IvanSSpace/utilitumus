@@ -18,15 +18,22 @@ case "$status" in
   *) ok "уведомления, видные всем, только у связи и реестра" ;;
 esac
 
-printf 'let probeName = "%s"\n' "$PROBE" > "$OUT/src/ProbeName.swift"
-printf 'MainActor.assumeIsolated { SatelliteMain.run(ProbeModule()) }\n' > "$OUT/src/main.swift"
+# Инкрементальная сборка: у пробы и центра стенда свой кэш (Tests/lib/incremental.sh). Имя пробы — в имени кэша: файл с ним подставной.
+PROBE_CACHE="$(incremental_cache "probe-$PROBE" KIT_TEST_DEFAULTS)"
+HUB_CACHE="$(incremental_cache "probe-hub-$PROBE" KIT_TEST_DEFAULTS)"
+printf 'let probeName = "%s"\n' "$PROBE" | cache_put "$PROBE_CACHE/src/ProbeName.swift"
+printf 'let probeName = "%s"\n' "$PROBE" | cache_put "$HUB_CACHE/src/ProbeName.swift"
+printf 'MainActor.assumeIsolated { SatelliteMain.run(ProbeModule()) }\n' | cache_put "$PROBE_CACHE/src/main.swift"
+KIT_FILES=()
+while IFS= read -r f; do KIT_FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
 
 # Утилита-проба: как build-app.sh, только источники из Tests. Метка выпуска и остальное — из Info.plist «Не спать».
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name Probe -o "$EXE" \
-  "$OUT/src/main.swift" "$OUT/src/ProbeName.swift" Tests/SatelliteProbe.swift Tests/SatelliteProbeWire.swift \
-  $(find Sources/Kit -name '*.swift') -framework SwiftUI -framework AppKit
+FILES=("$PROBE_CACHE/src/main.swift" "$PROBE_CACHE/src/ProbeName.swift" Tests/SatelliteProbe.swift Tests/SatelliteProbeWire.swift "${KIT_FILES[@]}")
+incremental_flags "$PROBE_CACHE" "${FILES[@]}"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name Probe -o "$EXE" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit
 cp Sources/Apps/Awake/Info.plist "$APP/Contents/Info.plist"
 plutil -replace CFBundleIdentifier -string "$IDENTIFIER" "$APP/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string Probe "$APP/Contents/Info.plist"
@@ -37,9 +44,13 @@ TEST_EPOCH="$(sed -n 's/.*static let testPeerEpoch = "\(.*\)".*/\1/p' Sources/Ki
 plutil -replace UtilitumusSecurityEpoch -string "$TEST_EPOCH" "$APP/Contents/Info.plist"
 codesign --force --options runtime --sign "$SIGN_NAME" --identifier "$IDENTIFIER" "$APP"
 
-swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ProbeCheck -o "$OUT/hub-build" \
-  Tests/SatelliteBaseCheck.swift Tests/SatelliteCheckKit.swift Tests/SatelliteProbeWire.swift "$OUT/src/ProbeName.swift" \
-  Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModuleSurface.swift Sources/App/Design/DashState.swift $(find Sources/Kit -name "*.swift") -framework SwiftUI -framework AppKit \
+FILES=(Tests/SatelliteBaseCheck.swift Tests/SatelliteCheckKit.swift Tests/SatelliteProbeWire.swift "$HUB_CACHE/src/ProbeName.swift" \
+  Sources/App/Satellites/RemoteModuleModel.swift Sources/App/Satellites/RemoteModuleSurface.swift Sources/App/Design/DashState.swift "${KIT_FILES[@]}")
+incremental_flags "$HUB_CACHE" "${FILES[@]}"
+# Плист вшивает линковщик, а swiftc за ним не следит: при готовом бинарнике и тех же объектах правка плиста не дошла бы.
+rm -f "$OUT/hub-build"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name ProbeCheck -o "$OUT/hub-build" \
+  "${FILES[@]}" -framework SwiftUI -framework AppKit \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 sign_hub
 

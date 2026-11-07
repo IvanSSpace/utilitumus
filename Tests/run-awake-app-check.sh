@@ -52,10 +52,18 @@ scripts/build-app.sh "$ID" Awake 1.2.3 "$OUT" --test-seam
 same "LSUIElement" "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$APP/Contents/Info.plist")" "true"
 same "bundle id" "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" "$IDENTIFIER"
 
-cp Tests/SatelliteRoleCheck.swift "$OUT/src/main.swift"
-swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/client-build" "$OUT/src/main.swift" \
-  Sources/Kit/KitDefaults.swift Sources/Kit/KitSigning.swift Sources/Kit/SatelliteCatalog.swift \
-  Sources/Kit/SatelliteRole.swift Sources/Kit/SatelliteSelfUpdate.swift Sources/Kit/KitArchive.swift $(find Sources/Kit/Link -name '*.swift') \
+# Инкрементальная сборка клиента. Кэш не тот, что у run-satellite-role-check: здесь ещё и плист. Подробности в Tests/lib/incremental.sh.
+. Tests/lib/incremental.sh
+CACHE="$(incremental_cache awake-app-client KIT_TEST_DEFAULTS)"
+mkdir -p "$CACHE/src"
+cmp -s Tests/SatelliteRoleCheck.swift "$CACHE/src/main.swift" || cp Tests/SatelliteRoleCheck.swift "$CACHE/src/main.swift"
+FILES=("$CACHE/src/main.swift" Sources/Kit/KitDefaults.swift Sources/Kit/KitSigning.swift Sources/Kit/SatelliteCatalog.swift \
+  Sources/Kit/SatelliteRole.swift Sources/Kit/SatelliteSelfUpdate.swift Sources/Kit/KitArchive.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit/Link -name '*.swift' | sort)
+incremental_flags "$CACHE" "${FILES[@]}"
+# Плист вшивает линковщик, а swiftc за ним не следит: при готовом бинарнике и тех же объектах правка плиста не дошла бы.
+rm -f "$OUT/client-build"
+swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name AwakeAppClient -o "$OUT/client-build" "${FILES[@]}" \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker Tests/EmbeddedInfoSeam.plist
 signed() {
   cp "$OUT/client-build" "$OUT/$1"
