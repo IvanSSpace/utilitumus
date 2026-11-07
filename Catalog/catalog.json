@@ -69,13 +69,13 @@
     },
     {
       "id": "mixer",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.2.0/Mixer.zip",
-      "sha256": "57253dc00ab7fabb9666105a6388461e690159f80129eba02f2004f41e141e0d",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.2.1/Mixer.zip",
+      "sha256": "54f2f4cb0288c21f0e402288c9980b73b879e34c66369dca87aa4e0789b06b8a",
       "sizeMB": 1,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
