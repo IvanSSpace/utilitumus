@@ -95,7 +95,7 @@ final class UpdateAll: ObservableObject {
 
     /// «Нужен центр новее» в конце: с этими сейчас ничего не сделать.
     var rows: [UpdateRow] {
-        let all = Module.allCases.compactMap(row)
+        let all = ModuleScope.shown(Module.allCases).compactMap(row)
         let held = all.filter { if case .needsHub = $0.phase { return true }; return false }
         return all.filter { !held.contains($0) } + held
     }

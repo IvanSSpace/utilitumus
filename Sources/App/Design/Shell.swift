@@ -172,7 +172,7 @@ struct DSSidebar: View {
             }
             // Ничего не установлено: подсказка ведёт в Стор.
             if layout.flattened.isEmpty {
-                Text("Выбери модули в Сторе")
+                Text(ModuleScope.emptyNote ?? "Выбери модули в Сторе")
                     .font(.system(size: 12.5, weight: .medium)).foregroundStyle(.white.opacity(0.6))
                     .padding(.horizontal, 12).padding(.bottom, 8)
             }

@@ -2,7 +2,13 @@
 # Быстрая сборка для разработки: центр и только те утилиты, что менялись. Без -O, инкрементально, кэш на каждую утилиту.
 #   scripts/dev.sh                        что менялось, определяется по git (от ветки main и рабочее дерево)
 #   scripts/dev.sh mixer load browser     ровно эти утилиты и центр
-#   scripts/dev.sh --hub                  только центр
+#   scripts/dev.sh --hub                  только центр, модулей в нём нет
+#   scripts/dev.sh --all                  только центр, видны все модули: для правок самой панели
+# Центр показывает только свой набор: боковая панель, дашборд, Стор, обновления, меню, значки, «О проекте».
+# Набор — то, что собирается, плюс модули, чей экран в центре менялся (Sources/App/Satellites/Remote<Имя>*): такой модуль
+# виден, а его утилита не пересобирается, если её файлы не менялись. Правка Sources/Kit набор не расширяет.
+# Набор зашит при компиляции (-D KIT_DEV_SCOPE и DevScope.swift в папке разработки, см. Sources/App/ModuleScope.swift)
+# и только прячет: утилиты вне набора работают как работали, их настройки и настройки человека не меняются.
 # Центр собирается всегда: пустая пересборка стоит полсекунды. Помощники (вентиляторы, голос, Links) собираются
 # один раз и лежат в кэше, пока не менялись их исходники.
 # Утилиты попадают в центр штатным путём: свой каталог (catalog.json, архивы) в папке разработки и центр,
@@ -35,13 +41,17 @@ matches "$DEV" '^/[A-Za-z0-9/._-]+$' || fail "В пути к папке разр
 ALL_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots"
 APPS=""
 for pair in $ALL_APPS; do [ -d "Sources/Apps/${pair##*:}" ] && APPS="$APPS $pair"; done
-name_of() { local pair; for pair in $APPS; do [ "${pair%%:*}" = "$1" ] && { echo "${pair##*:}"; return; }; done; return 1; }
-id_of_name() { local pair; for pair in $APPS; do [ "${pair##*:}" = "$1" ] && { echo "${pair%%:*}"; return; }; done; return 1; }
+. scripts/dev-scope.sh
 
 # --- Что собирать
 PICK=()
+SCREENS=""
+SCOPE_ALL=""
 if [ $# -eq 1 ] && [ "$1" = "--hub" ]; then
-  echo "Выбрано: только центр (--hub)."
+  echo "Выбрано: только центр, без модулей (--hub)."
+elif [ $# -eq 1 ] && [ "$1" = "--all" ]; then
+  SCOPE_ALL=1
+  echo "Выбрано: только центр, видны все модули (--all)."
 elif [ $# -gt 0 ]; then
   for id in "$@"; do
     name_of "$id" >/dev/null || fail "Нет такой утилиты: ${id}. Есть:$(for p in $APPS; do printf ' %s' "${p%%:*}"; done)"
@@ -51,17 +61,9 @@ elif [ $# -gt 0 ]; then
 else
   BASE="$(/usr/bin/git merge-base HEAD main 2>/dev/null || echo HEAD)"
   CHANGED="$({ /usr/bin/git diff --name-only "$BASE"; /usr/bin/git ls-files -o --exclude-standard; } | sort -u)"
-  KIT=""
-  while IFS= read -r file; do
-    case "$file" in
-      Sources/Apps/*/* | Sources/Modules/*/*) id="$(id_of_name "$(echo "$file" | cut -d/ -f3)")" || continue ;;
-      Sources/VoiceHelper/*) id=voice ;;
-      Sources/Kit/*) KIT=1; continue ;;
-      *) continue ;;
-    esac
-    case " ${PICK[*]:-} " in *" $id "*) ;; *) PICK+=("$id") ;; esac
-  done <<<"$CHANGED"
+  dev_scope_classify <<<"$CHANGED"
   echo "Выбрано по git (от $(echo "$BASE" | cut -c1-7), с рабочим деревом): ${PICK[*]:-ничего, только центр}"
+  [ -z "$SCREENS" ] || echo "Менялись экраны в центре, видны без пересборки утилиты: $SCREENS"
   if [ -n "$KIT" ]; then
     echo "Менялся Sources/Kit: затрагивает все утилиты ($(for p in $APPS; do printf '%s ' "${p%%:*}"; done)); автоматически не пересобираю, назови нужные: scripts/dev.sh <id> ..."
   fi
@@ -176,6 +178,18 @@ WANT="enum KitPilotCatalog {
 }"
 [ "$(cat "$SOURCE" 2>/dev/null || true)" = "$WANT" ] || printf '%s\n' "$WANT" > "$SOURCE"
 
+# Какие модули видит центр. Файл не трогается, пока набор тот же: иначе инкрементальная сборка делала бы лишнее.
+SCOPE_SOURCE="$DEV/DevScope.swift"
+if [ -n "$SCOPE_ALL" ]; then
+  SCOPE_IDS=('*')
+else
+  # shellcheck disable=SC2206 # SCREENS — id через пробел.
+  SCOPE_IDS=(${PICK[@]+"${PICK[@]}"} $SCREENS)
+fi
+SCOPE_LINE="$(dev_scope_line ${SCOPE_IDS[@]+"${SCOPE_IDS[@]}"})"
+SCOPE_WANT="$(dev_scope_swift ${SCOPE_IDS[@]+"${SCOPE_IDS[@]}"})"
+[ "$(cat "$SCOPE_SOURCE" 2>/dev/null || true)" = "$SCOPE_WANT" ] || printf '%s\n' "$SCOPE_WANT" > "$SCOPE_SOURCE"
+
 scripts/fetch-sherpa.sh >/dev/null
 SHERPA="Vendor/sherpa-onnx"
 SHERPA_LIBS=(libsherpa-onnx-c-api libsherpa-onnx-core libonnxruntime libkaldi-decoder-core libkaldi-native-fbank-core libkissfft-float libsherpa-onnx-fst libsherpa-onnx-fstfar libsherpa-onnx-kaldifst-core libssentencepiece_core libutf8proc)
@@ -228,7 +242,7 @@ step "помощники центра (пересобрано:${HELPER_NOTE:- н
 T="$(now)"
 HUB_FILES=()
 while IFS= read -r f; do HUB_FILES+=("$f"); done < <(find Sources -name '*.swift' -not -path 'Sources/FanHelper/*' -not -path 'Sources/LinkHelper/*' -not -path 'Sources/Apps/*' | sort)
-HUB_FILES+=("$SOURCE")
+HUB_FILES+=("$SOURCE" "$SCOPE_SOURCE")
 /usr/bin/python3 -I - "$HC" "${HUB_FILES[@]}" <<'PY'
 import hashlib, json, sys
 cache = sys.argv[1]
@@ -245,7 +259,7 @@ if not same:
     open(cache + "/map.json", "w").write(new)
 PY
 if ! swiftc -Onone -incremental -enable-batch-mode -j8 -output-file-map "$HC/map.json" -module-name Utilitumus \
-  -parse-as-library -target "$TARGET" -D KIT_PILOT_CATALOG -o "$HC/Utilitumus" "${HUB_FILES[@]}" \
+  -parse-as-library -target "$TARGET" -D KIT_PILOT_CATALOG -D KIT_DEV_SCOPE -o "$HC/Utilitumus" "${HUB_FILES[@]}" \
   -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit > "$HC/compile.log" 2>&1; then
   grep -E 'error:' "$HC/compile.log" | head -20 >&2 || tail -20 "$HC/compile.log" >&2
   fail "Центр не собрался (полный лог: $HC/compile.log)"
@@ -280,14 +294,18 @@ T="$(now)"
 codesign --verify --deep --strict "$APP" || fail "Подпись центра не сходится."
 signed_by_author "$APP" local.utilitumus
 [ "$(plutil -extract UtilitumusSecurityEpoch raw -o - "$APP/Contents/Info.plist")" = "$EPOCH" ] || fail "В Info.plist центра метка выпуска не ${EPOCH}."
-[[ "$(strings -a "$APP/Contents/MacOS/Utilitumus")" == *"$CATALOG"* ]] || fail "В центре нет пути к каталогу разработки."
-step "проверки (подпись, метка выпуска, каталог)" "$T"
+HUB_STRINGS="$(strings -a "$APP/Contents/MacOS/Utilitumus")"
+[[ "$HUB_STRINGS" == *"$CATALOG"* ]] || fail "В центре нет пути к каталогу разработки."
+[[ "$HUB_STRINGS" == *"$SCOPE_LINE"* ]] || fail "В центре не тот набор модулей, ждал: $SCOPE_LINE"
+step "проверки (подпись, метка выпуска, каталог, набор)" "$T"
 
 echo
 echo "Собрано для разработки, ничего не установлено и не запущено (всего $(perl -e 'printf "%.1f", $ARGV[0]-$ARGV[1]' "$(now)" "$T0") с)."
 for s in "${STEPS[@]}"; do echo "  $s"; done
 echo "  Центр $HUB_VERSION: $APP"
 echo "  Каталог: $CATALOG"
+if [ -n "$SCOPE_ALL" ]; then SCOPE_SHOW="все"; else SCOPE_SHOW="${SCOPE_LINE#*=}"; SCOPE_SHOW="${SCOPE_SHOW:-нет, только центр}"; fi
+echo "  Модули в центре: $SCOPE_SHOW"
 if [ ${#BUILT[@]} -gt 0 ]; then
   echo "  Утилиты (Стор предложит обновление):"
   for entry in ${BUILT[@]+"${BUILT[@]}"}; do IFS=: read -r id name version <<<"$entry"; echo "    $name $version"; done

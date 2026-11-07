@@ -32,7 +32,7 @@ fi
 cp Tests/ModuleHandoverCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -module-name ModuleHandoverCheck -o "$OUT/module-handover-check" "$OUT/src/main.swift" "$OUT/src/KitDefaults.swift" \
   $(find Sources/Kit -name '*.swift' -not -name KitDefaults.swift) \
-  Sources/App/ModuleManager.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
+  Sources/App/ModuleManager.swift Sources/App/ModuleScope.swift Sources/App/ModuleReset.swift Sources/Modules/Keyboard/InputSources.swift \
   Sources/App/SidebarLayout.swift Tests/HubLinkStubs.swift \
   Sources/App/Satellites/ModuleHandover.swift Sources/App/Satellites/SatelliteRegistry.swift \
   Sources/App/Satellites/SatelliteInstaller.swift Sources/App/Satellites/SatelliteAgent.swift Sources/App/Satellites/ModuleMigration.swift Sources/App/Design/DashState.swift \

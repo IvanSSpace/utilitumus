@@ -76,8 +76,12 @@ struct StoreRemovalAlert: ViewModifier {
 private struct StoreShowcase: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            StoreFeatured(module: StoreModel.featured)
-            ForEach(ModuleCategory.all) { StoreShelf(category: $0) }
+            if let note = ModuleScope.emptyNote {
+                Text(note).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                    .frame(maxWidth: .infinity).padding(.top, 40)
+            }
+            if ModuleScope.shows(StoreModel.featured) { StoreFeatured(module: StoreModel.featured) }
+            ForEach(ModuleScope.categories) { StoreShelf(category: $0) }
         }
     }
 }
@@ -166,7 +170,8 @@ private struct StoreShelf: View {
     }
 
     var body: some View {
-        let items = category.modules.map(Item.module) + StoreSoon.all.filter { $0.categoryID == category.id }.map(Item.soon)
+        let soon = ModuleScope.showsSoon ? StoreSoon.all.filter { $0.categoryID == category.id } : []
+        let items = ModuleScope.shown(category.modules).map(Item.module) + soon.map(Item.soon)
         let rows = stride(from: 0, to: items.count, by: columns).map { Array(items[$0..<min($0 + columns, items.count)]) }
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 7) {
@@ -524,7 +529,7 @@ private struct StorePacksTab: View {
             VStack(spacing: 16) {
                 ForEach([Array(groups[0..<2]), Array(groups[2..<4])], id: \.first) { pair in
                     HStack(alignment: .top, spacing: 16) {
-                        ForEach(pair) { PackSection(group: $0) }
+                        ForEach(pair.filter { ModuleScope.shows($0.module) }) { PackSection(group: $0) }
                     }
                 }
             }

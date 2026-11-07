@@ -49,33 +49,39 @@ struct AppMenuBarScene: Scene {
         MenuBarExtra("Utilitumus", systemImage: "slider.horizontal.3") {
             Button("Открыть Utilitumus") { show() }
 
-            Section("Модули") {
-                ForEach(modules.order) { module in
-                    Toggle(module.title, isOn: Binding(
-                        get: { modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module) },
-                        set: {
-                            if modules.isExternal(module) { satellites.setEnabled(module, $0) } else { modules.setOn(module, $0) }
-                        }))
+            if !modules.order.isEmpty {
+                Section("Модули") {
+                    ForEach(modules.order) { module in
+                        Toggle(module.title, isOn: Binding(
+                            get: { modules.isExternal(module) ? satellites.isEnabled(module) : modules.isOn(module) },
+                            set: {
+                                if modules.isExternal(module) { satellites.setEnabled(module, $0) } else { modules.setOn(module, $0) }
+                            }))
+                    }
                 }
-            }
 
-            Menu("Значки") {
-                ForEach(modules.order) { module in
-                    Toggle(module.title, isOn: Binding(get: { menuIcons.isOn(module) }, set: { menuIcons.set(module, $0) }))
-                        .disabled(menuIcons.isFull && !menuIcons.isOn(module))
+                Menu("Значки") {
+                    ForEach(modules.order) { module in
+                        Toggle(module.title, isOn: Binding(get: { menuIcons.isOn(module) }, set: { menuIcons.set(module, $0) }))
+                            .disabled(menuIcons.isFull && !menuIcons.isOn(module))
+                    }
+                    if let notice = menuIcons.notice ?? (menuIcons.isFull ? MenuBarIcon.limitNotice : nil) { Text(notice) }
                 }
-                if let notice = menuIcons.notice ?? (menuIcons.isFull ? MenuBarIcon.limitNotice : nil) { Text(notice) }
             }
 
             // Быстрые действия ведут встроенные контроллеры: пока модуль у утилиты, их трогать нельзя.
             // Контроллер создаётся только внутри вида, который есть, пока модуль встроенный.
-            if modules.runsBuiltIn(.fans) { FansMenuSection() }
-            if modules.isExternal(.fans) { RemoteFansMenuSection() }
+            if ModuleScope.shows(.fans) {
+                if modules.runsBuiltIn(.fans) { FansMenuSection() }
+                if modules.isExternal(.fans) { RemoteFansMenuSection() }
+            }
 
-            AwakeMenuItem()
+            if ModuleScope.shows(.awake) { AwakeMenuItem() }
 
-            if modules.runsBuiltIn(.stash) { StashMenuSection() }
-            if modules.isExternal(.stash) { RemoteStashMenuSection() }
+            if ModuleScope.shows(.stash) {
+                if modules.runsBuiltIn(.stash) { StashMenuSection() }
+                if modules.isExternal(.stash) { RemoteStashMenuSection() }
+            }
 
             // Ведомые модули: быстрые действия приходят в статусе утилиты.
             ForEach(MenuQuickActions.sections(order: modules.order, modules: modules, entries: satellites.entries), id: \.module) { section in

@@ -2,12 +2,14 @@
 # Боевая сборка не должна нести тестовый шов: сборки со швом подписаны тем же ключом (KitSigning.testPeerEpoch).
 # Ищет в исполняемых файлах и Info.plist образец `local.utilitumus.test.` (домен настроек и метка стендов)
 # и метку выпуска стенда. Образец собран из частей, чтобы скрипт не находил сам себя.
+# Второй образец — метка набора модулей дев-сборки (Sources/App/ModuleScope.swift): выпуск показывает все модули.
 #   scripts/check-no-seam.sh <бандл.app>
 set -euo pipefail
 APP="${1:?Укажи бандл}"
 [ -d "$APP" ] || { echo "Нет бандла: $APP" >&2; exit 1; }
 NEEDLE="local.utilitumus.""test."
-FOUND="$(find "$APP/Contents" -type f \( -path '*/MacOS/*' -o -path '*/Helpers/*' -o -name Info.plist \) -exec grep -laF -e "$NEEDLE" {} + 2>/dev/null || true)"
+SCOPE_NEEDLE="local.utilitumus.dev-""scope"
+FOUND="$(find "$APP/Contents" -type f \( -path '*/MacOS/*' -o -path '*/Helpers/*' -o -name Info.plist \) -exec grep -laF -e "$NEEDLE" -e "$SCOPE_NEEDLE" {} + 2>/dev/null || true)"
 EPOCH="$(sed -n 's/.*static let testPeerEpoch = "\(.*\)".*/\1/p' "$(dirname "$0")/../Sources/Kit/KitSigning.swift")"
 [ -n "$EPOCH" ] || { echo "Нет testPeerEpoch в Sources/Kit/KitSigning.swift" >&2; exit 1; }
 while IFS= read -r PLIST; do

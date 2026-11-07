@@ -133,7 +133,7 @@ final class ModuleMenuIcons: ObservableObject {
 
     /// Значки встроенных модулей, нужные сейчас.
     var wanted: Set<Module> {
-        Set(Module.allCases.filter {
+        Set(ModuleScope.shown(Module.allCases).filter {
             MenuBarIcon.hubShows(setting: settings[$0], external: modules.isExternal($0), moduleOn: modules.isOn($0))
         })
     }
@@ -201,15 +201,17 @@ struct MenuIconsSection: View {
     @ObservedObject private var modules = ModuleManager.shared
 
     var body: some View {
-        DSSection("Значки в строке меню") {
-            ForEach(modules.order) { module in
-                DSRow(icon: module.icon, title: module.title, iconTint: module.tint) {
-                    DSToggle("Значок «\(module.title)» в строке меню",
-                             isOn: Binding(get: { icons.isOn(module) }, set: { icons.set(module, $0) }))
-                        .disabled(icons.isFull && !icons.isOn(module))
+        if !modules.order.isEmpty {
+            DSSection("Значки в строке меню") {
+                ForEach(modules.order) { module in
+                    DSRow(icon: module.icon, title: module.title, iconTint: module.tint) {
+                        DSToggle("Значок «\(module.title)» в строке меню",
+                                 isOn: Binding(get: { icons.isOn(module) }, set: { icons.set(module, $0) }))
+                            .disabled(icons.isFull && !icons.isOn(module))
+                    }
                 }
+                MenuIconNotice()
             }
-            MenuIconNotice()
         }
     }
 }

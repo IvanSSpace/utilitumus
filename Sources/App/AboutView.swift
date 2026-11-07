@@ -14,9 +14,9 @@ struct AboutView: View, Equatable {
         DSPlainPage(icon: "info.circle", title: "О проекте",
                     subtitle: "Тонкая настройка MacBook там, где macOS её не даёт. Одно лёгкое приложение вместо россыпи утилит.") {
             hero
-            ForEach(ModuleCategory.all) { group in
+            ForEach(ModuleScope.categories) { group in
                 DSSection(group.title, trailing: group.subtitle, mark: theme.categoryColor(group)) {
-                    ForEach(group.modules) { module in
+                    ForEach(ModuleScope.shown(group.modules)) { module in
                         Button { open(module) } label: {
                             DSRow(icon: module.icon, title: module.title, subtitle: module.info.tagline,
                                   iconTint: theme.tone(module)) {
@@ -78,9 +78,10 @@ struct AboutView: View, Equatable {
     }
 
     private var footer: some View {
-        let on = Module.allCases.filter { modules.isOn($0) }.count
+        let all = ModuleScope.shown(Module.allCases)
+        let on = all.filter { modules.isOn($0) }.count
         return HStack(spacing: 6) {
-            Text("Модулей: \(Module.allCases.count), включено: \(on).")
+            Text("Модулей: \(all.count), включено: \(on).")
             Text("Открытый код — делай форк и предлагай свои модули.")
             Spacer()
             DSButton("Настройки", style: .plain, small: true) { modules.settingsShown = true }
