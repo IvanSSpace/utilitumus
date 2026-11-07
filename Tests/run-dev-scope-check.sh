@@ -91,7 +91,7 @@ defaults delete "$SUITE" >/dev/null 2>&1 || true
 trap 'defaults delete "$BIN" >/dev/null 2>&1 || true; defaults delete "$SUITE" >/dev/null 2>&1 || true' EXIT
 run_stand() { (cd "$OUT" && KIT_TEST_SUITE="$SUITE" "./$BIN" "$OUT/work" "$OUT/png" "$1" "$2"); }
 
-# Первым открывается «Не спать»: его экран не касается железа. Остальные встроенные модули в окне не открываются.
+# Первым открывается «Не спать»: его экран не касается железа. Модули без утилиты в окне не открываются.
 echo "== набор awake,load"
 build_scoped awake load
 run_stand "" seed

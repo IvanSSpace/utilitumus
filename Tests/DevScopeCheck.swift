@@ -25,7 +25,7 @@ func check(_ ok: Bool, _ name: String) {
 let arranged: [Module] = Module.allCases.reversed()
 let pinned: Set<Module> = [.sound, .mixer, .awake]
 let hiddenOnes: Set<Module> = [.fans, .load]
-let builtIn: Set<Module> = [.mixer, .awake, .load]
+let withoutUtility: Set<Module> = [.mixer, .awake, .load]
 
 /// Всё, что не должно меняться: порядок, выбранный модуль, значки, скрытые, включённость, передача утилите.
 func guardedSettings(_ defaults: UserDefaults) -> [String: String] {
@@ -48,16 +48,17 @@ func guardedSettings(_ defaults: UserDefaults) -> [String: String] {
     for module in Module.allCases {
         defaults.set(true, forKey: ModuleManager.onKey(module))
         defaults.set(hiddenOnes.contains(module), forKey: "ModuleHidden.\(module.rawValue)")
-        if !builtIn.contains(module) { defaults.set(true, forKey: ModuleHandover.handedOverKey(module.rawValue)) }
+        if !withoutUtility.contains(module) { defaults.set(true, forKey: ModuleHandover.handedOverKey(module.rawValue)) }
         if pinned.contains(module) { Kit.defaults.set(true, forKey: MenuBarIcon.key(module)) }
     }
     defaults.synchronize()
     Kit.defaults.synchronize()
 }
 
-/// Бандлы всех утилит в папке стенда: опрос видит их установленными, каталог предлагает обновление всем.
+/// Бандлы утилит в папке стенда: опрос видит их установленными, каталог предлагает обновление всем. У `withoutUtility` бандла нет:
+/// стоящей утилите центр передал бы модуль, что бы она ни ответила.
 func installBundles(_ apps: URL) {
-    for module in Module.allCases {
+    for module in Module.allCases where !withoutUtility.contains(module) {
         let contents = apps.appendingPathComponent(SatelliteRegistry.bundleName(module) + ".app/Contents")
         try? FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         (["CFBundleShortVersionString": "1.1.0"] as NSDictionary).write(to: contents.appendingPathComponent("Info.plist"), atomically: true)
@@ -80,7 +81,7 @@ final class Calls: @unchecked Sendable {
 }
 let calls = Calls()
 
-/// Статус: утилиты вне встроенных отвечают, у встроенных связи нет.
+/// Статус: утилиты отвечают, у модулей без утилиты связи нет.
 @MainActor func setEnvironment(apps: URL) {
     let paths = SatellitePaths(appsDir: apps, agentsDir: workRoot.appendingPathComponent("Agents"))
     SatelliteRegistry.standEnvironment = SatelliteEnvironment(
@@ -88,7 +89,7 @@ let calls = Calls()
         installer: SatelliteInstaller(paths: paths, launchctl: { calls.add("launchctl \($0.first ?? "")") }, download: { $0 }, verify: { _, _ in }),
         commands: SatelliteCommands(
             status: { id in
-                guard let module = Module(rawValue: id), !builtIn.contains(module) else { throw LinkError.timeout }
+                guard let module = Module(rawValue: id), !withoutUtility.contains(module) else { throw LinkError.timeout }
                 return LinkStatus(enabled: true, line: id, needsSetup: 0, quickActions: [LinkQuickAction(title: "действие", icon: "bolt", action: Data())])
             },
             setEnabled: { id, on in calls.add("setEnabled \(id) \(on)") },
@@ -124,7 +125,8 @@ func recognizedText(_ image: CGImage) -> String {
     return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
 }
 
-@MainActor func render<V: View>(_ name: String, height: CGFloat = 900, _ view: V) async -> String {
+/// `during` идёт, когда вид уже на экране: снимок покажет, как он ответил.
+@MainActor func render<V: View>(_ name: String, height: CGFloat = 900, _ view: V, during: (@MainActor () -> Void)? = nil) async -> String {
     let root = ZStack { DSBackground(module: .mixer, neutral: true); view }
         .environment(\.moduleControls, DSModuleControls.forEnvironment)
         .dsThemed()
@@ -138,6 +140,10 @@ func recognizedText(_ image: CGImage) -> String {
     window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
     window.orderBack(nil)
     await pause(1.2)
+    if let during {
+        during()
+        await pause(1.2)
+    }
     host.layoutSubtreeIfNeeded()
     let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
     host.cacheDisplay(in: host.bounds, to: rep)
@@ -182,15 +188,17 @@ func mentioned(_ text: String) -> Set<Module> {
     check(Set(modules.panelModules).isSubset(of: want), "дашборд идёт по panelModules: только набор")
     check(Set(modules.installedModules) == want, "установленные в панели: только набор")
     check(Set(modules.hiddenModules) == hiddenOnes.intersection(want), "hiddenModules: только набор")
-    check(Set(UpdateAll.shared.rows.map(\.module)) == want, "обновления: только набор, \(UpdateAll.shared.rows.map(\.module.rawValue))")
-    check(Set(UpdateAll.shared.startable) == want, "«Обновить всё»: только набор")
+    // Обновлять можно только стоящую утилиту. В наборе awake,load их нет, а девять утилит вне набора обновление предлагают: фильтр виден и так.
+    let updatable = want.subtracting(withoutUtility)
+    check(Set(UpdateAll.shared.rows.map(\.module)) == updatable, "обновления: только набор, \(UpdateAll.shared.rows.map(\.module.rawValue))")
+    check(Set(UpdateAll.shared.startable) == updatable, "«Обновить всё»: только набор")
     check(Set(StoreModel.shared.buildModules) == want, "полоса Стора: только набор")
-    check(icons.wanted == want.intersection(pinned).intersection(builtIn), "значки центра: только набор, \(icons.wanted.map(\.rawValue))")
+    check(icons.wanted == want.intersection(pinned).intersection(withoutUtility), "значки центра: только набор, \(icons.wanted.map(\.rawValue))")
     check(icons.waitingForUpdate.allSatisfy(want.contains), "тихая строка о значках: только набор")
     #if KIT_TEST_DEFAULTS
     // Модель в `sections` своя: настоящие говорили бы с настоящими утилитами, поэтому обычная сборка это не считает.
     let sections = MenuQuickActions.sections(order: modules.order, modules: modules, entries: registry.entries)
-    let quick = Set(want.filter { !builtIn.contains($0) })
+    let quick = Set(want.filter { !withoutUtility.contains($0) })
     check(Set(sections.map(\.module)) == quick, "быстрые действия в меню: только набор, \(sections.map(\.module.rawValue))")
     #endif
     if let first = modules.firstInPanel { check(want.contains(first), "первый в панели из набора") }
@@ -200,9 +208,9 @@ func mentioned(_ text: String) -> Set<Module> {
     print("== \(label): вне набора всё работает как работало")
     let outside = Module.allCases.filter { !want.contains($0) }
     check(outside.allSatisfy(modules.isInstalled), "вне набора модули остаются установленными")
-    check(outside.filter { !builtIn.contains($0) }.allSatisfy(modules.isExternal), "вне набора утилиты остаются внешними")
-    check(outside.filter { !builtIn.contains($0) }.allSatisfy { registry.entries[$0]?.status != nil }, "опрос ходит и к утилитам вне набора")
-    check(outside.filter(builtIn.contains).allSatisfy(modules.wantsUtility), "вне набора модули без утилиты остаются включёнными")
+    check(outside.filter { !withoutUtility.contains($0) }.allSatisfy(modules.isExternal), "вне набора утилиты остаются внешними")
+    check(outside.filter { !withoutUtility.contains($0) }.allSatisfy { registry.entries[$0]?.status != nil }, "опрос ходит и к утилитам вне набора")
+    check(outside.filter(withoutUtility.contains).allSatisfy(modules.wantsUtility), "вне набора модули без утилиты остаются включёнными")
     check(outside.filter(hiddenOnes.contains).allSatisfy(modules.isHidden), "скрытые вне набора остаются скрытыми")
     check(calls.all.isEmpty, "утилитам ничего не сказано: \(calls.all)")
     check(told.isEmpty, "значки утилит не трогались: \(told)")
@@ -220,7 +228,7 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
 @MainActor func scoped(expected: [Module], isAll: Bool, label: String) async {
     let want = Set(expected)
     let before = guardedSettings(.standard)
-    for module in Module.allCases where want.contains(module) && builtIn.contains(module) {
+    for module in Module.allCases where want.contains(module) && withoutUtility.contains(module) {
         DashboardLive.testBuiltIn[module] = DashState(text: "стенд")
     }
     await common(expected: expected, label: label)
@@ -260,10 +268,36 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
         let main = await render("\(label)-main", MainView())
         let sidebar = mentioned(main)
         check(sidebar.subtracting(want).isEmpty, "главное окно без чужих: \(sidebar.subtracting(want).map(\.rawValue))")
-        check(want.isSubset(of: sidebar), "главное окно со всеми из набора: \(want.subtracting(sidebar).map(\.rawValue))")
+        // Скрытый виден только в свёрнутых «Скрытых» (Нагрузка попадала сюда из плашки обновлений, а у модуля без утилиты обновлять нечего).
+        let visibleInPanel = want.subtracting(hiddenOnes)
+        check(visibleInPanel.isSubset(of: sidebar), "главное окно со всеми из набора: \(visibleInPanel.subtracting(sidebar).map(\.rawValue))")
         check(guardedSettings(.standard) == before, "главное окно ничего не записало: \(difference(before, guardedSettings(.standard)))")
         check(UserDefaults.standard.string(forKey: "SelectedModule") == Module.sound.rawValue, "SelectedModule остался прежним")
         if want.isEmpty { check(main.contains("только центр"), "пустой набор: окно объясняет, а не пустует") }
+    }
+
+    // Обе утилиты ставятся и удаляются только в этом процессе: seed() ниже возвращает настройки, следующий запуск их читает заново.
+    if want == [.awake, .load] {
+        print("== \(label): утилиту открытого модуля удалили руками")
+        let modules = ModuleManager.shared
+        modules.setHidden(.load, false)
+        func gone(_ module: Module) {
+            // То же, что `SatelliteRegistry.utilityGone` делает с менеджером; сам реестр проверяет run-module-handover-check.
+            modules.setOn(module, false)
+            modules.setExternal(module, false)
+            NotificationCenter.default.post(name: .moduleRemoved, object: module)
+        }
+        let opened = await render("\(label)-before-gone", MainView())
+        check(opened.contains("Не спать") && opened.contains("Утилита модуля"), "открыта страница «утилиты нет» у «Не спать»")
+        let next = await render("\(label)-gone-next", MainView(), during: { gone(.awake) })
+        check(!mentioned(next).contains(.awake), "модуль убран: его строки и страницы нет, окно живо")
+        check(mentioned(next).contains(.load) && next.contains("Утилита модуля"), "окно перешло на следующий модуль")
+        let last = await render("\(label)-gone-last", MainView(), during: { gone(.load) })
+        check(last.contains("Витрина"), "последний убран: окно перешло в Стор")
+        check(mentioned(last) == want, "оба снова предлагаются в Сторе: \(mentioned(last).map(\.rawValue))")
+        modules.setOn(.awake, true)
+        modules.setOn(.load, true)
+        modules.setHidden(.load, true)
     }
 
     if !want.isEmpty, !isAll {
