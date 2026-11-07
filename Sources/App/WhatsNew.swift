@@ -38,6 +38,11 @@ final class WhatsNew: ObservableObject {
     private static let seenKey = "WhatsNewSeen"
     private let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 
+    /// Готовый список без чтения ресурса: так окно собирает проверка.
+    init(entries: [WhatsNewEntry]) {
+        self.entries = entries
+    }
+
     private init() {
         let url = Bundle.main.url(forResource: "WhatsNew", withExtension: "json")
         let all = url.flatMap { try? Data(contentsOf: $0) }
@@ -60,10 +65,14 @@ final class WhatsNew: ObservableObject {
 // MARK: - Окно
 
 struct WhatsNewSheet: View {
-    @ObservedObject var whatsNew = WhatsNew.shared
+    @ObservedObject var whatsNew: WhatsNew
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dsTheme) private var theme
     @State private var selected: String?
+
+    init(whatsNew: WhatsNew = .shared) {
+        self.whatsNew = whatsNew
+    }
 
     private var entry: WhatsNewEntry? {
         whatsNew.entries.first { $0.version == selected } ?? whatsNew.entries.first
@@ -76,8 +85,9 @@ struct WhatsNewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if let entry {
+                        let tints = Self.tints(for: theme)
                         ForEach(Array(entry.items.enumerated()), id: \.offset) { index, item in
-                            ItemRow(item: item, tint: Self.tints[index % Self.tints.count])
+                            ItemRow(item: item, tint: tints[index % tints.count])
                         }
                     }
                 }
@@ -166,7 +176,11 @@ struct WhatsNewSheet: View {
         .scrollClipDisabled()
     }
 
-    private static let tints: [Color] = [.pink, .orange, .yellow, .green, .teal, .blue, .indigo, .purple]
+    /// Плитки значков пунктов. У «Графита» одна приглушённая серая, как шапка: белый значок на ней читается, пестрота не нужна.
+    static func tints(for theme: DSTheme) -> [Color] {
+        if theme == .graphite { return [Color(white: 0.38)] }
+        return [.pink, .orange, .yellow, .green, .teal, .blue, .indigo, .purple]
+    }
 }
 
 private struct ItemRow: View {

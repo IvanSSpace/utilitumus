@@ -1,7 +1,7 @@
 #!/bin/bash
-# Значки модулей в строке меню: маршрутизация и настройка, закрытость связи для чужих, снимок раздела в двух темах на узкой ширине.
+# Значки модулей в строке меню: маршрутизация и настройка, закрытость связи для чужих.
 # Подпись не нужна, окна за экраном (x: -10000), значков в настоящей строке меню нет. Настройки: Kit.defaults в своём suite,
-# домен бинарника снят на выходе. Папка: MENU_ICONS_CHECK_DIR, иначе $TMPDIR/menu-icons-check. PNG остаются в png/.
+# домен бинарника снят на выходе. Папка: MENU_ICONS_CHECK_DIR, иначе $TMPDIR/menu-icons-check.
 source "$(dirname "$0")/lib/check-limit.sh"
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,7 +20,7 @@ echo "ok   утилита и центр сообщают друг другу о 
 # Центр значков не рисует: у модуля без утилиты вышел бы пустой значок, а компилятору это не видно.
 if grep -rn 'MenuBarIconItem(' Sources/App; then echo "ПРОВАЛ: центр снова создаёт значок в строке меню"; exit 1; fi
 if grep -rn 'hubShows' Sources; then echo "ПРОВАЛ: вернулось правило «значок рисует центр»"; exit 1; fi
-# Меню и настройки строят переключатели из `switchable`: полный порядок дал бы их и модулям без утилиты.
+# Меню строит переключатели из `switchable`: полный порядок дал бы их и модулям без утилиты.
 if grep -n 'ForEach(modules.order)' Sources/App/MenuBar.swift Sources/App/ModuleMenuIcons.swift; then echo "ПРОВАЛ: переключатели у модулей без утилиты"; exit 1; fi
 # Выключает утилита у себя. `ModuleOn` без неё ничего не включит: такой переключатель врал бы.
 if grep -nE 'modules\.(setOn|isOn)|ModuleManager\.shared\.(setOn|isOn)' Sources/App/MenuBar.swift Sources/App/ModuleControlsHub.swift Sources/App/Design/Shell.swift Sources/App/Design/Dashboard.swift; then echo "ПРОВАЛ: переключатель снова идёт мимо утилиты"; exit 1; fi
@@ -30,7 +30,7 @@ echo "ok   центр значков не рисует, переключател
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache menu-icons "$TARGET" KIT_TEST_DEFAULTS)"
 rm -rf "$OUT"
-mkdir -p "$OUT/src" "$OUT/png" "$OUT/work"
+mkdir -p "$OUT/src" "$OUT/work"
 sed 's/^@main$//' Sources/App/UtilitumusApp.swift > "$OUT/src/UtilitumusApp.swift"
 cp Tests/MenuBarIconCheck.swift "$OUT/src/main.swift"
 # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.
@@ -49,4 +49,4 @@ defaults delete "$BIN" >/dev/null 2>&1 || true
 defaults delete "$SUITE" >/dev/null 2>&1 || true
 trap 'defaults delete "$BIN" >/dev/null 2>&1 || true; defaults delete "$SUITE" >/dev/null 2>&1 || true' EXIT
 cd "$OUT"
-KIT_TEST_SUITE="$SUITE" "./$BIN" "$OUT/work" "$OUT/png"
+KIT_TEST_SUITE="$SUITE" "./$BIN" "$OUT/work"

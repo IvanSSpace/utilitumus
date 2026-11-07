@@ -23,9 +23,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: DS.blockSpacing) {
                         ThemeSection()
                         DockSection()
-                        // Выше длинного списка значков: иначе выключатель теряется внизу.
                         AutoUpdateSection()
-                        MenuIconsSection()
                         PageModeSection()
                     }
                 }

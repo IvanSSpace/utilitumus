@@ -2,50 +2,13 @@ import AppKit
 import SwiftUI
 import ObjectiveC
 
-// Значки модулей в строке меню: маршрутизация и настройка (чисто), закрытость связи для чужих, снимок раздела
-// в двух темах на узкой ширине. Запуск: Tests/run-menu-icons-check.sh. Аргументы: рабочая папка, папка PNG.
+// Значки модулей в строке меню: маршрутизация и настройка (чисто), закрытость связи для чужих.
+// Запуск: Tests/run-menu-icons-check.sh. Аргумент: рабочая папка.
 
-let pngDir = URL(fileURLWithPath: CommandLine.arguments[2])
 nonisolated(unsafe) var failures = 0
 func check(_ ok: Bool, _ name: String) {
     print((ok ? "ok   " : "FAIL ") + name)
     if !ok { failures += 1 }
-}
-
-@MainActor func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
-
-@MainActor func snapshot(_ name: String, _ view: some View, theme: DSTheme, width: CGFloat) async -> NSBitmapImageRep {
-    Kit.defaults.set(theme.rawValue, forKey: DSTheme.storageKey)
-    let host0 = NSHostingView(rootView: view.environment(\.dsTint, theme.accent(.sound)).dsThemed().frame(width: width))
-    let height = max(host0.fittingSize.height, 100)
-    let root = ZStack { DSBackground(module: .sound); VStack { view.padding(DS.pagePadding); Spacer(minLength: 0) } }
-        .environment(\.pageActive, true)
-        .environment(\.dsTint, theme.accent(.sound))
-        .dsThemed()
-        .frame(width: width, height: height + DS.pagePadding * 2)
-    let host = NSHostingView(rootView: root)
-    let size = NSSize(width: width, height: height + DS.pagePadding * 2)
-    let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -10000, y: -10000), size: size),
-                          styleMask: [.borderless], backing: .buffered, defer: false)
-    window.isReleasedWhenClosed = false
-    window.contentView = host
-    window.setFrameOrigin(NSPoint(x: -10000, y: -10000))
-    window.orderBack(nil)
-    await pause(0.5)
-    host.layoutSubtreeIfNeeded()
-    let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
-    host.cacheDisplay(in: host.bounds, to: rep)
-    try! rep.representation(using: .png, properties: [:])!.write(to: pngDir.appendingPathComponent(name + ".png"))
-    window.orderOut(nil)
-    window.contentView = nil
-    return rep
-}
-
-func differing(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
-    guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh, let x = a.bitmapData, let y = b.bitmapData else { return Int.max }
-    var count = 0
-    for i in 0..<(a.pixelsWide * a.pixelsHigh) where memcmp(x + i * 4, y + i * 4, 4) != 0 { count += 1 }
-    return count
 }
 
 func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
@@ -139,43 +102,6 @@ func hasSelector(_ proto: Protocol, _ name: String) -> Bool {
     check(Set(AppMenuBarScene.switchable(modules)) == [.load, .fans], "утилита появилась: переключатель появился")
     modules.setExternal(.fans, false); modules.setExternal(.load, false)
     check(AppMenuBarScene.switchable(modules).isEmpty, "утилит нет: переключателей нет")
-    for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
-
-    print("== снимки раздела")
-    let shared = ModuleMenuIcons.shared
-    shared.tellUtility = { _, _ in }
-    var shots: [NSBitmapImageRep] = []
-    // Раздел настроек: модули без утилиты в нём не показаны, значок им рисовать некому.
-    for m in Module.allCases { modules.setExternal(m, false) }
-    let none = await snapshot("section-no-utility", MenuIconsSection(), theme: .dusk, width: 380)
-    modules.setExternal(.fans, true)
-    let one = await snapshot("section-one-utility", MenuIconsSection(), theme: .dusk, width: 380)
-    // По высоте не сравнить: снимок не ниже 100 pt, и в них помещается одна строка.
-    check(differing(one, none) > 0, "раздел: появилась утилита, появилась строка")
-    modules.setOn(.fans, true); modules.setOn(.awake, true); modules.setOn(.stash, true)
-    modules.setExternal(.awake, true); modules.setExternal(.stash, true)
-    let three = await snapshot("section-three-utilities", MenuIconsSection(), theme: .dusk, width: 380)
-    check(three.pixelsHigh > one.pixelsHigh, "раздел: три утилиты выше одной")
-    for (name, theme) in [("dusk", DSTheme.dusk), ("calm", DSTheme.calm)] {
-        for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
-        shared.set(.fans, false); defaults.removeObject(forKey: MenuBarIcon.key(.fans))
-        let off = await snapshot("section-\(name)-off", MenuIconsSection(), theme: theme, width: 380)
-        check(off.pixelsWide > 0, "раздел снят (\(name), все выключены)")
-        shared.set(.fans, true); shared.set(.awake, true); shared.set(.stash, true)
-        let on = await snapshot("section-\(name)-on", MenuIconsSection(), theme: theme, width: 380)
-        check(on.pixelsHigh == off.pixelsHigh && on.pixelsWide == off.pixelsWide, "раздел \(name): включение не сдвигает раскладку")
-        check(differing(on, off) > 0, "раздел \(name): переключатели видны")
-        shots.append(on)
-        shared.set(.fans, false)
-        let ctrlOff = await snapshot("header-\(name)-off", DSModuleControls(module: .fans), theme: theme, width: 380)
-        let ctrlOff2 = await snapshot("header-\(name)-off2", DSModuleControls(module: .fans), theme: theme, width: 380)
-        check(differing(ctrlOff, ctrlOff2) == 0, "шапка \(name): выключенное состояние повторяется один в один")
-        shared.set(.fans, true)
-        let ctrlOn = await snapshot("header-\(name)-on", DSModuleControls(module: .fans), theme: theme, width: 380)
-        check(ctrlOn.pixelsHigh == ctrlOff2.pixelsHigh && ctrlOn.pixelsWide == ctrlOff2.pixelsWide, "шапка \(name): включение не сдвигает раскладку")
-    }
-    check(differing(shots[0], shots[1]) > 0, "темы различаются")
-    for m in [Module.fans, .awake, .stash] { modules.setExternal(m, false) }
     for m in Module.allCases { defaults.removeObject(forKey: MenuBarIcon.key(m)) }
     defaults.removeObject(forKey: DSTheme.storageKey)
 }
