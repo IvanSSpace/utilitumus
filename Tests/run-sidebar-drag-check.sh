@@ -15,7 +15,7 @@ SUITE="local.utilitumus.test.kit.sidebar-drag"
 
 # Инкрементальная сборка: кэш рядом с папкой проверки, а не в ней (её чистят). Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh
-CACHE="${SIDEBAR_DRAG_CACHE:-$OUT-cache}"
+CACHE="${SIDEBAR_DRAG_CACHE:-$(incremental_cache sidebar-drag KIT_TEST_DEFAULTS)}"
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/png" "$OUT/work"
 # Подставной файл с тем же содержимым не должен менять время изменения: иначе его перекомпилируют зря.

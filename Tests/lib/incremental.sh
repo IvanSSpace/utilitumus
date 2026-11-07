@@ -4,6 +4,15 @@
 #   incremental_flags "$CACHE" "${FILES[@]}"   # заполняет INC_FLAGS; файлы потом передаются swiftc как обычно
 #   swiftc "${INC_FLAGS[@]}" ... "${FILES[@]}"
 # Нужен -module-name в самом вызове swiftc. INCREMENTAL_OFF=1 — собрать целиком, как раньше.
+#   CACHE="$(incremental_cache имя-проверки [флаги -D ...])"   # папка кэша
+# Пути к исходникам в карте относительные и у всех копий проекта одинаковые, поэтому общий кэш подмешал бы объекты чужой
+# ветки. Своя папка у каждой копии (рабочее дерево), проверки и набора флагов. Вызывать из корня проекта.
+incremental_cache() {
+  local name="$1" key; shift
+  key="$( { pwd -P; printf '%s\n' "$@"; } | /usr/bin/shasum -a 256 | cut -c1-12)"
+  echo "${INCREMENTAL_ROOT:-${TMPDIR:-/tmp}/utilitumus-inc}/$key/$name"
+}
+
 incremental_flags() {
   local cache="$1"; shift
   INC_FLAGS=()
