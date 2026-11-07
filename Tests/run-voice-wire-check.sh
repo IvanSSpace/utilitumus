@@ -9,16 +9,18 @@ BASE="${VOICE_WIRE_BASE:-509cdb3}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 CONTROLLER=Sources/Modules/Voice/VoiceController.swift
 REAL_MODELS="$HOME/Library/Application Support/Utilitumus/Voice/Models"
+# Свой suite вместо общего local.utilitumus.test.kit: стенд пишет настройки в Kit.defaults, а модели лежат в папке по имени suite.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.voice-wire"
 
 fail() { echo "ПРОВАЛ: $1"; exit 1; }
 real_snapshot() { ls -laT "$REAL_MODELS" 2>/dev/null | shasum; }
 cleanup() {
-  for name in voice-wire-check voice-wire-base; do
+  for name in voice-wire-check voice-wire-base "$KIT_TEST_SUITE"; do
     defaults delete "$name" 2>/dev/null || true
     rm -f "$HOME/Library/Preferences/$name.plist"
   done
   # Модели стенда (шов KIT_TEST_DEFAULTS) лежат во временной папке, а не в доме.
-  rm -rf "${TMPDIR:-/tmp}/utilitumus-test-models/${KIT_TEST_SUITE:-local.utilitumus.test.kit}"
+  rm -rf "${TMPDIR:-/tmp}/utilitumus-test-models/$KIT_TEST_SUITE"
 }
 trap cleanup EXIT
 BEFORE="$(real_snapshot)"

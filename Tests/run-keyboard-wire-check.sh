@@ -10,11 +10,15 @@ OUT="${KEYBOARD_WIRE_DIR:-${TMPDIR:-/tmp}/keyboard-wire-check}"
 # Экран до переноса на модель. Осознанное изменение вида — повод обновить этот коммит.
 BASELINE=509cdb3
 NAME=keyboard-wire-check
+# Свой suite вместо общего local.utilitumus.test.kit: стенд пишет в Kit.defaults настройки модуля.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.keyboard-wire"
 VIEW=Sources/Modules/Keyboard/KeyboardView.swift
 
 cleanup() {
-  defaults delete "$NAME" 2>/dev/null || true
-  rm -f "$HOME/Library/Preferences/$NAME.plist"
+  for domain in "$NAME" "$KIT_TEST_SUITE"; do
+    defaults delete "$domain" 2>/dev/null || true
+    rm -f "$HOME/Library/Preferences/$domain.plist"
+  done
 }
 trap cleanup EXIT
 
