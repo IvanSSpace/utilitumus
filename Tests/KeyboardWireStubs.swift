@@ -1,6 +1,6 @@
 import Foundation
 
-// Подмена InputSources.swift и AccessState в проверке связи «Клавиатуры». Настоящий файл в стенд не собирается,
+// Подмена InputSources.swift, FnSystemAction.swift и AccessState в проверке связи «Клавиатуры». Настоящие файлы в стенд не собираются,
 // поэтому записи в com.apple.HIToolbox и com.apple.symbolichotkeys, снятие TextInputSwitcher и смена раскладки
 // в нём невозможны: скрипт проверяет это ещё и по символам готового файла.
 

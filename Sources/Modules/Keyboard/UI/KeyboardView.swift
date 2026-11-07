@@ -197,15 +197,11 @@ struct KeyboardView<Model: KeyboardModel>: View {
             }
             if logShown {
                 ForEach(Array(model.logTail.enumerated()), id: \.offset) { _, entry in
-                    DSRow(title: "\(KeyboardLog.shortTime(entry.date))  \(entry.text)") { EmptyView() }
+                    DSRow(title: "\(KeyboardLogEntry.shortTime(entry.date))  \(entry.text)") { EmptyView() }
                 }
             }
         }
     }
-}
-
-extension KeyboardView where Model == KeyboardController {
-    init() { self.init(model: .shared) }
 }
 
 /// Настройки раскрытой фишки: чуть правее строк фишек и с цветной полосой слева, чтобы было видно, чьи они.

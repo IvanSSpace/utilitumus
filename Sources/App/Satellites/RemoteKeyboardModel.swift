@@ -53,7 +53,7 @@ final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction
     var inputAccess: Bool { state.inputAccess }
     var systemUsage: Int? { state.systemUsage }
     var secureInputApp: String? { state.secureInputApp }
-    var logTail: [KeyboardLog.Entry] { state.logTail }
+    var logTail: [KeyboardLogEntry] { state.logTail }
     var logCount: Int { state.logCount }
     var repairResult: String? { state.repairResult }
     var layouts: [KeyboardLayoutItem] { state.layouts }

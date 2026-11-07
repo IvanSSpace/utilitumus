@@ -1,7 +1,7 @@
 #!/bin/bash
-# Возврат системного действия 🌐 «Клавиатурой» (настоящий InputSources.swift со швом). Система не трогается:
+# Возврат системного действия 🌐 «Клавиатурой» (настоящий FnSystemAction.swift со швом). Система не трогается:
 # AppleFnUsageType и горячие клавиши подменены ключами Test.* тестового домена.
-# FN_RESTORE_OLD=<коммит> собирает проверку со старым InputSources.swift (показать, что она падала).
+# FN_RESTORE_OLD=<коммит> собирает проверку со старым InputSources.swift, где тогда лежал FnSystemAction (показать, что она падала).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
@@ -16,10 +16,10 @@ rm -rf "$OUT"; mkdir -p "$OUT/src"
 cleanup
 cp Tests/FnRestoreCheck.swift "$OUT/src/main.swift"
 if [ -n "${FN_RESTORE_OLD:-}" ]; then
-  /usr/bin/git show "$FN_RESTORE_OLD:Sources/Modules/Keyboard/InputSources.swift" > "$OUT/src/InputSources.swift"
+  /usr/bin/git show "$FN_RESTORE_OLD:Sources/Modules/Keyboard/InputSources.swift" > "$OUT/src/FnSystemAction.swift"
 else
-  cp Sources/Modules/Keyboard/InputSources.swift "$OUT/src/InputSources.swift"
+  cp Sources/Modules/Keyboard/UI/FnSystemAction.swift "$OUT/src/FnSystemAction.swift"
 fi
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" \
-  "$OUT/src/main.swift" "$OUT/src/InputSources.swift" Sources/Kit/KitDefaults.swift -framework AppKit -framework Carbon
+  "$OUT/src/main.swift" "$OUT/src/FnSystemAction.swift" Sources/Kit/KitDefaults.swift -framework AppKit -framework Carbon
 "$OUT/check"

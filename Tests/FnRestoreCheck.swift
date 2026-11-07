@@ -1,6 +1,6 @@
 import Foundation
 
-// Возврат системного действия 🌐 при выключении и удалении «Клавиатуры». Настоящий InputSources.swift со швом:
+// Возврат системного действия 🌐 при выключении и удалении «Клавиатуры». Настоящий FnSystemAction.swift со швом:
 // AppleFnUsageType и горячие клавиши живут в ключах Test.* тестового домена, activateSettings и TextInputSwitcher
 // стенд не трогает (только пишет в Test.Apply*, что применение было). Запуск: Tests/run-fn-restore-check.sh
 var failures = 0

@@ -40,7 +40,8 @@ if [ "${STASH_WIRE_LOGIC:-}" = 1 ]; then
   export KIT_TEST_SUITE="$SUITE"
   CACHE="$(incremental_cache stash-wire-logic STASH_NO_SCREEN KIT_TEST_DEFAULTS)"
   incremental_sync "$OUT/src" "$CACHE/src"
-  FILES=("$CACHE/src/StashWireCheck.swift" Sources/Modules/Stash/StashStore.swift Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift)
+  FILES=("$CACHE/src/StashWireCheck.swift" Sources/Modules/Stash/StashStore.swift Sources/Modules/Stash/StashStoreModel.swift Sources/Modules/Stash/UI/StashTypes.swift
+    Sources/Modules/Stash/UI/StashView.swift Sources/Modules/Stash/UI/StashModel.swift Sources/Modules/Stash/UI/StashWire.swift)
   while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
   incremental_flags "$CACHE" "${FILES[@]}"
   swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D STASH_NO_SCREEN -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \
@@ -63,7 +64,8 @@ grep -q 'init(store: StashStore)' "$OUT/src/LegacyStashView.swift" || { echo "П
 CACHE="$(incremental_cache stash-wire KIT_TEST_DEFAULTS)"
 incremental_sync "$OUT/src" "$CACHE/src"
 FILES=("$CACHE/src/StashWireCheck.swift" "$CACHE/src/StashStore.swift" "$CACHE/src/LegacyStashView.swift"
-  Sources/Modules/Stash/StashView.swift Sources/Modules/Stash/StashModel.swift Sources/Modules/Stash/StashWire.swift)
+  Sources/Modules/Stash/StashStoreModel.swift Sources/Modules/Stash/UI/StashTypes.swift
+  Sources/Modules/Stash/UI/StashView.swift Sources/Modules/Stash/UI/StashModel.swift Sources/Modules/Stash/UI/StashWire.swift)
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name StashWireCheck -o "$EXE" \

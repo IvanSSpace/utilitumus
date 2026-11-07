@@ -1,5 +1,5 @@
 // Печатает включённые раскладки в том порядке, в каком их отдаёт система (как их берёт модуль «Клавиатура»).
-// Запуск: swiftc -o /tmp/list-layouts -D KIT_TEST_DEFAULTS scripts/list-layouts/main.swift Sources/Kit/KitDefaults.swift Sources/Modules/Keyboard/InputSources.swift && /tmp/list-layouts
+// Запуск: swiftc -o /tmp/list-layouts -D KIT_TEST_DEFAULTS scripts/list-layouts/main.swift Sources/Kit/KitDefaults.swift Sources/Modules/Keyboard/InputSources.swift Sources/Modules/Keyboard/UI/FnSystemAction.swift && /tmp/list-layouts
 import Foundation
 
 let current = InputSources.current()?.id

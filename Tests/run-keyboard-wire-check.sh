@@ -1,6 +1,6 @@
 #!/bin/bash
 # Клавиатура: состояние, действия и их проверки, экран до и после переноса на модель. Окно за экраном и прозрачное.
-# Настоящий InputSources.swift и App в стенд не собираются (Tests/KeyboardWireStubs.swift): 🌐, диктовка,
+# Настоящие InputSources.swift, FnSystemAction.swift и App в стенд не собираются (Tests/KeyboardWireStubs.swift): 🌐, диктовка,
 # TextInputSwitcher и текущая раскладка недоступны стенду. Настройки: домен самого файла и suite шва. Папка: KEYBOARD_WIRE_DIR.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -12,7 +12,8 @@ BASELINE=509cdb3
 NAME=keyboard-wire-check
 # Свой suite вместо общего local.utilitumus.test.kit: стенд пишет в Kit.defaults настройки модуля.
 export KIT_TEST_SUITE="local.utilitumus.test.kit.keyboard-wire"
-VIEW=Sources/Modules/Keyboard/KeyboardView.swift
+VIEW=Sources/Modules/Keyboard/UI/KeyboardView.swift
+BASELINE_VIEW=Sources/Modules/Keyboard/KeyboardView.swift
 
 cleanup() {
   for domain in "$NAME" "$KIT_TEST_SUITE"; do
@@ -26,7 +27,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/home" "$OUT/png"
 SHOWN='s/@State private var logShown = false/@State private var logShown = testLogShown/'
 sed "$SHOWN" "$VIEW" > "$OUT/src/KeyboardView.swift"
-/usr/bin/git show "$BASELINE:$VIEW" | sed -e "$SHOWN" \
+/usr/bin/git show "$BASELINE:$BASELINE_VIEW" | sed -e "$SHOWN" \
   -e 's/^struct KeyboardView: View {/struct BaselineKeyboardView: View {/' \
   -e 's/var controller = KeyboardController.shared/var controller = baselineModel/' > "$OUT/src/BaselineKeyboardView.swift"
 for file in "$OUT/src/KeyboardView.swift" "$OUT/src/BaselineKeyboardView.swift"; do
@@ -41,7 +42,7 @@ CACHE="$(incremental_cache keyboard-wire KIT_TEST_DEFAULTS)"
 incremental_sync "$OUT/src" "$CACHE/src"
 FILES=(Tests/KeyboardWireCheck.swift Tests/KeyboardWireStubs.swift "$CACHE/src/KeyboardView.swift" "$CACHE/src/BaselineKeyboardView.swift"
   Sources/App/Design/Pages.swift Sources/Apps/Keyboard/KeyboardModule.swift)
-while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Keyboard -name '*.swift' -not -name InputSources.swift -not -name KeyboardView.swift | sort)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Keyboard -name '*.swift' -not -name InputSources.swift -not -name FnSystemAction.swift -not -name KeyboardView.swift | sort)
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Kit -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name KeyboardWireCheck -o "$OUT/$NAME" \
