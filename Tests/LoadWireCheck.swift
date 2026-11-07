@@ -483,7 +483,75 @@ func realFileStamp(_ url: URL?) -> String {
         second.releaseWriter()
     }
 
+    await botCommandIsTheShownOne(engine)
+
     check(zip(realFiles, stamps).allSatisfy { realFileStamp($0) == $1 }, "настоящие load-history.json и actions.log не менялись")
+}
+
+/// Настоящий исполнитель и настоящий разбор файла, но файл из шва, а команды стенд не запускает: Kit отказывает прямо
+/// перед запуском («Стенд не запускает…»). Этот отказ и значит «сверка пройдена, дошло бы до запуска».
+@MainActor func botCommandIsTheShownOne(_ engine: FakeEngine) async {
+    // Файл шва один на домен настроек, а проверки идут одновременно: у процесса свой. Домен настроек уже выбран раньше.
+    _ = Kit.defaults
+    setenv("KIT_TEST_SUITE", "local.utilitumus.test.load-wire.\(getpid())", 1)
+    let file = BotRegistry.url
+    check(file.lastPathComponent.contains(".\(getpid()).") && !file.path.hasPrefix(Kit.realHome + "/"), "файл ботов свой и не в настоящем доме: \(file.path)")
+    defer { try? FileManager.default.removeItem(at: file) }
+    func put(_ start: String) {
+        let text = "[[bot]]\nid = \"filebot\"\nname = \"File bot\"\nproject = \"p\"\nlaunchd = [\"com.stand.filebot\"]\nstart = \(start)\n"
+        check(FileManager.default.createFile(atPath: file.path, contents: Data(text.utf8), attributes: [.posixPermissions: 0o600]), "файл ботов записан")
+    }
+    let reached = "Стенд не запускает команды ботов"
+    let shownA = #"["/nonexistent/stand-bot-a"]"#, shownB = #"["/nonexistent/stand-bot-b"]"#
+
+    put(shownA)
+    let background = BackgroundStore(collect: { s in
+        BackgroundData(bots: BotRegistry.load().map { BotRegistry.status($0, procs: s.procs, tree: s.tree, launchd: s.launchd) })
+    }, readJournal: { [] })
+    let store = LoadStore(engine: engine, background: background)
+
+    /// Как экран в центре: просьба и подтверждение через действия связи, на экране только то, что прислал модуль.
+    func ask() -> LoadBackgroundPrompt? {
+        check(store.handle(.requestBot(id: "filebot", verb: .start)) == nil, "просьба принята")
+        return store.background.prompt
+    }
+    func confirm(_ prompt: LoadBackgroundPrompt?) async -> LoadNotice? {
+        store.dismissNotice()
+        guard let prompt, store.handle(.confirmBackground(planID: prompt.id)) == nil else { check(false, "подтверждение принято"); return nil }
+        await until("итог действия") { !store.background.running && store.notice != nil }
+        return store.notice
+    }
+    func showing(_ command: BotCommand?) async {
+        store.apply(engine.snapshot, force: true)
+        await until("список по файлу") { background.data.bots.first?.spec.commands[.start] == command }
+    }
+
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let same = ask()
+    check(same?.command == "/nonexistent/stand-bot-a", "вопрос показывает команду из файла")
+    check(await confirm(same)?.text == reached, "файл тот же: сверка пройдена, дошло до запуска")
+
+    await showing(.argv(["/nonexistent/stand-bot-a"]))
+    let stale = ask()
+    put(shownB)
+    let refused = await confirm(stale)
+    check(refused?.text == BotRunner.changedMessage && refused?.isError == true, "файл изменили после вопроса: отказ «\(refused?.text ?? "нет")»")
+
+    await showing(.argv(["/nonexistent/stand-bot-b"]))
+    let again = ask()
+    check(again?.command == "/nonexistent/stand-bot-b", "повторный вопрос показывает новую команду")
+    check(await confirm(again)?.text == reached, "новую команду подтвердили: дошло до запуска")
+
+    // В файле была не команда: вопрос её не показал, значит и появившуюся без нового вопроса запускать нельзя.
+    put(#""не список строк""#)
+    await showing(.invalid)
+    let unseen = ask()
+    check(unseen?.command == "", "вопрос без команды")
+    check(await confirm(unseen)?.text.contains("не список строк") == true, "в файле всё ещё не команда: об этом и сообщение")
+    await showing(.invalid)
+    let unseenThenSet = ask()
+    put(shownA)
+    check(await confirm(unseenThenSet)?.text == BotRunner.changedMessage, "команда появилась после вопроса без команды: отказ")
 }
 #endif
 

@@ -228,9 +228,14 @@ final class BackgroundExecutor: @unchecked Sendable {
 
     // MARK: Бот
 
+    /// Сверка с командой из плана: её человек видел на подтверждении, а файл к этому времени могли поменять.
+    /// В плане нет команды (в файле было не списком строк) — пустой список не совпадёт ни с какой настоящей:
+    /// то, чего человек не видел, не запустится.
     private func bot(_ verb: BotVerb, _ spec: BotSpec, command: inout String, output: inout String) throws -> StopResult {
-        if case .argv(let argv)? = BotRegistry.load().first(where: { $0.id == spec.id })?.commands[verb] { command = Exec.display(argv) }
-        return StopResult(ok: true, message: try BotRunner.run(verb, id: spec.id), freedMB: 0)
+        var shown: [String] = []
+        if case .argv(let argv)? = spec.commands[verb] { shown = argv }
+        command = Exec.display(shown)
+        return StopResult(ok: true, message: try BotRunner.run(verb, id: spec.id, expected: shown), freedMB: 0)
     }
 }
 
