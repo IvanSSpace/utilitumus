@@ -58,10 +58,13 @@ if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnectio
 fi
 echo "ok   nm: нет вызовов SMC и XPC"
 
-# От настроек остаётся файл домена этого бинарника и ключ в suite стендов: cfprefsd не смотрит на подменённую папку.
+# От настроек остаётся файл домена этого бинарника и свой suite: cfprefsd не смотрит на подменённую папку.
+# Не общий local.utilitumus.test.kit: FanConfigs пишет ещё run-fans-wire-check.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.update-order"
 clean_prefs() {
   rm -f "$HOME/Library/Preferences/update-order-check.plist"
-  defaults delete local.utilitumus.test.kit FanConfigs 2>/dev/null || true
+  defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true
+  rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"
 }
 clean_prefs
 trap clean_prefs EXIT

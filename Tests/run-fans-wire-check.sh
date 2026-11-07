@@ -9,10 +9,12 @@ OUT="${FANS_WIRE_DIR:-${TMPDIR:-/tmp}/fans-wire-check}"
 BASE_REF="${FANS_BASE_REF:-509cdb3}"
 TARGET="arm64-apple-macos$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 NAME=fans-wire-check
+# Свой suite вместо общего local.utilitumus.test.kit: FanConfigs и настройки игр пишет ещё run-update-order-check.
+export KIT_TEST_SUITE="local.utilitumus.test.kit.fans-wire"
 
 mkdir -p "$OUT/src" "$OUT/home" "$OUT/base" "$OUT/new"
 OUT="$(cd "$OUT" && pwd -P)"
-trap 'defaults delete "$NAME" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$NAME.plist"' EXIT
+trap 'for d in "$NAME" "$KIT_TEST_SUITE"; do defaults delete "$d" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$d.plist"; done' EXIT
 
 # Инкрементальная сборка: у базы и у нового экрана свой кэш с копиями подставных файлов. Подробности в Tests/lib/incremental.sh.
 . Tests/lib/incremental.sh
