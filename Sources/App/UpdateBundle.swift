@@ -68,21 +68,4 @@ enum UpdateBundle {
         let staged = try stage(app, expectedVersion: expectedVersion, target: target, afterCopy: afterCopy)
         try commit(staged, expectedVersion: expectedVersion, target: target)
     }
-
-    /// Как `install`, но с шагами вокруг подмены. `beforeReplace` идёт только после удачного `stage`: бандл ещё старый.
-    /// `replaceFailed` — только если `beforeReplace` уже был, а `commit` не удался: бандл остался прежним, приложение работает дальше.
-    static func install(
-        _ app: URL, expectedVersion: String, target: URL, afterCopy: (URL) throws -> Void = { _ in },
-        beforeReplace: @MainActor @Sendable () -> Void,
-        replaceFailed: @MainActor @Sendable () -> Void
-    ) async throws {
-        let staged = try stage(app, expectedVersion: expectedVersion, target: target, afterCopy: afterCopy)
-        await beforeReplace()
-        do {
-            try commit(staged, expectedVersion: expectedVersion, target: target)
-        } catch {
-            await replaceFailed()
-            throw error
-        }
-    }
 }

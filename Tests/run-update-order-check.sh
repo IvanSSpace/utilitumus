@@ -1,6 +1,8 @@
 #!/bin/bash
-# Порядок шагов обновления и удержание вентиляторов: настоящие UpdateBundle и FanController, поддельные SMC и служба.
-# В сборке нет ни SMC.swift, ни FanHelperClient.swift: дойти до настоящего SMC или службы ей нечем (ниже проверяется по nm).
+# Обновление центра не касается вентиляторов (настоящий UpdateBundle), удержание перед заменой утилиты делает она сама
+# (настоящие FansModule и FanController, поддельные SMC и служба).
+# В сборке нет ни SMC.swift, ни FanHelperClient.swift, ни FanHelperInstaller.swift: дойти до настоящего SMC или службы ей нечем
+# (ниже проверяется по nm).
 # Папка стенда: UPDATE_ORDER_CHECK_DIR, иначе $TMPDIR/update-order-check. Нужен сертификат «Utilitumus Signing».
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -17,6 +19,13 @@ if ! security find-identity -p codesigning | grep -q "\"$SIGN_NAME\""; then
   echo "ПРОВАЛ: нет сертификата «$SIGN_NAME»"
   exit 1
 fi
+
+# Центр вентиляторов не трогает: шагов вокруг подмены больше нет, удерживает сама утилита.
+if grep -nE 'FanController|FanHelper|holdForUpdate|resumeAfterFailedUpdate|beforeReplace|replaceFailed' Sources/App/Updater.swift Sources/App/UpdateBundle.swift; then
+  echo "ПРОВАЛ: обновление центра снова занимается вентиляторами"
+  exit 1
+fi
+echo "ok   обновление центра: ни вентиляторов, ни шагов вокруг подмены"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/src" "$OUT/root" "$OUT/home"
@@ -46,11 +55,17 @@ mkdir -p "$CACHE/src"
 cmp -s "$OUT/main.swift" "$CACHE/src/main.swift" || cp "$OUT/main.swift" "$CACHE/src/main.swift"
 # Шов KIT_TEST_DEFAULTS обязателен: у бинарника без бандла Kit.defaults иначе был бы настоящий домен настроек,
 # и FanController записал бы туда настройки вентиляторов.
-FILES=("$CACHE/src/main.swift" Sources/App/UpdateBundle.swift Sources/Kit/KitSigning.swift Sources/Kit/KitDefaults.swift \
-  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/UI/FanTypes.swift Sources/Modules/Fans/FanGate.swift Sources/Shared/FanLink.swift)
+FILES=("$CACHE/src/main.swift" Sources/App/UpdateBundle.swift Sources/Apps/Fans/FansModule.swift \
+  Sources/Kit/SatelliteModule.swift Sources/Kit/Components.swift Sources/Kit/KitDefaults.swift Sources/Kit/Module.swift Sources/Kit/ModuleCategory.swift \
+  Sources/Kit/ModuleControls.swift Sources/Kit/ModuleInfo.swift Sources/Kit/PageActive.swift Sources/Kit/PrivateLog.swift Sources/Kit/KitIdentity.swift \
+  Sources/Kit/Link/LinkProtocol.swift Sources/Kit/KitSigning.swift Sources/Kit/Link/LinkWire.swift Sources/Kit/ScrollThumb.swift Sources/Kit/SegmentedControl.swift \
+  Sources/Kit/Theme.swift Sources/App/Design/Pages.swift Sources/Shared/FanLink.swift \
+  Sources/Modules/Fans/FanController.swift Sources/Modules/Fans/FanControllerWire.swift Sources/Modules/Fans/BuiltInFansModel.swift Sources/Modules/Fans/FanGate.swift \
+  Sources/Modules/Fans/GameModeController.swift Sources/Modules/Fans/UI/FanTypes.swift Sources/Modules/Fans/UI/GameDetection.swift Sources/Modules/Fans/UI/FansModel.swift \
+  Sources/Modules/Fans/UI/FansWire.swift Sources/Modules/Fans/UI/FansView.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name UpdateOrderCheck -o "$OUT/update-order-check" \
-  "${FILES[@]}" -framework AppKit
+  "${FILES[@]}" -framework AppKit -framework SwiftUI
 
 if nm -u "$OUT/update-order-check" | grep -E 'IOConnect|IOService|NSXPCConnection'; then
   echo "ПРОВАЛ: стенд мог бы дойти до настоящего SMC или службы"

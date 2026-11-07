@@ -1,7 +1,9 @@
 import AppKit
+import SwiftUI
 
 // Порядок шагов обновления и удержание вентиляторов. Запуск: Tests/run-update-order-check.sh
-// UpdateBundle и FanController настоящие, ниже подделаны только их соседи: SMC и служба вентиляторов — запись в память.
+// Обновление центра: настоящий UpdateBundle, вентиляторов он не касается. Перед заменой утилиты: настоящие FansModule и
+// FanController, ниже подделаны только их соседи: SMC, служба вентиляторов и установщик службы — запись в память.
 
 // MARK: - Подделки
 
@@ -100,27 +102,22 @@ enum LegacyFanHelper {
 }
 
 @MainActor
-final class FanHelperInstaller {
-    enum Status { case notInstalled, installed, outdated, ready }
+final class FanHelperInstaller: ObservableObject {
+    enum Status: Equatable { case notInstalled, installed, outdated, ready }
     static let shared = FanHelperInstaller()
     nonisolated static let installedPath = "/nonexistent"
-    var status = Status.ready
+    @Published var status = Status.ready
+    @Published var lastError: String?
     var moduleRunning = false
+    var screenOpen = false
     var hasLegacySetuid = false
     var serviceAnswered = true
-    func refresh() {}
+    func refresh(afterInstall: Bool = false) {}
+    func install() {}
+    func uninstall() {}
 }
 
-@MainActor
-final class GameModeController {
-    static let shared = GameModeController()
-    var isActive = false
-    func start() {}
-    func stop() {}
-    func cancelCurrent() {}
-}
-
-enum PrivateLog { static func prepare(file: URL) {} }
+enum ActionLog { static func preparePrivate(file: URL) {} }
 
 // MARK: - Проверки
 
@@ -167,33 +164,25 @@ func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(second
     return condition()
 }
 
-/// Шаги обновления в том порядке, в каком они случились, и что было на диске у каждого.
-@MainActor final class Steps {
-    var order: [String] = []
-    var targetIntactAtBefore = false
-    var stagedExistsAtBefore = false
-    var targetIntactAtFailed = false
+/// Обновление центра как в Updater: шагов вокруг подмены нет, копия проверяется заново перед заменой.
+struct CenterUpdate {
+    var copied = false
+    var targetIntactAtCopy = false
+    var error: Error?
 }
 
-/// `install` как в Updater: те же действия контроллера, плюс запись шагов.
-@MainActor func runInstall(_ app: URL, version v: String = version, afterCopy: (URL) throws -> Void = { _ in }) async -> (Steps, Error?) {
-    let steps = Steps()
-    let controller = FanController.shared
+func updateCenter(_ app: URL, version v: String = version, afterCopy: (URL) throws -> Void = { _ in }) -> CenterUpdate {
+    var result = CenterUpdate()
     do {
-        try await UpdateBundle.install(app, expectedVersion: v, target: target, afterCopy: afterCopy, beforeReplace: {
-            steps.order.append("before")
-            steps.targetIntactAtBefore = targetIntact()
-            steps.stagedExistsAtBefore = fm.fileExists(atPath: staged.path)
-            controller.holdForUpdate()
-        }, replaceFailed: {
-            steps.order.append("failed")
-            steps.targetIntactAtFailed = targetIntact()
-            controller.resumeAfterFailedUpdate()
-        })
-        return (steps, nil)
+        try UpdateBundle.install(app, expectedVersion: v, target: target) { copy in
+            result.copied = fm.fileExists(atPath: staged.path) && copy.path == staged.path
+            result.targetIntactAtCopy = targetIntact()
+            try afterCopy(copy)
+        }
     } catch {
-        return (steps, error)
+        result.error = error
     }
+    return result
 }
 
 /// Базовая линия: контроллер под управлением, вентилятор в ручном на `rpm`. Без неё «ничего не послал» ничего бы не значило.
@@ -207,21 +196,43 @@ func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(second
 @MainActor func scenario() async {
     let controller = FanController.shared
     let installer = FanHelperInstaller.shared
+    let module = FansModule()
 
     controller.configs = [FanConfig(mode: .constant, rpm: 3000)]
-    controller.start()
+    module.start()
     check(await until { bench.log.contains("set 0 3000") }, "без обновления такт шлёт set: стенд не слеп")
-    bench.clearLog()
+    await controlled(rpm: 3050, "управление идёт")
 
-    // Обновление удалось: порядок, «Авто» до подмены, и дальше ни одной команды.
+    // Обновление центра: подмена после копии, вентиляторы не тронуты, и такт после неё управляет как раньше.
     freshTarget()
-    let (ok, okError) = await runInstall(copyOfGood("ok"))
-    check(okError == nil, "подписанная сборка ставится: \(okError?.localizedDescription ?? "")")
-    check(ok.order == ["before"], "успех: beforeReplace один раз, replaceFailed нет: \(ok.order)")
-    check(ok.targetIntactAtBefore, "beforeReplace раньше подмены: цель ещё старая")
-    check(ok.stagedExistsAtBefore, "beforeReplace после stage: копия уже лежит")
-    check(!targetIntact(), "после install цель заменена")
-    check(await until { bench.log == ["auto 0"] }, "«Авто» ушёл: \(bench.log)")
+    let ok = updateCenter(copyOfGood("ok"))
+    check(ok.error == nil, "подписанная сборка ставится: \(ok.error?.localizedDescription ?? "")")
+    check(ok.copied && ok.targetIntactAtCopy, "центр: копия лежит рядом, цель ещё старая")
+    check(!targetIntact() && !fm.fileExists(atPath: staged.path), "центр: цель заменена, копии не осталось")
+    check(bench.log.isEmpty && bench.manual, "центр: обновление вентиляторов не касается: \(bench.log)")
+    await controlled(rpm: 3100, "центр: после обновления управление то же")
+
+    // Не тот бандл: до копии дело не доходит.
+    freshTarget()
+    let badStage = updateCenter(copyOfGood("version"), version: "1.0.0")
+    check(badStage.error != nil && !badStage.copied, "центр, не та версия: отказ до копии")
+    check(targetIntact(), "центр, не та версия: цель цела")
+    check(bench.log.isEmpty && bench.manual, "центр, не та версия: вентиляторы не тронуты: \(bench.log)")
+
+    // Копию подменили после первой проверки.
+    freshTarget()
+    let badCommit = updateCenter(copyOfGood("swap")) { copy in
+        try "подмена".write(to: copy.appendingPathComponent(data), atomically: false, encoding: .utf8)
+    }
+    check(badCommit.error?.localizedDescription.contains("не от автора") == true, "центр, подмена копии: отказ подписи: \(badCommit.error?.localizedDescription ?? "nil")")
+    check(badCommit.targetIntactAtCopy && targetIntact(), "центр, подмена копии: цель цела")
+    check(!fm.fileExists(atPath: staged.path), "центр, подмена копии: копии не осталось")
+    check(bench.log.isEmpty && bench.manual, "центр, подмена копии: вентиляторы не тронуты: \(bench.log)")
+
+    // Заменяют утилиту: сама отдаёт «Авто», и дальше ни одной команды.
+    bench.clearLog()
+    module.stopForUpdate()
+    check(await until { bench.log == ["auto 0"] }, "утилита перед заменой: «Авто» ушёл: \(bench.log)")
     check(!bench.manual, "вентилятор отдан системе")
 
     bench.clearLog()
@@ -242,7 +253,7 @@ func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(second
     controller.stop()
     controller.start()
     await pause(0.5)
-    check(bench.log.isEmpty && !bench.manual, "выключение и включение модуля удержание не снимают: \(bench.log)")
+    check(bench.log.isEmpty && !bench.manual, "остановка и запуск контроллера удержание не снимают: \(bench.log)")
 
     // Служба устарела, вентилятор застрял: и эта ветка apply молчит.
     bench.manual = true
@@ -258,42 +269,36 @@ func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(second
     installer.status = .ready
 
     // Удержание не мешает отпустить: при выходе это последний шанс.
-    controller.stop()
+    module.stop()
     check(await until { bench.log == ["auto 0"] && !bench.manual }, "под удержанием выход отдаёт «Авто»: \(bench.log)")
     controller.start()
     bench.clearLog()
 
-    // Снятие возвращает управление сразу: сразу после такта таймера следующий через 2 с, быстрее — только сам tick().
+    // Замена сорвалась, хост снова зовёт `start`. Он возвращает управление сразу: сразу после такта таймера следующий через 2 с,
+    // быстрее только сам tick().
     let readsAtStart = bench.readCount
     check(await until { bench.readCount > readsAtStart }, "такт таймера пришёл")
     await pause(0.05)
     let readsAligned = bench.readCount
-    controller.resumeAfterFailedUpdate()
+    module.start()
     check(await until(0.5) { bench.readCount > readsAligned }, "снятие читает SMC сразу, не ждёт такта")
     check(await until(0.5) { bench.log == ["set 0 3100"] && bench.manual }, "снятие возвращает управление: \(bench.log)")
+    await controlled(rpm: 3200, "снятие: новые настройки применяются")
 
-    // Stage не прошёл: beforeReplace не было, управление не прерывалось.
-    await controlled(rpm: 3200, "управление снова на месте")
-    freshTarget()
-    let (badStage, badStageError) = await runInstall(copyOfGood("version"), version: "1.0.0")
-    check(badStageError != nil, "не та версия: отказ")
-    check(badStage.order.isEmpty, "stage не прошёл: ни beforeReplace, ни replaceFailed: \(badStage.order)")
-    check(targetIntact(), "stage не прошёл: цель цела")
-    check(bench.log.isEmpty && bench.manual, "stage не прошёл: вентиляторы не тронуты: \(bench.log)")
-    await controlled(rpm: 3300, "stage не прошёл: управление работает")
+    // Второй `start` уже ничего не снимает: удержания нет, а такт и так работает.
+    module.start()
+    check(bench.manual, "повторный start ничего не отпускает")
+    await controlled(rpm: 3300, "повторный start: управление работает")
 
-    // Commit не прошёл: копию подменили после stage.
-    freshTarget()
-    let (badCommit, badCommitError) = await runInstall(copyOfGood("swap")) { copy in
-        try "подмена".write(to: copy.appendingPathComponent(data), atomically: false, encoding: .utf8)
-    }
-    check(badCommitError?.localizedDescription.contains("не от автора") == true, "commit не прошёл: отказ подписи: \(badCommitError?.localizedDescription ?? "nil")")
-    check(badCommit.order == ["before", "failed"], "commit не прошёл: beforeReplace, затем replaceFailed: \(badCommit.order)")
-    check(badCommit.targetIntactAtBefore && badCommit.stagedExistsAtBefore, "commit не прошёл: beforeReplace был до подмены")
-    check(badCommit.targetIntactAtFailed && targetIntact(), "commit не прошёл: цель цела")
-    check(!fm.fileExists(atPath: staged.path), "commit не прошёл: копии не осталось")
-    check(await until { bench.log == ["auto 0", "set 0 3300"] && bench.manual }, "commit не прошёл: сначала «Авто», потом управление снова берёт вентилятор: \(bench.log)")
-    await controlled(rpm: 3400, "commit не прошёл: новые настройки применяются")
+    // Ещё одна замена после сорвавшейся: удержание снова работает.
+    module.stopForUpdate()
+    check(await until { bench.log == ["auto 0"] && !bench.manual }, "вторая замена: снова «Авто»: \(bench.log)")
+    bench.clearLog()
+    controller.configs = [FanConfig(mode: .constant, rpm: 3400)]
+    await pause(0.5)
+    check(bench.log.isEmpty && !bench.manual, "вторая замена: настройка снова ничего не шлёт: \(bench.log)")
+    module.start()
+    await controlled(rpm: 3450, "вторая замена сорвалась: управление вернулось")
 
     // Set уже в очереди, когда пришло удержание: в SMC его не видно, а отпустить надо и этот вентилятор.
     controller.configs = [FanConfig(mode: .auto)]
@@ -303,7 +308,7 @@ func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(second
     controller.configs = [FanConfig(mode: .constant, rpm: 3500)]
     check(await until { bench.isBlocked }, "set застрял на очереди помощника")
     check(!bench.manual, "в SMC его ещё не видно")
-    controller.holdForUpdate()
+    module.stopForUpdate()
     bench.release()
     check(await until { bench.log.count == 2 }, "обе команды дошли: \(bench.log)")
     check(bench.log == ["set 0 3500", "auto 0"], "«Авто» идёт после застрявшего set: \(bench.log)")

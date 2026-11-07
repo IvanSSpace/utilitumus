@@ -21,7 +21,8 @@ extension SatelliteEnvironment {
             },
             hubVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
             modules: .shared,
-            restoreSystemFn: { FnSystemAction.restore() })
+            restoreSystemFn: { FnSystemAction.restore() },
+            systemFnHeld: { FnSystemAction.keepsOff })
     }
 }
 

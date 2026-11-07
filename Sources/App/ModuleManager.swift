@@ -26,6 +26,9 @@ final class ModuleManager: ObservableObject {
     /// Открыт лист «Модули» (настройки) поверх главного окна.
     @Published var settingsShown = false
 
+    /// Включённый модуль без утилиты убрали (Стор, меню, страница). Ставит `SatelliteRegistry`: все такие пути идут через `setOn`.
+    var droppedWithoutUtility: @MainActor (Module) -> Void = { _ in }
+
     private let defaults: UserDefaults
     /// Сброс при первом запуске коснулся модулей, которых ведёт утилита: реестр выключит их у утилиты при первом ответе.
     private var utilityResets: Set<Module> = []
@@ -138,8 +141,10 @@ final class ModuleManager: ObservableObject {
     var hiddenModules: [Module] { order.filter { hidden.contains($0) && isInstalled($0) } }
 
     func setOn(_ module: Module, _ on: Bool) {
+        let dropped = !on && wantsUtility(module)
         defaults.set(on, forKey: Self.onKey(module))
         if on { enabled.insert(module) } else { enabled.remove(module) }
+        if dropped { droppedWithoutUtility(module) }
     }
 
     /// Один раз на модуль: сброс просит утилиту выключиться, а не трогает её настройки сам.

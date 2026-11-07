@@ -41,7 +41,7 @@ final class FansModule: SatelliteModule {
     }
 
     /// Бандл сейчас заменят, и служба после этого может не принять процесс: вентиляторы отдаются заранее.
-    /// Так же делает обновление центра. Перезапуск `kickstart -k` без этого бросил бы вентилятор в ручном режиме.
+    /// Перезапуск `kickstart -k` без этого бросил бы вентилятор в ручном режиме.
     func stopForUpdate() {
         heldForUpdate = true
         controller.holdForUpdate()
@@ -88,7 +88,6 @@ final class FansModule: SatelliteModule {
         ]
     }
 
-    /// Те же слова, что у шага встроенного модуля (`Module.setupSteps`): на экране центра они не должны отличаться.
     /// Устаревший помощник команд не получает, но обновляется плашкой на экране модуля: без этого шага экран открыт.
     var setupSteps: [LinkSetupStep] {
         [LinkSetupStep(id: Self.helperStep, title: "Помощник для вентиляторов", why: "Пароль администратора, один раз",

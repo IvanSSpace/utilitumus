@@ -127,7 +127,8 @@ final class SpyDefaults: UserDefaults, @unchecked Sendable {
             restoreSystemFn: {
                 journal.add("fn restore")
                 FnSystemAction.restore()
-            }))
+            },
+            systemFnHeld: { FnSystemAction.keepsOff }))
         if bundle { makeBundle() }
     }
 
@@ -176,8 +177,8 @@ final class RigBox: @unchecked Sendable {
     }
 }
 
-func catalogData(minHub: String = "0.6.0", version: String = "2.0.0") -> Data {
-    let app: [String: Any] = ["id": "awake", "version": version, "minHub": minHub,
+func catalogData(id: String = "awake", minHub: String = "0.6.0", version: String = "2.0.0") -> Data {
+    let app: [String: Any] = ["id": id, "version": version, "minHub": minHub,
                               "url": "https://example.com/Awake.zip", "sha256": "ab", "sizeMB": 2]
     return try! JSONSerialization.data(withJSONObject: ["schema": 1, "apps": [app]])
 }
@@ -637,6 +638,158 @@ func holdFnOff() {
     }
 }
 
+/// Клавиатура включена, утилиты нет: поставить её не вышло, или модуль убрали. Слушать Fn некому, если 0 держим мы.
+@MainActor func fnStrandedChecks() async {
+    let kit = Kit.defaults
+    /// 0 в системе поставил сам человек, не мы.
+    func ownZero() {
+        for key in ["Keyboard.SavedFnUsage", "Keyboard.KeepSystemFnOff", "Keyboard.SavedDictationEnabled", "Test.ApplyCount"] { kit.removeObject(forKey: key) }
+        kit.set(0, forKey: "Test.FnUsage")
+    }
+    let keyboardCatalog = catalogData(id: "keyboard")
+
+    do {
+        let rig = Rig("fn-install-failed", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "утилиты нет, но ещё не пробовали: 🌐 пока не трогаем")
+        try? await rig.registry.install(.keyboard, app: sampleApp("keyboard"))
+        check(rig.journal.has("download"), "установка дошла до загрузки")
+        check(FnSystemAction.usage == 1 && !FnSystemAction.keepsOff, "установка не удалась: 🌐 снова как была у человека")
+        check(rig.modules.wantsUtility(.keyboard), "установка не удалась: модуль остаётся на странице «утилиты нет»")
+        try? await rig.registry.install(.keyboard, app: sampleApp("keyboard"))
+        await rig.registry.update()
+        check(rig.journal.count("fn restore") == 1, "установка не удалась снова: возвращать уже нечего, один раз")
+    }
+    do {
+        let rig = Rig("fn-install-failed-other", moduleOn: true)
+        rig.box.catalog = .success(catalogData())
+        holdFnOff()
+        try? await rig.registry.install(.awake, app: sampleApp())
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "не удалась установка другого модуля: Fn не трогаем")
+    }
+    do {
+        let rig = Rig("fn-migration-failed", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        holdFnOff()
+        rig.registry.startMigration()
+        await rig.registry.migration?.value
+        check(rig.journal.has("download"), "автопереход дошёл до загрузки")
+        check(FnSystemAction.usage == 1, "автопереход не удался: 🌐 вернулась")
+    }
+    do {
+        let rig = Rig("fn-update-failed", module: .keyboard, moduleOn: true, handedOver: true, bundle: true)
+        rig.box.reply = .success(ready)
+        rig.box.catalog = .success(keyboardCatalog)
+        holdFnOff()
+        await rig.registry.update()
+        try? await rig.registry.install(.keyboard, app: sampleApp("keyboard"))
+        check(rig.journal.has("download"), "обновление дошло до загрузки")
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "не удалось обновление: утилита на месте, 🌐 не трогаем")
+    }
+    do {
+        let rig = Rig("fn-catalog-failed", module: .keyboard, moduleOn: true)
+        holdFnOff()
+        await rig.registry.update()
+        check(rig.registry.catalogFailed, "каталог сорвался")
+        check(FnSystemAction.usage == 1 && rig.journal.count("fn restore") == 1, "каталог сорвался, поставить нечем: 🌐 вернулась")
+    }
+    do {
+        let rig = Rig("fn-catalog-no-entry", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(catalogData())
+        holdFnOff()
+        await rig.registry.update()
+        check(!rig.registry.catalogFailed && FnSystemAction.usage == 1, "в каталоге нет утилиты: 🌐 вернулась")
+    }
+    do {
+        let rig = Rig("fn-catalog-needs-hub", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(catalogData(id: "keyboard", minHub: "9.0.0"))
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 1, "утилите нужен центр новее: 🌐 вернулась")
+    }
+    do {
+        // Отметка сбоя осталась с прошлого запуска, а до конца отступа новой попытки не будет.
+        let rig = Rig("fn-backoff", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        rig.defaults.set(1, forKey: ModuleMigration.failuresKey("keyboard"))
+        holdFnOff()
+        await rig.registry.update()
+        check(FnSystemAction.usage == 1, "прошлая установка сорвалась, ждём отступ: 🌐 вернулась")
+    }
+    do {
+        let rig = Rig("fn-own-zero", module: .keyboard, moduleOn: true)
+        ownZero()
+        await rig.registry.update()
+        check(rig.registry.catalogFailed && !rig.journal.has("fn restore"), "0 держим не мы: каталог сорвался, Fn не трогаем")
+        check(kit.object(forKey: "Keyboard.KeepSystemFnOff") == nil && FnSystemAction.usage == 0, "0 держим не мы: намерение и значение на месте")
+    }
+    do {
+        let rig = Rig("fn-off-no-utility", module: .keyboard)
+        holdFnOff()
+        await rig.registry.update()
+        check(rig.registry.catalogFailed && !rig.journal.has("fn restore"), "модуль выключен: опрос и сбой каталога Fn не трогают")
+    }
+
+    // Убрали через Стор или меню: туда идут `ModuleManager.setOn`.
+    do {
+        let rig = Rig("fn-drop", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        await rig.registry.update()
+        holdFnOff()
+        rig.modules.setOn(.keyboard, false)
+        check(FnSystemAction.usage == 1 && rig.journal.count("fn restore") == 1, "убрали модуль без утилиты: 🌐 вернулась")
+        check(!rig.defaults.bool(forKey: ModuleManager.onKey(.keyboard)), "убрали модуль без утилиты: он выключен")
+        rig.modules.setOn(.keyboard, false)
+        check(rig.journal.count("fn restore") == 1, "повторное выключение ничего не делает")
+    }
+    do {
+        let rig = Rig("fn-drop-own-zero", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        await rig.registry.update()
+        ownZero()
+        rig.modules.setOn(.keyboard, false)
+        check(!rig.journal.has("fn restore") && FnSystemAction.usage == 0, "убрали модуль, 0 держим не мы: Fn не трогаем")
+    }
+    do {
+        let rig = Rig("fn-drop-external", module: .keyboard, moduleOn: true, handedOver: true, bundle: true)
+        rig.box.reply = .success(ready)
+        await rig.registry.update()
+        holdFnOff()
+        rig.modules.setOn(.keyboard, false)
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "модуль ведёт утилита: 🌐 у неё, не трогаем")
+    }
+    do {
+        // Бандл уже есть, опроса ещё не было: утилита поставлена и слушает сама.
+        let rig = Rig("fn-drop-bundle", module: .keyboard, moduleOn: true, bundle: true)
+        holdFnOff()
+        rig.modules.setOn(.keyboard, false)
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "бандл есть, передачи ещё не было: не трогаем")
+    }
+    do {
+        let rig = Rig("fn-drop-other", moduleOn: true)
+        await rig.registry.update()
+        holdFnOff()
+        rig.modules.setOn(.awake, false)
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "убрали другой модуль: Fn не трогаем")
+    }
+    do {
+        // Идёт установка: может и встать. Сорвётся — вернёт ветка сбоя, хотя модуль уже выключен.
+        let rig = Rig("fn-drop-busy", module: .keyboard, moduleOn: true)
+        rig.box.catalog = .success(keyboardCatalog)
+        rig.box.downloadDelay = 0.3
+        await rig.registry.update()
+        holdFnOff()
+        let installing = Task { try? await rig.registry.install(.keyboard, app: sampleApp("keyboard")) }
+        for _ in 0..<100 where !rig.registry.busy.contains(.keyboard) { try? await Task.sleep(for: .seconds(0.01)) }
+        rig.modules.setOn(.keyboard, false)
+        check(FnSystemAction.usage == 0 && !rig.journal.has("fn restore"), "убрали во время установки: пока ждём её")
+        await installing.value
+        check(FnSystemAction.usage == 1 && rig.journal.count("fn restore") == 1, "убрали во время установки, она сорвалась: 🌐 вернулась")
+    }
+}
+
 // MARK: - Кнопка «Установить»
 
 @MainActor func missingPageChecks() async {
@@ -675,6 +828,7 @@ Task { @MainActor in
     await pollChecks()
     await goneChecks()
     await fnChecks()
+    await fnStrandedChecks()
     await missingPageChecks()
     await stallChecks()
     await serialChecks()

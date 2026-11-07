@@ -67,6 +67,8 @@ struct SatelliteEnvironment {
     var modules: ModuleManager
     /// Вернуть системе 🌐 и диктовку, когда их больше некому держать. Настоящий `FnSystemAction` даёт только `live()`.
     var restoreSystemFn: @MainActor () -> Void = {}
+    /// Держим ли 🌐 отключённой (`FnSystemAction.keepsOff`). Настоящее чтение тоже даёт только `live()`.
+    var systemFnHeld: @MainActor () -> Bool = { false }
 }
 
 /// Что центр знает об отдельных утилитах и кто из них ведёт модуль.
@@ -122,6 +124,9 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     init(_ environment: SatelliteEnvironment) {
         self.environment = environment
         super.init()
+        environment.modules.droppedWithoutUtility = { [weak self] module in
+            if module == .keyboard { self?.releaseFnIfNobodyListens() }
+        }
     }
 
     deinit {
@@ -309,6 +314,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
             if fresh { defaults.set(previous, forKey: enabledKey) }
             if !(error is CancellationError), (error as? URLError)?.code != .cancelled { installFailures[module] = error }
             finish(module)
+            if module == .keyboard { releaseFnIfNobodyListens() }
             // Откат тоже перезапустил утилиту.
             environment.commands.refreshScreen(module)
             throw error
@@ -375,12 +381,15 @@ final class SatelliteRegistry: NSObject, ObservableObject {
             catalogFailed = false
         } catch {
             catalogFailed = true
+            if modules.wantsUtility(.keyboard) { releaseFnIfNobodyListens() }
             return
         }
         for module in Module.allCases {
             let current = entries[module]
             entries[module] = entry(module, version: current?.installedVersion, reply: current?.status)
         }
+        // Каталог прочитан, а поставить нечего: запись убрали или ей нужен центр новее.
+        if modules.wantsUtility(.keyboard), catalogApp(.keyboard) == nil { releaseFnIfNobodyListens() }
     }
 
     private func entry(_ module: Module, version: String?, reply: LinkStatus?) -> Entry? {
@@ -424,6 +433,10 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         switch ModuleHandover.decide(bundlePresent: version != nil, handedOver: handedOver) {
         case .notInstalled:
             modules.setExternal(module, false)
+            // Прошлая установка сорвалась, а следующей ждать до конца отступа: до недели.
+            if module == .keyboard, modules.wantsUtility(module), defaults.object(forKey: ModuleMigration.failuresKey(id)) != nil {
+                releaseFnIfNobodyListens()
+            }
         case .utilityGone:
             await utilityGone(module)
         case .handOver:
@@ -491,6 +504,17 @@ final class SatelliteRegistry: NSObject, ObservableObject {
         } catch {
             return
         }
+    }
+
+    /// 🌐 отключена ради утилиты, а её нет и сейчас она не ставится: слушать Fn некому, смена языка мертва. Возвращаем системе,
+    /// отключить снова попросит чек-лист утилиты, когда она встанет. Только если 0 держим мы: иначе `restore` зря записал бы
+    /// «не держать» и стёр запомненное. Бандл есть — решает передача (`poll`), а обновление и так держит 🌐 для следующей версии.
+    private func releaseFnIfNobodyListens() {
+        let module = Module.keyboard
+        guard !busy.contains(module), environment.systemFnHeld() else { return }
+        let bundle = environment.paths.appsDir.appendingPathComponent(Self.bundleName(module) + ".app")
+        guard !FileManager.default.fileExists(atPath: bundle.path) else { return }
+        environment.restoreSystemFn()
     }
 
     /// Как у `scripts/build-app.sh`: `Sources/Apps/<Имя>` и имя бандла совпадают с папкой модуля.

@@ -78,9 +78,7 @@ final class Updater: ObservableObject {
         state = .installing
         Task {
             do {
-                try await Self.downloadAndReplace(from: url, expectedVersion: version,
-                                                  target: Bundle.main.bundleURL,
-                                                  beforeReplace: {}, replaceFailed: {})
+                try await Self.downloadAndReplace(from: url, expectedVersion: version, target: Bundle.main.bundleURL)
                 Self.relaunch(Bundle.main.bundleURL)
             } catch {
                 fail(error.localizedDescription)
@@ -125,11 +123,7 @@ final class Updater: ObservableObject {
     /// Скачивает zip, распаковывает, проверяет, что внутри именно Utilitumus
     /// нужной версии с целой подписью, и подменяет `target`. Старая версия
     /// удаляется только после успешной подмены.
-    nonisolated static func downloadAndReplace(
-        from url: URL, expectedVersion: String, target: URL,
-        beforeReplace: @escaping @MainActor @Sendable () -> Void,
-        replaceFailed: @escaping @MainActor @Sendable () -> Void
-    ) async throws {
+    nonisolated static func downloadAndReplace(from url: URL, expectedVersion: String, target: URL) async throws {
         let fm = FileManager.default
         let work = fm.temporaryDirectory.appendingPathComponent("utilitumus-update-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true)
@@ -142,13 +136,10 @@ final class Updater: ObservableObject {
 
         let unpacked = work.appendingPathComponent("unpacked")
         try KitSigning.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
-        // После подмены бандла на диске служба может не принять этот процесс по подписи: «Авто» при выходе не дойдёт.
-        try await UpdateBundle.install(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target,
-                                       beforeReplace: beforeReplace, replaceFailed: replaceFailed)
+        try UpdateBundle.install(unpacked.appendingPathComponent("Utilitumus.app"), expectedVersion: expectedVersion, target: target)
     }
 
-    /// Открыть новую версию после выхода текущей. Выход штатный —
-    /// applicationWillTerminate вернёт вентиляторы в «Авто».
+    /// Открыть новую версию после выхода текущей.
     static func relaunch(_ app: URL) {
         if Kit.standRefuses("перезапуск приложения") { return }
         // Новый экземпляр открываем только после того, как этот процесс действительно
