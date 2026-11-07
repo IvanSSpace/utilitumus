@@ -77,11 +77,6 @@ struct MouseView<Model: MouseModel>: View {
     }
 }
 
-extension MouseView where Model == MouseController {
-    /// Встроенный модуль.
-    @MainActor init() { self.init(model: .shared) }
-}
-
 /// Слайдер с акцентом модуля. Акцент задаёт `DSPage`, поэтому читать его надо ниже страницы.
 private struct TintedSlider: View {
     @Binding var value: Double

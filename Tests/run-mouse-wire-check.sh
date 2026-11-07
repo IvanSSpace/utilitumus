@@ -22,8 +22,8 @@ mkdir -p "$OUT/src" "$OUT/png"
 cp Tests/MouseWireCheck.swift "$OUT/src/MouseWireCheck.swift"
 /usr/bin/git show "$BEFORE:Sources/Modules/Mouse/MouseView.swift" | sed 's/MouseView/LegacyMouseView/' > "$OUT/src/LegacyMouseView.swift"
 sed -E 's/UserDefaults = (\.standard|Kit\.defaults)/UserDefaults = mouseCheckDefaults/' \
-  Sources/Modules/Mouse/MouseScrollLogic.swift > "$OUT/src/MouseScrollLogic.swift"
-[ "$(grep -c 'UserDefaults = mouseCheckDefaults' "$OUT/src/MouseScrollLogic.swift")" = 2 ] \
+  Sources/Modules/Mouse/UI/MouseTypes.swift > "$OUT/src/MouseTypes.swift"
+[ "$(grep -c 'UserDefaults = mouseCheckDefaults' "$OUT/src/MouseTypes.swift")" = 2 ] \
   || { echo "ПРОВАЛ: настройки модуля не переведены на suite стенда"; exit 1; }
 
 # Инкрементальная сборка: кэш и копии подставных файлов вне папки стенда. Подробности в Tests/lib/incremental.sh.
@@ -31,8 +31,8 @@ sed -E 's/UserDefaults = (\.standard|Kit\.defaults)/UserDefaults = mouseCheckDef
 . Tests/lib/incremental-sync.sh
 CACHE="$(incremental_cache mouse-wire KIT_TEST_DEFAULTS)"
 incremental_sync "$OUT/src" "$CACHE/src"
-FILES=("$CACHE/src/MouseWireCheck.swift" "$CACHE/src/LegacyMouseView.swift" "$CACHE/src/MouseScrollLogic.swift" Sources/Apps/Mouse/MouseModule.swift Sources/App/Design/Pages.swift)
-while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Mouse Sources/Kit -name '*.swift' -not -name MouseScrollLogic.swift | sort)
+FILES=("$CACHE/src/MouseWireCheck.swift" "$CACHE/src/LegacyMouseView.swift" "$CACHE/src/MouseTypes.swift" Sources/Apps/Mouse/MouseModule.swift Sources/App/Design/Pages.swift)
+while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Mouse Sources/Kit -name '*.swift' -not -name MouseTypes.swift | sort)
 incremental_flags "$CACHE" "${FILES[@]}"
 rm -f "$OUT/check"
 swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -module-name MouseWireCheck -o "$OUT/check" \
