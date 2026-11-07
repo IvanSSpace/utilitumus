@@ -25,13 +25,13 @@
     },
     {
       "id": "clipboard",
-      "version": "1.3.1",
+      "version": "1.4.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.3.1/Clipboard.zip",
-      "sha256": "1c065f5456a80f5f6605a2280708fe3cd02905013bfe79ee2fe8efe51a568742",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.4.0/Clipboard.zip",
+      "sha256": "ad39b99b5b3f3571f13b5c000032f4a665c13262ec4d0c0592a594280668c068",
       "sizeMB": 2,
       "notes": [
-        "Перенос на категорию без значка «+» и с анимацией, панель закрывается плавно, вставка идёт после её ухода"
+        "Порядок карточек и категорий перетаскиванием, названия карточек, скрытие содержимого у категории, выбор нескольких карточек через Shift и ⌘, новые анимации"
       ]
     },
     {
@@ -69,13 +69,13 @@
     },
     {
       "id": "mixer",
-      "version": "1.3.0",
+      "version": "1.4.0",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.3.0/Mixer.zip",
-      "sha256": "a3cc4cf43d0e11701bf9aff3a2583f9a2d53e5896e1aad1d4c7eefa2e3b78442",
-      "sizeMB": 1,
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.4.0/Mixer.zip",
+      "sha256": "88f5fd89a9ece9929fa73c84c95faa1d41aed8cd0170454b30139ce07e4c46e2",
+      "sizeMB": 2,
       "notes": [
-        "Обновлена общая основа утилит для лаунчера 0.9.0"
+        "Эквалайзер на 10 полос и готовые режимы, у каждого приложения свой"
       ]
     },
     {
