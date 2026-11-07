@@ -111,7 +111,7 @@ process_line="$(grep -n 'Process()' "$LEGACY" | cut -d: -f1)"
 grep -q 'identifier: "local.utilitumus.fan"' "$LEGACY" || fail "проверка не того identifier"
 ok "прежний помощник: сначала подпись, потом запуск"
 # Без hardened runtime метка ничего не значила бы: в такой бинарник внедряют код.
-grep -q 'codesign --force --options runtime --entitlements Utilitumus.entitlements' build.sh || fail "центр без hardened runtime"
+grep -q 'codesign --force --options runtime --sign "$SIGN_ID" "$APP_BUNDLE"' build.sh || fail "центр без hardened runtime"
 grep -q 'codesign --force --options runtime --sign "$SIGN_ID" --identifier "local.utilitumus.app.$ID"' scripts/build-app.sh || fail "утилита без hardened runtime"
 ok "метка ставится только на hardened-сборки"
 if [ "$(grep -c 'bundledPath' Sources/Modules/Fans/FanHelperInstaller.swift)" != 2 ]; then fail "копия из бандла используется не только как источник установки"; fi

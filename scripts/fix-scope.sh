@@ -74,7 +74,7 @@ fix_classify() { # id
         else
           FIX_REFUSED+=("$file — общий код экранов в лаунчере: нужен и выпуск лаунчера")
         fi ;;
-      Sources/App/* | Info.plist | build.sh | install.sh | Resources/* | Utilitumus.entitlements | local.utilitumus.plist)
+      Sources/App/* | Info.plist | build.sh | install.sh | Resources/* | local.utilitumus.plist)
         if fix_released_in "$HUB_TAG" "$file"; then
           FIX_SKIPPED+=("$file")
         else

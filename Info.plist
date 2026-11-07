@@ -22,12 +22,8 @@
 	<string>public.app-category.utilities</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.2</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Микшеру нужно перехватывать звук выбранного приложения, чтобы менять его громкость отдельно от остальных. Звук остаётся на этом Mac и нигде не сохраняется.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Голосовой ввод: речь распознаётся на этом Mac и никуда не отправляется.</string>
 	<key>UtilitumusSecurityEpoch</key>
 	<string>1</string>
 </dict>

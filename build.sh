@@ -40,10 +40,6 @@ HUB_LIST="$(scripts/hub-sources.sh)"
 HUB_FILES=()
 while IFS= read -r f; do HUB_FILES+=("$f"); done <<<"$HUB_LIST"
 
-# Движок голосового ввода (sherpa-onnx, статически): скачивается один раз, хэши сверяются.
-# Без интернета и без Vendor/ сборка останавливается здесь с понятной ошибкой.
-scripts/fetch-sherpa.sh
-
 rm -rf "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
@@ -52,33 +48,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 swiftc -O -parse-as-library -target "$TARGET" ${PILOT_ARGS[@]+"${PILOT_ARGS[@]}"} \
   -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
   "${HUB_FILES[@]}" \
-  -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit
-
-# Root-служба вентиляторов: отдельный бинарник, ставится кнопкой «Дать доступ». Только Foundation и IOKit;
-# -wmo убирает из root-процесса всё, что не вызывается (остальное в KitSigning, вроде запуска процессов).
-swiftc -O -wmo -target "$TARGET" \
-  -o "$APP_BUNDLE/Contents/MacOS/utilitumus-fan" \
-  Sources/Shared/SMC.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift \
-  -framework IOKit
-# --options runtime (hardened runtime): в процесс нельзя внедрить чужой код через DYLD_* и подменённые библиотеки.
-codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.fan "$APP_BUNDLE/Contents/MacOS/utilitumus-fan"
-
-# Помощник голосового ввода: отдельный процесс, sherpa-onnx влинкован статически.
-# Динамическую библиотеку под hardened runtime с нашим сертификатом загрузить нельзя
-# (нужен disable-library-validation) — поэтому процесс, а не dylib. Без entitlements.
-SHERPA="Vendor/sherpa-onnx"
-clang -O2 -Wall -target "$TARGET" \
-  -I "$SHERPA/include" \
-  -o "$APP_BUNDLE/Contents/MacOS/utilitumus-voice" \
-  Sources/VoiceHelper/main.c \
-  "$SHERPA/lib/libsherpa-onnx-c-api.a" "$SHERPA/lib/libsherpa-onnx-core.a" \
-  "$SHERPA/lib/libonnxruntime.a" "$SHERPA/lib/libkaldi-decoder-core.a" \
-  "$SHERPA/lib/libkaldi-native-fbank-core.a" "$SHERPA/lib/libkissfft-float.a" \
-  "$SHERPA/lib/libsherpa-onnx-fst.a" "$SHERPA/lib/libsherpa-onnx-fstfar.a" \
-  "$SHERPA/lib/libsherpa-onnx-kaldifst-core.a" "$SHERPA/lib/libssentencepiece_core.a" \
-  "$SHERPA/lib/libutf8proc.a" \
-  -lc++ -framework Foundation -framework Accelerate -Wl,-dead_strip
-codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.voice "$APP_BUNDLE/Contents/MacOS/utilitumus-voice"
+  -framework SwiftUI -framework AppKit -framework CoreAudio
 
 # Помощник ссылок «Utilitumus Links» — браузер по умолчанию для модуля «Браузер». Отдельное
 # приложение без окна и Dock: macOS активирует получателя ссылки, и будь им сам Utilitumus,
@@ -103,7 +73,8 @@ cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 [ -f Resources/AppIcon.icns ] && cp Resources/AppIcon.icns "$APP_BUNDLE/Contents/Resources/"
 cp Resources/WhatsNew.json "$APP_BUNDLE/Contents/Resources/"
 
-codesign --force --options runtime --entitlements Utilitumus.entitlements --sign "$SIGN_ID" "$APP_BUNDLE"
+# Без entitlements: микрофон, захват звука и Apple Events нужны только утилитам, центр их не просит.
+codesign --force --options runtime --sign "$SIGN_ID" "$APP_BUNDLE"
 
 echo "Собрано: $APP_BUNDLE"
 
@@ -111,8 +82,7 @@ echo "Собрано: $APP_BUNDLE"
 [ -n "${NO_INSTALL:-}" ] && exit 0
 
 INSTALLED="/Applications/$APP_NAME.app"
-# Сначала штатный выход — чтобы отработал applicationWillTerminate (вентиляторы
-# в «Авто»); pkill — только если не вышло.
+# Сначала штатный выход; pkill — только если не вышло.
 pgrep -qf "$INSTALLED/Contents/MacOS/$APP_NAME" && osascript -e "quit app \"$APP_NAME\"" 2>/dev/null || true
 sleep 1
 pkill -f "$INSTALLED/Contents/MacOS/$APP_NAME" 2>/dev/null || true

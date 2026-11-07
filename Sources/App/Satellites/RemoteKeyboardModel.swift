@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// Модель вкладки «Клавиатура», когда модуль ведёт утилита. Tap, журнал и системные настройки у утилиты,
@@ -8,12 +7,13 @@ final class RemoteKeyboardModel: RemoteModuleModel<KeyboardState, KeyboardAction
     init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         let defaults = Kit.defaults
         // До первого ответа — сохранённые настройки: домен настроек у центра и утилиты один.
+        // Доступ «Мониторинг ввода» выдан утилите, а не центру: своё разрешение спрашивать незачем, до ответа считаем, что он есть.
         super.init(id: id,
                    initial: KeyboardState(
                        features: KeyboardFeature.enabled.map(\.rawValue),
                        trigger: FnTrigger(rawValue: defaults.string(forKey: "Keyboard.Trigger") ?? "") ?? .onRelease,
                        mode: LayoutMode(rawValue: defaults.string(forKey: "Keyboard.Mode") ?? "") ?? .lastTwo,
-                       currentName: "—", tapActive: false, inputAccess: CGPreflightListenEventAccess(),
+                       currentName: "—", tapActive: false, inputAccess: true,
                        systemUsage: nil, secureInputApp: nil, logTail: [], logCount: 0, repairResult: nil, layouts: [],
                        newAppLayout: defaults.string(forKey: "Keyboard.AppLayout.NewStart"),
                        excludedApps: defaults.stringArray(forKey: "Keyboard.AppLayout.Excluded") ?? []),

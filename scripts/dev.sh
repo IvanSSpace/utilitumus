@@ -10,8 +10,8 @@
 # Набор зашит при компиляции (-D KIT_DEV_SCOPE и DevScope.swift в папке разработки, см. Sources/App/ModuleScope.swift)
 # и только прячет: утилиты вне набора работают как работали, центр опрашивает их как обычно, их настройки и настройки
 # человека не меняются.
-# Центр собирается всегда: пустая пересборка стоит полсекунды. Помощники (вентиляторы, голос, Links) собираются
-# один раз и лежат в кэше, пока не менялись их исходники.
+# Центр собирается всегда: пустая пересборка стоит полсекунды. Помощник ссылок собирается один раз и лежит в кэше,
+# пока не менялись его исходники.
 # Утилиты попадают в центр штатным путём: свой каталог (catalog.json, архивы) в папке разработки и центр,
 # собранный с KIT_PILOT_CATALOG. Версия пересобранной утилиты на патч выше и каталожной, и установленной, поэтому
 # Стор предлагает обновление. Остальные записи каталога остаются настоящими (боевые адреса GitHub).
@@ -191,36 +191,14 @@ SCOPE_LINE="$(dev_scope_line ${SCOPE_IDS[@]+"${SCOPE_IDS[@]}"})"
 SCOPE_WANT="$(dev_scope_swift ${SCOPE_IDS[@]+"${SCOPE_IDS[@]}"})"
 [ "$(cat "$SCOPE_SOURCE" 2>/dev/null || true)" = "$SCOPE_WANT" ] || printf '%s\n' "$SCOPE_WANT" > "$SCOPE_SOURCE"
 
-scripts/fetch-sherpa.sh >/dev/null
-SHERPA="Vendor/sherpa-onnx"
-SHERPA_LIBS=(libsherpa-onnx-c-api libsherpa-onnx-core libonnxruntime libkaldi-decoder-core libkaldi-native-fbank-core libkissfft-float libsherpa-onnx-fst libsherpa-onnx-fstfar libsherpa-onnx-kaldifst-core libssentencepiece_core libutf8proc)
-
 # Помощник пересобирается, только если изменился отпечаток его исходников, цели или подписи.
 helper_stamp() { # имя, файлы...
   local name="$1" f; shift
-  { printf '%s\n' "$TARGET" "$SIGN_ID" "$name"; for f in "$@"; do case "$f" in *.a) stat -f '%N %z %m' "$f" ;; *) cat "$f" ;; esac; done; } | shasum -a 256
+  { printf '%s\n' "$TARGET" "$SIGN_ID" "$name"; for f in "$@"; do cat "$f"; done; } | shasum -a 256
 }
 helper_fresh() { [ -e "$HC/$1" ] && [ -f "$HC/$1.stamp" ] && [ "$(<"$HC/$1.stamp")" = "$2" ]; }
 
 HELPER_NOTE=""
-FAN_FILES=(Sources/Shared/SMC.swift Sources/Shared/FanLink.swift Sources/Kit/KitSigning.swift Sources/FanHelper/main.swift)
-STAMP="$(helper_stamp fan "${FAN_FILES[@]}")"
-if ! helper_fresh utilitumus-fan "$STAMP"; then
-  swiftc -O -wmo -target "$TARGET" -o "$HC/utilitumus-fan" "${FAN_FILES[@]}" -framework IOKit
-  codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.fan "$HC/utilitumus-fan"
-  echo "$STAMP" > "$HC/utilitumus-fan.stamp"; HELPER_NOTE="$HELPER_NOTE fan"
-fi
-
-VOICE_FILES=(Sources/VoiceHelper/main.c)
-for lib in "${SHERPA_LIBS[@]}"; do VOICE_FILES+=("$SHERPA/lib/$lib.a"); done
-STAMP="$(helper_stamp voice "${VOICE_FILES[@]}")"
-if ! helper_fresh utilitumus-voice "$STAMP"; then
-  clang -O2 -Wall -target "$TARGET" -I "$SHERPA/include" -o "$HC/utilitumus-voice" "${VOICE_FILES[@]}" \
-    -lc++ -framework Foundation -framework Accelerate -Wl,-dead_strip
-  codesign --force --options runtime --sign "$SIGN_ID" --identifier local.utilitumus.voice "$HC/utilitumus-voice"
-  echo "$STAMP" > "$HC/utilitumus-voice.stamp"; HELPER_NOTE="$HELPER_NOTE voice"
-fi
-
 LINKS_FILES=(Sources/LinkHelper/main.swift Sources/Modules/Browser/UI/BrowserCatalog.swift Sources/Modules/Browser/UI/BrowserRules.swift
   Sources/Modules/Browser/BrowserPicker.swift Sources/Modules/Browser/BrowserRouter.swift Sources/LinkHelper/Info.plist Info.plist)
 [ ! -f Resources/AppIcon.icns ] || LINKS_FILES+=(Resources/AppIcon.icns)
@@ -262,7 +240,7 @@ if not same:
 PY
 if ! swiftc -Onone -incremental -enable-batch-mode -j8 -output-file-map "$HC/map.json" -module-name Utilitumus \
   -parse-as-library -target "$TARGET" -D KIT_PILOT_CATALOG -D KIT_DEV_SCOPE -o "$HC/Utilitumus" "${HUB_FILES[@]}" \
-  -framework SwiftUI -framework AppKit -framework CoreAudio -framework AudioToolbox -framework IOKit > "$HC/compile.log" 2>&1; then
+  -framework SwiftUI -framework AppKit -framework CoreAudio > "$HC/compile.log" 2>&1; then
   grep -E 'error:' "$HC/compile.log" | head -20 >&2 || tail -20 "$HC/compile.log" >&2
   fail "Центр не собрался (полный лог: $HC/compile.log)"
 fi
@@ -272,20 +250,20 @@ step "центр: компиляция и линковка" "$T"
 T="$(now)"
 APP="$DEV/hub/Utilitumus.app"
 BUNDLE_STAMP="$({
-  shasum -a 256 "$HC/Utilitumus" Info.plist Utilitumus.entitlements Resources/WhatsNew.json $( [ -f Resources/AppIcon.icns ] && echo Resources/AppIcon.icns )
-  cat "$HC"/*.stamp; echo "$SIGN_ID"
+  shasum -a 256 "$HC/Utilitumus" Info.plist Resources/WhatsNew.json $( [ -f Resources/AppIcon.icns ] && echo Resources/AppIcon.icns )
+  cat "$HC/Utilitumus Links.app.stamp"; echo "$SIGN_ID"
 } | shasum -a 256)"
 SIGNED="no"
 if [ ! -d "$APP" ] || [ ! -f "$DEV/hub/stamp" ] || [ "$(<"$DEV/hub/stamp")" != "$BUNDLE_STAMP" ]; then
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
-  cp "$HC/Utilitumus" "$HC/utilitumus-fan" "$HC/utilitumus-voice" "$APP/Contents/MacOS/"
+  cp "$HC/Utilitumus" "$APP/Contents/MacOS/"
   cp -R "$HC/Utilitumus Links.app" "$APP/Contents/Helpers/"
   cp Info.plist "$APP/Contents/Info.plist"
   plutil -replace UtilitumusDevBuild -bool true "$APP/Contents/Info.plist"
   [ ! -f Resources/AppIcon.icns ] || cp Resources/AppIcon.icns "$APP/Contents/Resources/"
   cp Resources/WhatsNew.json "$APP/Contents/Resources/"
-  codesign --force --options runtime --entitlements Utilitumus.entitlements --sign "$SIGN_ID" "$APP"
+  codesign --force --options runtime --sign "$SIGN_ID" "$APP"
   echo "$BUNDLE_STAMP" > "$DEV/hub/stamp"
   SIGNED="yes"
 fi
