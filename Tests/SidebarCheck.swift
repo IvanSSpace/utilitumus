@@ -232,7 +232,7 @@ func pure() {
     told = []
     check(model.send(.awake, to: .pinned) && icons.isOn(.awake) && told.isEmpty, "модуль без утилиты: закреплён, сказать некому: \(told)")
     check(model.send(.awake, to: .list), "и откреплён")
-    check(MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления запасной значок утилиты без центра остаётся")
+    check(!MenuBarIcon.utilityShows(setting: MenuBarIcon.setting(.awake), hubRunning: false, active: true), "после открепления значка утилиты нет и без центра")
     check(model.send(.sound, to: .hidden) && modules.isHidden(.sound) && defaults.object(forKey: MenuBarIcon.key(.sound)) == nil, "перенос закреплённого в скрытые снимает ключ")
     icons.set(.awake, false)
     check(defaults.object(forKey: MenuBarIcon.key(.awake)) as? Bool == false, "явное «Скрыть значок» пишет false")

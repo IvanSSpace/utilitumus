@@ -17,8 +17,8 @@ enum MenuBarIcon {
         defaults.set(on, forKey: key(module))
     }
 
-    /// Снова как до настройки: без центра значок у утилиты есть. Открепление и удаление снимают ключ, а `false` пишет
-    /// только явное «скрыть значок»: иначе открепление навсегда убирало бы запасной значок при закрытом центре.
+    /// Снова как до настройки: значка нет. Открепление и удаление снимают ключ, а `false` пишет
+    /// только явное «скрыть значок».
     static func clear(_ module: Module, defaults: UserDefaults = Kit.defaults) {
         defaults.removeObject(forKey: key(module))
     }
@@ -31,10 +31,10 @@ enum MenuBarIcon {
     /// не отличаются от прежних.
     static func switchOn(_ setting: Bool?) -> Bool { setting == true }
 
-    /// Рисует ли значок утилита. `active` — модуль ведёт она (центр не запущен или передал модуль).
+    /// Рисует ли значок утилита: только закреплённая, открыт центр или нет. Незакреплённая значка не рисует и при
+    /// закрытом центре: иначе в строке меню разом появлялись значки всех утилит. `active` — модуль ведёт она.
     static func utilityShows(setting: Bool?, hubRunning: Bool, active: Bool) -> Bool {
-        if !hubRunning { return setting ?? true }
-        return setting == true && active
+        setting == true && (active || !hubRunning)
     }
 
     /// Нужна ли утилите меню: центр запущен — клик по значку открывает меню, центра нет — окно утилиты, как раньше.

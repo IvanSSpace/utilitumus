@@ -71,7 +71,7 @@ final class ModuleMenuIcons: ObservableObject {
         changed(module, on)
     }
 
-    /// Открепили, спрятали строку или убрали модуль: настройка снимается, запасной значок утилиты без центра остаётся.
+    /// Открепили, спрятали строку или убрали модуль: настройка снимается, значка утилиты больше нет.
     func clear(_ module: Module) {
         limitNotice = nil
         MenuBarIcon.clear(module, defaults: defaults)
