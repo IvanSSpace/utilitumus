@@ -58,13 +58,13 @@
     },
     {
       "id": "load",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.2.0/Load.zip",
-      "sha256": "7204d8893384ffff5b661c3b5b3c433bb2d0c93aac014e9e80724de860b5fe6a",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/load-v1.2.1/Load.zip",
+      "sha256": "f21d249e63703d6baf7d6c12a7b680551b429c96431ca0334b3ab5d8286de251",
       "sizeMB": 2,
       "notes": [
-        "Перед запуском бота команда сверяется с той, что показана в вопросе. Из имён убираются символы, которыми можно подменить текст"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
