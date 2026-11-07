@@ -102,13 +102,13 @@
     },
     {
       "id": "stash",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.2.0/Stash.zip",
-      "sha256": "c0b90cd93f8bcb1540421fc589d88a02f4e0577ad5006ff0e7df60ec207d2ec6",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/stash-v1.2.1/Stash.zip",
+      "sha256": "12d4787920319f1a7384a3d99af8ecea971abf2814dd66de5d14c98bc35ee2e3",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
