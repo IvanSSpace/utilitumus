@@ -14,13 +14,13 @@
     },
     {
       "id": "browser",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.2.0/Browser.zip",
-      "sha256": "68c69a24a09afe3849f854d5b0cc740a9e463d859fc61267deb51edc905b01ae",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/browser-v1.2.1/Browser.zip",
+      "sha256": "acadc645407a27e6dd7b7f11755bbe8237ffe4feef20b748d4a9caca0d1c408e",
       "sizeMB": 2,
       "notes": [
-        "Обновление проходит по новым правилам выпуска"
+        "Значок в строке меню остаётся только у закреплённых инструментов, даже когда лаунчер закрыт"
       ]
     },
     {
