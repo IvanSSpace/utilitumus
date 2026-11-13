@@ -102,6 +102,8 @@ else
     echo "Менялся Sources/Kit: затрагивает все утилиты ($(for p in $APPS; do printf '%s ' "${p%%:*}"; done)); автоматически не пересобираю, назови нужные: scripts/dev.sh <id> ..."
   fi
 fi
+# Общий стенд показа: собирается выбранное, а центр показывает все модули, не только собранные.
+[ -z "${UTILITUMUS_DEV_SCOPE_ALL:-}" ] || { SCOPE_ALL=1; echo "Центр показывает все модули (UTILITUMUS_DEV_SCOPE_ALL)."; }
 
 # --- Подпись и версии
 EPOCH="$(sed -n 's/.*static let securityEpoch = "\(.*\)".*/\1/p' Sources/Kit/KitSigning.swift)"
