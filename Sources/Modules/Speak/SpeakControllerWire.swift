@@ -5,7 +5,7 @@ extension SpeakController {
     var wireState: SpeakState {
         SpeakState(speed: speed, pinnedVoices: pinnedVoices, voices: voices, phase: phase, message: message,
                    hotKeyLabel: hotKeyLabel, hotKeyError: hotKeyError, keyCode: keyCode, modifiers: modifiers,
-                   accessibilityTrusted: accessibilityTrusted, canStart: canStart)
+                   accessibilityTrusted: accessibilityTrusted, canStart: canStart, copyFallback: copyFallback)
     }
 
     /// Действие из связи. Самое длинное настоящее — `pinVoice` с id голоса, короче 512 байт.
@@ -46,6 +46,8 @@ extension SpeakController {
                 refreshPermissions()
             case .requestAccessibility:
                 requestAccessibility()
+            case .setCopyFallback(let on):
+                setCopyFallback(on)
             }
             return nil
         }

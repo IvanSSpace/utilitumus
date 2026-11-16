@@ -16,6 +16,7 @@ final class RemoteSpeakModel: RemoteModuleModel<SpeakState, SpeakAction>, SpeakM
                        case .unpin(let language): state.pinnedVoices[language] = nil
                        case .setHotKey(let keyCode, let modifiers):
                            state.hotKeyLabel = VoiceHotKey.label(keyCode: keyCode, modifiers: modifiers)
+                       case .setCopyFallback(let on): state.copyFallback = on
                        // Чтение, сочетание и права решает утилита: показываем её ответ.
                        default: break
                        }
@@ -31,6 +32,7 @@ final class RemoteSpeakModel: RemoteModuleModel<SpeakState, SpeakAction>, SpeakM
     var hotKeyError: String? { state.hotKeyError }
     var accessibilityTrusted: Bool { state.accessibilityTrusted }
     var canStart: Bool { state.canStart }
+    var copyFallback: Bool { state.copyFallback }
 
     func setSpeed(_ value: Double) { send(.setSpeed(value)) }
     func stepSpeed(_ direction: Int) { send(.stepSpeed(direction)) }
@@ -42,6 +44,7 @@ final class RemoteSpeakModel: RemoteModuleModel<SpeakState, SpeakAction>, SpeakM
     func stopSpeaking() { send(.stop) }
     func refreshPermissions() { send(.refreshPermissions) }
     func requestAccessibility() { send(.requestAccessibility) }
+    func setCopyFallback(_ on: Bool) { send(.setCopyFallback(on)) }
 
     func setHotKey(keyCode: UInt32, modifiers: UInt32) { send(.setHotKey(keyCode: keyCode, modifiers: modifiers)) }
     func resetHotKey() { send(.resetHotKey) }

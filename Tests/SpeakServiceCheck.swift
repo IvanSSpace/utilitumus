@@ -162,6 +162,13 @@ MainActor.assumeIsolated {
     // MARK: Запуск снова
     module.start()
     check(installed.count == 3 && installed.last.flatMap { $0 } === module.service, "снова start: провайдер снова стоит")
+
+    // Текст по сочетанию ещё берётся: перезапуск между ⌘C и возвратом буфера оставил бы в нём чужое выделение.
+    stand.reader.hold = true
+    stand.reader.result = .text("Берётся")
+    stand.hotKey.press()
+    check(stand.controller.reading != nil && stand.controller.phase == .idle && !module.mayRestart,
+          "пока текст по сочетанию берётся, перезапуск ради обновления нельзя")
     module.stop()
 
     // MARK: Место панели

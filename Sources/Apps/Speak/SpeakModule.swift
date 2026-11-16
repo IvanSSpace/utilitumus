@@ -72,6 +72,7 @@ final class SpeakModule: SatelliteModule {
     func windowRoot() -> AnyView { AnyView(SpeakView(model: controller)) }
     var windowSize: CGSize { CGSize(width: 620, height: 720) }
 
-    /// Идёт чтение: перезапуск оборвал бы его.
-    var mayRestart: Bool { controller.phase == .idle }
+    /// Идёт чтение: перезапуск оборвал бы его. Текст ещё берётся: перезапуск между ⌘C и возвратом буфера оставил бы в нём
+    /// чужое выделение.
+    var mayRestart: Bool { controller.phase == .idle && controller.reading == nil }
 }

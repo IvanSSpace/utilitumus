@@ -198,6 +198,11 @@ struct SpeakView<Model: SpeakModel>: View {
                 if let error = model.hotKeyError {
                     DSRow(icon: "exclamationmark.triangle.fill", title: error)
                 }
+                // Неразрывный пробел: в узком окне «⌘C» не уезжает на строку одно.
+                DSRow(icon: "doc.on.doc", title: "Если программа не отдаёт выделенное — копировать через\u{00A0}⌘C",
+                      subtitle: "Буфер обмена вернётся как был") {
+                    DSToggle("Копировать через ⌘C", isOn: Binding(get: { model.copyFallback }, set: { model.setCopyFallback($0) }))
+                }
             }
             if recorder.isRecording { caption("Esc — отмена, Delete — вернуть \(defaultHotKeyLabel)") }
         }

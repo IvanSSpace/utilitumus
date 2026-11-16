@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 
 // Ядро «Озвучки» без настоящего звука, AX и горячей клавиши: синтезатор, чтение выделения и сочетание подменены.
 // Запуск: Tests/run-speak-core-check.sh. Сборка со швом KIT_TEST_DEFAULTS: настройки только в своём тестовом suite.
+// Текст по нажатию берётся асинхронно: проверка ждёт его через `Stand.press()`.
 
 var failures = 0
 func check(_ ok: Bool, _ name: String) {
@@ -11,7 +12,14 @@ func check(_ ok: Bool, _ name: String) {
     if !ok { failures += 1 }
 }
 
-MainActor.assumeIsolated {
+Task { @MainActor in
+    await run()
+    print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
+    exit(failures == 0 ? 0 : 1)
+}
+RunLoop.main.run()
+
+@MainActor func run() async {
     let suite = ProcessInfo.processInfo.environment["KIT_TEST_SUITE"] ?? ""
     check(suite.hasPrefix("local.utilitumus.test.kit.speak"), "настройки только в тестовом suite «Озвучки» (\(suite))")
     foreignDefaults("delete", suite)
@@ -63,10 +71,10 @@ MainActor.assumeIsolated {
     var c = stand.controller
     check(stand.hotKey.registerCalls == 0, "init не занимает сочетание")
     stand.reader.result = .text(russian)
-    stand.hotKey.press()
+    await stand.press()
     check(stand.reader.reads == 0 && stand.synth.spoken.isEmpty, "до start нажатие ничего не читает")
     stand.reader.result = .notTrusted
-    stand.hotKey.press()
+    await stand.press()
     check(stand.reader.reads == 0 && stand.screen.opens == 0 && c.message == nil, "до start нажатие без права экран модуля не открывает")
     stand.reader.result = .text(russian)
     check(c.speak(text: russian) == SpeakMessage.notRunning && stand.synth.spoken.isEmpty, "до start Службы не читают")
@@ -78,17 +86,17 @@ MainActor.assumeIsolated {
     check(c.voices == voices, "start берёт голоса системы")
 
     // MARK: Нажатие читает, повторное останавливает
-    stand.hotKey.press()
+    await stand.press()
     check(stand.reader.reads == 1 && stand.synth.spoken.count == 1 && c.phase == .speaking, "нажатие читает выделенное")
     check(stand.synth.last?.text == russian && stand.synth.last?.rate == AVSpeechUtteranceDefaultSpeechRate,
           "весь текст, обычная скорость")
     check(stand.synth.last?.voiceID == "ru.yuri.premium", "голос по Авто")
     check(c.message == nil, "сообщения нет")
-    stand.hotKey.press()
+    await stand.press()
     check(c.phase == .idle && stand.synth.calls.last == "stop" && stand.reader.reads == 1, "повторное нажатие останавливает и не читает")
 
     // Чтение кончилось само.
-    stand.hotKey.press()
+    await stand.press()
     let finishedID = stand.synth.last!.id
     stand.synth.onFinish?(finishedID)
     check(c.phase == .idle, "конец чтения — снова ждём")
@@ -96,14 +104,14 @@ MainActor.assumeIsolated {
     check(c.phase == .idle, "лишний колбэк безвреден")
 
     // MARK: Пауза и продолжение
-    stand.hotKey.press()
+    await stand.press()
     c.pause()
     check(c.phase == .paused && stand.synth.calls.last == "pause", "пауза")
     c.pause()
     check(stand.synth.calls.filter { $0 == "pause" }.count == 1, "повторная пауза ничего не делает")
     c.resume()
     check(c.phase == .speaking && stand.synth.calls.last == "resume", "продолжить")
-    stand.hotKey.press()
+    await stand.press()
     check(c.phase == .idle, "нажатие на паузе тоже останавливает")
     let pausedCount = stand.synth.calls.count
     c.resume()
@@ -114,7 +122,7 @@ MainActor.assumeIsolated {
     let text = "Раз два три четыре пять шесть"
     stand.reader.result = .text(text)
     stand.synth.finishOnStopNow = false
-    stand.hotKey.press()
+    await stand.press()
     let first = stand.synth.last!.id
     let tri = (text as NSString).range(of: "три")
     stand.synth.onRange?(first, tri)
@@ -152,7 +160,7 @@ MainActor.assumeIsolated {
 
     // Составной символ: смещение посреди эмодзи даёт начало символа.
     stand.reader.result = .text("а 👍🏽 б")
-    stand.hotKey.press()
+    await stand.press()
     stand.synth.onRange?(stand.synth.last!.id, NSRange(location: 3, length: 1))
     c.setSpeed(1.0)
     check(stand.synth.last?.text == "👍🏽 б", "перезапуск не режет составной символ")
@@ -160,34 +168,86 @@ MainActor.assumeIsolated {
 
     // MARK: Сообщения
     stand.reader.result = .none
-    stand.hotKey.press()
+    await stand.press()
     check(c.message == SpeakMessage.noSelection && c.phase == .idle, ".none — «Не вижу выделенный текст…»")
     stand.reader.result = .text("   \n ")
-    stand.hotKey.press()
+    await stand.press()
     check(c.message == SpeakMessage.noSelection && c.phase == .idle, "пробелы — тоже «не вижу»")
     stand.reader.result = .secureField
-    stand.hotKey.press()
+    await stand.press()
     check(c.message == SpeakMessage.secureField && c.phase == .idle, ".secureField — «Из поля пароля не читаю»")
     check(stand.screen.opens == 0, ".text, .none и .secureField экран модуля не открывают")
     let spokenBefore = stand.synth.spoken.count
     stand.reader.result = .notTrusted
-    stand.hotKey.press()
+    await stand.press()
     check(c.message == SpeakMessage.needAccess && !c.accessibilityTrusted, ".notTrusted — «Нужен Универсальный доступ…»")
     check(stand.screen.opens == 1, ".notTrusted — экран модуля открыт один раз")
-    stand.hotKey.press()
+    await stand.press()
     check(stand.screen.opens == 2 && c.message == SpeakMessage.needAccess, "второе нажатие без права — ещё один раз, не больше")
     stand.reader.result = .text(String(repeating: "я", count: SpeakText.limit + 1))
-    stand.hotKey.press()
+    await stand.press()
     check(c.message == SpeakMessage.tooLong && c.phase == .idle && c.accessibilityTrusted, "длиннее лимита — не читаем, сообщение")
     check(stand.synth.spoken.count == spokenBefore, "ни в одном из этих случаев синтезатор не звали")
     stand.reader.result = .text(String(repeating: "я", count: SpeakText.limit))
-    stand.hotKey.press()
+    await stand.press()
     check(c.phase == .speaking && c.message == nil, "ровно лимит — читаем, сообщение ушло")
     let readsSpeaking = stand.reader.reads
     stand.reader.result = .notTrusted
-    stand.hotKey.press()
+    await stand.press()
     check(c.phase == .idle && stand.reader.reads == readsSpeaking && stand.screen.opens == 2,
           "нажатие во время чтения только обрывает: выделение не читается, экран не открывается")
+    c.stopSpeaking()
+    stand.reader.result = .secureInput
+    await stand.press()
+    check(c.message == SpeakMessage.secureInput && c.phase == .idle, ".secureInput — «Включён защищённый ввод…»")
+    stand.reader.result = .pasteboardDenied
+    await stand.press()
+    check(c.message == SpeakMessage.pasteboardDenied && c.phase == .idle, ".pasteboardDenied — сообщение про доступ к буферу")
+    check(SpeakMessage.pasteboardDenied.contains("Конфиденциальность и безопасность → Вставка из других приложений"),
+          "сообщение про буфер ведёт в раздел по локализации macOS")
+    check(stand.synth.spoken.count == spokenBefore + 1 && stand.screen.opens == 2, "защищённый ввод и запрет буфера: не читаем, экран не открываем")
+
+    // MARK: Копирование через ⌘C: переключатель
+    check(c.copyFallback && Kit.defaults.object(forKey: SpeakKeys.copyFallback) == nil, "копирование через ⌘C по умолчанию включено, ключа нет")
+    check(stand.reader.copyFallbacks.allSatisfy { $0 }, "включённое копирование доходит до чтения выделения")
+    c.setCopyFallback(false)
+    check(!c.copyFallback && Kit.defaults.object(forKey: SpeakKeys.copyFallback) as? Bool == false, "выключили — false в Kit.defaults")
+    stand.reader.result = .none
+    await stand.press()
+    check(stand.reader.copyFallbacks.last == false, "выключенное копирование доходит до чтения выделения")
+    check(c.message == SpeakMessage.noSelectionCopyOff, "копирование выключено и текста нет — подсказка про переключатель")
+    check(SpeakMessage.noSelectionCopyOff.contains("Службы") && SpeakMessage.noSelectionCopyOff.contains("⌘C"), "подсказка: Службы и ⌘C")
+    c.setCopyFallback(true)
+    await stand.press()
+    check(c.message == SpeakMessage.noSelection, "копирование включено и текста нет — без подсказки про переключатель")
+
+    // MARK: Нажатие, пока текст ещё берётся
+    stand.reader.hold = true
+    stand.reader.result = .text(russian)
+    let readsBefore = stand.reader.reads
+    let spokenHeld = stand.synth.spoken.count
+    stand.hotKey.press()
+    await settle()
+    check(stand.reader.waiting && c.reading != nil && c.phase == .idle, "текст берётся: фаза не меняется")
+    stand.hotKey.press()
+    await settle()
+    check(stand.reader.reads == readsBefore + 1, "второе нажатие, пока текст берётся, второго чтения не начинает")
+    let pending = c.reading
+    stand.reader.release()
+    await pending?.value
+    check(c.reading == nil && c.phase == .speaking && stand.synth.spoken.count == spokenHeld + 1,
+          "текст взялся — одно чтение вслух, не два")
+    c.stopSpeaking()
+
+    // Пока текст брался, начали читать из «Служб»: запоздалое выделение его не перебивает.
+    stand.reader.hold = true
+    stand.hotKey.press()
+    await settle()
+    check(c.speak(text: english) == nil && stand.synth.last?.text == english, "Службы, пока текст берётся, читают")
+    let late = c.reading
+    stand.reader.release()
+    await late?.value
+    check(stand.synth.last?.text == english && c.phase == .speaking, "запоздалое выделение не перебивает «Службы»")
     c.stopSpeaking()
 
     // MARK: Службы
@@ -201,7 +261,7 @@ MainActor.assumeIsolated {
     let readsBlocked = stand.reader.reads
     let opensBlocked = stand.screen.opens
     stand.reader.result = .notTrusted
-    stand.hotKey.press()
+    await stand.press()
     check(stand.reader.reads == readsBlocked && stand.screen.opens == opensBlocked, "canStart = false — нажатие не читает и экран не открывает")
     c.canStart = true
 
@@ -236,9 +296,13 @@ MainActor.assumeIsolated {
     check(reply(#"{"setHotKey":{"keyCode":1,"modifiers":0}}"#)?.error != nil, "связь: S без модификатора не принимается")
     check(reply(#"{"toggle":{}}"#)?.error == "Непонятная команда", "связь: чужое действие — отказ")
     check(reply(#"{"stop":{},"pause":{}}"#)?.error == "Непонятная команда", "связь: два действия разом — отказ")
+    check(reply(#"{"setCopyFallback":{"_0":false}}"#)?.state.copyFallback == false && !c.copyFallback, "связь: setCopyFallback false")
+    check(reply(#"{"setCopyFallback":{"_0":true}}"#)?.state.copyFallback == true && c.copyFallback, "связь: setCopyFallback true")
+    check(reply(#"{"setCopyFallback":{}}"#)?.error == "Непонятная команда" && c.copyFallback, "связь: setCopyFallback без значения — отказ")
+    check(reply(#"{"setCopyFallback":{"_0":"нет"}}"#)?.error == "Непонятная команда" && c.copyFallback, "связь: setCopyFallback не Bool — отказ")
     let roundTrip: [SpeakAction] = [.setSpeed(1.5), .stepSpeed(1), .setVoiceAuto, .pinVoice(language: "en", id: "en.alex"), .unpin(language: "en"),
                                     .pause, .resume, .stop, .setHotKey(keyCode: 1, modifiers: 4096), .resetHotKey, .suspendHotKey,
-                                    .resumeHotKey, .refreshPermissions, .requestAccessibility]
+                                    .resumeHotKey, .refreshPermissions, .requestAccessibility, .setCopyFallback(false), .setCopyFallback(true)]
     check(roundTrip.allSatisfy { LinkWire.decodeAction(SpeakAction.self, from: LinkWire.encoded($0), limit: 512) == $0 },
           "все действия проходят связь туда и обратно")
 
@@ -258,14 +322,32 @@ MainActor.assumeIsolated {
 
     // MARK: stop снимает сочетание и обрывает речь
     stand.reader.result = .text(russian)
-    stand.hotKey.press()
+    await stand.press()
     c.stop()
     check(stand.hotKey.registered == nil && c.phase == .idle && stand.synth.calls.last == "stop", "stop: сочетание отпущено, чтение оборвано")
     let readsStopped = stand.reader.reads
-    stand.hotKey.press()
+    await stand.press()
     check(stand.reader.reads == readsStopped, "после stop нажатие ничего не читает")
     c.stop()
     check(stand.hotKey.registered == nil, "повторный stop безвреден")
+
+    // stop, пока текст берётся: выделение не читается, даже если модуль сразу включили снова.
+    c.start()
+    stand.reader.hold = true
+    stand.reader.result = .text(russian)
+    let spokenBeforeStop = stand.synth.spoken.count
+    stand.hotKey.press()
+    await settle()
+    let cancelled = c.reading
+    c.stop()
+    c.start()
+    stand.reader.release()
+    await cancelled?.value
+    check(c.reading == nil && c.phase == .idle && stand.synth.spoken.count == spokenBeforeStop,
+          "stop, пока текст берётся: взятый текст не читается и после нового start")
+    await stand.press()
+    check(c.phase == .speaking, "после такого stop нажатие снова читает")
+    c.stop()
 
     // MARK: Настройки помнятся между экземплярами и перечитываются в start
     c.setSpeed(1.25)
@@ -276,8 +358,11 @@ MainActor.assumeIsolated {
     check(c.hotKeyLabel == "⌃⌥⇧S", "новый экземпляр: сочетание из настроек")
     foreignDefaults("write", suite, SpeakKeys.speed, "-float", "2.5")
     foreignDefaults("write", suite, SpeakKeys.keyCode, "-int", String(kVK_ANSI_T))
+    foreignDefaults("write", suite, SpeakKeys.copyFallback, "-bool", "false")
     c.start()
     check(c.speed == 2.5, "start: скорость, записанная другим процессом")
+    check(!c.copyFallback && !c.wireState.copyFallback, "start: выключенное другим процессом копирование через ⌘C")
+    foreignDefaults("delete", suite, SpeakKeys.copyFallback)
     check(stand.hotKey.registered?.keyCode == UInt32(kVK_ANSI_T), "start: сочетание, записанное другим процессом")
     foreignDefaults("write", suite, SpeakKeys.speed, "-float", "99")
     c.start()
@@ -297,7 +382,5 @@ MainActor.assumeIsolated {
     check(Kit.defaults.object(forKey: SpeakKeys.speed) == nil && Kit.defaults.object(forKey: SpeakKeys.keyCode) == nil,
           "start без изменений не создаёт ключи")
     check(published <= 1, "start без изменений будит не больше раза: только голоса (\(published))")
+    check(c.copyFallback && Kit.defaults.object(forKey: SpeakKeys.copyFallback) == nil, "start без изменений: копирование включено, ключа нет")
 }
-
-print(failures == 0 ? "ВСЁ ОК" : "ПРОВАЛОВ: \(failures)")
-exit(failures == 0 ? 0 : 1)

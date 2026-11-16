@@ -46,6 +46,8 @@ struct SpeakState: Codable, Equatable, Sendable {
     /// Универсальный доступ у утилиты: без него выделение не прочитать, остаётся меню «Службы».
     var accessibilityTrusted: Bool
     var canStart: Bool
+    /// Программа не отдала выделенное — копировать через ⌘C и вернуть буфер (`SpeakKeys.copyFallback`).
+    var copyFallback: Bool
 }
 
 /// Что экран может попросить. Больше утилита ничего не примет.
@@ -68,6 +70,7 @@ enum SpeakAction: Codable, Equatable, Sendable {
     case resumeHotKey
     case refreshPermissions
     case requestAccessibility
+    case setCopyFallback(Bool)
 
     /// Строго: ровно одно известное действие и ровно его поля. Кодирование остаётся синтезированным.
     init(from decoder: Decoder) throws {
@@ -93,6 +96,7 @@ enum SpeakAction: Codable, Equatable, Sendable {
         case "resumeHotKey": try wire.none(); self = .resumeHotKey
         case "refreshPermissions": try wire.none(); self = .refreshPermissions
         case "requestAccessibility": try wire.none(); self = .requestAccessibility
+        case "setCopyFallback": self = .setCopyFallback(try wire.value())
         default: throw wire.refuse()
         }
     }
@@ -111,6 +115,7 @@ extension SpeakState {
             hotKeyLabel: VoiceHotKey.label(keyCode: keyCode, modifiers: modifiers), hotKeyError: nil,
             keyCode: keyCode, modifiers: modifiers,
             // Подсказка про «Универсальный доступ» не должна мигнуть до ответа.
-            accessibilityTrusted: true, canStart: true)
+            accessibilityTrusted: true, canStart: true,
+            copyFallback: SpeakKeys.storedCopyFallback(d.object(forKey: SpeakKeys.copyFallback)))
     }
 }

@@ -27,7 +27,7 @@ func fixtureState(phase: SpeakPhase = .idle) -> SpeakState {
     SpeakState(speed: 1.5, pinnedVoices: [:], voices: fixtureVoices, phase: phase, message: nil,
                hotKeyLabel: VoiceHotKey.label(keyCode: SpeakKeys.defaultKeyCode, modifiers: SpeakKeys.defaultModifiers),
                hotKeyError: nil, keyCode: SpeakKeys.defaultKeyCode, modifiers: SpeakKeys.defaultModifiers,
-               accessibilityTrusted: true, canStart: true)
+               accessibilityTrusted: true, canStart: true, copyFallback: true)
 }
 
 /// Модель-фикстура: показывает заданное состояние, каждое нажатие записывает действием связи.
@@ -47,6 +47,7 @@ final class FixtureSpeakModel: SpeakModel {
     var hotKeyError: String? { state.hotKeyError }
     var accessibilityTrusted: Bool { state.accessibilityTrusted }
     var canStart: Bool { state.canStart }
+    var copyFallback: Bool { state.copyFallback }
 
     func setSpeed(_ value: Double) { sent.append(.setSpeed(value)) }
     func stepSpeed(_ direction: Int) { sent.append(.stepSpeed(direction)) }
@@ -62,6 +63,7 @@ final class FixtureSpeakModel: SpeakModel {
     func resetHotKey() { sent.append(.resetHotKey) }
     func suspendHotKey() { sent.append(.suspendHotKey) }
     func resumeHotKey() { sent.append(.resumeHotKey) }
+    func setCopyFallback(_ on: Bool) { sent.append(.setCopyFallback(on)) }
 }
 
 /// Имя действия. Новый case сломает сборку проверки, пока его сюда не добавят.
@@ -81,11 +83,12 @@ func actionName(_ action: SpeakAction) -> String {
     case .resumeHotKey: return "resumeHotKey"
     case .refreshPermissions: return "refreshPermissions"
     case .requestAccessibility: return "requestAccessibility"
+    case .setCopyFallback: return "setCopyFallback"
     }
 }
 let allActionNames: Set<String> = ["setSpeed", "stepSpeed", "setVoiceAuto", "pinVoice", "unpin", "pause", "resume", "stop",
                                    "setHotKey", "resetHotKey", "suspendHotKey", "resumeHotKey", "refreshPermissions",
-                                   "requestAccessibility"]
+                                   "requestAccessibility", "setCopyFallback"]
 
 // MARK: - Снимки
 
@@ -184,6 +187,7 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
                 case .setVoiceAuto: utility.pinnedVoices = [:]
                 case .pinVoice(let language, let id): utility.pinnedVoices[language] = id
                 case .unpin(let language): utility.pinnedVoices[language] = nil
+                case .setCopyFallback(let on): utility.copyFallback = on
                 default: break
                 }
             }
@@ -209,6 +213,8 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
         ("запись сочетания: вернуть", { remote.resumeHotKey() }, .resumeHotKey),
         ("перечитать права", { remote.refreshPermissions() }, .refreshPermissions),
         ("дать доступ", { remote.requestAccessibility() }, .requestAccessibility),
+        ("копировать через ⌘C: выключить", { remote.setCopyFallback(false) }, .setCopyFallback(false)),
+        ("копировать через ⌘C: включить", { remote.setCopyFallback(true) }, .setCopyFallback(true)),
     ]
     var covered: Set<String> = []
     for (name, press, expected) in presses {
@@ -234,6 +240,12 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     check(remote.pinnedVoices == ["ru": "ru.katya"], "закреплённый голос виден сразу")
     remote.setHotKey(keyCode: 1, modifiers: 256)
     check(remote.hotKeyLabel == VoiceHotKey.label(keyCode: 1, modifiers: 256), "новое сочетание видно сразу (\(remote.hotKeyLabel))")
+    remote.setCopyFallback(false)
+    check(!remote.copyFallback, "выключенное копирование через ⌘C видно сразу")
+    await pause(0.05)
+    check(!remote.copyFallback, "утилита подтвердила: копирование через ⌘C выключено")
+    remote.setCopyFallback(true)
+    check(remote.copyFallback, "включённое копирование через ⌘C видно сразу")
     await pause(0.05)
     refuse = "Такой скорости нет"
     remote.setSpeed(1.25)
@@ -274,6 +286,8 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     busy.message = SpeakMessage.needAccess
     busy.hotKeyError = SpeakMessage.hotKeyBusy
     busy.accessibilityTrusted = false
+    // Переключатель выключен: на втором снимке видно и другое его положение.
+    busy.copyFallback = false
     let speaking = await Shots.render(SpeakView(model: FixtureSpeakModel(busy)), width: 738, height: 1600)
     Shots.save(speaking, dir, "speak-screen-speaking")
     check(differingPixels(local, speaking) > 0, "снимки разные, не пустые")
@@ -281,6 +295,8 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
     // Узкое окно утилиты (SpeakModule.windowSize 620): ничего не должно уехать за край.
     var paused = busy
     paused.phase = .paused
+    // Самое длинное новое сообщение: в узком окне оно переносится, а не обрезается.
+    paused.message = SpeakMessage.pasteboardDenied
     Shots.save(await Shots.render(SpeakView(model: FixtureSpeakModel(paused)), width: 620, height: 1700), dir, "speak-screen-narrow-paused")
 }
 

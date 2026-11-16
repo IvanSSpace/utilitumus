@@ -54,9 +54,25 @@ final class FakeSynth: SpeechSynthesizing {
 final class FakeReader: SelectionReading {
     var result: SelectionResult = .none
     var reads = 0
-    func read() -> SelectionResult {
+    /// С каким переключателем копирования звали чтение.
+    var copyFallbacks: [Bool] = []
+    /// true — чтение не кончается до `release()`: так видно, что делает повторное нажатие, пока текст берётся.
+    var hold = false
+    private var held: CheckedContinuation<Void, Never>?
+
+    func read(copyFallback: Bool) async -> SelectionResult {
         reads += 1
+        copyFallbacks.append(copyFallback)
+        if hold { await withCheckedContinuation { held = $0 } }
         return result
+    }
+
+    var waiting: Bool { held != nil }
+
+    func release() {
+        hold = false
+        held?.resume()
+        held = nil
     }
 }
 
@@ -108,4 +124,15 @@ struct Stand {
         controller = SpeakController(synthesizer: synth, reader: reader, hotKey: hotKey,
                                      trusted: { true }, preferredLanguages: { preferred }, openScreen: { screen.opens += 1 })
     }
+
+    /// Нажать сочетание и дождаться, пока текст возьмётся и уйдёт в чтение.
+    func press() async {
+        hotKey.press()
+        await controller.reading?.value
+    }
+}
+
+/// Дождаться, пока задачи главного потока, поставленные раньше, дойдут до своего `await`.
+@MainActor func settle() async {
+    for _ in 0..<20 { await Task.yield() }
 }

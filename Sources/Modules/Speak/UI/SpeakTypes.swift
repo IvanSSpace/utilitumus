@@ -2,12 +2,16 @@ import Carbon.HIToolbox
 import Foundation
 
 /// Ключи настроек, общие для утилиты и экрана. Домен настроек у центра и утилиты один.
-/// Текст чтения сюда не пишется никогда: только скорость, голоса и сочетание.
+/// Текст чтения сюда не пишется никогда: только скорость, голоса, сочетание и переключатель копирования.
 enum SpeakKeys {
     static let speed = "Speak.Speed"
     static let pinnedVoices = "Speak.PinnedVoices"
     static let keyCode = "Speak.HotKeyCode"
     static let modifiers = "Speak.HotKeyModifiers"
+    /// Программа не отдала выделенное через AX — скопировать его ⌘C и вернуть буфер как был. Ключа нет — включено.
+    static let copyFallback = "Speak.CopyFallback"
+
+    static func storedCopyFallback(_ object: Any?) -> Bool { object as? Bool ?? true }
 
     /// ⌃⌥⇧S.
     static let defaultKeyCode = UInt32(kVK_ANSI_S)
@@ -56,7 +60,15 @@ enum SpeakText {
 enum SpeakMessage {
     static let needAccess = "Нужен Универсальный доступ: дай его кнопкой в разделе «Универсальный доступ» или читай через меню «Службы»"
     static let noSelection = "Не вижу выделенный текст: попробуй через меню Службы"
+    /// То же, когда копирование через ⌘C выключено на экране.
+    static let noSelectionCopyOff = "Не вижу выделенный текст: попробуй через меню Службы или включи копирование через ⌘C на экране «Озвучка»"
     static let secureField = "Из поля пароля не читаю"
+    /// Защищённый ввод системы включён. Пункт Терминала назван по его русской локализации (MainMenu.loctable, macOS 26).
+    static let secureInput = "Включён защищённый ввод (поле пароля или «Безопасный ввод с клавиатуры» в Терминале): не читаю"
+    /// Система спрашивает или запрещает утилите доступ к буферу (macOS 15.4+). Разделы названы по русской локализации
+    /// SecurityPrivacyExtension (InfoPlist.loctable; Localizable.loctable, ключ PASTEBOARD_ACCESS), macOS 26.
+    static let pasteboardDenied = "Доступ к буферу обмена запрещён или требует подтверждения: разреши его для «Озвучки» в "
+        + "«Системные настройки → Конфиденциальность и безопасность → Вставка из других приложений»"
     static let tooLong = "Текст длиннее 50 000 символов, выдели меньше"
     static let notRunning = "Модуль сейчас не может читать"
     static let hotKeyBusy = "Это сочетание занято, выбери другое"

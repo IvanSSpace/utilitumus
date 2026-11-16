@@ -14,6 +14,8 @@ final class SpeakController: SpeakModel {
     @Published private(set) var pinnedVoices: [String: String]
     @Published private(set) var keyCode: UInt32
     @Published private(set) var modifiers: UInt32
+    /// AX не отдал выделенное — копировать через ⌘C и вернуть буфер как был.
+    @Published private(set) var copyFallback: Bool
 
     // MARK: Состояние
 
@@ -35,6 +37,9 @@ final class SpeakController: SpeakModel {
     private let openScreen: () -> Void
     private var isRunning = false
     private var hotKeySuspended = false
+    /// Текст по нажатию ещё берётся (до секунды с ⌘C). Пока он берётся, повторное нажатие ничего не делает:
+    /// второе ⌘C поверх первого сняло бы в «прежний» буфер чужое выделение. Фаза при этом не меняется.
+    private(set) var reading: Task<Void, Never>?
 
     /// Текущее чтение. Единственное место, где лежит текст; nil — ничего не читаем.
     private struct Session {
@@ -54,7 +59,7 @@ final class SpeakController: SpeakModel {
     init(synthesizer: SpeechSynthesizing? = nil, reader: SelectionReading? = nil, hotKey: SpeakHotKeyBinding? = nil,
          trusted: (() -> Bool)? = nil, preferredLanguages: (() -> [String])? = nil, openScreen: (() -> Void)? = nil) {
         self.synthesizer = synthesizer ?? AVSpeechSynthesizerAdapter()
-        self.reader = reader ?? AXSelectionReader()
+        self.reader = reader ?? SpeakSelectionReader.system()
         self.hotKey = hotKey ?? CarbonSpeakHotKey()
         self.trusted = trusted ?? { Kit.accessTrusted() }
         self.preferredLanguages = preferredLanguages ?? { Locale.preferredLanguages }
@@ -64,6 +69,7 @@ final class SpeakController: SpeakModel {
         pinnedVoices = d.dictionary(forKey: SpeakKeys.pinnedVoices) as? [String: String] ?? [:]
         keyCode = d.object(forKey: SpeakKeys.keyCode) as? UInt32 ?? SpeakKeys.defaultKeyCode
         modifiers = d.object(forKey: SpeakKeys.modifiers) as? UInt32 ?? SpeakKeys.defaultModifiers
+        copyFallback = SpeakKeys.storedCopyFallback(d.object(forKey: SpeakKeys.copyFallback))
         accessibilityTrusted = self.trusted()
 
         self.synthesizer.onFinish = { [weak self] id in self?.speechFinished(id) }
@@ -85,7 +91,9 @@ final class SpeakController: SpeakModel {
     }
 
     /// Выключили: отпустить сочетание и оборвать чтение. Повторный вызов безвреден.
+    /// Текст ещё берётся — его не прочитают; начатое ⌘C при этом всё равно вернёт буфер (см. `SpeakCopyFallback`).
     func stop() {
+        reading?.cancel()
         stopSpeaking()
         isRunning = false
         // Запись сочетания на экране тоже кончилась: следующий `start` займёт сочетание сразу.
@@ -115,6 +123,8 @@ final class SpeakController: SpeakModel {
         let savedModifiers = d.object(forKey: SpeakKeys.modifiers) as? UInt32 ?? SpeakKeys.defaultModifiers
         if keyCode != savedKey { keyCode = savedKey }
         if modifiers != savedModifiers { modifiers = savedModifiers }
+        let savedCopy = SpeakKeys.storedCopyFallback(d.object(forKey: SpeakKeys.copyFallback))
+        if copyFallback != savedCopy { copyFallback = savedCopy }
     }
 
     private func refreshVoices() {
@@ -124,22 +134,44 @@ final class SpeakController: SpeakModel {
 
     // MARK: Чтение
 
-    /// Нажали сочетание: читаем — оборвать, иначе прочитать выделенное.
+    /// Нажали сочетание: читаем — оборвать, иначе взять выделенное и прочитать.
     /// Без Универсального доступа — сообщение и экран модуля в центре, по разу на нажатие.
     func hotKeyPressed() {
         guard isRunning, canStart else { return }
         if phase != .idle { return stopSpeaking() }
-        switch reader.read() {
+        guard reading == nil else { return }
+        let copyFallback = copyFallback
+        reading = Task { [weak self] in
+            guard let reader = self?.reader else { return }
+            let result = await reader.read(copyFallback: copyFallback)
+            guard let self else { return }
+            reading = nil
+            // Модуль выключили, пока брали текст: не читаем, даже если его уже снова включили.
+            guard !Task.isCancelled else { return }
+            selectionRead(result, copyFallback: copyFallback)
+        }
+    }
+
+    private func selectionRead(_ result: SelectionResult, copyFallback: Bool) {
+        // Пока брали текст, началось чтение из «Служб»: оно важнее запоздалого выделения.
+        guard isRunning, canStart, phase == .idle else { return }
+        switch result {
         case .notTrusted:
             if accessibilityTrusted { accessibilityTrusted = false }
             show(SpeakMessage.needAccess)
             openScreen()
         case .none:
             markTrusted()
-            show(SpeakMessage.noSelection)
+            show(copyFallback ? SpeakMessage.noSelection : SpeakMessage.noSelectionCopyOff)
         case .secureField:
             markTrusted()
             show(SpeakMessage.secureField)
+        case .secureInput:
+            markTrusted()
+            show(SpeakMessage.secureInput)
+        case .pasteboardDenied:
+            markTrusted()
+            show(SpeakMessage.pasteboardDenied)
         case .text(let text):
             markTrusted()
             begin(text)
@@ -256,6 +288,14 @@ final class SpeakController: SpeakModel {
         case .idle:
             break
         }
+    }
+
+    // MARK: Копирование через ⌘C
+
+    func setCopyFallback(_ on: Bool) {
+        guard copyFallback != on else { return }
+        copyFallback = on
+        Kit.defaults.set(on, forKey: SpeakKeys.copyFallback)
     }
 
     // MARK: Голоса

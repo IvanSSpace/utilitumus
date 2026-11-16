@@ -13,6 +13,8 @@ protocol SpeakModel: ObservableObject, HotKeyTarget {
     var hotKeyError: String? { get }
     var accessibilityTrusted: Bool { get }
     var canStart: Bool { get }
+    /// Программа не отдала выделенное — копировать через ⌘C и вернуть буфер как был.
+    var copyFallback: Bool { get }
 
     func setSpeed(_ value: Double)
     /// +1 или −1.
@@ -26,4 +28,5 @@ protocol SpeakModel: ObservableObject, HotKeyTarget {
     func stopSpeaking()
     func refreshPermissions()
     func requestAccessibility()
+    func setCopyFallback(_ on: Bool)
 }
