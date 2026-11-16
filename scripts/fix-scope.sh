@@ -18,6 +18,7 @@ fix_checks_of() {
     mixer) echo run-mixer-eq-check run-mixer-remote-check run-mixer-wire-check ;;
     mouse) echo run-mouse-remote-check run-mouse-wire-check ;;
     sound) echo run-sound-remote-check run-sound-wire-check ;;
+    speak) echo run-speak-copy-check run-speak-core-check run-speak-privacy-check run-speak-screen-check run-speak-service-check ;;
     stash) echo run-own-identity-check run-stash-module-check run-stash-remote-check run-stash-title-check run-stash-wire-check ;;
     voice) echo run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check ;;
     # Лаунчер (fix.sh hub): оболочка и следы утилит в ней, боковая панель, дашборд и меню-бар, значки меню (раздел настроек), Стор,

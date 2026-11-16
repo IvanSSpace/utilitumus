@@ -1,0 +1,138 @@
+import AppKit
+
+// Подмены для проверок «Озвучки»: синтезатор без звука, чтение выделения без AX, сочетание без Carbon,
+// экран модуля без просьбы центру.
+// Общие для Tests/SpeakCoreCheck.swift и Tests/SpeakPrivacyCheck.swift.
+
+/// Запись другого процесса, как у центра.
+func foreignDefaults(_ arguments: String...) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+    process.arguments = arguments
+    process.standardError = FileHandle.nullDevice
+    try? process.run()
+    process.waitUntilExit()
+}
+
+@MainActor
+final class FakeSynth: SpeechSynthesizing {
+    var onStart: ((Int) -> Void)?
+    var onFinish: ((Int) -> Void)?
+    var onRange: ((Int, NSRange) -> Void)?
+    struct Spoken { let text: String; let voiceID: String?; let rate: Float; let id: Int }
+    var spoken: [Spoken] = []
+    var calls: [String] = []
+    var voiceList: [SpeakVoiceRow] = []
+    /// Как у настоящего: остановка отвечает «закончилось». Сразу или позже (`flush`).
+    var finishOnStopNow = true
+    var pendingFinish: [Int] = []
+    private var lastID = 0
+
+    func speak(_ text: String, voiceID: String?, rate: Float) -> Int {
+        lastID += 1
+        spoken.append(Spoken(text: text, voiceID: voiceID, rate: rate, id: lastID))
+        calls.append("speak")
+        return lastID
+    }
+    func pause() { calls.append("pause") }
+    func resume() { calls.append("resume") }
+    func stop() {
+        calls.append("stop")
+        guard let last = spoken.last?.id else { return }
+        if finishOnStopNow { onFinish?(last) } else { pendingFinish.append(last) }
+    }
+    func flush() {
+        let ids = pendingFinish
+        pendingFinish = []
+        for id in ids { onFinish?(id) }
+    }
+    func voices() -> [SpeakVoiceRow] { voiceList }
+    var last: Spoken? { spoken.last }
+}
+
+@MainActor
+final class FakeReader: SelectionReading {
+    var result: SelectionResult = .none
+    var reads = 0
+    /// С каким переключателем копирования звали чтение.
+    var copyFallbacks: [Bool] = []
+    /// true — чтение не кончается до `release()`: так видно, что делает повторное нажатие, пока текст берётся.
+    var hold = false
+    private var held: CheckedContinuation<Void, Never>?
+
+    func read(copyFallback: Bool) async -> SelectionResult {
+        reads += 1
+        copyFallbacks.append(copyFallback)
+        if hold { await withCheckedContinuation { held = $0 } }
+        return result
+    }
+
+    var waiting: Bool { held != nil }
+
+    func release() {
+        hold = false
+        held?.resume()
+        held = nil
+    }
+}
+
+@MainActor
+final class FakeHotKey: SpeakHotKeyBinding {
+    var onPress: (() -> Void)?
+    var registered: (keyCode: UInt32, modifiers: UInt32)?
+    var registerCalls = 0
+    var busy = false
+    func register(keyCode: UInt32, modifiers: UInt32) -> Bool {
+        registerCalls += 1
+        guard !busy else { registered = nil; return false }
+        registered = (keyCode, modifiers)
+        return true
+    }
+    func unregister() { registered = nil }
+    func press() { onPress?() }
+}
+
+/// Вместо просьбы центру открыть экран модуля: только счёт вызовов.
+@MainActor
+final class FakeScreen {
+    var opens = 0
+}
+
+let voices = [
+    SpeakVoiceRow(id: "ru.milena", name: "Milena", language: "ru-RU", quality: .regular),
+    SpeakVoiceRow(id: "ru.katya", name: "Katya", language: "ru-RU", quality: .enhanced),
+    SpeakVoiceRow(id: "ru.yuri.premium", name: "Yuri", language: "ru-RU", quality: .premium),
+    SpeakVoiceRow(id: "en.samantha", name: "Samantha", language: "en-US", quality: .regular),
+    SpeakVoiceRow(id: "en.daniel", name: "Daniel", language: "en-GB", quality: .enhanced),
+    SpeakVoiceRow(id: "en.alex", name: "Alex", language: "en-US", quality: .enhanced),
+]
+let russian = "Привет! Сегодня отличная погода, пойдём гулять в парк у реки."
+let english = "The weather is lovely today, let us go for a long walk by the river."
+
+/// Контроллер на подменах. Каждый новый — как утилита после перезапуска: настройки только из Kit.defaults.
+@MainActor
+struct Stand {
+    let synth = FakeSynth()
+    let reader = FakeReader()
+    let hotKey = FakeHotKey()
+    let screen = FakeScreen()
+    let controller: SpeakController
+
+    init(preferred: [String] = ["ru-RU", "en-US"]) {
+        synth.voiceList = voices
+        let screen = screen
+        controller = SpeakController(synthesizer: synth, reader: reader, hotKey: hotKey,
+                                     trusted: { true }, preferredLanguages: { preferred }, openScreen: { screen.opens += 1 })
+    }
+
+    /// Нажать сочетание и дождаться, пока текст возьмётся и уйдёт в чтение.
+    func press() async {
+        hotKey.press()
+        await controller.reading?.value
+    }
+}
+
+/// Дождаться, пока задачи главного потока, поставленные раньше, дойдут до своего `await`.
+@MainActor func settle() async {
+    for _ in 0..<20 { await Task.yield() }
+}

@@ -322,7 +322,8 @@ func pure() {
     modules.setOn(.fans, true)
     await pause(0.1)
     check(SatelliteRegistry.isOutdated(.sound, installed: "1.0.0") && SatelliteRegistry.isOutdated(.sound, installed: "0") && !SatelliteRegistry.isOutdated(.sound, installed: "1.1.0")
-          && !SatelliteRegistry.isOutdated(.sound, installed: "1.10.0") && !SatelliteRegistry.isOutdated(.sound, installed: nil) && !SatelliteRegistry.isOutdated(.bots, installed: "1.0.0"), "кто считается старым")
+          && !SatelliteRegistry.isOutdated(.sound, installed: "1.10.0") && !SatelliteRegistry.isOutdated(.sound, installed: nil) && !SatelliteRegistry.isOutdated(.bots, installed: "1.0.0")
+          && !SatelliteRegistry.isOutdated(.speak, installed: "1.0.0") && SatelliteRegistry.isOutdated(.speak, installed: "0"), "кто считается старым")
 
     print("== десятый не закрепляется")
     for m in Module.allCases { _ = model.send(m, to: .list) }

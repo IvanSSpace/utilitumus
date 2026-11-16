@@ -55,6 +55,7 @@ enum StoreCatalog {
         case .clipboard: return [StoreNeed(permission: .accessibility, why: "Чтобы выбранная запись вставлялась сама")]
         case .voice: return [StoreNeed(permission: .microphone, why: "Чтобы слышать тебя; звук остаётся на этом Mac"),
                              StoreNeed(permission: .accessibility, why: "Чтобы текст вставлялся сам, иначе останется нажать ⌘V")]
+        case .speak: return [StoreNeed(permission: .accessibility, why: "Чтобы взять выделенный текст из программы; без права работает меню «Службы»")]
         case .sound, .load, .browser, .awake, .bots: return []
         }
     }
@@ -74,6 +75,7 @@ enum StoreCatalog {
         case .keyboard: return "Фишки для клавиатуры и языка"
         case .awake: return "Mac не засыпает за работой"
         case .bots: return "Боты одним списком"
+        case .speak: return "Читает выделенное вслух"
         }
     }
 
