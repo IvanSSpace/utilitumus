@@ -135,7 +135,8 @@ enum ClipReorder {
 /// История буфера и пространства. Всё на диске зашифровано AES-GCM; без ключа из Keychain это шум.
 ///
 /// Индекс (`index.bin`) — JSON со всеми записями, картинки — отдельные файлы `img-<id>.bin`, их миниатюры для карточек
-/// панели — `thumb-<id>.bin` тем же ключом.
+/// панели — `thumb-<id>.bin` тем же ключом. Миниатюры скопированных файлов-картинок — `filethumb-<случайный номер>.bin`,
+/// тоже тем же ключом; их знает только запись.
 /// Не привязан к главному потоку и к AppKit, чтобы проверяться отдельным тестом.
 final class ClipboardStore {
     private(set) var items: [ClipItem] = []
@@ -153,6 +154,10 @@ final class ClipboardStore {
     /// Доделанные миниатюры, ещё не записанные в индекс: он пишется пачками, а не после каждой картинки.
     private var unsavedThumbnails = 0
     static let thumbnailSaveBatch = 20
+    /// Миниатюры файлов, о которых индекс не знал при открытии: их уберёт `removeOrphanThumbnails`. Считается один раз
+    /// в `load` и потом не меняется, поэтому читается и с очереди доделки; записанное позже сюда не попадает.
+    private var staleFileThumbnails: [String] = []
+    static let fileThumbnailPrefix = "filethumb-"
 
     private struct Index: Codable {
         var items: [ClipItem]
@@ -235,10 +240,17 @@ final class ClipboardStore {
             existing.date = now
             existing.sourceBundleID = item.sourceBundleID ?? existing.sourceBundleID
             existing.sourceName = item.sourceName ?? existing.sourceName
+            // Файл скопировали снова: миниатюра свежая (по тому же пути мог лечь другой снимок), а у записи старше миниатюр
+            // её не было вовсе. Нечем заменить — прежняя остаётся.
+            if existing.kind == .file, let thumbnail = snap.fileThumbnail, let name = writeFileThumbnail(thumbnail) {
+                if let old = existing.thumbnailFile, Self.isFileThumbnail(old) { try? fm.removeItem(at: directory.appendingPathComponent(old)) }
+                existing.thumbnailFile = name
+            }
             items.insert(existing, at: 0)
             save()
             return true
         }
+        if item.kind == .file, let thumbnail = snap.fileThumbnail { item.thumbnailFile = writeFileThumbnail(thumbnail) }
         if let png {
             let file = "img-\(item.id.uuidString).bin"
             guard writeEncrypted(png, name: file) else { return false }
@@ -454,7 +466,8 @@ final class ClipboardStore {
     }
 
     /// Картинка для карточки панели: миниатюра, а пока её нет — полный файл, как раньше. Запись берётся текущая:
-    /// доделка могла дописать миниатюру после того, как панель взяла свою копию списка.
+    /// доделка могла дописать миниатюру после того, как панель взяла свою копию списка. У записи-файла только миниатюра:
+    /// полного файла у неё в истории нет, а сам файл здесь не читается.
     func cardImageData(_ item: ClipItem) -> Data? {
         let current = items.first { $0.id == item.id } ?? item
         if let file = current.thumbnailFile, let thumbnail = readEncrypted(name: file) { return thumbnail }
@@ -506,12 +519,38 @@ final class ClipboardStore {
 
     /// Миниатюры без своей картинки: запись удалили, пока миниатюра делалась, или утилита закрылась в этот момент.
     /// Миниатюры отложенной истории не трогаются: их картинки на месте.
+    /// Миниатюре файла пары по имени нет, у записи-файла картинки нет. Уходят те, о которых индекс не знал при открытии:
+    /// запись удалили, а файл не убрался, или утилита закрылась между записью миниатюры и индекса.
     func removeOrphanThumbnails() {
         let names = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
         let present = Set(names)
         for name in names where name.hasPrefix("thumb-") && !present.contains("img-" + name.dropFirst(6)) {
             try? fm.removeItem(at: directory.appendingPathComponent(name))
         }
+        for name in staleFileThumbnails where present.contains(name) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
+    static func isFileThumbnail(_ name: String) -> Bool {
+        name.hasPrefix(fileThumbnailPrefix) && name.hasSuffix(".bin") && !name.contains("/")
+    }
+
+    /// Миниатюра файла-картинки под новым случайным именем: имя записи не повторяет, поэтому уборка по списку открытия
+    /// не заденет миниатюру, записанную позже. nil — не влезла в предел или не записалась: карточка со списком имён.
+    private func writeFileThumbnail(_ data: Data) -> String? {
+        guard data.count <= ClipThumbnail.fileMaxBytes else { return nil }
+        let name = Self.fileThumbnailPrefix + UUID().uuidString + ".bin"
+        return writeEncrypted(data, name: name) ? name : nil
+    }
+
+    /// Миниатюры файлов в каталоге, которых не знает только что прочитанный индекс. Есть отложенная история — не считаем:
+    /// среди них могут быть её миниатюры.
+    private func findStaleFileThumbnails() -> [String] {
+        let names = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
+        guard !names.contains(where: { $0.hasPrefix("index-unreadable-") }) else { return [] }
+        let known = Set(items.compactMap(\.thumbnailFile))
+        return names.filter { Self.isFileThumbnail($0) && !known.contains($0) }
     }
 
     // MARK: Диск
@@ -542,6 +581,7 @@ final class ClipboardStore {
         items = index.items
         spaces = index.spaces
         settleRanks()
+        staleFileThumbnails = findStaleFileThumbnails()
     }
 
     /// Индекс старого формата мест не знает. Закреплённые встают левее уже размеченных, в порядке списка: сначала новые.
@@ -611,6 +651,9 @@ final class ClipboardStore {
     }
 
     private func removeFiles(_ item: ClipItem) {
+        if item.kind == .file, let thumbnail = item.thumbnailFile, Self.isFileThumbnail(thumbnail) {
+            try? fm.removeItem(at: directory.appendingPathComponent(thumbnail))
+        }
         guard let file = item.imageFile else { return }
         try? fm.removeItem(at: directory.appendingPathComponent(file))
         // По имени картинки, а не по полю: миниатюру могла уже записать доделка, которую индекс ещё не применил.

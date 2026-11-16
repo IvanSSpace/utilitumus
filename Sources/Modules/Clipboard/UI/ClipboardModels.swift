@@ -37,6 +37,7 @@ struct ClipItem: Codable, Identifiable, Equatable {
     /// Место внутри пространства: чем меньше, тем левее. Вне пространства его нет.
     var spaceRank: Int?
     /// Зашифрованная миниатюра картинки для карточки панели. nil — её ещё нет: карточка берёт полный файл.
+    /// У записи-файла — миниатюра файла-картинки, сделанная при копировании; nil — карточка со списком имён.
     var thumbnailFile: String?
     /// Миниатюру сделать не вышло (картинка не читается, не расшифровывается или не разжимается): больше не пробуем.
     var thumbnailFailed: Bool?
@@ -64,6 +65,8 @@ struct ClipSnapshot: Sendable {
     var imagePNG: Data?
     /// Миниатюра `imagePNG` для карточки, готовая до записи: хранилище её только шифрует и пишет.
     var imageThumbnail: Data?
+    /// Миниатюра скопированного файла-картинки, готовая до записи (`ClipFileThumbnail`): потом файл не читается.
+    var fileThumbnail: Data?
     var sourceBundleID: String?
     var sourceName: String?
 }

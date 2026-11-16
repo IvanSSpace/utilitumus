@@ -2725,6 +2725,122 @@ func titlePoint(card: Int) -> NSPoint {
     model.forgetImages()
 }
 
+// MARK: - Миниатюра файла-картинки
+
+/// Карточка файла-картинки: миниатюра на всю область, внизу полоса с именем показанного файла и «+N» за остальные.
+/// Без миниатюры — прежний список имён, загрузчик картинок не зовётся. Значок типа по расширению: файлов здесь нет вовсе.
+/// Хранилище временное, ключ выдуманный; пути в записях выдуманные и не открываются.
+@MainActor func checkFileThumbnail(out: String) async {
+    let now = Date()
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-file-thumb-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    let picture: Data = {
+        let context = CGContext(data: nil, width: 1600, height: 900, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.1, green: 0.8, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1600, height: 900))
+        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }()
+    let thumb = ClipThumbnail.make(from: picture, maxBytes: ClipThumbnail.fileMaxBytes)
+    check(thumb != nil && thumb!.count <= ClipThumbnail.fileMaxBytes, "миниатюра файла в пределе 40 КБ")
+    func file(_ paths: [String], _ thumbnail: Data?) -> ClipSnapshot {
+        ClipSnapshot(types: ["public.file-url"], filePaths: paths, fileThumbnail: thumbnail, sourceBundleID: "com.apple.finder", sourceName: "Finder")
+    }
+    let shotPath = "/Users/someone-else/Desktop/Снимок экрана 2026-11-16 в 21.59.17.png"
+    store.ingest(file(["/tmp/выдуманная смета.pdf", shotPath, "/tmp/выдуманная заметка.txt"], thumb))
+    store.ingest(file(["/Users/someone-else/Desktop/один снимок.png"], thumb))
+    store.ingest(file(["/Users/someone-else/Desktop/без миниатюры.png", "/tmp/выдуманный второй.txt"], nil))
+    let controller = ClipboardController.shared
+    controller.attach(store)
+    defer { controller.detachStore() }
+    let model = ClipboardPanelHost.shared.makeModel(controller)
+    model.allItems = controller.items
+    // Карточки снимаются вне показа: разрешение расшифровки ставит сам показ, здесь — явно.
+    model.picturesAllowed = true
+    var loads = 0, syncLoads = 0
+    let data = model.filePictureData, loader = model.imageLoader
+    model.filePictureData = { loads += 1; return data($0) }
+    model.imageLoader = { syncLoads += 1; return loader($0) }
+    func item(_ count: Int, thumbnail: Bool) -> ClipItem {
+        controller.items.first { $0.filePaths?.count == count && ($0.thumbnailFile != nil) == thumbnail }!
+    }
+    let content = CGRect(x: 0, y: ClipCard.headerHeight, width: ClipCard.width,
+                         height: ClipCard.height - ClipCard.headerHeight - ClipCard.footerHeight - ClipCard.fileStripHeight)
+    func greenShare(_ shot: Shot) -> Double {
+        Double(shot.count(in: content) { $0.g > 0.6 && $0.g - $0.r > 0.3 && $0.g - $0.b > 0.3 }) / Double(content.width * content.height)
+    }
+
+    let three = item(3, thumbnail: true)
+    // Миниатюра в кэше до снимка: карточка рисует её сразу, без проявления, которое снимок мог бы застать на середине.
+    let preloaded = await model.loadFilePicture(three)
+    check(preloaded && model.readyPicture(three) != nil, "миниатюра файла разжата и лежит в кэше показа")
+    let (threeShot, threeTexts) = await cardShot(three, spaces: [], model: model, concealed: false, preview: false, now: now)
+    check(greenShare(threeShot) > 0.95, "три файла: миниатюра на всю область (\(Int(greenShare(threeShot) * 100))% точек её цвета)")
+    check(threeTexts.contains { $0.contains("\"+2\"") }, "три файла: на карточке «+2»")
+    check(threeTexts.contains { $0.contains("Снимок экрана 2026-11-16") } && !threeTexts.contains { $0.contains("выдуманная смета") },
+          "на полосе имя показанного файла-картинки, а не первого в списке")
+    check(threeTexts.contains { $0.contains("3 файла") }, "подпись прежняя: «3 файла»")
+    check(loads > 0 && syncLoads == 0, "миниатюра файла взята своим загрузчиком вне главного потока, а не общим (\(loads), \(syncLoads))")
+    let (_, previewTexts) = await cardShot(three, spaces: [], model: model, concealed: false, preview: true, now: now)
+    check(previewTexts.contains { $0.contains("\"+2\"") }, "копия при переносе тоже с миниатюрой и «+2»")
+
+    _ = await model.loadFilePicture(item(1, thumbnail: true))
+    let (oneShot, oneTexts) = await cardShot(item(1, thumbnail: true), spaces: [], model: model, concealed: false, preview: false, now: now)
+    check(greenShare(oneShot) > 0.95 && !oneTexts.contains { $0.contains("\"+") }, "один файл: миниатюра без «+N»")
+
+    loads = 0
+    let plain = item(2, thumbnail: false)
+    let (plainShot, plainTexts) = await cardShot(plain, spaces: [], model: model, concealed: false, preview: false, now: now)
+    check(loads == 0, "без миниатюры загрузчик картинок не зовётся")
+    // Имена в ForEach, в тексте вида их нет: две строки списка видны по светлым буквам там, где они были и раньше.
+    let rows = (0..<2).map { row in
+        plainShot.count(in: CGRect(x: ClipboardPreview.textInset + 24, y: ClipCard.headerHeight + 12 + CGFloat(row) * 23, width: 150, height: 16)) { min($0.r, $0.g, $0.b) > 0.7 }
+    }
+    check(greenShare(plainShot) < 0.01 && rows.allSatisfy { $0 > 20 } && plainTexts.contains { $0.contains("2 файла") } && !plainTexts.contains { $0.contains("\"+") },
+          "без миниатюры прежний список имён (светлых точек в строках \(rows)), без «+N»")
+    let (_, hiddenTexts) = await cardShot(three, spaces: [], model: model, concealed: true, preview: false, now: now)
+    check(loads == 0 && !hiddenTexts.contains { $0.contains("Снимок экрана") || $0.contains("\"+2\"") }, "скрытая карточка: миниатюра не расшифровывается, имени и «+N» нет")
+
+    // Файл миниатюры пропал: не падает, вместо картинки крупный значок типа, полоса с именем на месте.
+    let lost = item(1, thumbnail: true)
+    try? FileManager.default.removeItem(at: dir.appendingPathComponent(lost.thumbnailFile!))
+    model.forgetImages()
+    let (lostShot, lostTexts) = await cardShot(lost, spaces: [], model: model, concealed: false, preview: false, now: now.addingTimeInterval(1))
+    let iconArea = CGRect(x: ClipCard.width / 2 - 32, y: ClipCard.headerHeight + 30, width: 64, height: 64)
+    check(greenShare(lostShot) < 0.01 && lostShot.count(in: iconArea) { max($0.r, $0.g, $0.b) > 0.5 } > 200 && lostTexts.contains { $0.contains("один снимок.png") },
+          "файл миниатюры пропал: значок типа и имя, не падает")
+
+    // Настоящий показ на стенде: прогрев миниатюр не трогает, первый кадр их не ждёт, ушла панель — кэш пуст.
+    let stand = LeaveStand(wired: true)
+    var standLoads = 0
+    let standData = stand.model.filePictureData
+    stand.model.filePictureData = { standLoads += 1; return standData($0) }
+    stand.host.prewarm(controller: controller)
+    await pause(0.3)
+    check(standLoads == 0 && stand.model.readyPicture(three) == nil, "прогрев: миниатюры файлов не расшифровывались")
+    stand.host.show(controller: controller)
+    check(stand.model.readyPicture(three) == nil, "показ не ждёт миниатюр файлов: сразу после показа их ещё нет")
+    await pause(0.05)
+    check(standLoads == 0, "пока панель едет, миниатюры файлов не расшифровываются")
+    let arrived = await waitUntil(2) { stand.model.readyPicture(three) != nil }
+    check(arrived && standLoads >= 2, "миниатюры файлов приходят следом (\(standLoads) загрузок)")
+    stand.host.hide()
+    _ = await waitUntil(2) { stand.settledGone }
+    await pause(0.2)
+    check(stand.model.readyPicture(three) == nil && !stand.model.picturesAllowed, "панель ушла: миниатюр файлов в памяти нет, новые не расшифровываются")
+    stand.close()
+
+    // Значок типа по расширению: путь выдуманный, файла нет, значок всё равно есть — файл не нужен.
+    check(ClipFileTypeIcon.image(shotPath) != nil && ClipFileTypeIcon.image("/tmp/выдуманная смета.pdf") != nil, "значок типа по расширению, без файла")
+    check(ClipFileTypeIcon.image("/tmp/без расширения") == nil, "без расширения — прежний общий значок")
+
+    let panel = panelModel(theme: "vivid", items: controller.items)
+    panel.imageLoader = model.imageLoader
+    _ = await Stand.render(panel, "color-file-thumbnails", out: out)
+    model.forgetImages()
+}
+
 // MARK: - Прогрев панели
 
 /// Прогрев: окно и первая раскладка на настоящих записях заранее, а для показа панель «не показывалась, но готова».
@@ -2894,6 +3010,7 @@ enum Main {
             checkGeometry()
             await checkDrag()
             await checkCardThumbnail()
+            await checkFileThumbnail(out: out)
             await checkLiveEvents()
             checkDragSourceMask()
             await checkDropTarget()

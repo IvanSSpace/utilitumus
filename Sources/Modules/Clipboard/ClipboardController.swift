@@ -267,6 +267,7 @@ final class ClipboardController: ObservableObject {
             snap.sourceBundleID = sourceID
             snap.sourceName = sourceName
             // Миниатюра карточки здесь же, при копировании: панель потом не разжимает полный снимок при каждом открытии.
+            // У файла-картинки её уже сделал снимок (`ClipFileThumbnail`), пока буфер с её источником был под рукой.
             snap.imageThumbnail = snap.imagePNG.flatMap { ClipThumbnail.make(from: $0) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { ClipboardController.shared.finishRead(snap) }

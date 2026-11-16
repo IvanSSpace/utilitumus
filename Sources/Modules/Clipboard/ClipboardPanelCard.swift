@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Цвет шапки по значку программы: считается один раз на bundle id и только здесь, на этом Mac.
 @MainActor
@@ -39,6 +40,93 @@ enum ClipSourceTint {
 
 extension ClipRGB {
     var color: Color { Color(.sRGB, red: r, green: g, blue: b) }
+}
+
+/// Системный значок типа файла по расширению: сам файл не открывается. Один на расширение за процесс.
+@MainActor
+enum ClipFileTypeIcon {
+    private static var cache: [String: NSImage] = [:]
+
+    static func image(_ path: String) -> NSImage? {
+        let ext = (path as NSString).pathExtension.lowercased()
+        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return nil }
+        if let hit = cache[ext] { return hit }
+        let icon = NSWorkspace.shared.icon(for: type)
+        icon.size = NSSize(width: 16, height: 16)
+        cache[ext] = icon
+        return icon
+    }
+}
+
+/// Миниатюра, разжатая вне главного потока сразу в цвета и порядок байт экрана: вывод кадра её только копирует.
+/// Из `NSImage(data:)` цвета переводились бы при выводе кадра, на главном потоке.
+struct ClipScreenPicture: @unchecked Sendable {
+    /// Пространство цвета экрана: берётся на главном потоке, неизменяемо, передаётся на очередь разжатия.
+    struct Space: @unchecked Sendable { let value: CGColorSpace? }
+
+    let image: CGImage
+    let size: NSSize
+
+    /// nil — не картинка или больше предела стороны миниатюры: свою миниатюру больше сделать нельзя.
+    init?(_ data: Data, space: Space) {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let decoded = CGImageSourceCreateImageAtIndex(source, 0, nil),
+              decoded.width <= ClipThumbnail.maxSide, decoded.height <= ClipThumbnail.maxSide,
+              let context = CGContext(data: nil, width: decoded.width, height: decoded.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: space.value ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return nil }
+        context.draw(decoded, in: CGRect(x: 0, y: 0, width: decoded.width, height: decoded.height))
+        guard let image = context.makeImage() else { return nil }
+        self.image = image
+        size = NSSize(width: CGFloat(decoded.width) / 2, height: CGFloat(decoded.height) / 2)
+    }
+}
+
+/// Картинка карточки файла. Разжимается вне главного потока, когда панель доехала; до того на её месте фон карточки,
+/// первые кадры панели её не ждут. Перерисовывается по своему счётчику: у карточки подписки на модель нет.
+/// Миниатюра не прочиталась — крупный значок типа по расширению, тоже без чтения файла.
+private struct ClipFilePicture: View {
+    let item: ClipItem
+    /// Путь показанного файла: по нему значок типа, если миниатюры не будет.
+    let shown: String
+    /// Показ панели: в новом показе загрузка заново, кэш прошлого уже забыт.
+    let shownAt: Date
+    let model: ClipboardPanelModel
+    /// Сколько раз миниатюра легла в кэш: смена счётчика перерисовывает только этот вид.
+    @State private var arrivals = 0
+    @State private var failed = false
+
+    private struct Key: Equatable {
+        let id: UUID
+        let shownAt: Date
+        /// Кэш мог отпустить миниатюру, пока карточка жива: тогда загрузка ещё раз.
+        let ready: Bool
+    }
+
+    var body: some View {
+        let _ = arrivals
+        let image = model.readyPicture(item)
+        ZStack {
+            if let image {
+                // Без перехода: проявление при каждом показе сначала гасило бы прошлую миниатюру, +9 мс к повторному
+                // открытию (замер bench47-after2).
+                Image(nsImage: image).resizable().scaledToFill()
+            } else if failed, let icon = ClipFileTypeIcon.image(shown) {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 64, height: 64)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: Key(id: item.id, shownAt: shownAt, ready: image != nil)) {
+            guard image == nil else { return }
+            if await model.loadFilePicture(item) {
+                arrivals += 1
+            } else if model.picturesAllowed {
+                // Отказ из-за ушедшей панели или прогрева — не отказ миниатюры: значок не нужен.
+                failed = true
+            }
+        }
+    }
 }
 
 struct ClipCard: View {
@@ -215,17 +303,61 @@ struct ClipCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         case .file:
-            VStack(alignment: .leading, spacing: 7) {
-                ForEach(Array((item.filePaths ?? []).prefix(5)), id: \.self) { path in
-                    HStack(spacing: 7) {
-                        Image(systemName: "doc.fill").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
-                        Text((path as NSString).lastPathComponent).font(.system(size: ClipboardPreview.fontSize))
-                            .lineLimit(1).truncationMode(.middle)
-                            .foregroundStyle(.white.opacity(0.92))
+            // Миниатюра есть только у файла-картинки, сделанная при копировании; без неё список имён, как раньше.
+            if item.thumbnailFile != nil {
+                filePicture
+            } else {
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array((item.filePaths ?? []).prefix(5)), id: \.self) { path in
+                        HStack(spacing: 7) {
+                            fileIcon(path)
+                            fileName(path)
+                        }
                     }
                 }
+                .padding(.horizontal, ClipboardPreview.textInset).padding(.top, 12)
             }
-            .padding(.horizontal, ClipboardPreview.textInset).padding(.top, 12)
+        }
+    }
+
+    /// Миниатюра первого файла-картинки на всю область, внизу полоса с его именем и «+N» за остальные файлы.
+    private var filePicture: some View {
+        let paths = item.filePaths ?? []
+        let shown = ClipFileThumbnail.shownIndex(in: paths).map { paths[$0] } ?? paths.first ?? ""
+        return ClipFilePicture(item: item, shown: shown, shownAt: now, model: model)
+            .frame(width: Self.width, height: Self.height - Self.headerHeight - Self.footerHeight)
+            .clipped()
+            .overlay(alignment: .bottom) {
+                HStack(spacing: 7) {
+                    fileIcon(shown)
+                    fileName(shown)
+                    Spacer(minLength: 0)
+                    if paths.count > 1 {
+                        Text(verbatim: "+\(paths.count - 1)").font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.85))
+                            .fixedSize()
+                    }
+                }
+                .padding(.horizontal, ClipboardPreview.textInset)
+                .frame(height: Self.fileStripHeight)
+                .background(.black.opacity(0.55))
+            }
+    }
+
+    static let fileStripHeight: CGFloat = 28
+
+    private func fileName(_ path: String) -> some View {
+        Text((path as NSString).lastPathComponent).font(.system(size: ClipboardPreview.fontSize))
+            .lineLimit(1).truncationMode(.middle)
+            .foregroundStyle(.white.opacity(0.92))
+    }
+
+    /// Значок типа по расширению, файл не читается. Без расширения тип не узнать — прежний общий значок.
+    @ViewBuilder private func fileIcon(_ path: String) -> some View {
+        if let icon = ClipFileTypeIcon.image(path) {
+            Image(nsImage: icon).resizable().interpolation(.high).frame(width: 16, height: 16)
+        } else {
+            Image(systemName: "doc.fill").font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
         }
     }
 

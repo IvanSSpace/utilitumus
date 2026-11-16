@@ -136,6 +136,14 @@ final class ClipboardPanelModel: ObservableObject {
 
     /// Картинка для карточки: миниатюра, пока её нет — полный файл.
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
+    /// Байты миниатюры файла-картинки. Расшифровка короткая и идёт здесь, разжатие — вне главного потока (`loadFilePicture`).
+    var filePictureData: (ClipItem) -> Data? = { _ in nil }
+    /// Панель на экране: только тогда миниатюры файлов расшифровываются. Прогрев и скрытая панель их не трогают.
+    var picturesAllowed = false
+    /// Когда панель доедет (время работы системы, с): раньше миниатюры файлов не расшифровываются и не разжимаются.
+    var picturesAfter: TimeInterval = 0
+    /// Меняется с каждым `forgetImages`: разжатое к уже ушедшей панели в кэш не кладётся.
+    private var imagesEpoch = 0
     /// Как достать сохранённые байты картинки для переноса наружу. Возвращает загрузчик: сама расшифровка только по запросу программы.
     var imageBytes: (ClipItem) -> @Sendable () -> Data? = { _ in { nil } }
     var onPaste: (ClipItem) -> Void = { _ in }
@@ -352,7 +360,36 @@ final class ClipboardPanelModel: ObservableObject {
         return image
     }
 
-    func forgetImages() { images.removeAllObjects() }
+    func forgetImages() {
+        images.removeAllObjects()
+        imagesEpoch += 1
+    }
+
+    /// Миниатюра файла-картинки, уже разжатая для этого показа; nil — ещё нет.
+    func readyPicture(_ item: ClipItem) -> NSImage? { images.object(forKey: item.id as NSUUID) }
+
+    /// Разжать миниатюру файла-картинки вне главного потока и положить в кэш показа. Через `NSImage(data:)` цвета
+    /// переводились бы при выводе кадра, ~2 мс на карточку, а разжатие и перевод на главном потоке стоили бы ~4 мс
+    /// (замер bench47-after2). Начинается, когда панель доехала: расшифровка и разжатие в первых кадрах задерживали
+    /// их на несколько мс даже вне главного потока. До миниатюры на её месте фон карточки. true — миниатюра в кэше.
+    func loadFilePicture(_ item: ClipItem) async -> Bool {
+        let key = item.id as NSUUID
+        if images.object(forKey: key) != nil { return true }
+        guard picturesAllowed else { return false }
+        let epoch = imagesEpoch
+        let wait = picturesAfter - ProcessInfo.processInfo.systemUptime
+        if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+        guard epoch == imagesEpoch, picturesAllowed else { return false }
+        if images.object(forKey: key) != nil { return true }
+        guard let data = filePictureData(item) else { return false }
+        let space = ClipScreenPicture.Space(value: NSScreen.main?.colorSpace?.cgColorSpace)
+        let picture = await withCheckedContinuation { (done: CheckedContinuation<ClipScreenPicture?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async { done.resume(returning: ClipScreenPicture(data, space: space)) }
+        }
+        guard epoch == imagesEpoch, picturesAllowed, let picture else { return false }
+        images.setObject(NSImage(cgImage: picture.image, size: picture.size), forKey: key)
+        return true
+    }
 
     /// Панель закрывается: правка сохраняется, как при клике мимо, открытое на время снова скрыто.
     func panelClosing() {
@@ -1324,6 +1361,8 @@ final class ClipboardPanelHost {
     private var showDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.showSpeedKey)).duration }
     private var hideDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.hideSpeedKey)).duration }
     static let slideDistance: CGFloat = 40
+    /// Пауза после конца движения до миниатюр файлов: последний кадр движения уже выведен.
+    static let picturesPause: TimeInterval = 0.03
 
     private var panel: NSPanel?
     private var model: ClipboardPanelModel?
@@ -1398,6 +1437,7 @@ final class ClipboardPanelHost {
     @discardableResult
     func present(_ model: ClipboardPanelModel) -> NSPanel {
         self.model = model
+        model.picturesAllowed = true
         model.reset()
         model.refreshTheme()
 
@@ -1424,6 +1464,8 @@ final class ClipboardPanelHost {
         // Первый показ рисуется долго: пусть это случится при нулевой альфе, отсчёт движения начнётся после.
         panel.displayIfNeeded()
         let duration = showDuration
+        // Миниатюры файлов — после того, как панель доехала, и ещё через кадр-другой.
+        model.picturesAfter = ProcessInfo.processInfo.systemUptime + duration + Self.picturesPause
         if duration == 0 {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
@@ -1500,6 +1542,7 @@ final class ClipboardPanelHost {
         panel.orderOut(nil)
         panel.alphaValue = 0
         // Расшифрованным картинкам незачем лежать в памяти, пока панели нет.
+        model?.picturesAllowed = false
         model?.forgetImages()
         if forgetsItemsOnLeave { dropItems() }
         let callbacks = leftCallbacks
@@ -1533,6 +1576,7 @@ final class ClipboardPanelHost {
         // Карточке хватает миниатюры: полный снимок разжимался бы на главном потоке при каждом открытии.
         // Полный файл нужен только переносу наружу и вставке, они берут его сами и только по запросу.
         model.imageLoader = { [weak controller] item in controller?.cardImageData(item).flatMap { NSImage(data: $0) } }
+        model.filePictureData = { [weak controller] item in controller?.cardImageData(item) }
         model.imageBytes = { [weak controller] item in
             // Запрос придёт не обязательно на главном потоке. Хранилищу это не мешает: чтение файла и ключ неизменяемы.
             nonisolated(unsafe) let store = controller?.store
