@@ -25,13 +25,13 @@
     },
     {
       "id": "clipboard",
-      "version": "1.4.1",
+      "version": "1.4.2",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.4.1/Clipboard.zip",
-      "sha256": "c454f03d956b51e3e01ac59dd7c0a568c9816f453285a5cf99f3b74ae30643d0",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/clipboard-v1.4.2/Clipboard.zip",
+      "sha256": "cc464ee4891808a7c3d237feb56637f95748b5646d05a3e779b4fb6d531730da",
       "sizeMB": 2,
       "notes": [
-        "Панель открывается быстрее. В меню «…» настраивается скорость появления и закрытия: Мгновенно, Быстро, Обычно, Плавно"
+        "Панель Буфера открывается быстрее, особенно когда среди свежих записей есть скриншоты: карточки показывают лёгкие миниатюры, а панель готовится заранее"
       ]
     },
     {
