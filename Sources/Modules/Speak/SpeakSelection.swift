@@ -89,7 +89,7 @@ final class SpeakSelectionReader: SelectionReading {
         self.clock = clock
     }
 
-    /// Настоящие зависимости. В сборке со швом AX, общий буфер и ⌘C отказывают через `Kit.standRefuses`.
+    /// Настоящие зависимости. В сборке со швом AX и ⌘C отказывают через `Kit.standRefuses`, а буфер обмена — именованный тестовый.
     static func system() -> SpeakSelectionReader {
         let clock = SpeakMainClock()
         let secureInput = CarbonSecureInput()

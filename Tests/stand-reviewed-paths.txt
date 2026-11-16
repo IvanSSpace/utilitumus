@@ -71,6 +71,8 @@ Sources/Modules/Sound/AudioMonitor.swift|AudioObjectSetPropertyData
 Sources/Modules/Sound/UI/MicGuardMigration.swift|UserDefaults(suiteName
 # «Озвучка»: раздел Универсального доступа в Настройках открывается только по кнопке, в стенде requestAccessibility отказывает (Kit.standRefuses).
 Sources/Modules/Speak/SpeakController.swift|NSWorkspace.shared.open
+# «Озвучка», запасной путь через ⌘C (SpeakCopyFallback.swift): записи не нужно — буфер берётся из шва Kit.pasteboard (в стенде
+# именованный тестовый), ⌘C стенд отказывает (Kit.standRefuses). Держит Tests/run-speak-privacy-check.sh.
 Sources/Modules/Stash/StashStore.swift|.terminate()
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.open
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.openApplication

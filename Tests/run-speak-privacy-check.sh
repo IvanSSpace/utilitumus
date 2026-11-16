@@ -1,7 +1,8 @@
 #!/bin/bash
 # «Озвучка»: прочитанный текст не уходит из памяти чтения. По исходникам: нет сети, логов и записи на диск; общий буфер обмена
 # и синтетическое ⌘C — только в SpeakCopyFallback.swift (запасной путь, когда программа не отдаёт выделенное через AX), и там
-# же видно, что буфер возвращается, а стенд отказывает. Во всём остальном модуле, в экране и у центра их нет.
+# же видно, что буфер берётся из шва Kit.pasteboard (в стенде — именованный тестовый) и возвращается, а ⌘C стенд отказывает.
+# Во всём остальном модуле, в экране и у центра их нет.
 # Вживую (подмены вместо звука, AX и сочетания): после чтения случайной строки её нет ни в состоянии для центра, ни в строке статуса,
 # ни в контроллере, ни в тестовом suite настроек, ни в выводе проверки, ни в файлах подставного дома; то же для текста, взятого через ⌘C.
 # Сборка со швом KIT_TEST_DEFAULTS, настоящие настройки не трогаются. Папка стенда: SPEAK_PRIVACY_DIR, иначе $TMPDIR/speak-privacy-check.
@@ -81,8 +82,16 @@ echo "== $COPY"
 none "в нём нет журналов, печати и сети" \
   '\bprint\(|debugPrint\(|NSLog\(|fputs\(|os_log|Logger\(|PrivateLog|\bdump\(|URLSession|URLRequest|NWConnection|import Network|\bsocket\(' "$COPY"
 none "в нём нет настроек: ни текст, ни что-либо ещё в Kit.defaults не пишется" 'Kit\.defaults|UserDefaults|AppStorage' "$COPY"
-times "общий буфер — в одном месте" 'NSPasteboard\.general' "$COPY" 1
-has "и только через отказ стенда" 'Kit\.standRefuses\("общий буфер обмена"\) \? nil : NSPasteboard\.general' "$COPY"
+# Буфер берётся только из шва Kit.pasteboard: в стенде это именованный тестовый буфер, а не буфер автора.
+none "в нём общий буфер не берётся мимо шва" 'NSPasteboard\.general|NSPasteboard\(name|withUniqueName|generalPasteboard' "$COPY"
+times "буфер из шва — в одном месте" 'Kit\.pasteboard' "$COPY" 1
+GENERAL="$(line_of 'static func general\(\) -> SpeakSystemPasteboard \{$' "$COPY")"
+SEAM="$(line_of 'SpeakSystemPasteboard \{ Kit\.pasteboard \}$' "$COPY")"
+if [ -n "$GENERAL" ] && [ "$SEAM" = "$((GENERAL + 1))" ]; then
+  ok "шов Kit.pasteboard — тело general() (строка $SEAM)"
+else
+  bad "шов Kit.pasteboard не тело general(): general() ${GENERAL:-нет}, шов ${SEAM:-нет}"
+fi
 times "событие клавиши отправляется в одном месте" '\.post\(tap' "$COPY" 1
 has "⌘C только после отказа стенда" 'if Kit\.standRefuses\("⌘C в переднюю программу"\) \{ return \}' "$COPY"
 has "флаги ⌘C ровно ⌘" 'event\?\.flags = \.maskCommand$' "$COPY"

@@ -114,10 +114,11 @@ final class SpeakSystemPasteboard: SpeakPasteboard {
 
     init(board: @escaping () -> NSPasteboard?) { self.board = board }
 
-    /// Общий буфер обмена. В сборке со швом стенд отказывает: буфер автора не читается и не пишется,
-    /// а `accessRestricted` тогда true — до ⌘C дело не доходит.
+    /// Буфер обмена из шва Kit: в продукте общий, в сборке со швом — именованный тестовый буфер,
+    /// так что буфер автора стенд не читает и не пишет. ⌘C стенд не отправляет (`Kit.standRefuses` в `sendCopy`),
+    /// копия не приходит, и до возврата буфера дело не доходит: тестовый буфер разве что снимается, но не пишется.
     static func general() -> SpeakSystemPasteboard {
-        SpeakSystemPasteboard { Kit.standRefuses("общий буфер обмена") ? nil : NSPasteboard.general }
+        SpeakSystemPasteboard { Kit.pasteboard }
     }
 
     /// `.default` и `.alwaysAllow` — система не спросит; `.ask`, `.alwaysDeny` и неизвестное новое значение — не трогаем.
