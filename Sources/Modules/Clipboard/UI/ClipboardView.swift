@@ -88,6 +88,13 @@ struct ClipboardView<Model: ClipboardModel>: View {
                     DSSegmented(ClipboardPolicy.limits, selection: Binding(
                         get: { model.limit }, set: { model.setLimit($0) })) { "\($0)" }
                 }
+                if let hides = model.hidesPanelFromCapture {
+                    DSRow(icon: "eye.slash", title: "Скрывать панель на снимках и записи экрана",
+                          subtitle: "Чтобы история не попала в скриншот или демонстрацию экрана") {
+                        DSToggle("Скрывать панель на снимках и записи экрана",
+                                 isOn: Binding(get: { hides }, set: { model.setHidesPanelFromCapture($0) }))
+                    }
+                }
                 DSRow(icon: "trash", title: "Очистить историю",
                       subtitle: "Пространства останутся") {
                     DSButton("Очистить…", small: true) { confirmClear = true }

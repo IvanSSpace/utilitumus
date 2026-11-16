@@ -6,14 +6,19 @@ import UniformTypeIdentifiers
 enum ClipboardPasteboard {
     /// Снимок для опроса, вызывается вне главного потока. nil — буфер поменялся до конца чтения:
     /// содержимое уже другое, его прочитает следующий опрос.
-    static func snapshot(of pasteboard: NSPasteboard, change: Int) -> ClipSnapshot? {
+    static func snapshot(of pasteboard: NSPasteboard, change: Int, files: ClipFileAccess = .system(granted: []),
+                         denied: (ClipAskFolder) -> Void = { _ in }) -> ClipSnapshot? {
         guard pasteboard.changeCount == change else { return nil }
-        let snap = snapshot(of: pasteboard)
+        let snap = snapshot(of: pasteboard, files: files, denied: denied)
         return pasteboard.changeCount == change ? snap : nil
     }
 
     /// Снимок текущего содержимого. Скрытые типы попадают в `types`, дальше их отсеивает политика.
-    static func snapshot(of pasteboard: NSPasteboard) -> ClipSnapshot {
+    /// `files` — как открыть скопированный файл-картинку ради миниатюры и к каким «спрашиваемым» папкам доступ уже дан;
+    /// проверка подставляет свой счётчик. По умолчанию ни к каким. `denied` — macOS отказала в доступе к разрешённой
+    /// раньше папке (его сняли в Настройках): утилита снимает свой флаг, чтобы не пробовать снова при каждом копировании.
+    static func snapshot(of pasteboard: NSPasteboard, files: ClipFileAccess = .system(granted: []),
+                         denied: (ClipAskFolder) -> Void = { _ in }) -> ClipSnapshot {
         var snap = ClipSnapshot()
         snap.types = (pasteboard.types ?? []).map(\.rawValue)
         if ClipboardPolicy.shouldSkip(types: snap.types) { return snap }
@@ -21,6 +26,12 @@ enum ClipboardPasteboard {
         let fileURLs = (pasteboard.readObjects(forClasses: [NSURL.self],
                                                options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
         snap.filePaths = fileURLs.map(\.path)
+        // Миниатюра файла-картинки здесь же, вне главного потока: панель потом файла не касается.
+        if let shown = ClipFileThumbnail.shownIndex(in: snap.filePaths) {
+            let made = ClipFileThumbnail.make(path: snap.filePaths[shown], files: files)
+            snap.fileThumbnail = made.data
+            if case .denied(let folder) = made { denied(folder) }
+        }
         snap.text = pasteboard.string(forType: .string).map(ClipboardPolicy.trimmedText)
         // Настоящий текст с картинкой рядом (Word, Excel) остаётся текстом: картинку здесь даже не читаем.
         if snap.filePaths.isEmpty, ClipboardStore.imageOutranks(text: snap.text) {

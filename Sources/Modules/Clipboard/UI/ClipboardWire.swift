@@ -52,6 +52,8 @@ struct ClipboardState: Codable, Equatable {
     var axTrusted: Bool
     /// Только утилита: слово о ключе истории, чтобы центр знал, когда передать ключ. Самого ключа здесь нет и быть не должно.
     var keyState: ClipboardKeyState? = nil
+    /// Скрывать панель на снимках и записи экрана. nil — утилита старше этой настройки: строки на экране нет.
+    var hidesPanelFromCapture: Bool? = nil
 }
 
 extension ClipboardState {
@@ -62,7 +64,7 @@ extension ClipboardState {
                   spaceCounts: Dictionary(uniqueKeysWithValues: model.spaces.map { ($0.id.uuidString, model.count(inSpace: $0.id)) }),
                   recent: recent, hotKeyLabel: model.hotKeyLabel, hotKeyError: model.hotKeyError,
                   storeError: model.storeError, storeNotice: model.storeNotice, limit: model.limit,
-                  excludedApps: model.excludedApps, axTrusted: model.axTrusted)
+                  excludedApps: model.excludedApps, axTrusted: model.axTrusted, hidesPanelFromCapture: model.hidesPanelFromCapture)
     }
 }
 
@@ -84,6 +86,7 @@ enum ClipboardAction: Codable, Equatable {
     case resumeHotKey
     case setHotKey(keyCode: UInt32, modifiers: UInt32)
     case resetHotKey
+    case setHidesPanelFromCapture(on: Bool)
 
     init(from decoder: Decoder) throws {
         let wire = try LinkActionFields(from: decoder)
@@ -122,6 +125,9 @@ enum ClipboardAction: Codable, Equatable {
         case "setHotKey":
             try wire.fields("keyCode", "modifiers")
             self = .setHotKey(keyCode: try wire.field("keyCode"), modifiers: try wire.field("modifiers"))
+        case "setHidesPanelFromCapture":
+            try wire.fields("on")
+            self = .setHidesPanelFromCapture(on: try wire.field("on"))
         default:
             throw wire.refuse()
         }
@@ -213,6 +219,8 @@ extension ClipboardModel {
         case .setHotKey(let keyCode, let modifiers):
             guard ClipboardWireRules.isHotKey(keyCode: keyCode, modifiers: modifiers) else { return "Такое сочетание не подходит" }
             setHotKey(keyCode: keyCode, modifiers: modifiers)
+        case .setHidesPanelFromCapture(let on):
+            setHidesPanelFromCapture(on)
         }
         return nil
     }

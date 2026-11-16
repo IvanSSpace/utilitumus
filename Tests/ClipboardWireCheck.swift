@@ -50,6 +50,8 @@ final class FakeClipboardModel: ClipboardModel {
     @Published var axTrusted: Bool
     @Published var keyCode = UInt32(kVK_ANSI_V)
     @Published var modifiers = UInt32(cmdKey | shiftKey)
+    /// nil — как у утилиты старше настройки: строки нет, экран как прежний.
+    @Published var hidesPanelFromCapture: Bool?
     /// Хранилище не открыто: как у контроллера, `addSpace` молчит.
     var storeOpen = true
     /// Как свой bundle id у контроллера: `addExcluded` молчит.
@@ -118,6 +120,7 @@ final class FakeClipboardModel: ClipboardModel {
     func resetHotKey() { calls.append("resetHotKey") }
     func suspendHotKey() { calls.append("suspendHotKey") }
     func resumeHotKey() { calls.append("resumeHotKey") }
+    func setHidesPanelFromCapture(_ on: Bool) { calls.append("setHidesPanelFromCapture"); hidesPanelFromCapture = on }
 }
 
 /// Подставляется в старый экран вместо настоящего контроллера: поля те, что он читал.
@@ -179,15 +182,17 @@ let threeSpaces = [ClipSpace(id: spaceA, name: "Работа", colorID: "blue"),
         .moveSpace(id: id, by: -1), .deleteSpace(id: id), .addExcluded(bundleID: "com.example.app"),
         .removeExcluded(bundleID: "com.example.app"), .suspendHotKey, .resumeHotKey,
         .setHotKey(keyCode: 9, modifiers: UInt32(cmdKey)), .resetHotKey,
+        .setHidesPanelFromCapture(on: true), .setHidesPanelFromCapture(on: false),
     ]
-    check(actions.count == 16, "действий 16")
+    check(actions.count == 18, "действий 18")
     for action in actions {
         let data = try! encoder.encode(action)
         let back = try? JSONDecoder().decode(ClipboardAction.self, from: data)
         check(back == action && back.flatMap { try? encoder.encode($0) } == data,
               "действие туда и обратно: \(String(decoding: data, as: UTF8.self))")
     }
-    for bad in [#"{"explode":{}}"#, #"{"setLimit":{"value":"много"}}"#, #"{"setLimit":{}}"#, #"{"deleteSpace":{"id":"не-uuid"}}"#, "{}", "[]"] {
+    for bad in [#"{"explode":{}}"#, #"{"setLimit":{"value":"много"}}"#, #"{"setLimit":{}}"#, #"{"deleteSpace":{"id":"не-uuid"}}"#, "{}", "[]",
+                #"{"setHidesPanelFromCapture":{}}"#, #"{"setHidesPanelFromCapture":{"on":"да"}}"#, #"{"setHidesPanelFromCapture":{"on":true,"x":1}}"#] {
         check((try? JSONDecoder().decode(ClipboardAction.self, from: Data(bad.utf8))) == nil, "не разбирается: \(bad)")
     }
     // Чужой ключ разбор не видит; отсекает его сверка с кодированием в общем помощнике, и она здесь срабатывает.
@@ -343,6 +348,8 @@ func fullFixture() -> Fixture {
     for id in ClipboardPolicy.defaultExcludedApps { check(ClipboardWireRules.isBundleID(id), "годится программа по умолчанию \(id)") }
     accepts(.removeExcluded(bundleID: "com.example.listed"), "removeExcluded") { !model.excludedApps.contains("com.example.listed") }
     accepts(.setHotKey(keyCode: 9, modifiers: UInt32(controlKey | optionKey)), "setHotKey") { model.keyCode == 9 }
+    accepts(.setHidesPanelFromCapture(on: false), "setHidesPanelFromCapture") { model.hidesPanelFromCapture == false }
+    accepts(.setHidesPanelFromCapture(on: true), "setHidesPanelFromCapture") { model.hidesPanelFromCapture == true }
     accepts(.setHotKey(keyCode: 122, modifiers: 0), "setHotKey") { model.keyCode == 122 }
     accepts(.clearHistory, "clearHistory") { model.historyCount == 0 }
 }
@@ -557,6 +564,69 @@ func longFixture() -> Fixture {
 
 func pause(_ seconds: Double) async { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
 
+// MARK: - Настройка «Скрывать панель на снимках и записи экрана»
+
+/// Значение идёт утилитой в состоянии, центр показывает ту же строку тем же `ClipboardView` и шлёт команду, утилита
+/// применяет. Связь здесь подставная: состояние и действия идут тем же `LinkWire.handle`, что у утилиты, в поддельную
+/// модель. Старое состояние без поля читается, строки тогда нет ни там, ни там.
+@MainActor func checkCaptureSetting(out: String) async {
+    // Старое состояние (утилита до настройки): поля нет, читается, значение неизвестно.
+    let old = FakeClipboardModel(fullFixture())
+    let oldData = try! encoder.encode(old.wireState)
+    check(!String(decoding: oldData, as: UTF8.self).contains("hidesPanelFromCapture"), "без значения поля в состоянии нет: старый вид")
+    let oldBack = try? JSONDecoder().decode(ClipboardState.self, from: oldData)
+    check(oldBack != nil && oldBack?.hidesPanelFromCapture == nil, "старое состояние без поля читается, значение неизвестно")
+    // Новое: поле в состоянии, туда и обратно байт в байт.
+    let utility = FakeClipboardModel(fullFixture())
+    utility.hidesPanelFromCapture = true
+    utility.showsWireRows = true
+    let data = try! encoder.encode(utility.wireState)
+    let top = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+    check(top["hidesPanelFromCapture"] as? Bool == true, "значение настройки идёт в состоянии")
+    let back = try? JSONDecoder().decode(ClipboardState.self, from: data)
+    check(back == utility.wireState && back.flatMap { try? encoder.encode($0) } == data, "состояние с настройкой туда и обратно, байты те же")
+
+    // Вкладка центра на подставной связи к «утилите».
+    func remote(over model: FakeClipboardModel) async -> RemoteClipboardModel {
+        let link = RemoteModuleLink(state: { LinkWire.encoded(model.wireState) },
+                                    action: { LinkWire.handle($0, as: ClipboardAction.self, limit: 1024, state: { model.wireState }) { model.handle($0) } },
+                                    setWatch: { _ in }, onPing: { _ in })
+        let tab = RemoteClipboardModel(id: "test.clipboard.capture", link: link, canRead: { true })
+        await tab.read()
+        return tab
+    }
+    let tab = await remote(over: utility)
+    check(tab.hidesPanelFromCapture == true, "центр видит значение утилиты")
+    let utilityShot = await Stand.render(ClipboardView(model: utility), "capture-utility", out: out)
+    let tabShot = await Stand.render(ClipboardView(model: tab), "capture-tab", out: out)
+    let same = differingPixels(utilityShot, tabShot)
+    check(same == 0, "окно утилиты и вкладка центра — один экран со строкой: разных пикселей \(same)")
+    let withoutRow = FakeClipboardModel(fullFixture())
+    withoutRow.showsWireRows = true
+    let rowShot = await Stand.render(ClipboardView(model: withoutRow), "capture-no-row", out: out)
+    check(differingPixels(rowShot, tabShot) > 500, "строка настройки на экране есть: без неё \(differingPixels(rowShot, tabShot)) пикселей разницы")
+
+    // Переключатель во вкладке: команда доходит до утилиты, она применяет, центр видит новое значение.
+    utility.calls = []
+    tab.setHidesPanelFromCapture(false)
+    var applied = false
+    for _ in 0..<100 {
+        if utility.hidesPanelFromCapture == false && tab.hidesPanelFromCapture == false { applied = true; break }
+        await pause(0.02)
+    }
+    check(applied && utility.calls.contains("setHidesPanelFromCapture"), "команда из центра дошла, утилита применила, центр видит «выключено»")
+    let offShot = await Stand.render(ClipboardView(model: tab), "capture-tab-off", out: out)
+    let offUtility = await Stand.render(ClipboardView(model: utility), "capture-utility-off", out: out)
+    check(differingPixels(offShot, offUtility) == 0 && differingPixels(offShot, tabShot) > 0, "выключено: снова один экран, переключатель другой")
+
+    // Новый центр и утилита без настройки: строки нет, экран как у такой утилиты.
+    let olderUtility = FakeClipboardModel(fullFixture())
+    olderUtility.showsWireRows = true
+    let olderTab = await remote(over: olderUtility)
+    let olderShot = await Stand.render(ClipboardView(model: olderTab), "capture-tab-older", out: out)
+    check(olderTab.hidesPanelFromCapture == nil && differingPixels(olderShot, rowShot) == 0, "утилита без настройки: у центра строки нет, экран прежний")
+}
+
 @main
 enum Main {
     static func main() {
@@ -570,6 +640,7 @@ enum Main {
             checkRefusals()
             checkAccepted()
             await checkScreen(out: out)
+            await checkCaptureSetting(out: out)
             await checkSpaceDrag(out: out)
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)

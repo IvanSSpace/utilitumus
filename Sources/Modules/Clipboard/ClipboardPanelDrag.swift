@@ -12,7 +12,7 @@ enum ClipDrag {
 
     /// Картинка отдаётся байт в байт и только когда программа попросила: `loadImage` до этого не зовётся.
     static func provider(for item: ClipItem, loadImage: @escaping @Sendable () -> Data?,
-                         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> NSItemProvider {
+                         fileExists: (String) -> Bool = { ClipDrag.mayExist($0) }) -> NSItemProvider {
         let provider = NSItemProvider()
         switch item.kind {
         case .text:
@@ -40,6 +40,12 @@ enum ClipDrag {
             return nil
         }
         return provider
+    }
+
+    /// Есть ли файл. В защищённую папку (Рабочий стол, Документы, Загрузки, Библиотека, тома) не заглядываем: проверка
+    /// сама вызвала бы окно прав. Такой путь считается живым, его проверит программа, куда файл перенесли.
+    static func mayExist(_ path: String, protected: ClipProtectedPaths = .system) -> Bool {
+        protected.contains(path: path) || FileManager.default.fileExists(atPath: path)
     }
 
     /// Категория: только номер под своим типом. Другим программам взять нечего.

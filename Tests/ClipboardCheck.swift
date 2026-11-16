@@ -91,7 +91,7 @@ do {
         if data.range(of: Data("очень-секретная-строка".utf8)) != nil || data.range(of: Data("PNG".utf8)) != nil
             || data.range(of: Data("JFIF".utf8)) != nil { leaked = true }
     }
-    check(files.contains { $0.hasPrefix("thumb-") }, "миниатюра картинки лежит рядом с ней")
+    check(files.contains { $0.hasPrefix(ClipboardStore.thumbnailPrefix) }, "миниатюра картинки лежит рядом с ней")
     check(!files.isEmpty && !leaked, "на диске нет открытого текста, PNG и JPEG (\(files.count) файла)")
     let modes = files.compactMap { (try? FileManager.default.attributesOfItem(atPath: secretDir.appendingPathComponent($0).path))?[.posixPermissions] as? Int }
     check(!modes.isEmpty && modes.allSatisfy { $0 == 0o600 }, "файлы с правами 0600")
@@ -896,8 +896,19 @@ do {
         let transparent = stride(from: 3, to: image.width * image.height * 4, by: 4).contains { bytes[$0] < 255 }
         return Shape(type: type as String, width: image.width, height: image.height, transparent: transparent)
     }
-    let aspect = ClipThumbnail.cardArea.width / ClipThumbnail.cardArea.height
-    func cardAspect(_ s: Shape?) -> Bool { s.map { abs(Double($0.width) / Double($0.height) - aspect) < 0.02 } ?? false }
+    /// Пропорция исходной с допуском в точку по меньшей стороне: миниатюра — уменьшенная картинка целиком, не кусок.
+    func sameAspect(_ s: Shape?, _ width: Int, _ height: Int) -> Bool {
+        guard let s else { return false }
+        return width >= height ? abs(Double(s.height) - Double(s.width) * Double(height) / Double(width)) <= 1
+                               : abs(Double(s.width) - Double(s.height) * Double(width) / Double(height)) <= 1
+    }
+    let frame = ClipThumbnail.frame
+    /// Вписана в рамку карточки на Retina: обе стороны не больше её, и одна достаёт до своей (или картинка меньше рамки).
+    func fits(_ s: Shape?, _ width: Int, _ height: Int) -> Bool {
+        guard let s, s.width <= frame.width, s.height <= frame.height, s.width <= width, s.height <= height else { return false }
+        return abs(s.width - frame.width) <= 1 || abs(s.height - frame.height) <= 1 || (s.width == width && s.height == height)
+    }
+    check(frame.width == 533 && frame.height == 348, "рамка миниатюры: карточка 242×158 на Retina с запасом ×2,2 = \(frame.width)×\(frame.height)")
 
     // Сама миниатюра.
     let shot = screenshot(width: 2880, height: 1800)
@@ -907,19 +918,76 @@ do {
     let shotShape = shape(thumb)
     print("     снимок 2880×1800 (PNG \(shot.count / 1024) КБ): миниатюра \(shotShape?.type ?? "нет") \(shotShape?.width ?? 0)×\(shotShape?.height ?? 0), \(thumb.map { $0.count / 1024 } ?? 0) КБ, \(Int(shotTime)) мс")
     check(shotShape?.type == "public.jpeg" && !(shotShape?.transparent ?? true), "непрозрачный снимок с каналом альфы: миниатюра JPEG")
-    check(shotShape?.width == 533 && shotShape?.height == 348, "снимок: миниатюра закрывает карточку на Retina с запасом (533×348)")
+    check(shotShape?.width == 533 && sameAspect(shotShape, 2880, 1800) && fits(shotShape, 2880, 1800),
+          "снимок: миниатюра целиком, 533 в ширину на Retina с запасом, пропорция снимка (\(shotShape?.width ?? 0)×\(shotShape?.height ?? 0))")
     check((thumb?.count ?? .max) <= 80 * 1024, "снимок: миниатюра в десятки КБ (\(thumb.map { $0.count / 1024 } ?? -1) КБ)")
+    // Тот же снимок, скопированный файлом: предел 40 КБ.
+    let fileShot = ClipThumbnail.make(from: shot, maxBytes: ClipThumbnail.fileMaxBytes)
+    let fileShotShape = shape(fileShot)
+    check((fileShot?.count ?? .max) <= ClipThumbnail.fileMaxBytes && sameAspect(fileShotShape, 2880, 1800),
+          "снимок как файл: миниатюра \(fileShotShape?.type ?? "нет") \(fileShotShape?.width ?? 0)×\(fileShotShape?.height ?? 0), \(fileShot.map { $0.count / 1024 } ?? -1) КБ ≤ 40")
 
     let clear = shape(ClipThumbnail.make(from: screenshot(width: 1200, height: 800, transparent: true)))
     check(clear?.type == "public.png" && clear?.transparent == true, "прозрачная картинка: миниатюра PNG, прозрачность цела")
 
     let loud = ClipThumbnail.make(from: noise(width: 1600, height: 1000))
     let loudShape = shape(loud)
-    check(loud != nil && loud!.count <= ClipThumbnail.maxBytes && loudShape?.type == "public.png" && cardAspect(loudShape),
+    check(loud != nil && loud!.count <= ClipThumbnail.maxBytes && loudShape?.type == "public.png" && sameAspect(loudShape, 1600, 1000),
           "прозрачный шум: PNG уменьшен до предела, а не пропущен (\(loud.map { $0.count / 1024 } ?? -1) КБ, \(loudShape?.width ?? 0)×\(loudShape?.height ?? 0))")
 
     let page = shape(ClipThumbnail.make(from: screenshot(width: 1000, height: 10000)))
-    check(cardAspect(page) && (page?.width ?? .max) <= ClipThumbnail.maxSide, "длинная страница: середина в пропорции карточки (\(page?.width ?? 0)×\(page?.height ?? 0))")
+    check(sameAspect(page, 1000, 10000) && page?.height == frame.height, "длинная страница целиком, а не середина: \(page?.width ?? 0)×\(page?.height ?? 0)")
+
+    // Вписывание: широкая, высокая, очень узкая и длинная, квадратная. По краям исходной цветные полосы разных цветов:
+    // все четыре есть и в миниатюре — значит, ничего не срезано. Внутри серое поле.
+    typealias Edge = (r: UInt8, g: UInt8, b: UInt8)
+    let edges: [(name: String, color: Edge)] = [("левая", (230, 30, 30)), ("правая", (30, 60, 230)), ("верхняя", (30, 200, 60)), ("нижняя", (230, 210, 30))]
+    func framed(_ width: Int, _ height: Int) -> Data {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        func fill(_ c: Edge, _ rect: CGRect) {
+            context.setFillColor(CGColor(srgbRed: CGFloat(c.r) / 255, green: CGFloat(c.g) / 255, blue: CGFloat(c.b) / 255, alpha: 1))
+            context.fill(rect)
+        }
+        fill((128, 128, 128), CGRect(x: 0, y: 0, width: width, height: height))
+        // Полоса — пятая доля стороны (у очень узкой это две точки миниатюры: JPEG сводит цвет парами точек),
+        // поперёк — середина: углы не спорят, чей цвет.
+        let bandX = max(1, width / 5), bandY = max(1, height / 5)
+        fill(edges[0].color, CGRect(x: 0, y: bandY, width: bandX, height: height - 2 * bandY))
+        fill(edges[1].color, CGRect(x: width - bandX, y: bandY, width: bandX, height: height - 2 * bandY))
+        fill(edges[2].color, CGRect(x: bandX, y: height - bandY, width: width - 2 * bandX, height: bandY))
+        fill(edges[3].color, CGRect(x: bandX, y: 0, width: width - 2 * bandX, height: bandY))
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return out as Data
+    }
+    /// Цвет точки миниатюры в долях стороны от левого верхнего угла.
+    func pixel(_ data: Data?, _ fx: Double, _ fy: Double) -> Edge? {
+        guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let x = min(image.width - 1, Int(Double(image.width) * fx)), y = min(image.height - 1, Int(Double(image.height) * fy))
+        let p = context.data!.bindMemory(to: UInt8.self, capacity: image.width * image.height * 4) + (y * image.width + x) * 4
+        return (p[0], p[1], p[2])
+    }
+    func near(_ a: Edge?, _ b: Edge) -> Bool {
+        guard let a else { return false }
+        return abs(Int(a.r) - Int(b.r)) < 45 && abs(Int(a.g) - Int(b.g)) < 45 && abs(Int(a.b) - Int(b.b)) < 45
+    }
+    for (name, width, height) in [("широкая", 3000, 1000), ("высокая", 1000, 3000), ("очень узкая и длинная", 100, 4000), ("квадратная", 2000, 2000)] {
+        let made = ClipThumbnail.make(from: framed(width, height))
+        let s = shape(made)
+        // Точки полос по краям миниатюры: середина каждой полосы, в двадцатой доле стороны от края.
+        let seen = [pixel(made, 0.05, 0.5), pixel(made, 0.95, 0.5), pixel(made, 0.5, 0.05), pixel(made, 0.5, 0.95)]
+        let kept = zip(seen, edges).filter { near($0.0, $0.1.color) }.map(\.1.name)
+        check(sameAspect(s, width, height) && fits(s, width, height) && (made?.count ?? .max) <= ClipThumbnail.maxBytes && kept.count == 4,
+              "\(name) \(width)×\(height): миниатюра \(s?.width ?? 0)×\(s?.height ?? 0) в пропорции исходной, вписана в \(frame.width)×\(frame.height), \((made?.count ?? 0) / 1024) КБ, полосы на месте: \(kept)")
+        let asFile = shape(ClipThumbnail.make(from: framed(width, height), maxBytes: ClipThumbnail.fileMaxBytes))
+        check(sameAspect(asFile, width, height), "\(name) как файл: пропорция та же (\(asFile?.width ?? 0)×\(asFile?.height ?? 0))")
+    }
     let small = shape(ClipThumbnail.make(from: tiny(1)))
     check(small?.width == 40, "маленькая картинка не растягивается: ширина \(small?.width ?? 0)")
     check(ClipThumbnail.make(from: Data("не картинка".utf8)) == nil, "не картинка: миниатюры нет")
@@ -938,8 +1006,8 @@ do {
     let store = ClipboardStore(directory: thumbDir, key: key, limit: 10)
     check(store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: shot, imageThumbnail: thumb)), "картинка с миниатюрой записана")
     let item = store.items[0]
-    let thumbURL = thumbDir.appendingPathComponent("thumb-\(item.id.uuidString).bin")
-    check(item.thumbnailFile == thumbURL.lastPathComponent && fm.fileExists(atPath: thumbURL.path), "миниатюра в thumb-<id>.bin рядом с img-<id>.bin")
+    let thumbURL = thumbDir.appendingPathComponent("fit-\(item.id.uuidString).bin")
+    check(item.thumbnailFile == thumbURL.lastPathComponent && fm.fileExists(atPath: thumbURL.path), "миниатюра в fit-<id>.bin рядом с img-<id>.bin")
     let sealed = (try? Data(contentsOf: thumbURL)) ?? Data()
     let opened = try? AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: key)
     check(opened == thumb && sealed.count <= ClipThumbnail.maxBytes + 28, "файл миниатюры открывается ключом истории: те же байты, в пределе (\(sealed.count / 1024) КБ)")
@@ -959,9 +1027,9 @@ do {
     // Удаление, обрезка по лимиту и «Очистить» уносят миниатюру: сирот нет.
     func orphans(_ dir: URL) -> [String] {
         let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
-        return names.filter { $0.hasPrefix("thumb-") && !names.contains("img-" + $0.dropFirst(6)) }
+        return names.filter { $0.hasPrefix("fit-") && !names.contains("img-" + $0.dropFirst(4)) }
     }
-    func thumbs(_ dir: URL) -> Int { ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("thumb-") }.count }
+    func thumbs(_ dir: URL) -> Int { ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("fit-") }.count }
     let wipeDir = root.appendingPathComponent("thumbs-wipe")
     let wipe = ClipboardStore(directory: wipeDir, key: key, limit: 10)
     for seed in 0..<12 { wipe.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(seed), imageThumbnail: ClipThumbnail.make(from: tiny(seed)))) }
@@ -977,11 +1045,11 @@ do {
     wipe.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(50)))
     let late = wipe.items[0]
     let made = wipe.makeThumbnail(for: late)
-    check(made == .made("thumb-\(late.id.uuidString).bin") && thumbs(wipeDir) == 2, "доделка записала миниатюру рядом с картинкой")
+    check(made == .made("fit-\(late.id.uuidString).bin") && thumbs(wipeDir) == 2, "доделка записала миниатюру рядом с картинкой")
     wipe.delete(late.id)
     check(thumbs(wipeDir) == 1, "удаление записи уносит миниатюру, которой ещё нет в индексе")
     // Запись удалили раньше, чем доделка дописала файл: применение результата его убирает.
-    try! Data("поздний файл".utf8).write(to: wipeDir.appendingPathComponent("thumb-\(late.id.uuidString).bin"))
+    try! Data("поздний файл".utf8).write(to: wipeDir.appendingPathComponent("fit-\(late.id.uuidString).bin"))
     wipe.applyThumbnail(made, to: late.id)
     check(thumbs(wipeDir) == 1 && orphans(wipeDir).isEmpty, "применение к удалённой записи убирает её миниатюру")
 
@@ -1000,7 +1068,7 @@ do {
     try! fm.removeItem(at: imageURL(brokenIDs[3]))
     let good = 25
     for seed in 0..<good { fill.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(seed))) }
-    try! Data("сирота".utf8).write(to: fillDir.appendingPathComponent("thumb-сирота.bin"))
+    try! Data("сирота".utf8).write(to: fillDir.appendingPathComponent("fit-сирота.bin"))
     check(fill.itemsWithoutThumbnail.count == good + broken.count, "в очереди все картинки без миниатюры: \(fill.itemsWithoutThumbnail.count)")
 
     // Первый запуск: отмена после трёх. Между картинками отмена видна, четвёртой не будет.
@@ -1013,7 +1081,7 @@ do {
         if delivered.count == 3 { first.cancel() }
     }
     check(delivered == pending.prefix(3).map(\.id), "по одной, по порядку очереди: сначала новые; отмена после трёх остановила доделку")
-    check(!fm.fileExists(atPath: fillDir.appendingPathComponent("thumb-сирота.bin").path), "миниатюра без своей картинки убрана")
+    check(!fm.fileExists(atPath: fillDir.appendingPathComponent("fit-сирота.bin").path), "миниатюра без своей картинки убрана")
     fill.saveThumbnails()
     fill = ClipboardStore(directory: fillDir, key: key, limit: 100)
     check(fill.itemsWithoutThumbnail.count == good + broken.count - 3, "следующий запуск: в очереди только недоделанные (\(fill.itemsWithoutThumbnail.count))")
@@ -1052,6 +1120,524 @@ do {
     // Хранилище без ключа: доделывать нечего.
     let noKey = ClipboardStore(directory: fillDir, key: nil)
     check(!noKey.isAvailable && noKey.itemsWithoutThumbnail.isEmpty, "без ключа очередь пуста, ничего не читается")
+}
+
+// 25. Миниатюры скопированных файлов-картинок: только из самого файла. Вне защищённых папок — сразу; в «спрашиваемых»
+// (Рабочий стол, Документы, Загрузки своего дома) — только с доступом, данным кнопкой раньше (флаг) или этим нажатием;
+// в закрытых (Библиотека, облака, тома, чужие дома) — никогда. Значок из буфера миниатюрой не считается: у Finder в нём
+// общий значок типа. Всё во временной папке: «дом» подставной, буфер именованный, открытие файла и чтение ссылок считаются.
+do {
+    let fm = FileManager.default
+    // Пути без /private в начале, как их записывает счётчик открытий: /var и /tmp — ссылки на /private/…
+    let rootPath = root.appendingPathComponent("files-thumb").path
+    let base = URL(fileURLWithPath: rootPath.hasPrefix("/private/") ? String(rootPath.dropFirst("/private".count)) : rootPath)
+    let home = base.appendingPathComponent("дом")
+    let free = base.appendingPathComponent("свободно")
+    for folder in ["Desktop/папка", "Documents", "Downloads", "Library/Mobile Documents/com~apple~CloudDocs", "Library/CloudStorage/Диск", "Library/Caches"] {
+        try! fm.createDirectory(at: home.appendingPathComponent(folder), withIntermediateDirectories: true)
+    }
+    try! fm.createDirectory(at: free, withIntermediateDirectories: true)
+    let protected = ClipProtectedPaths(homes: [home.path])
+
+    typealias RGB = (CGFloat, CGFloat, CGFloat)
+    let red: RGB = (0.9, 0.1, 0.1), green: RGB = (0.1, 0.8, 0.2), blue: RGB = (0.1, 0.3, 0.9), yellow: RGB = (0.9, 0.9, 0.1)
+    func filled(_ width: Int, _ height: Int, _ color: RGB) -> CGImage {
+        let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: color.0, green: color.1, blue: color.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+    /// Несколько картинок в одном файле, как значок ICNS или TIFF с несколькими размерами.
+    func encoded(_ images: [CGImage], as type: String) -> Data {
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, type as CFString, images.count, nil)!
+        for image in images { CGImageDestinationAddImage(destination, image, nil) }
+        CGImageDestinationFinalize(destination)
+        return out as Data
+    }
+    func noise(_ width: Int, _ height: Int, opaque: Bool) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: width * 4, bitsPerPixel: 32)!
+        let bytes = rep.bitmapData!
+        arc4random_buf(bytes, width * height * 4)
+        if opaque { for index in stride(from: 3, to: width * height * 4, by: 4) { bytes[index] = 255 } }
+        return rep.representation(using: .png, properties: [:])!
+    }
+    /// Средний цвет миниатюры: по нему видно, из какого источника она сделана.
+    func color(_ data: Data?) -> (r: Double, g: Double, b: Double)? {
+        guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let context = CGContext(data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let pixel = context.data!.bindMemory(to: UInt8.self, capacity: 4)
+        return (Double(pixel[0]) / 255, Double(pixel[1]) / 255, Double(pixel[2]) / 255)
+    }
+    func near(_ data: Data?, _ expected: RGB) -> Bool {
+        guard let c = color(data) else { return false }
+        return abs(c.r - Double(expected.0)) < 0.12 && abs(c.g - Double(expected.1)) < 0.12 && abs(c.b - Double(expected.2)) < 0.12
+    }
+    /// Пропорция миниатюры как у исходной (допуск — точка по меньшей стороне).
+    func sameAspect(_ data: Data?, _ width: Int, _ height: Int) -> Bool {
+        guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return false }
+        return abs(Double(image.height) - Double(image.width) * Double(height) / Double(width)) <= 1
+    }
+    func kb(_ data: Data?) -> String { data.map { String(format: "%.1f", Double($0.count) / 1024) } ?? "нет" }
+
+    /// Чтение файла и разбор ссылок считаются; сами операции настоящие, но только над временной папкой.
+    /// `deny` — пути, на которые «система» отвечает отказом в доступе, как macOS на запрещённую папку.
+    /// Открытые пути записываются без /private: временная папка /var — ссылка на /private/var, разбор её проходит.
+    final class Probe {
+        var opened: [String] = []
+        var links: [String] = []
+        var deny: [String] = []
+    }
+    func access(_ probe: Probe, granted: Set<ClipAskFolder> = []) -> ClipFileAccess {
+        let real = ClipFileAccess.system(granted: [])
+        return ClipFileAccess(protected: protected, granted: granted,
+                              readLink: { probe.links.append($0); return real.readLink($0) },
+                              open: { url in
+                                  let path = url.path.hasPrefix("/private/") ? String(url.path.dropFirst("/private".count)) : url.path
+                                  probe.opened.append(path)
+                                  if probe.deny.contains(where: { path.hasPrefix($0) }) { return .denied }
+                                  return real.open(url)
+                              })
+    }
+    func make(_ path: String, _ probe: Probe, granted: Set<ClipAskFolder> = [], asking: ClipAskFolder? = nil) -> ClipFileResult {
+        ClipFileThumbnail.make(path: path, files: access(probe, granted: granted), asking: asking)
+    }
+    var boards: [NSPasteboard] = []
+    defer { boards.forEach { $0.releaseGlobally() } }
+    /// Именованный буфер с элементами как у Finder: у каждого файла свой элемент с адресом, именем и, если дан, значком.
+    func finderBoard(_ files: [(path: String, icons: [(String, Data)])], extra: [(String, Data)] = []) -> NSPasteboard {
+        let pb = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipcheck.\(UUID().uuidString)"))
+        boards.append(pb)
+        pb.clearContents()
+        var items = files.map { file -> NSPasteboardItem in
+            let item = NSPasteboardItem()
+            item.setString(URL(fileURLWithPath: file.path).absoluteString, forType: .fileURL)
+            item.setString((file.path as NSString).lastPathComponent, forType: .string)
+            for (type, data) in file.icons { item.setData(data, forType: NSPasteboard.PasteboardType(type)) }
+            return item
+        }
+        if !extra.isEmpty {
+            let item = NSPasteboardItem()
+            for (type, data) in extra { item.setData(data, forType: NSPasteboard.PasteboardType(type)) }
+            items.append(item)
+        }
+        pb.writeObjects(items)
+        return pb
+    }
+
+    // Содержимое файлов синее, значки красные: по цвету миниатюры видно, что её источник.
+    let shot = encoded([filled(2880, 1800, blue)], as: "public.png")
+    let shotName = "Снимок экрана 2026-11-16 в 21.59.17.png"
+    let places = ["Desktop", "Documents", "Downloads", "Library/Mobile Documents/com~apple~CloudDocs", "Library/CloudStorage/Диск", "Library/Caches", "Desktop/папка"]
+    for place in places { try! shot.write(to: home.appendingPathComponent(place).appendingPathComponent(shotName)) }
+    try! shot.write(to: free.appendingPathComponent(shotName))
+    let inHome = { (place: String) in home.appendingPathComponent(place).appendingPathComponent(shotName).path }
+    let desktopShot = inHome("Desktop"), documentsShot = inHome("Documents"), downloadsShot = inHome("Downloads")
+    let freeShot = free.appendingPathComponent(shotName).path
+    let redIcon = encoded([filled(512, 512, red), filled(256, 256, yellow), filled(128, 128, yellow)], as: "com.apple.icns")
+    // Внутрь защищённого — своим счётом, а не проверяемым кодом: подставные папки дома и их вид через /private.
+    func roots(_ folders: [String]) -> [String] {
+        folders.flatMap { folder in [home.path, "/private" + home.path].map { ($0 + "/" + folder).lowercased() } }
+    }
+    func inside(_ paths: [String], _ folders: [String]) -> [String] {
+        let r = roots(folders)
+        return paths.filter { path in r.contains { path.lowercased() == $0 || path.lowercased().hasPrefix($0 + "/") } }
+    }
+    let everyProtected = ["Desktop", "Documents", "Downloads", "Library"]
+
+    // (1) Как у Finder: адрес файла с Рабочего стола и значок рядом. Значок миниатюрой не стал, файл не открывался,
+    // путь не разбирался: доступа к Рабочему столу не давали. Тот же значок у файла во временной папке — миниатюра из файла.
+    do {
+        let probe = Probe()
+        let snap = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [("com.apple.icns", redIcon)])]), files: access(probe))
+        check(snap.filePaths == [desktopShot] && snap.fileThumbnail == nil && probe.opened.isEmpty && probe.links.isEmpty,
+              "Finder, Рабочий стол и значок ICNS рядом: значок не миниатюра, файл не открыт, путь не разбирался (\(probe.opened.count), \(probe.links.count))")
+        let freeSnap = ClipboardPasteboard.snapshot(of: finderBoard([(freeShot, [("com.apple.icns", redIcon)])]), files: access(probe))
+        check(near(freeSnap.fileThumbnail, blue) && probe.opened.count == 1, "временная папка и значок рядом: миниатюра из самого файла, а не из значка")
+        let alone = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [])], extra: [("com.apple.icns", redIcon)]), files: access(probe))
+        check(alone.fileThumbnail == nil && probe.opened.count == 1, "значок отдельным элементом: тоже не миниатюра")
+    }
+
+    // (2) Файл вне защищённых папок: миниатюра из самого файла, открыт ровно один раз.
+    do {
+        let probe = Probe()
+        let snap = ClipboardPasteboard.snapshot(of: finderBoard([(freeShot, [])]), files: access(probe))
+        check(near(snap.fileThumbnail, blue) && sameAspect(snap.fileThumbnail, 2880, 1800),
+              "временная папка: миниатюра из файла целиком, пропорция снимка (\(kb(snap.fileThumbnail)) КБ)")
+        check(probe.opened.count == 1 && probe.opened.first.map { $0.hasSuffix("/" + shotName) && !$0.contains("/../") } == true,
+              "файл открыт ровно один раз, по настоящему пути: \(probe.opened.count)")
+        // Ссылка внутри разрешённого: доходит до файла, не перестраховывается.
+        let alias = free.appendingPathComponent("ярлык-снимка.png")
+        try! fm.createSymbolicLink(atPath: alias.path, withDestinationPath: freeShot)
+        let viaAlias = Probe()
+        check(near(make(alias.path, viaAlias).data, blue) && viaAlias.opened.count == 1
+              && viaAlias.opened.first?.hasSuffix("/свободно/" + shotName) == true, "ссылка на файл во временной папке: открыт сам файл, один раз")
+        // Больше 50 МБ — как «нельзя прочитать»: файл разреженный, места на диске не занимает.
+        let huge = free.appendingPathComponent("огромный.png")
+        fm.createFile(atPath: huge.path, contents: shot)
+        let handle = try! FileHandle(forWritingTo: huge)
+        try! handle.truncate(atOffset: UInt64(ClipFileAccess.maxFileBytes + 1))
+        try! handle.close()
+        check(make(huge.path, Probe()) == .unavailable, "файл больше 50 МБ: миниатюры нет, и это не «нет доступа»")
+        check(make(free.appendingPathComponent("нет такого.png").path, Probe()) == .unavailable, "файла нет: «не получилось», не «нет доступа»")
+    }
+
+    // (3) Без доступа: «спрашиваемые» папки ждут кнопки, закрытые недоступны совсем, обходы к ним ловит разбор ссылок.
+    // Файл не открывается, внутрь защищённого разбор не заходит.
+    do {
+        let desktop = home.appendingPathComponent("Desktop")
+        try! fm.createSymbolicLink(atPath: free.appendingPathComponent("ярлык").path, withDestinationPath: desktop.path)
+        try! fm.createSymbolicLink(atPath: free.appendingPathComponent("ссылка.png").path, withDestinationPath: desktopShot)
+        try! fm.createSymbolicLink(atPath: free.appendingPathComponent("вверх").path, withDestinationPath: "../дом")
+        try! fm.createSymbolicLink(atPath: free.appendingPathComponent("глубоко").path, withDestinationPath: desktop.appendingPathComponent("папка").path)
+        let cases: [(String, String, ClipFileResult)] = [
+            ("Рабочий стол", desktopShot, .needsAccess(.desktop)),
+            ("Документы", documentsShot, .needsAccess(.documents)),
+            ("Загрузки", downloadsShot, .needsAccess(.downloads)),
+            ("iCloud Drive", inHome("Library/Mobile Documents/com~apple~CloudDocs"), .unavailable),
+            ("облако (CloudStorage)", inHome("Library/CloudStorage/Диск"), .unavailable),
+            ("Библиотека", inHome("Library/Caches"), .unavailable),
+            ("папка в Рабочем столе", inHome("Desktop/папка"), .needsAccess(.desktop)),
+            ("другой регистр: DESKTOP", home.path + "/DESKTOP/" + shotName, .needsAccess(.desktop)),
+            ("другой регистр: desktop", home.path + "/desktop/" + shotName, .needsAccess(.desktop)),
+            ("«..» из временной папки", free.path + "/../дом/Desktop/" + shotName, .needsAccess(.desktop)),
+            ("«.» и двойная черта", home.path + "/./Desktop//" + shotName, .needsAccess(.desktop)),
+            ("через /System/Volumes/Data", "/System/Volumes/Data/private" + home.path + "/Desktop/" + shotName, .needsAccess(.desktop)),
+            ("через /private", "/private" + home.path + "/Desktop/" + shotName, .needsAccess(.desktop)),
+            ("ссылка на папку Рабочего стола", free.path + "/ярлык/" + shotName, .unavailable),
+            ("ссылка на файл в Рабочем столе", free.path + "/ссылка.png", .unavailable),
+            ("относительная ссылка и папка за ней", free.path + "/вверх/Desktop/" + shotName, .unavailable),
+            ("ссылка и «..» после неё (по тексту путь свободный)", free.path + "/глубоко/../" + shotName, .unavailable),
+            ("Рабочий стол другого пользователя", "/Users/someone-else/Desktop/" + shotName, .unavailable),
+            ("съёмный том", "/Volumes/Флешка/" + shotName, .unavailable),
+            ("сетевой том", "/Network/Servers/nas/" + shotName, .unavailable),
+            ("служебный корень", "/.vol/16777234/2/" + shotName, .unavailable),
+            ("медиатека «Фото»", free.path + "/Медиатека.photoslibrary/originals/" + shotName, .unavailable),
+            ("не абсолютный путь", "Desktop/" + shotName, .unavailable),
+        ]
+        check((free.path + "/глубоко/../" + shotName).hasPrefix(free.path) && !protected.contains(path: free.path + "/глубоко/../" + shotName),
+              "обход «ссылка и ..» по тексту выглядит свободным: его ловит только разбор ссылок")
+        for (name, path, expected) in cases {
+            let probe = Probe()
+            let made = make(path, probe)
+            let stepped = inside(probe.links, everyProtected)
+            check(made == expected && probe.opened.isEmpty && stepped.isEmpty,
+                  "\(name): \(made == expected ? "как ждали" : "не то"), файл не открыт (\(probe.opened.count)), внутрь защищённого ни шагу (\(stepped))")
+        }
+        // Весь путь через буфер: запись-файл без миниатюры, по расширению картинка — карточка покажет значок типа и кнопку.
+        let probe = Probe()
+        let snap = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [])]), files: access(probe))
+        let store = ClipboardStore(directory: base.appendingPathComponent("история-защищённое"), key: key)
+        check(store.ingest(snap) && store.items[0].kind == .file && store.items[0].thumbnailFile == nil && probe.opened.isEmpty && probe.links.isEmpty,
+              "Рабочий стол без доступа: запись-файл без миниатюры, файл не тронут")
+        check(ClipFileThumbnail.isImage(path: desktopShot) && store.cardImageData(store.items[0]) == nil, "по расширению картинка: значок типа без чтения, данных карточке нет")
+        let check3 = access(Probe())
+        check(check3.readsWithoutAsking(freeShot) && !check3.readsWithoutAsking(desktopShot) && !check3.readsWithoutAsking(inHome("Library/Caches"))
+              && access(Probe(), granted: [.desktop]).readsWithoutAsking(desktopShot) && !access(Probe(), granted: [.desktop]).readsWithoutAsking(documentsShot),
+              "без нажатия читается только свободное и разрешённое (по тексту пути)")
+    }
+
+    // (3а) Доступ кнопкой или флагом: ровно эта папка и только она. Ссылка в другую «спрашиваемую» — другой запрос, отказ.
+    // Закрытое не читается ни с каким доступом. Отказ macOS отличается от прочего.
+    do {
+        let probe = Probe()
+        let asked = make(desktopShot, probe, asking: .desktop)
+        check(near(asked.data, blue) && probe.opened == [desktopShot] && inside(probe.links, ["Documents", "Downloads", "Library"]).isEmpty,
+              "кнопка Рабочего стола: прочитан ровно этот файл (\(probe.opened.count)), в другие папки ни шагу")
+        let flagged = Probe()
+        check(near(make(desktopShot, flagged, granted: [.desktop]).data, blue) && make(documentsShot, flagged, granted: [.desktop]) == .needsAccess(.documents)
+              && make(downloadsShot, flagged, granted: [.desktop]) == .needsAccess(.downloads) && flagged.opened == [desktopShot]
+              && inside(flagged.links, ["Documents", "Downloads"]).isEmpty,
+              "флаг Рабочего стола: его файл читается, Документы и Загрузки нет (открыто \(flagged.opened.count))")
+        let docs = Probe()
+        check(near(make(documentsShot, docs, asking: .documents).data, blue) && make(desktopShot, docs, asking: .documents) == .needsAccess(.desktop)
+              && docs.opened == [documentsShot] && inside(docs.links, ["Desktop", "Downloads", "Library"]).isEmpty,
+              "кнопка Документов читает только Документы: \(docs.opened.map { ($0 as NSString).lastPathComponent })")
+        // Ссылка с Рабочего стола в Документы.
+        let crossing = home.appendingPathComponent("Desktop/в-документы.png").path
+        try! fm.createSymbolicLink(atPath: crossing, withDestinationPath: documentsShot)
+        let cross = Probe()
+        check(make(crossing, cross, asking: .desktop) == .unavailable && cross.opened.isEmpty && inside(cross.links, ["Documents"]).isEmpty,
+              "ссылка с Рабочего стола в Документы без доступа к Документам: отказ, в Документы ни шагу")
+        let both = Probe()
+        check(near(make(crossing, both, granted: [.documents], asking: .desktop).data, blue) && both.opened == [documentsShot],
+              "та же ссылка, когда Документы уже разрешены: читается")
+        let closed = Probe()
+        let all = Set(ClipAskFolder.allCases)
+        for path in [inHome("Library/Caches"), inHome("Library/Mobile Documents/com~apple~CloudDocs"), "/Volumes/Флешка/" + shotName,
+                     "/Users/someone-else/Desktop/" + shotName] {
+            check(make(path, closed, granted: all, asking: .desktop) == .unavailable, "закрыто при любом доступе: \(path.replacingOccurrences(of: base.path, with: "…"))")
+        }
+        check(closed.opened.isEmpty && inside(closed.links, ["Library"]).isEmpty, "закрытое не открывалось и не разбиралось ни разу")
+        // Отказ macOS: у «спрашиваемой» папки — «нет доступа», у свободной — просто «не получилось».
+        let denied = Probe()
+        denied.deny = [home.path]
+        check(make(desktopShot, denied, asking: .desktop) == .denied(.desktop) && make(desktopShot, denied, granted: [.desktop]) == .denied(.desktop),
+              "macOS отказала: «нет доступа» к Рабочему столу, и по кнопке, и по флагу")
+        denied.deny = [free.path]
+        check(make(freeShot, denied) == .unavailable, "отказ во временной папке — не «нет доступа» к папке")
+        check(ClipFileAccess.isDenial(NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError))
+              && ClipFileAccess.isDenial(NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM)))
+              && ClipFileAccess.isDenial(NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                                                 userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))]))
+              && !ClipFileAccess.isDenial(NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError))
+              && !ClipFileAccess.isDenial(NSError(domain: NSPOSIXErrorDomain, code: Int(ENOENT))),
+              "отказ в доступе (EPERM, EACCES, NSFileReadNoPermission) отличается от «нет файла»")
+        check(ClipFileAccess.onlyInCloud(ubiquitous: true, status: .notDownloaded) && ClipFileAccess.onlyInCloud(ubiquitous: true, status: .downloaded)
+              && ClipFileAccess.onlyInCloud(ubiquitous: true, status: nil) && !ClipFileAccess.onlyInCloud(ubiquitous: true, status: .current)
+              && !ClipFileAccess.onlyInCloud(ubiquitous: false, status: nil) && !ClipFileAccess.onlyInCloud(ubiquitous: nil, status: nil),
+              "файл только в iCloud (не загружен) не читается: чтение запустило бы скачивание")
+        // Снимок буфера: флаг даёт миниатюру при копировании, отказ сообщается, чтобы утилита сняла флаг.
+        let copy = Probe()
+        var revoked: [ClipAskFolder] = []
+        let granted = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [])]), files: access(copy, granted: [.desktop]), denied: { revoked.append($0) })
+        check(near(granted.fileThumbnail, blue) && copy.opened == [desktopShot] && revoked.isEmpty, "копирование с Рабочего стола при флаге: миниатюра сразу")
+        copy.deny = [home.path]
+        let refused = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [])]), files: access(copy, granted: [.desktop]), denied: { revoked.append($0) })
+        check(refused.fileThumbnail == nil && revoked == [.desktop], "флаг есть, а macOS отказала: миниатюры нет, утилите сказано снять флаг")
+    }
+
+    // (4) Не картинка (pdf, txt) со значком рядом: значок — общий значок типа, миниатюрой не становится, файл не читается.
+    for ext in ["pdf", "txt"] {
+        let path = free.appendingPathComponent("отчёт.\(ext)").path
+        try! Data("не картинка".utf8).write(to: URL(fileURLWithPath: path))
+        let probe = Probe()
+        let snap = ClipboardPasteboard.snapshot(of: finderBoard([(path, [("com.apple.icns", redIcon)])]), files: access(probe))
+        check(snap.filePaths == [path] && snap.fileThumbnail == nil && probe.opened.isEmpty, "\(ext) со значком рядом: миниатюры нет, файл не открывался")
+    }
+
+    // (5) Предел 40 КБ на заведомо тяжёлом: шум 3000×2000 из файла. У картинок прежний предел 150 КБ.
+    var sizes: [String] = []
+    for opaque in [true, false] {
+        let data = noise(3000, 2000, opaque: opaque)
+        let path = free.appendingPathComponent("шум-\(opaque ? "плотный" : "прозрачный").png").path
+        try! data.write(to: URL(fileURLWithPath: path))
+        let fromFile = make(path, Probe()).data
+        let kind = opaque ? "непрозрачный" : "прозрачный"
+        check(fromFile != nil && fromFile!.count <= ClipThumbnail.fileMaxBytes && sameAspect(fromFile, 3000, 2000), "шум 3000×2000 \(kind) из файла: \(kb(fromFile)) КБ ≤ 40, пропорция исходной")
+        let image = ClipThumbnail.make(from: data)
+        check(image != nil && image!.count > ClipThumbnail.fileMaxBytes && image!.count <= ClipThumbnail.maxBytes, "у картинки предел прежний: \(kb(image)) КБ ≤ 150")
+        sizes.append("шум \(kind) \(kb(fromFile)) КБ")
+    }
+    print("     миниатюры файлов: снимок 2880×1800 \(kb(make(freeShot, Probe()).data)) КБ, \(sizes.joined(separator: ", "))")
+
+    // (6) Несколько файлов: миниатюра первого файла-картинки. Первая картинка на Рабочем столе — её не читаем и за ней не идём.
+    do {
+        let pdf = free.appendingPathComponent("смета.pdf").path, txt = free.appendingPathComponent("заметка.txt").path
+        let probe = Probe()
+        let snap = ClipboardPasteboard.snapshot(of: finderBoard([(pdf, []), (freeShot, []), (txt, [])]), files: access(probe))
+        check(ClipFileThumbnail.shownIndex(in: snap.filePaths) == 1 && near(snap.fileThumbnail, blue) && probe.opened.count == 1,
+              "pdf, снимок, txt: миниатюра снимка, открыт только он")
+        let store = ClipboardStore(directory: base.appendingPathComponent("история-несколько"), key: key)
+        check(store.ingest(snap) && store.items[0].filePaths?.count == 3 && store.items[0].thumbnailFile != nil, "запись трёх файлов с миниатюрой, пути все")
+        let guarded = ClipboardPasteboard.snapshot(of: finderBoard([(pdf, []), (desktopShot, []), (freeShot, [])]), files: access(probe))
+        check(guarded.fileThumbnail == nil && probe.opened.count == 1, "первая картинка на Рабочем столе: миниатюры нет, ни она, ни следующая не открыты")
+        check(ClipFileThumbnail.shownIndex(in: [pdf, txt]) == nil && ClipFileThumbnail.shownIndex(in: [freeShot, desktopShot]) == 0, "показывается первая картинка в списке")
+    }
+
+    // (7) Хранилище: зашифровано тем же ключом, права 0600, уходит с записью, обрезкой и «Очистить»; сирот убирает уборка.
+    do {
+        let thumb = make(freeShot, Probe()).data!
+        let dir = base.appendingPathComponent("история")
+        func fileThumbs() -> [String] { ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix(ClipboardStore.fileThumbnailPrefix) } }
+        func snapshot(_ paths: [String], _ thumbnail: Data?) -> ClipSnapshot {
+            ClipSnapshot(types: ["public.file-url"], filePaths: paths, fileThumbnail: thumbnail, sourceBundleID: "com.apple.finder", sourceName: "Finder")
+        }
+        let store = ClipboardStore(directory: dir, key: key, limit: 10)
+        check(store.ingest(snapshot([freeShot], thumb)), "запись-файл с миниатюрой записана")
+        let item = store.items[0]
+        let url = dir.appendingPathComponent(item.thumbnailFile ?? "нет")
+        check(item.kind == .file && item.thumbnailFile.map(ClipboardStore.isFileThumbnail) == true && item.thumbnailFile?.hasPrefix("filefit-") == true
+              && fm.fileExists(atPath: url.path) && item.imageFile == nil,
+              "миниатюра файла в своём filefit-…bin, картинки у записи нет")
+        let sealed = (try? Data(contentsOf: url)) ?? Data()
+        check((try? AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: key)) == thumb, "файл миниатюры открывается ключом истории: те же байты")
+        check(sealed.range(of: thumb.prefix(16)) == nil && sealed.range(of: Data("JFIF".utf8)) == nil && sealed.range(of: Data([0xFF, 0xD8, 0xFF])) == nil
+              && sealed.range(of: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) == nil, "в файле миниатюры нет открытого JPEG и PNG")
+        check((try? fm.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int == 0o600, "файл миниатюры с правами 0600")
+        check(store.cardImageData(item) == thumb && store.imageData(item) == nil, "карточке миниатюра; полного файла в истории нет")
+        check(ClipboardStore(directory: dir, key: key).items[0].thumbnailFile == item.thumbnailFile, "миниатюра файла прочитана из индекса")
+        // Исходный файл удалили: превью остаётся, пометок нет.
+        let gone = free.appendingPathComponent("удалят.png")
+        try! shot.write(to: gone)
+        check(store.ingest(snapshot([gone.path], make(gone.path, Probe()).data)), "запись файла, который потом удалят")
+        try! fm.removeItem(at: gone)
+        check(near(store.cardImageData(store.items[0]), blue), "файл удалили: превью осталось")
+
+        // Повтор того же файла: прежняя запись. Миниатюра появляется, если её не было, и обновляется, если была:
+        // по тому же пути мог лечь другой снимок. Без новой миниатюры прежняя остаётся.
+        let old = free.appendingPathComponent("старый.png").path
+        store.ingest(snapshot([old], nil))
+        let before = store.items.count, oldID = store.items[0].id
+        store.ingest(snapshot([old], thumb))
+        let attached = store.items[0].thumbnailFile
+        check(store.items.count == before && store.items[0].id == oldID && attached != nil, "старая запись без миниатюры: при повторном копировании получает её")
+        let other = ClipThumbnail.make(from: encoded([filled(800, 500, green)], as: "public.png"), maxBytes: ClipThumbnail.fileMaxBytes)
+        store.ingest(snapshot([old], other))
+        let refreshed = store.items[0].thumbnailFile
+        check(refreshed != attached && !fm.fileExists(atPath: dir.appendingPathComponent(attached!).path) && near(store.cardImageData(store.items[0]), green)
+              && fileThumbs().count == 3, "повтор с новой миниатюрой: она заменила прежнюю, прежний файл удалён (\(fileThumbs().count))")
+        store.ingest(snapshot([old], nil))
+        check(store.items[0].thumbnailFile == refreshed && store.items.count == before, "повтор без миниатюры: прежняя остаётся")
+        // Миниатюра по кнопке опоздала: у записи уже есть своя. Лишний файл убран, своя на месте.
+        let late = ClipboardStore.fileThumbnailPrefix + UUID().uuidString + ".bin"
+        try! Data("опоздала".utf8).write(to: dir.appendingPathComponent(late))
+        store.applyThumbnail(.made(late), to: oldID)
+        check(store.items[0].thumbnailFile == refreshed && !fm.fileExists(atPath: dir.appendingPathComponent(late).path), "опоздавшая миниатюра убрана, своя осталась")
+
+        // Удаление, обрезка по лимиту и «Очистить».
+        store.delete(oldID)
+        check(fileThumbs().count == 2 && !fm.fileExists(atPath: dir.appendingPathComponent(refreshed!).path), "удаление записи удаляет миниатюру файла")
+        for index in 0..<12 { store.ingest(snapshot([free.appendingPathComponent("файл-\(index).png").path], thumb)) }
+        check(store.items.count == 10 && fileThumbs().count == 10, "лимит 10: у вытесненных миниатюры файлов удалены (\(fileThumbs().count))")
+        let space = store.addSpace(name: "Оставить", colorID: "red")
+        store.pin(store.items[0].id, to: space.id)
+        store.clearHistory()
+        check(fileThumbs().count == 1, "«Очистить» удаляет миниатюры файлов истории, у закреплённой остаётся")
+
+        // Уборка: сирота, о которой индекс не знал при открытии, уходит; живая и записанная после открытия остаются.
+        let live = store.items[0].thumbnailFile!
+        let orphan = ClipboardStore.fileThumbnailPrefix + UUID().uuidString + ".bin"
+        try! Data("сирота".utf8).write(to: dir.appendingPathComponent(orphan))
+        try! Data("сирота картинки".utf8).write(to: dir.appendingPathComponent("fit-сирота.bin"))
+        let reopened = ClipboardStore(directory: dir, key: key, limit: 10)
+        reopened.ingest(snapshot([free.appendingPathComponent("после открытия.png").path], thumb))
+        let fresh = reopened.items[0].thumbnailFile!
+        ClipThumbnailBackfill(store: reopened).run(reopened.itemsWithoutThumbnail) { reopened.applyThumbnail($1, to: $0) }
+        let left = Set(fileThumbs())
+        check(!left.contains(orphan) && !fm.fileExists(atPath: dir.appendingPathComponent("fit-сирота.bin").path), "уборка: сирота-миниатюра файла и сирота картинки убраны")
+        check(left.contains(live) && left.contains(fresh), "уборка не трогает миниатюру живой записи и записанную после открытия")
+        // Есть отложенная история: её миниатюры могли остаться в каталоге, уборка файловые не трогает.
+        let kept = ClipboardStore.fileThumbnailPrefix + UUID().uuidString + ".bin"
+        try! Data("чужая".utf8).write(to: dir.appendingPathComponent(kept))
+        try! Data("отложенный".utf8).write(to: dir.appendingPathComponent("index-unreadable-2026-11-16-120000.bin"))
+        let withAside = ClipboardStore(directory: dir, key: key, limit: 10)
+        withAside.removeOrphanThumbnails()
+        check(fm.fileExists(atPath: dir.appendingPathComponent(kept).path) && Set(fileThumbs()).isSuperset(of: [live, fresh]),
+              "отложенная история в каталоге: миниатюры файлов не трогаются")
+    }
+
+    // (8) Без миниатюры: битый значок, пропавший файл миниатюры — не падает, карточке нечего, как раньше.
+    do {
+        let probe = Probe()
+        let garbage = Data((0..<4000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+        let broken = ClipboardPasteboard.snapshot(of: finderBoard([(desktopShot, [("com.apple.icns", garbage), ("public.tiff", Data("TIFF".utf8))])]), files: access(probe))
+        check(broken.filePaths == [desktopShot] && broken.fileThumbnail == nil && probe.opened.isEmpty, "битый значок, файл на Рабочем столе: миниатюры нет, файл не открыт")
+        let freeBroken = ClipboardPasteboard.snapshot(of: finderBoard([(freeShot, [("com.apple.icns", garbage)])]), files: access(probe))
+        check(near(freeBroken.fileThumbnail, blue) && probe.opened.count == 1, "битый значок, файл во временной папке: миниатюра из файла")
+        let store = ClipboardStore(directory: base.appendingPathComponent("история-без"), key: key)
+        check(store.ingest(broken) && store.items[0].thumbnailFile == nil && store.cardImageData(store.items[0]) == nil, "запись без миниатюры: карточке нечего")
+        let oldStyle = ClipItem(id: UUID(), hash: "x", kind: .file, filePaths: ["/tmp/a.png"], date: Date())
+        check(store.cardImageData(oldStyle) == nil, "запись старого индекса без миниатюры: не падает")
+        store.ingest(ClipSnapshot(types: [], filePaths: [freeShot], fileThumbnail: freeBroken.fileThumbnail))
+        try! fm.removeItem(at: base.appendingPathComponent("история-без").appendingPathComponent(store.items[0].thumbnailFile!))
+        check(store.cardImageData(store.items[0]) == nil, "файл миниатюры пропал: карточке нечего, не падает")
+        let tooBig = ClipboardStore(directory: base.appendingPathComponent("история-предел"), key: key)
+        check(tooBig.ingest(ClipSnapshot(types: [], filePaths: [freeShot], fileThumbnail: Data(count: ClipThumbnail.fileMaxBytes + 1)))
+              && tooBig.items[0].thumbnailFile == nil, "миниатюра сверх 40 КБ не пишется, запись остаётся")
+    }
+
+    // (9) Доделка записей-файлов: только то, что читается без нажатия. Без флага Рабочий стол, Документы и Загрузки
+    // не открываются и не разбираются; с флагом — ровно эта папка. Отказ macOS снимает папку до конца прохода.
+    do {
+        let dir = base.appendingPathComponent("история-доделка")
+        let store = ClipboardStore(directory: dir, key: key, limit: 100)
+        let missing = free.appendingPathComponent("пропал.png").path
+        let deskTwo = home.appendingPathComponent("Desktop/второй.png").path
+        try! shot.write(to: URL(fileURLWithPath: deskTwo))
+        let paths = [missing, inHome("Library/Caches"), free.appendingPathComponent("отчёт.pdf").path, downloadsShot, documentsShot, deskTwo, desktopShot, freeShot]
+        for path in paths { store.ingest(ClipSnapshot(types: ["public.file-url"], filePaths: [path])) }
+        func id(_ path: String) -> UUID { store.items.first { $0.filePaths == [path] }!.id }
+        func pending(_ granted: Set<ClipAskFolder>) -> [UUID] { store.itemsWithoutThumbnail(files: access(Probe(), granted: granted)).map(\.id) }
+        check(pending([]) == [id(freeShot), id(missing)] && store.itemsWithoutThumbnail.isEmpty,
+              "в очереди без флага только свободные файлы-картинки, по порядку списка; без доступа к файлам — ни одного")
+        let none = Probe()
+        var outcomes: [UUID: ClipThumbnailOutcome] = [:]
+        // В очередь подложены и записи защищённых папок: доделка сама их пропускает, а не только очередь их не берёт.
+        let everything = store.items.filter { $0.kind == .file }
+        ClipThumbnailBackfill(store: store, files: access(none)).run(everything) { outcomes[$0] = $1; store.applyThumbnail($1, to: $0) }
+        check(inside(none.opened + none.links, everyProtected).isEmpty, "без флага доделка в защищённые папки ни шагу: \(inside(none.opened + none.links, everyProtected))")
+        check(store.items.first { $0.id == id(freeShot) }?.thumbnailFile != nil && outcomes[id(missing)] == .broken
+              && store.items.first { $0.id == id(missing) }?.thumbnailFailed == true, "свободный файл доделан, пропавший помечен и больше не пробуется")
+        let desk = Probe()
+        check(pending([.desktop]) == [id(desktopShot), id(deskTwo)], "с флагом Рабочего стола в очереди его записи")
+        ClipThumbnailBackfill(store: store, files: access(desk, granted: [.desktop])).run(store.itemsWithoutThumbnail(files: access(Probe(), granted: [.desktop]))) {
+            store.applyThumbnail($1, to: $0)
+        }
+        check(Set(desk.opened) == [desktopShot, deskTwo] && inside(desk.opened + desk.links, ["Documents", "Downloads", "Library"]).isEmpty
+              && store.items.first { $0.id == id(documentsShot) }?.thumbnailFile == nil,
+              "доделка с флагом Рабочего стола: открыты только его файлы, Документы и Загрузки не тронуты")
+        // Отказ: первая запись Документов получает «нет доступа», вторую доделка уже не пробует, пометок нет.
+        let docTwo = home.appendingPathComponent("Documents/второй.png").path
+        try! shot.write(to: URL(fileURLWithPath: docTwo))
+        store.ingest(ClipSnapshot(types: ["public.file-url"], filePaths: [docTwo]))
+        let refused = Probe()
+        refused.deny = [home.appendingPathComponent("Documents").path]
+        var denials: [ClipThumbnailOutcome] = []
+        ClipThumbnailBackfill(store: store, files: access(refused, granted: [.documents])).run(store.itemsWithoutThumbnail(files: access(Probe(), granted: [.documents]))) {
+            if case .denied = $1 { denials.append($1) }
+            store.applyThumbnail($1, to: $0)
+        }
+        check(denials == [.denied(.documents)] && refused.opened.count == 1
+              && store.items.filter { ($0.filePaths?.first ?? "").contains("/Documents/") }.allSatisfy { $0.thumbnailFile == nil && $0.thumbnailFailed == nil },
+              "отказ macOS: одна попытка, остальные записи папки не пробуются, пометок «не получилось» нет")
+    }
+}
+
+// 26. Миграция: миниатюры прежнего формата (`thumb-`, `filethumb-`, выпуск 1.4.2 и дев-сборки) обрезаны до пропорции
+// карточки. Индекс о них забывает, файлы уходят, картинкам доделка делает вписанные из полного файла, карточка до того
+// берёт полный файл. Записи-файлы остаются без миниатюры: источника у них нет, кроме самого файла.
+do {
+    let fm = FileManager.default
+    let dir = root.appendingPathComponent("migration")
+    func wide() -> Data {
+        let context = CGContext(data: nil, width: 3000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 3000, height: 1000))
+        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }
+    let png = wide()
+    var store = ClipboardStore(directory: dir, key: key, limit: 10)
+    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png, imageThumbnail: ClipThumbnail.make(from: png)))
+    store.ingest(ClipSnapshot(types: ["public.file-url"], filePaths: ["/tmp/выдуманный снимок.png"], fileThumbnail: ClipThumbnail.make(from: png, maxBytes: ClipThumbnail.fileMaxBytes)))
+    let image = store.items[1], file = store.items[0]
+    // Как оставила версия с обрезкой: те же файлы под прежними именами и прежние имена в индексе.
+    let oldImage = "thumb-" + image.thumbnailFile!.dropFirst("fit-".count)
+    let oldFile = "filethumb-" + file.thumbnailFile!.dropFirst("filefit-".count)
+    try! fm.moveItem(at: dir.appendingPathComponent(image.thumbnailFile!), to: dir.appendingPathComponent(oldImage))
+    try! fm.moveItem(at: dir.appendingPathComponent(file.thumbnailFile!), to: dir.appendingPathComponent(oldFile))
+    let indexURL = dir.appendingPathComponent("index.bin")
+    var plain = String(data: try! AES.GCM.open(AES.GCM.SealedBox(combined: Data(contentsOf: indexURL)), using: key), encoding: .utf8)!
+    plain = plain.replacingOccurrences(of: image.thumbnailFile!, with: oldImage).replacingOccurrences(of: file.thumbnailFile!, with: oldFile)
+    try! AES.GCM.seal(Data(plain.utf8), using: key).combined!.write(to: indexURL)
+    check(plain.contains(oldImage) && plain.contains(oldFile), "индекс как у прежней версии: миниатюры thumb- и filethumb-")
+
+    store = ClipboardStore(directory: dir, key: key, limit: 10)
+    let reImage = store.items.first { $0.id == image.id }!, reFile = store.items.first { $0.id == file.id }!
+    check(reImage.thumbnailFile == nil && reFile.thumbnailFile == nil, "обрезанные миниатюры забыты при чтении индекса")
+    check(store.cardImageData(reImage) == png && store.cardImageData(reFile) == nil, "до доделки карточке картинки полный файл, а не обрезок; записи-файлу нечего")
+    check(store.itemsWithoutThumbnail.map(\.id) == [image.id], "картинка снова в очереди доделки")
+    ClipThumbnailBackfill(store: store).run(store.itemsWithoutThumbnail) { store.applyThumbnail($1, to: $0) }
+    store.saveThumbnails()
+    let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+    check(!names.contains(oldImage) && !names.contains(oldFile) && !names.contains { ClipboardStore.isCropped($0) }, "файлы прежнего формата убраны: \(names.filter(ClipboardStore.isCropped))")
+    let rebuilt = ClipboardStore(directory: dir, key: key, limit: 10).items.first { $0.id == image.id }
+    let thumb = rebuilt.flatMap { store.cardImageData($0) }
+    let decoded = thumb.flatMap { CGImageSourceCreateWithData($0 as CFData, nil) }.flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+    check(rebuilt?.thumbnailFile == "fit-\(image.id.uuidString).bin" && decoded?.width == 533 && abs((decoded?.height ?? 0) - 178) <= 1,
+          "доделка сделала вписанную миниатюру 3000×1000 → \(decoded?.width ?? 0)×\(decoded?.height ?? 0)")
+    let after = String(data: try! AES.GCM.open(AES.GCM.SealedBox(combined: Data(contentsOf: indexURL)), using: key), encoding: .utf8)!
+    check(!after.contains("thumb-") && !after.contains("filethumb-"), "в индексе прежних имён не осталось")
+    // Отложенная история не мешает: обрезанное ей тоже не покажут.
+    try! Data("обрезок".utf8).write(to: dir.appendingPathComponent("thumb-старый.bin"))
+    try! Data("отложенный".utf8).write(to: dir.appendingPathComponent("index-unreadable-2026-11-16-120000.bin"))
+    ClipboardStore(directory: dir, key: key, limit: 10).removeOrphanThumbnails()
+    check(!fm.fileExists(atPath: dir.appendingPathComponent("thumb-старый.bin").path), "обрезанные убираются и при отложенной истории")
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")

@@ -136,6 +136,22 @@ final class ClipboardPanelModel: ObservableObject {
 
     /// Картинка для карточки: миниатюра, пока её нет — полный файл.
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
+    /// Байты миниатюры файла-картинки. Расшифровка короткая и идёт здесь, разжатие — вне главного потока (`loadFilePicture`).
+    var filePictureData: (ClipItem) -> Data? = { _ in nil }
+    /// Панель на экране: только тогда миниатюры файлов расшифровываются. Прогрев и скрытая панель их не трогают.
+    var picturesAllowed = false
+    /// Когда панель доедет (время работы системы, с): раньше миниатюры файлов не расшифровываются и не разжимаются.
+    var picturesAfter: TimeInterval = 0
+    /// Меняется с каждым `forgetImages`: разжатое к уже ушедшей панели в кэш не кладётся.
+    private var imagesEpoch = 0
+    /// «Спрашиваемые» папки, доступ к которым уже дан: берутся из настроек при каждом показе.
+    var grantedFolders: Set<ClipAskFolder> = []
+    /// Как понять по тексту пути, где лежит файл записи. Стенд подставляет свой дом.
+    var protectedPaths: ClipProtectedPaths = .system
+    /// Что вышло у кнопок «Показать превью». Только в памяти, переживает уход панели.
+    let filePreviews = ClipFilePreviews()
+    /// Прочитать файл записи с доступом к его папке; ответ приходит в `filePreviews`.
+    var onFilePreview: (ClipItem, ClipAskFolder) -> Void = { _, _ in }
     /// Как достать сохранённые байты картинки для переноса наружу. Возвращает загрузчик: сама расшифровка только по запросу программы.
     var imageBytes: (ClipItem) -> @Sendable () -> Data? = { _ in { nil } }
     var onPaste: (ClipItem) -> Void = { _ in }
@@ -352,7 +368,52 @@ final class ClipboardPanelModel: ObservableObject {
         return image
     }
 
-    func forgetImages() { images.removeAllObjects() }
+    func forgetImages() {
+        images.removeAllObjects()
+        imagesEpoch += 1
+    }
+
+    /// Миниатюра файла-картинки, уже разжатая для этого показа; nil — ещё нет.
+    func readyPicture(_ item: ClipItem) -> NSImage? { images.object(forKey: item.id as NSUUID) }
+
+    /// Папка, доступ к которой спросит кнопка на карточке: файл-картинка записи в «спрашиваемой» папке без флага.
+    /// Только по тексту пути, диск не трогается. nil — кнопки нет.
+    func askFolder(_ item: ClipItem) -> ClipAskFolder? {
+        guard item.kind == .file, item.thumbnailFile == nil, item.thumbnailFailed != true, let paths = item.filePaths,
+              let shown = ClipFileThumbnail.shownIndex(in: paths),
+              case .ask(let folder) = protectedPaths.place(path: paths[shown]), !grantedFolders.contains(folder) else { return nil }
+        return folder
+    }
+
+    /// Нажата кнопка «Показать превью». Повторное нажатие, пока идёт чтение, ничего не делает.
+    func requestFilePreview(_ item: ClipItem) {
+        guard let folder = askFolder(item), filePreviews.states[item.id] != .reading else { return }
+        filePreviews.states[item.id] = .reading
+        onFilePreview(item, folder)
+    }
+
+    /// Разжать миниатюру файла-картинки вне главного потока и положить в кэш показа. Через `NSImage(data:)` цвета
+    /// переводились бы при выводе кадра, ~2 мс на карточку, а разжатие и перевод на главном потоке стоили бы ~4 мс
+    /// (замер bench47-after2). Начинается, когда панель доехала: расшифровка и разжатие в первых кадрах задерживали
+    /// их на несколько мс даже вне главного потока. До миниатюры на её месте фон карточки. true — миниатюра в кэше.
+    func loadFilePicture(_ item: ClipItem) async -> Bool {
+        let key = item.id as NSUUID
+        if images.object(forKey: key) != nil { return true }
+        guard picturesAllowed else { return false }
+        let epoch = imagesEpoch
+        let wait = picturesAfter - ProcessInfo.processInfo.systemUptime
+        if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
+        guard epoch == imagesEpoch, picturesAllowed else { return false }
+        if images.object(forKey: key) != nil { return true }
+        guard let data = filePictureData(item) else { return false }
+        let space = ClipScreenPicture.Space(value: NSScreen.main?.colorSpace?.cgColorSpace)
+        let picture = await withCheckedContinuation { (done: CheckedContinuation<ClipScreenPicture?, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async { done.resume(returning: ClipScreenPicture(data, space: space)) }
+        }
+        guard epoch == imagesEpoch, picturesAllowed, let picture else { return false }
+        images.setObject(NSImage(cgImage: picture.image, size: picture.size), forKey: key)
+        return true
+    }
 
     /// Панель закрывается: правка сохраняется, как при клике мимо, открытое на время снова скрыто.
     func panelClosing() {
@@ -1320,10 +1381,40 @@ final class ClipboardPanelHost {
 
     static let showSpeedKey = "Clipboard.ShowSpeed"
     static let hideSpeedKey = "Clipboard.HideSpeed"
+    /// Скрывать окно панели на снимках и записи экрана. По умолчанию да.
+    static let hideFromCaptureKey = "Clipboard.HidePanelFromCapture"
+
+    /// Нет значения или оно не Bool — скрывать: история не должна попасть в скриншот по ошибке настройки.
+    static var hidesFromCapture: Bool { (Kit.defaults.object(forKey: hideFromCaptureKey) as? Bool) ?? true }
+    /// `.none` — окна нет на снимках, записи и демонстрации экрана; `.readOnly` — видно, как обычное окно.
+    static var captureSharing: NSWindow.SharingType { hidesFromCapture ? .none : .readOnly }
+
+    /// Подписка на смену настроек: прогретое или открытое окно меняется сразу, без перепоказа.
+    nonisolated(unsafe) private var settingsObserver: NSObjectProtocol?
+
+    init() {
+        settingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: Kit.defaults,
+                                                                  queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyCaptureSharing() }
+        }
+    }
+
+    deinit {
+        if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+    }
+
+    /// Значение настройки на окно панели, какое оно сейчас есть (и окно стенда из `panelMaker`).
+    func applyCaptureSharing() {
+        let sharing = Self.captureSharing
+        if let panel, panel.sharingType != sharing { panel.sharingType = sharing }
+    }
+
     /// 0 — без анимации, как и при «Уменьшении движения», которое важнее настройки.
     private var showDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.showSpeedKey)).duration }
     private var hideDuration: Double { reducesMotion() ? 0 : ClipPanelSpeed.parse(Kit.defaults.string(forKey: Self.hideSpeedKey)).duration }
     static let slideDistance: CGFloat = 40
+    /// Пауза после конца движения до миниатюр файлов: последний кадр движения уже выведен.
+    static let picturesPause: TimeInterval = 0.03
 
     private var panel: NSPanel?
     private var model: ClipboardPanelModel?
@@ -1361,6 +1452,7 @@ final class ClipboardPanelHost {
         model.spaces = controller.spaces
         model.storeError = controller.storeError
         model.limit = controller.limit
+        model.grantedFolders = controller.grantedFolders
         return model
     }
 
@@ -1380,6 +1472,7 @@ final class ClipboardPanelHost {
         defer { model.imageLoader = loader }
         let panel = panelMaker(model)
         self.panel = panel
+        applyCaptureSharing()
         panel.ignoresMouseEvents = true
         panel.alphaValue = 0
         // Тот же кадр, с которого начинает показ: тогда показ только сдвигает окно, без новой раскладки.
@@ -1398,11 +1491,14 @@ final class ClipboardPanelHost {
     @discardableResult
     func present(_ model: ClipboardPanelModel) -> NSPanel {
         self.model = model
+        model.picturesAllowed = true
         model.reset()
         model.refreshTheme()
 
         let panel = self.panel ?? panelMaker(model)
         self.panel = panel
+        // Настройку могли поменять, пока окна не было на экране: читается при каждом показе.
+        applyCaptureSharing()
         model.pointer = { [weak panel] in panel.map { Self.pointInPanel(NSEvent.mouseLocation, frame: $0.frame) } }
         let frame = standFrame ?? Self.frameOnCursorScreen()
         // Открыли посреди ухода на том же экране: панель едет обратно с того места, где она сейчас, без скачка.
@@ -1424,6 +1520,8 @@ final class ClipboardPanelHost {
         // Первый показ рисуется долго: пусть это случится при нулевой альфе, отсчёт движения начнётся после.
         panel.displayIfNeeded()
         let duration = showDuration
+        // Миниатюры файлов — после того, как панель доехала, и ещё через кадр-другой.
+        model.picturesAfter = ProcessInfo.processInfo.systemUptime + duration + Self.picturesPause
         if duration == 0 {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
@@ -1500,6 +1598,7 @@ final class ClipboardPanelHost {
         panel.orderOut(nil)
         panel.alphaValue = 0
         // Расшифрованным картинкам незачем лежать в памяти, пока панели нет.
+        model?.picturesAllowed = false
         model?.forgetImages()
         if forgetsItemsOnLeave { dropItems() }
         let callbacks = leftCallbacks
@@ -1533,6 +1632,7 @@ final class ClipboardPanelHost {
         // Карточке хватает миниатюры: полный снимок разжимался бы на главном потоке при каждом открытии.
         // Полный файл нужен только переносу наружу и вставке, они берут его сами и только по запросу.
         model.imageLoader = { [weak controller] item in controller?.cardImageData(item).flatMap { NSImage(data: $0) } }
+        model.filePictureData = { [weak controller] item in controller?.cardImageData(item) }
         model.imageBytes = { [weak controller] item in
             // Запрос придёт не обязательно на главном потоке. Хранилищу это не мешает: чтение файла и ключ неизменяемы.
             nonisolated(unsafe) let store = controller?.store
@@ -1581,6 +1681,13 @@ final class ClipboardPanelHost {
             self?.refresh(controller)
         }
         model.onClose = { [weak self] in self?.hide() }
+        // Ответ приходит и к ушедшей панели: окно macOS могло её скрыть. Модель та же, миниатюра будет при следующем показе.
+        model.onFilePreview = { [weak self, weak controller, weak model] item, folder in
+            controller?.requestFilePreview(item, folder: folder) { result in
+                model?.filePreviews.finish(item.id, result)
+                self?.refresh(controller)
+            }
+        }
         if let opener = settingsOpener {
             model.onOpenSettings = { [weak self] in
                 // Окно настроек активирует утилиту: панель уходит раньше.
@@ -1595,6 +1702,7 @@ final class ClipboardPanelHost {
         guard let controller, let model else { return }
         model.allItems = controller.items
         model.spaces = controller.spaces
+        model.grantedFolders = controller.grantedFolders
         model.selected = min(model.selected, max(0, model.visible.count - 1))
     }
 
@@ -1610,8 +1718,9 @@ final class ClipboardPanelHost {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.appearance = NSAppearance(named: .darkAqua)
-        // Панель показывает содержимое буфера открытым текстом: при показе экрана её не видно.
-        panel.sharingType = .none
+        // Панель показывает содержимое буфера открытым текстом: при показе экрана её не видно, пока автор не выключит
+        // это в настройках («Скрывать панель на снимках и записи экрана»).
+        panel.sharingType = captureSharing
 
         let glass = NSVisualEffectView()
         glass.material = .hudWindow

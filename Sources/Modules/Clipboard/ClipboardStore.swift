@@ -135,7 +135,9 @@ enum ClipReorder {
 /// История буфера и пространства. Всё на диске зашифровано AES-GCM; без ключа из Keychain это шум.
 ///
 /// Индекс (`index.bin`) — JSON со всеми записями, картинки — отдельные файлы `img-<id>.bin`, их миниатюры для карточек
-/// панели — `thumb-<id>.bin` тем же ключом.
+/// панели — `fit-<id>.bin` тем же ключом. Миниатюры скопированных файлов-картинок — `filefit-<случайный номер>.bin`,
+/// тоже тем же ключом; их знает только запись. Прежние `thumb-` и `filethumb-` (выпуск 1.4.2 и дев-сборки) обрезаны
+/// до пропорции карточки: индекс о них забывает при чтении, файлы убирает уборка, картинкам миниатюры делает доделка.
 /// Не привязан к главному потоку и к AppKit, чтобы проверяться отдельным тестом.
 final class ClipboardStore {
     private(set) var items: [ClipItem] = []
@@ -153,6 +155,14 @@ final class ClipboardStore {
     /// Доделанные миниатюры, ещё не записанные в индекс: он пишется пачками, а не после каждой картинки.
     private var unsavedThumbnails = 0
     static let thumbnailSaveBatch = 20
+    /// Миниатюры файлов, о которых индекс не знал при открытии: их уберёт `removeOrphanThumbnails`. Считается один раз
+    /// в `load` и потом не меняется, поэтому читается и с очереди доделки; записанное позже сюда не попадает.
+    private var staleFileThumbnails: [String] = []
+    /// Миниатюры вписанные: картинка целиком. Префикс и есть признак формата.
+    static let thumbnailPrefix = "fit-"
+    static let fileThumbnailPrefix = "filefit-"
+    /// Миниатюры до вписывания, обрезанные до пропорции карточки. Целыми их не показываем.
+    static let croppedPrefixes = ["thumb-", "filethumb-"]
 
     private struct Index: Codable {
         var items: [ClipItem]
@@ -235,10 +245,17 @@ final class ClipboardStore {
             existing.date = now
             existing.sourceBundleID = item.sourceBundleID ?? existing.sourceBundleID
             existing.sourceName = item.sourceName ?? existing.sourceName
+            // Файл скопировали снова: миниатюра свежая (по тому же пути мог лечь другой снимок), а у записи старше миниатюр
+            // её не было вовсе. Нечем заменить — прежняя остаётся.
+            if existing.kind == .file, let thumbnail = snap.fileThumbnail, let name = writeFileThumbnail(thumbnail) {
+                if let old = existing.thumbnailFile, Self.isFileThumbnail(old) { try? fm.removeItem(at: directory.appendingPathComponent(old)) }
+                existing.thumbnailFile = name
+            }
             items.insert(existing, at: 0)
             save()
             return true
         }
+        if item.kind == .file, let thumbnail = snap.fileThumbnail { item.thumbnailFile = writeFileThumbnail(thumbnail) }
         if let png {
             let file = "img-\(item.id.uuidString).bin"
             guard writeEncrypted(png, name: file) else { return false }
@@ -454,7 +471,8 @@ final class ClipboardStore {
     }
 
     /// Картинка для карточки панели: миниатюра, а пока её нет — полный файл, как раньше. Запись берётся текущая:
-    /// доделка могла дописать миниатюру после того, как панель взяла свою копию списка.
+    /// доделка могла дописать миниатюру после того, как панель взяла свою копию списка. У записи-файла только миниатюра:
+    /// полного файла у неё в истории нет, а сам файл здесь не читается.
     func cardImageData(_ item: ClipItem) -> Data? {
         let current = items.first { $0.id == item.id } ?? item
         if let file = current.thumbnailFile, let thumbnail = readEncrypted(name: file) { return thumbnail }
@@ -463,20 +481,43 @@ final class ClipboardStore {
 
     // MARK: Миниатюры
 
-    /// Миниатюра лежит рядом с картинкой под её именем: `img-<id>.bin` → `thumb-<id>.bin`. По имени картинки её находят
+    /// Миниатюра лежит рядом с картинкой под её именем: `img-<id>.bin` → `fit-<id>.bin`. По имени картинки её находят
     /// удаление и уборка сирот, даже если индекс о ней ещё не знает.
     static func thumbnailName(for imageFile: String) -> String {
-        "thumb-" + (imageFile.hasPrefix("img-") ? String(imageFile.dropFirst(4)) : imageFile)
+        thumbnailPrefix + (imageFile.hasPrefix("img-") ? String(imageFile.dropFirst(4)) : imageFile)
     }
 
     /// Картинки, которым миниатюра ещё нужна, по порядку списка: сначала новые, их увидят первыми.
-    var itemsWithoutThumbnail: [ClipItem] {
-        items.filter { $0.kind == .image && $0.imageFile != nil && $0.thumbnailFile == nil && $0.thumbnailFailed != true }
+    var itemsWithoutThumbnail: [ClipItem] { itemsWithoutThumbnail(files: nil) }
+
+    /// То же и записи файлов-картинок, чей файл читается без нажатия: вне защищённых папок или в «спрашиваемой»,
+    /// доступ к которой уже дан. Только по тексту пути, диск не трогается.
+    func itemsWithoutThumbnail(files: ClipFileAccess?) -> [ClipItem] {
+        items.filter { item in
+            guard item.thumbnailFile == nil, item.thumbnailFailed != true else { return false }
+            switch item.kind {
+            case .image: return item.imageFile != nil
+            case .file:
+                guard let files, let paths = item.filePaths, let shown = ClipFileThumbnail.shownIndex(in: paths) else { return false }
+                return files.readsWithoutAsking(paths[shown])
+            case .text, .link: return false
+            }
+        }
     }
 
-    /// Одна картинка: чтение, расшифровка, уменьшение, шифрование и запись миниатюры. Идёт вне главного потока
+    /// Одна запись: картинка (чтение, расшифровка, уменьшение) или файл-картинка (через `files`, `asking` — папка,
+    /// доступ к которой даёт нажатие кнопки), потом шифрование и запись миниатюры. Идёт вне главного потока
     /// и трогает только неизменяемое (ключ, каталог), список записей не читает.
-    func makeThumbnail(for item: ClipItem) -> ClipThumbnailOutcome {
+    func makeThumbnail(for item: ClipItem, files: ClipFileAccess? = nil, asking: ClipAskFolder? = nil) -> ClipThumbnailOutcome {
+        if item.kind == .file {
+            guard let files, let paths = item.filePaths, let shown = ClipFileThumbnail.shownIndex(in: paths) else { return .broken }
+            switch ClipFileThumbnail.make(path: paths[shown], files: files, asking: asking) {
+            case .made(let thumbnail): return writeFileThumbnail(thumbnail).map(ClipThumbnailOutcome.made) ?? .notWritten
+            case .needsAccess: return .notWritten
+            case .denied(let folder): return .denied(folder)
+            case .unavailable: return .broken
+            }
+        }
         guard let file = item.imageFile, let thumbnail = imageData(item).flatMap({ ClipThumbnail.make(from: $0) }) else { return .broken }
         let name = Self.thumbnailName(for: file)
         return writeEncrypted(thumbnail, name: name) ? .made(name) : .notWritten
@@ -489,11 +530,17 @@ final class ClipboardStore {
             if case .made(let name) = outcome { try? fm.removeItem(at: directory.appendingPathComponent(name)) }
             return
         }
-        guard items[index].thumbnailFile == nil, items[index].thumbnailFailed != true else { return }
+        guard items[index].thumbnailFile == nil, items[index].thumbnailFailed != true else {
+            // Миниатюра появилась раньше (повторное копирование): новый файл файловой миниатюры лишний.
+            if case .made(let name) = outcome, name != items[index].thumbnailFile, Self.isFileThumbnail(name) {
+                try? fm.removeItem(at: directory.appendingPathComponent(name))
+            }
+            return
+        }
         switch outcome {
         case .made(let name): items[index].thumbnailFile = name
         case .broken: items[index].thumbnailFailed = true
-        case .notWritten: return
+        case .notWritten, .denied: return
         }
         unsavedThumbnails += 1
         if unsavedThumbnails >= Self.thumbnailSaveBatch { save() }
@@ -506,12 +553,58 @@ final class ClipboardStore {
 
     /// Миниатюры без своей картинки: запись удалили, пока миниатюра делалась, или утилита закрылась в этот момент.
     /// Миниатюры отложенной истории не трогаются: их картинки на месте.
+    /// Миниатюре файла пары по имени нет, у записи-файла картинки нет. Уходят те, о которых индекс не знал при открытии:
+    /// запись удалили, а файл не убрался, или утилита закрылась между записью миниатюры и индекса.
+    /// Обрезанные миниатюры прежнего формата уходят все, и у отложенной истории: показывать их эта версия не станет.
     func removeOrphanThumbnails() {
         let names = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
         let present = Set(names)
-        for name in names where name.hasPrefix("thumb-") && !present.contains("img-" + name.dropFirst(6)) {
+        let prefix = Self.thumbnailPrefix
+        for name in names where name.hasPrefix(prefix) && !present.contains("img-" + name.dropFirst(prefix.count)) {
             try? fm.removeItem(at: directory.appendingPathComponent(name))
         }
+        for name in names where Self.isCropped(name) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+        for name in staleFileThumbnails where present.contains(name) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
+    /// Миниатюра прежнего формата, обрезанная до пропорции карточки.
+    static func isCropped(_ name: String) -> Bool {
+        croppedPrefixes.contains { name.hasPrefix($0) } && name.hasSuffix(".bin") && !name.contains("/")
+    }
+
+    /// Признак формата в имени: миниатюры прежнего формата и чужие имена индекс забывает, запись остаётся без миниатюры.
+    /// У картинки её сделает доделка из полного файла, у файла — следующее копирование или доделка, если файл читается.
+    private func forgetCroppedThumbnails() {
+        for index in items.indices {
+            guard let name = items[index].thumbnailFile else { continue }
+            let current = items[index].imageFile.map(Self.thumbnailName) == name || Self.isFileThumbnail(name)
+            if !current { items[index].thumbnailFile = nil }
+        }
+    }
+
+    static func isFileThumbnail(_ name: String) -> Bool {
+        name.hasPrefix(fileThumbnailPrefix) && name.hasSuffix(".bin") && !name.contains("/")
+    }
+
+    /// Миниатюра файла-картинки под новым случайным именем: имя записи не повторяет, поэтому уборка по списку открытия
+    /// не заденет миниатюру, записанную позже. nil — не влезла в предел или не записалась: карточка со списком имён.
+    private func writeFileThumbnail(_ data: Data) -> String? {
+        guard data.count <= ClipThumbnail.fileMaxBytes else { return nil }
+        let name = Self.fileThumbnailPrefix + UUID().uuidString + ".bin"
+        return writeEncrypted(data, name: name) ? name : nil
+    }
+
+    /// Миниатюры файлов в каталоге, которых не знает только что прочитанный индекс. Есть отложенная история — не считаем:
+    /// среди них могут быть её миниатюры.
+    private func findStaleFileThumbnails() -> [String] {
+        let names = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
+        guard !names.contains(where: { $0.hasPrefix("index-unreadable-") }) else { return [] }
+        let known = Set(items.compactMap(\.thumbnailFile))
+        return names.filter { Self.isFileThumbnail($0) && !known.contains($0) }
     }
 
     // MARK: Диск
@@ -542,6 +635,8 @@ final class ClipboardStore {
         items = index.items
         spaces = index.spaces
         settleRanks()
+        forgetCroppedThumbnails()
+        staleFileThumbnails = findStaleFileThumbnails()
     }
 
     /// Индекс старого формата мест не знает. Закреплённые встают левее уже размеченных, в порядке списка: сначала новые.
@@ -611,6 +706,9 @@ final class ClipboardStore {
     }
 
     private func removeFiles(_ item: ClipItem) {
+        if item.kind == .file, let thumbnail = item.thumbnailFile, Self.isFileThumbnail(thumbnail) {
+            try? fm.removeItem(at: directory.appendingPathComponent(thumbnail))
+        }
         guard let file = item.imageFile else { return }
         try? fm.removeItem(at: directory.appendingPathComponent(file))
         // По имени картинки, а не по полю: миниатюру могла уже записать доделка, которую индекс ещё не применил.
@@ -634,25 +732,34 @@ final class ClipboardStore {
     }
 }
 
-/// Что вышло у доделки одной картинки.
+/// Что вышло у доделки одной записи.
 enum ClipThumbnailOutcome: Equatable, Sendable {
     /// Миниатюра записана в этот файл.
     case made(String)
-    /// Картинку не прочитать, не расшифровать или не разжать: запись помечается и больше не пробуется.
+    /// Картинку не прочитать, не расшифровать или не разжать, файла нет или он не картинка: запись помечается
+    /// и больше не пробуется.
     case broken
-    /// Миниатюра не записалась на диск: запись остаётся в очереди до следующего запуска.
+    /// Миниатюра не записалась на диск или папка не разрешена: запись остаётся в очереди до следующего запуска.
     case notWritten
+    /// macOS отказала в доступе к разрешённой раньше папке: запись остаётся как есть, утилита снимает флаг папки.
+    case denied(ClipAskFolder)
 }
 
-/// Доделка миниатюр у картинок, сохранённых до них. По одной: в памяти не больше одной расшифрованной картинки.
-/// Отмена смотрится между картинками; что не успели, остаётся без миниатюры и доделывается со следующего запуска.
+/// Доделка миниатюр у записей, сохранённых до них: картинок и файлов-картинок, которые читаются без нажатия.
+/// По одной: в памяти не больше одной расшифрованной картинки. Отмена смотрится между записями; что не успели,
+/// остаётся без миниатюры и доделывается со следующего запуска.
 final class ClipThumbnailBackfill: @unchecked Sendable {
     /// Здесь хранилище только читает картинку и пишет миниатюру. Список записей меняет `deliver` на своём потоке.
     private let store: ClipboardStore
+    /// Как читать файлы записей и к каким папкам доступ дан. nil — только картинки.
+    private let files: ClipFileAccess?
     private let lock = NSLock()
     private var cancelled = false
 
-    init(store: ClipboardStore) { self.store = store }
+    init(store: ClipboardStore, files: ClipFileAccess? = nil) {
+        self.store = store
+        self.files = files
+    }
 
     var isCancelled: Bool {
         lock.lock()
@@ -667,12 +774,18 @@ final class ClipThumbnailBackfill: @unchecked Sendable {
     }
 
     /// Идёт на фоновой очереди. `deliver` получает результат каждой картинки и переносит его на поток хранилища.
+    /// Отказ macOS по папке снимает её до конца прохода: остальные её записи не пробуются.
     func run(_ pending: [ClipItem], deliver: (UUID, ClipThumbnailOutcome) -> Void) {
         store.removeOrphanThumbnails()
+        var files = files
         for item in pending {
             guard !isCancelled else { return }
+            if item.kind == .file, let paths = item.filePaths, let shown = ClipFileThumbnail.shownIndex(in: paths),
+               files?.readsWithoutAsking(paths[shown]) != true { continue }
             // Своя граница освобождения на картинку: очередь GCD чистит её только в конце всей доделки.
-            deliver(item.id, autoreleasepool { store.makeThumbnail(for: item) })
+            let outcome = autoreleasepool { store.makeThumbnail(for: item, files: files) }
+            if case .denied(let folder) = outcome { files?.granted.remove(folder) }
+            deliver(item.id, outcome)
         }
     }
 }
