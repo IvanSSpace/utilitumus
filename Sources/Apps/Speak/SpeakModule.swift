@@ -44,7 +44,7 @@ final class SpeakModule: SatelliteModule {
     var setupSteps: [LinkSetupStep] {
         [LinkSetupStep(id: "speak.ax", title: "Универсальный доступ",
                        why: "Чтобы взять выделенный текст из программы. Без права работает меню «Службы»",
-                       icon: "hand.raised.fill", required: true, done: Kit.accessTrusted())]
+                       icon: "hand.raised.fill", required: false, done: Kit.accessTrusted())]
     }
 
     func performSetupStep(_ id: String) -> String? {

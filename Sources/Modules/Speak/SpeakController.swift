@@ -31,6 +31,8 @@ final class SpeakController: SpeakModel {
     private let hotKey: SpeakHotKeyBinding
     private let trusted: () -> Bool
     private let preferredLanguages: () -> [String]
+    /// Экран модуля в центре: нажали сочетание без Универсального доступа — там объяснено, как его дать.
+    private let openScreen: () -> Void
     private var isRunning = false
     private var hotKeySuspended = false
 
@@ -48,13 +50,15 @@ final class SpeakController: SpeakModel {
     private var session: Session?
 
     /// Зависимости по умолчанию настоящие. Ничего не регистрирует и не читает: работа только после `start`.
+    /// `openScreen` по умолчанию — просьба центру открыть страницу «Озвучки»; центр не запущен — просьба ждёт его запуска.
     init(synthesizer: SpeechSynthesizing? = nil, reader: SelectionReading? = nil, hotKey: SpeakHotKeyBinding? = nil,
-         trusted: (() -> Bool)? = nil, preferredLanguages: (() -> [String])? = nil) {
+         trusted: (() -> Bool)? = nil, preferredLanguages: (() -> [String])? = nil, openScreen: (() -> Void)? = nil) {
         self.synthesizer = synthesizer ?? AVSpeechSynthesizerAdapter()
         self.reader = reader ?? AXSelectionReader()
         self.hotKey = hotKey ?? CarbonSpeakHotKey()
         self.trusted = trusted ?? { Kit.accessTrusted() }
         self.preferredLanguages = preferredLanguages ?? { Locale.preferredLanguages }
+        self.openScreen = openScreen ?? { MenuBarIcon.requestOpen(.speak, hub: SatelliteHub.bundleURL) }
         let d = Kit.defaults
         speed = SpeakSpeed.stored(d.object(forKey: SpeakKeys.speed))
         pinnedVoices = d.dictionary(forKey: SpeakKeys.pinnedVoices) as? [String: String] ?? [:]
@@ -91,9 +95,10 @@ final class SpeakController: SpeakModel {
     }
 
     /// Строка статуса для утилиты. Чтение в ней не видно: о смене статуса узнают все на этом Mac.
+    /// Без Универсального доступа модуль работает через «Службы»: строка говорит, что не так, но не блокирует.
     func statusLine(passiveReason: String?) -> String {
         if let passiveReason { return passiveReason }
-        if !accessibilityTrusted { return "Нужен Универсальный доступ" }
+        if !accessibilityTrusted { return "Читает через меню «Службы»; для \(hotKeyLabel) нужен Универсальный доступ" }
         return "Читает выделенное по \(hotKeyLabel)"
     }
 
@@ -120,6 +125,7 @@ final class SpeakController: SpeakModel {
     // MARK: Чтение
 
     /// Нажали сочетание: читаем — оборвать, иначе прочитать выделенное.
+    /// Без Универсального доступа — сообщение и экран модуля в центре, по разу на нажатие.
     func hotKeyPressed() {
         guard isRunning, canStart else { return }
         if phase != .idle { return stopSpeaking() }
@@ -127,6 +133,7 @@ final class SpeakController: SpeakModel {
         case .notTrusted:
             if accessibilityTrusted { accessibilityTrusted = false }
             show(SpeakMessage.needAccess)
+            openScreen()
         case .none:
             markTrusted()
             show(SpeakMessage.noSelection)

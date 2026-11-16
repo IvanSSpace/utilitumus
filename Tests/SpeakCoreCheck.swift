@@ -65,6 +65,10 @@ MainActor.assumeIsolated {
     stand.reader.result = .text(russian)
     stand.hotKey.press()
     check(stand.reader.reads == 0 && stand.synth.spoken.isEmpty, "до start нажатие ничего не читает")
+    stand.reader.result = .notTrusted
+    stand.hotKey.press()
+    check(stand.reader.reads == 0 && stand.screen.opens == 0 && c.message == nil, "до start нажатие без права экран модуля не открывает")
+    stand.reader.result = .text(russian)
     check(c.speak(text: russian) == SpeakMessage.notRunning && stand.synth.spoken.isEmpty, "до start Службы не читают")
 
     c.start()
@@ -164,10 +168,14 @@ MainActor.assumeIsolated {
     stand.reader.result = .secureField
     stand.hotKey.press()
     check(c.message == SpeakMessage.secureField && c.phase == .idle, ".secureField — «Из поля пароля не читаю»")
+    check(stand.screen.opens == 0, ".text, .none и .secureField экран модуля не открывают")
     let spokenBefore = stand.synth.spoken.count
     stand.reader.result = .notTrusted
     stand.hotKey.press()
     check(c.message == SpeakMessage.needAccess && !c.accessibilityTrusted, ".notTrusted — «Нужен Универсальный доступ…»")
+    check(stand.screen.opens == 1, ".notTrusted — экран модуля открыт один раз")
+    stand.hotKey.press()
+    check(stand.screen.opens == 2 && c.message == SpeakMessage.needAccess, "второе нажатие без права — ещё один раз, не больше")
     stand.reader.result = .text(String(repeating: "я", count: SpeakText.limit + 1))
     stand.hotKey.press()
     check(c.message == SpeakMessage.tooLong && c.phase == .idle && c.accessibilityTrusted, "длиннее лимита — не читаем, сообщение")
@@ -175,6 +183,11 @@ MainActor.assumeIsolated {
     stand.reader.result = .text(String(repeating: "я", count: SpeakText.limit))
     stand.hotKey.press()
     check(c.phase == .speaking && c.message == nil, "ровно лимит — читаем, сообщение ушло")
+    let readsSpeaking = stand.reader.reads
+    stand.reader.result = .notTrusted
+    stand.hotKey.press()
+    check(c.phase == .idle && stand.reader.reads == readsSpeaking && stand.screen.opens == 2,
+          "нажатие во время чтения только обрывает: выделение не читается, экран не открывается")
     c.stopSpeaking()
 
     // MARK: Службы
@@ -186,8 +199,10 @@ MainActor.assumeIsolated {
     c.canStart = false
     check(c.speak(text: russian) == SpeakMessage.notRunning, "canStart = false — Службы не читают")
     let readsBlocked = stand.reader.reads
+    let opensBlocked = stand.screen.opens
+    stand.reader.result = .notTrusted
     stand.hotKey.press()
-    check(stand.reader.reads == readsBlocked, "canStart = false — нажатие не читает")
+    check(stand.reader.reads == readsBlocked && stand.screen.opens == opensBlocked, "canStart = false — нажатие не читает и экран не открывает")
     c.canStart = true
 
     // MARK: Голоса через контроллер

@@ -151,6 +151,14 @@ MainActor.assumeIsolated {
     check(error == SpeakMessage.notRunning && spy.reads == 0 && stand.synth.spoken.count == before,
           "canStart = false: отказ, буфер не открыт, ничего не прочитано")
 
+    // MARK: Шаг настройки
+    // Право стенда задаёт ключ шва: настоящий AX не спрашивается.
+    Kit.defaults.set(false, forKey: "Test.AXTrusted")
+    let axStep = module.setupSteps.first { $0.id == "speak.ax" }
+    check(axStep?.required == false && axStep?.done == false,
+          "«Универсальный доступ» — необязательный шаг: без права работают «Службы», центр не пишет «нужен доступ»")
+    Kit.defaults.removeObject(forKey: "Test.AXTrusted")
+
     // MARK: Запуск снова
     module.start()
     check(installed.count == 3 && installed.last.flatMap { $0 } === module.service, "снова start: провайдер снова стоит")

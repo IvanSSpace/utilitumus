@@ -1,6 +1,7 @@
 import AppKit
 
-// Подмены для проверок «Озвучки»: синтезатор без звука, чтение выделения без AX, сочетание без Carbon.
+// Подмены для проверок «Озвучки»: синтезатор без звука, чтение выделения без AX, сочетание без Carbon,
+// экран модуля без просьбы центру.
 // Общие для Tests/SpeakCoreCheck.swift и Tests/SpeakPrivacyCheck.swift.
 
 /// Запись другого процесса, как у центра.
@@ -75,6 +76,12 @@ final class FakeHotKey: SpeakHotKeyBinding {
     func press() { onPress?() }
 }
 
+/// Вместо просьбы центру открыть экран модуля: только счёт вызовов.
+@MainActor
+final class FakeScreen {
+    var opens = 0
+}
+
 let voices = [
     SpeakVoiceRow(id: "ru.milena", name: "Milena", language: "ru-RU", quality: .regular),
     SpeakVoiceRow(id: "ru.katya", name: "Katya", language: "ru-RU", quality: .enhanced),
@@ -92,11 +99,13 @@ struct Stand {
     let synth = FakeSynth()
     let reader = FakeReader()
     let hotKey = FakeHotKey()
+    let screen = FakeScreen()
     let controller: SpeakController
 
     init(preferred: [String] = ["ru-RU", "en-US"]) {
         synth.voiceList = voices
+        let screen = screen
         controller = SpeakController(synthesizer: synth, reader: reader, hotKey: hotKey,
-                                     trusted: { true }, preferredLanguages: { preferred })
+                                     trusted: { true }, preferredLanguages: { preferred }, openScreen: { screen.opens += 1 })
     }
 }
