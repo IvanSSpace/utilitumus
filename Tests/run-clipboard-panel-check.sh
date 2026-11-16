@@ -42,6 +42,11 @@ DIRECT="$(/usr/bin/grep -nE '\.animation\(' "${PANEL[@]}" | /usr/bin/grep -vE 'v
 [ -z "$DIRECT" ] || { echo "$DIRECT"; fail "анимация высоко в дереве задевает всех детей: разрешена только смена ленты"; }
 echo "ok   в панели нет .animation на дереве, кроме смены ленты"
 absent "подсказки карточки не называют содержимое" 'help\(.*(item\.(text|filePaths|host|imageFile)|linkTitle|caption)' Sources/Modules/Clipboard/ClipboardPanelCard.swift
+# Картинка в карточке целиком: вписывание, а не заполнение с обрезкой краёв (поведение — checkCardFit).
+absent "карточка вписывает картинку целиком, а не заполняет с обрезкой" 'scaledToFill|contentMode: *\.fill|aspectRatio\([^)]*\.fill' Sources/Modules/Clipboard/ClipboardPanelCard.swift
+[ "$(/usr/bin/grep -c 'resizable().scaledToFit()' Sources/Modules/Clipboard/ClipboardPanelCard.swift)" = 2 ] \
+  || fail "у картинки и у миниатюры файла должно быть scaledToFit"
+echo "ok   картинка и миниатюра файла вписаны (scaledToFit)"
 absent "перетаскивание не пишет содержимое ни в буфер, ни во временные файлы" 'NSPasteboard|temporaryDirectory|NSTemporaryDirectory|\.write\(' Sources/Modules/Clipboard/ClipboardPanelDrag.swift
 # Кнопки только через clipPanelButton: иначе у новой кнопки вернётся системная рамка фокуса. Проверка по исходникам:
 # окно за экраном не ключевое и такого фокуса не показывает, обход клавиатуры в нём зелёный и без focusable(false).

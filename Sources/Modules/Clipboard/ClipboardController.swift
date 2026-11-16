@@ -18,6 +18,8 @@ final class ClipboardController: ObservableObject {
         static let excluded = "Clipboard.ExcludedApps"
         static let limit = "Clipboard.Limit"
     }
+    /// «Спрашиваемые» папки, доступ к которым автор дал кнопкой «Показать превью»: имена `ClipAskFolder` одним набором.
+    static let previewFoldersKey = "Clipboard.PreviewFolders"
 
     @Published private(set) var items: [ClipItem] = []
     @Published private(set) var spaces: [ClipSpace] = []
@@ -36,6 +38,10 @@ final class ClipboardController: ObservableObject {
     private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
     /// Доделка миниатюр: по одной картинке, с низким приоритетом, открытию панели не мешает.
     private static let thumbnailQueue = DispatchQueue(label: "local.utilitumus.clipboard.thumbnails", qos: .utility)
+    /// Чтение по кнопке «Показать превью»: своя очередь, не за доделкой. Окно macOS держит её поток, а не главный.
+    private static let previewQueue = DispatchQueue(label: "local.utilitumus.clipboard.preview", qos: .userInitiated)
+    /// Как читать файлы записей с данными флагами папок. Шов: проверка подставляет временный дом и счётчики.
+    var fileAccess: (Set<ClipAskFolder>) -> ClipFileAccess = { .system(granted: $0) }
 
     private(set) var store: ClipboardStore?
     private(set) var isRunning = false
@@ -204,9 +210,11 @@ final class ClipboardController: ObservableObject {
     /// Картинки по одной на своей очереди; на главный поток приходит только результат, индекс пишется пачками.
     func fillThumbnails() {
         guard thumbnails == nil, let store, store.isAvailable else { return }
-        let run = ClipThumbnailBackfill(store: store)
+        // Файлы-картинки тоже, если читаются без нажатия: вне защищённых папок и в разрешённых кнопкой.
+        let files = fileAccess(grantedFolders)
+        let run = ClipThumbnailBackfill(store: store, files: files)
         thumbnails = run
-        let pending = store.itemsWithoutThumbnail
+        let pending = store.itemsWithoutThumbnail(files: files)
         Self.thumbnailQueue.async {
             run.run(pending) { id, outcome in
                 DispatchQueue.main.async {
@@ -226,6 +234,7 @@ final class ClipboardController: ObservableObject {
     /// без записи в индексе: картинка в очереди и при следующем запуске, а без картинки его убирает уборка сирот.
     private func applyThumbnail(_ outcome: ClipThumbnailOutcome, to id: UUID, from run: ClipThumbnailBackfill) {
         guard run === thumbnails else { return }
+        if case .denied(let folder) = outcome { revokeFolder(folder) }
         store?.applyThumbnail(outcome, to: id)
     }
 
@@ -247,6 +256,72 @@ final class ClipboardController: ObservableObject {
         spaces = store?.spaces ?? []
     }
 
+    // MARK: Превью файлов из «спрашиваемых» папок
+
+    /// Папки, доступ к которым дан кнопкой. Нет значения или оно не читается — ни одной: без нажатия ничего не читаем.
+    var grantedFolders: Set<ClipAskFolder> {
+        Set((Kit.defaults.stringArray(forKey: Self.previewFoldersKey) ?? []).compactMap(ClipAskFolder.init(rawValue:)))
+    }
+
+    private func setGranted(_ folders: Set<ClipAskFolder>) {
+        Kit.defaults.set(folders.map(\.rawValue).sorted(), forKey: Self.previewFoldersKey)
+    }
+
+    /// Флаг ставится только после того, как миниатюра сделана и записана: доступ macOS дала.
+    func grantFolder(_ folder: ClipAskFolder) { setGranted(grantedFolders.union([folder])) }
+
+    /// macOS отказала в доступе к разрешённой раньше папке (его сняли в Настройках): флаг снимается, чтобы не пробовать
+    /// снова при каждом копировании и доделке. На карточках этой папки снова кнопка; macOS после отказа окна не покажет,
+    /// и нажатие закончится подсказкой про Настройки.
+    func revokeFolder(_ folder: ClipAskFolder) {
+        guard grantedFolders.contains(folder) else { return }
+        setGranted(grantedFolders.subtracting([folder]))
+    }
+
+    /// Нажата «Показать превью»: прочитать ровно этот файл с доступом к его папке только на этот вызов. Окно macOS держит
+    /// вызывающий поток, поэтому не главный. Панель за это время может уйти: чтение не отменяется, результат записывается,
+    /// при следующем показе миниатюра на месте. `done` — на главном потоке, если хранилище то же.
+    func requestFilePreview(_ item: ClipItem, folder: ClipAskFolder, done: @escaping @MainActor (ClipFileResult) -> Void) {
+        // Хранилища нет: читать некуда, на карточке снова кнопка.
+        guard let store, store.isAvailable else { return done(.needsAccess(folder)) }
+        let files = fileAccess(grantedFolders)
+        nonisolated(unsafe) let handoff = store
+        Self.previewQueue.async {
+            let outcome = autoreleasepool { handoff.makeThumbnail(for: item, files: files, asking: folder) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    ClipboardController.shared.finishPreview(outcome, for: item.id, folder: folder, store: handoff, done: done)
+                }
+            }
+        }
+    }
+
+    private func finishPreview(_ outcome: ClipThumbnailOutcome, for id: UUID, folder: ClipAskFolder, store from: ClipboardStore,
+                               done: @MainActor (ClipFileResult) -> Void) {
+        // Хранилище отпустили или сменили, пока шло чтение: записанный файл уберёт уборка при следующем открытии,
+        // на карточке снова кнопка.
+        guard let store, store === from else { return done(.needsAccess(folder)) }
+        switch outcome {
+        case .made:
+            store.applyThumbnail(outcome, to: id)
+            store.saveThumbnails()
+            grantFolder(folder)
+            sync()
+            done(.made(Data()))
+            // Записи этой папки, скопированные раньше, доделываются в фоне.
+            if observesSystem {
+                cancelThumbnails()
+                fillThumbnails()
+            }
+        case .denied(let denied):
+            done(.denied(denied))
+        case .broken, .notWritten:
+            // Не «нет доступа»: файла нет, не картинка, больше предела, только в iCloud. Пометка не пишется:
+            // причина может пройти, а кнопка вернётся со следующим запуском.
+            done(.unavailable)
+        }
+    }
+
     // MARK: Слежение
 
     func poll() {
@@ -261,13 +336,18 @@ final class ClipboardController: ObservableObject {
         if sources.contains(where: excludedApps.contains) { return }
         let sourceID = front?.bundleIdentifier
         let sourceName = front?.localizedName
+        // Файл из «спрашиваемой» папки читается при копировании, только если доступ к ней уже дан кнопкой.
+        let files = fileAccess(grantedFolders)
         // Большое содержимое не должно останавливать главный поток: на нём живёт перехват прокрутки «Мыши».
         Self.readQueue.async {
-            guard var snap = ClipboardPasteboard.snapshot(of: Kit.pasteboard, change: count) else { return }
+            let denied: (ClipAskFolder) -> Void = { folder in
+                DispatchQueue.main.async { MainActor.assumeIsolated { ClipboardController.shared.revokeFolder(folder) } }
+            }
+            guard var snap = ClipboardPasteboard.snapshot(of: Kit.pasteboard, change: count, files: files, denied: denied) else { return }
             snap.sourceBundleID = sourceID
             snap.sourceName = sourceName
             // Миниатюра карточки здесь же, при копировании: панель потом не разжимает полный снимок при каждом открытии.
-            // У файла-картинки её уже сделал снимок (`ClipFileThumbnail`), пока буфер с её источником был под рукой.
+            // У файла-картинки её уже сделал снимок из самого файла (`ClipFileThumbnail`), если файл можно читать.
             snap.imageThumbnail = snap.imagePNG.flatMap { ClipThumbnail.make(from: $0) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { ClipboardController.shared.finishRead(snap) }
@@ -352,6 +432,14 @@ final class ClipboardController: ObservableObject {
         Kit.defaults.set(value, forKey: Key.limit)
         store?.setLimit(value)
         sync()
+    }
+
+    /// Панель не видна на снимках и записи экрана. Значение в Kit.defaults, окно панели меняется сразу (`ClipboardPanelHost`).
+    var hidesPanelFromCapture: Bool? { ClipboardPanelHost.hidesFromCapture }
+
+    func setHidesPanelFromCapture(_ on: Bool) {
+        objectWillChange.send()
+        Kit.defaults.set(on, forKey: ClipboardPanelHost.hideFromCaptureKey)
     }
 
     func clearHistory() { store?.clearHistory(); sync() }

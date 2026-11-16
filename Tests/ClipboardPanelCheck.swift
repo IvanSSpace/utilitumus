@@ -2721,7 +2721,8 @@ func titlePoint(card: Int) -> NSPoint {
     let reread = ClipboardStore(directory: dir, key: key, limit: 100)
     check(reread.items.allSatisfy { $0.thumbnailFile != nil }, "доделка записана в индекс")
     let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
-    check(names.filter { $0.hasPrefix("thumb-") }.count == olds.count + 1, "по одной миниатюре на картинку, сирот нет")
+    check(names.filter { $0.hasPrefix(ClipboardStore.thumbnailPrefix) }.count == olds.count + 1 && !names.contains(where: ClipboardStore.isCropped),
+          "по одной вписанной миниатюре на картинку, сирот и обрезанных нет")
     model.forgetImages()
 }
 
@@ -2765,10 +2766,18 @@ func titlePoint(card: Int) -> NSPoint {
     func item(_ count: Int, thumbnail: Bool) -> ClipItem {
         controller.items.first { $0.filePaths?.count == count && ($0.thumbnailFile != nil) == thumbnail }!
     }
-    let content = CGRect(x: 0, y: ClipCard.headerHeight, width: ClipCard.width,
-                         height: ClipCard.height - ClipCard.headerHeight - ClipCard.footerHeight - ClipCard.fileStripHeight)
+    // Область картинки над полосой с именем; картинка 1600×900 вписана в неё целиком, по центру, по бокам поля.
+    let content = CGRect(x: 0, y: ClipCard.headerHeight, width: ClipCard.width, height: ClipCard.pictureHeight - ClipCard.fileStripHeight)
+    let fittedWidth = (content.height * 1600 / 900).rounded(.down)
+    let fitted = CGRect(x: content.midX - fittedWidth / 2 + 1, y: content.minY + 1, width: fittedWidth - 2, height: content.height - 2)
+    func isGreen(_ c: ClipRGB) -> Bool { c.g > 0.6 && c.g - c.r > 0.3 && c.g - c.b > 0.3 }
     func greenShare(_ shot: Shot) -> Double {
-        Double(shot.count(in: content) { $0.g > 0.6 && $0.g - $0.r > 0.3 && $0.g - $0.b > 0.3 }) / Double(content.width * content.height)
+        Double(shot.count(in: fitted, where: isGreen)) / Double(fitted.width * fitted.height)
+    }
+    /// Поля слева и справа от вписанной картинки: фон карточки, не картинка и не растянутые края.
+    func sideGreen(_ shot: Shot) -> Int {
+        shot.count(in: CGRect(x: 0, y: content.minY, width: fitted.minX - 2, height: content.height), where: isGreen)
+            + shot.count(in: CGRect(x: fitted.maxX + 2, y: content.minY, width: content.maxX - fitted.maxX - 2, height: content.height), where: isGreen)
     }
 
     let three = item(3, thumbnail: true)
@@ -2776,7 +2785,8 @@ func titlePoint(card: Int) -> NSPoint {
     let preloaded = await model.loadFilePicture(three)
     check(preloaded && model.readyPicture(three) != nil, "миниатюра файла разжата и лежит в кэше показа")
     let (threeShot, threeTexts) = await cardShot(three, spaces: [], model: model, concealed: false, preview: false, now: now)
-    check(greenShare(threeShot) > 0.95, "три файла: миниатюра на всю область (\(Int(greenShare(threeShot) * 100))% точек её цвета)")
+    check(greenShare(threeShot) > 0.95 && sideGreen(threeShot) == 0,
+          "три файла: миниатюра целиком, вписана по центру над полосой (\(Int(greenShare(threeShot) * 100))% её цвета, по бокам \(sideGreen(threeShot)))")
     check(threeTexts.contains { $0.contains("\"+2\"") }, "три файла: на карточке «+2»")
     check(threeTexts.contains { $0.contains("Снимок экрана 2026-11-16") } && !threeTexts.contains { $0.contains("выдуманная смета") },
           "на полосе имя показанного файла-картинки, а не первого в списке")
@@ -2991,6 +3001,367 @@ func titlePoint(card: Int) -> NSPoint {
     sharedPanel?.contentView = nil
 }
 
+// MARK: - Картинка в карточке целиком
+
+/// Картинка с цветными полосами по краям: слева красная, справа синяя, сверху зелёная, снизу жёлтая, внутри серое.
+@MainActor func framedPicture(_ width: Int, _ height: Int) -> NSImage {
+    let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    func fill(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ rect: CGRect) {
+        context.setFillColor(CGColor(srgbRed: r, green: g, blue: b, alpha: 1))
+        context.fill(rect)
+    }
+    let bandX = CGFloat(width) / 5, bandY = CGFloat(height) / 5, w = CGFloat(width), h = CGFloat(height)
+    fill(0.5, 0.5, 0.5, CGRect(x: 0, y: 0, width: w, height: h))
+    fill(0.9, 0.1, 0.1, CGRect(x: 0, y: bandY, width: bandX, height: h - 2 * bandY))
+    fill(0.1, 0.25, 0.9, CGRect(x: w - bandX, y: bandY, width: bandX, height: h - 2 * bandY))
+    fill(0.1, 0.8, 0.25, CGRect(x: bandX, y: h - bandY, width: w - 2 * bandX, height: bandY))
+    fill(0.9, 0.85, 0.1, CGRect(x: bandX, y: 0, width: w - 2 * bandX, height: bandY))
+    return NSImage(cgImage: context.makeImage()!, size: NSSize(width: w, height: h))
+}
+
+/// Картинка в карточке целиком: вписана по центру на фоне карточки, все четыре края на месте, пропорция исходной.
+/// Так же у копии при переносе и у карточки файла-картинки.
+@MainActor func checkCardFit(out: String) async {
+    let now = Date()
+    let model = panelModel(theme: "vivid", items: [])
+    var pictures: [UUID: NSImage] = [:]
+    model.imageLoader = { pictures[$0.id] }
+    func isRed(_ c: ClipRGB) -> Bool { c.r > 0.7 && c.g < 0.35 && c.b < 0.35 }
+    func isBlue(_ c: ClipRGB) -> Bool { c.b > 0.7 && c.r < 0.35 && c.g < 0.45 }
+    func isGreen(_ c: ClipRGB) -> Bool { c.g > 0.6 && c.g - c.r > 0.3 && c.g - c.b > 0.3 }
+    func isYellow(_ c: ClipRGB) -> Bool { c.r > 0.7 && c.g > 0.65 && c.b < 0.35 }
+    func isCardBackground(_ c: ClipRGB) -> Bool { max(c.r, c.g, c.b) < 0.14 && saturation(c) < 0.04 }
+    /// Края вписанной картинки и поля вокруг неё на снимке карточки. `area` — где карточка рисует картинку.
+    func verify(_ shot: Shot, _ width: Int, _ height: Int, in area: CGRect, _ name: String) {
+        let scale = min(area.width / CGFloat(width), area.height / CGFloat(height))
+        let fitted = CGRect(x: area.midX - CGFloat(width) * scale / 2, y: area.midY - CGFloat(height) * scale / 2,
+                            width: CGFloat(width) * scale, height: CGFloat(height) * scale)
+        // Середины полос: десятая доля стороны от края вписанной картинки.
+        let left = shot.rgb(fitted.minX + fitted.width * 0.1, fitted.midY), right = shot.rgb(fitted.maxX - fitted.width * 0.1, fitted.midY)
+        let top = shot.rgb(fitted.midX, fitted.minY + fitted.height * 0.1), bottom = shot.rgb(fitted.midX, fitted.maxY - fitted.height * 0.1)
+        let edges = [isRed(left) ? "левая" : nil, isBlue(right) ? "правая" : nil, isGreen(top) ? "верхняя" : nil, isYellow(bottom) ? "нижняя" : nil].compactMap { $0 }
+        // Поля: по бокам у высокой, сверху и снизу у широкой — фон карточки. Берутся только поля шире 4 точек.
+        var margins: [CGPoint] = []
+        if fitted.minX - area.minX > 4 { margins += [CGPoint(x: (area.minX + fitted.minX) / 2, y: area.midY), CGPoint(x: (fitted.maxX + area.maxX) / 2, y: area.midY)] }
+        if fitted.minY - area.minY > 4 { margins += [CGPoint(x: area.midX, y: (area.minY + fitted.minY) / 2), CGPoint(x: area.midX, y: (fitted.maxY + area.maxY) / 2)] }
+        let plain = margins.allSatisfy { isCardBackground(shot.rgb($0.x, $0.y)) }
+        check(edges.count == 4 && plain,
+              "\(name): картинка целиком \(Int(fitted.width))×\(Int(fitted.height)) по центру, края \(edges), поля (\(margins.count)) — фон карточки: \(plain)")
+    }
+    let area = CGRect(x: 0, y: ClipCard.headerHeight, width: ClipCard.width, height: ClipCard.pictureHeight)
+    var items: [ClipItem] = []
+    for (name, width, height) in [("широкая 3000×1000", 3000, 1000), ("высокая 1000×3000", 1000, 3000), ("узкая 300×4000", 300, 4000), ("квадратная", 1200, 1200)] {
+        let item = ClipPanelFixture.entry(.image, nil, source: nil, ago: 10, now: now, size: (width, height))
+        pictures[item.id] = framedPicture(width, height)
+        items.append(item)
+        let (shot, _) = await cardShot(item, spaces: [], model: model, concealed: false, preview: false, now: now)
+        verify(shot, width, height, in: area, "картинка \(name)")
+    }
+    let (preview, _) = await cardShot(items[1], spaces: [], model: model, concealed: false, preview: true, now: now)
+    verify(preview, 1000, 3000, in: area, "копия при переносе, высокая")
+
+    // Файл-картинка: миниатюра вписана над полосой с именем, полоса её не закрывает.
+    let file = ClipItem(id: UUID(), hash: "f", kind: .file, filePaths: ["/tmp/выдуманный широкий.png"], sourceBundleID: "com.apple.finder",
+                        date: now, thumbnailFile: "filefit-выдуманный.bin")
+    let wide = framedPicture(3000, 1000)
+    let jpeg = NSBitmapImageRep(cgImage: wide.cgImage(forProposedRect: nil, context: nil, hints: nil)!).representation(using: .jpeg, properties: [:])!
+    model.filePictureData = { _ in jpeg }
+    model.picturesAllowed = true
+    let loaded = await model.loadFilePicture(file)
+    let (fileShot, _) = await cardShot(file, spaces: [], model: model, concealed: false, preview: false, now: now)
+    verify(fileShot, 3000, 1000, in: CGRect(x: 0, y: ClipCard.headerHeight, width: ClipCard.width, height: ClipCard.pictureHeight - ClipCard.fileStripHeight),
+           "файл-картинка широкая (разжата: \(loaded))")
+    model.forgetImages()
+    model.picturesAllowed = false
+    let panel = panelModel(theme: "vivid", items: items)
+    panel.imageLoader = model.imageLoader
+    _ = await Stand.render(panel, "color-fit-cards", out: out)
+}
+
+// MARK: - Скрытие панели на снимках экрана
+
+/// Настройка «Скрывать панель на снимках и записи экрана»: по умолчанию включена, нечитаемое значение — тоже включена.
+/// Выключили — окно панели видно на снимках (`.readOnly`), и прогретое скрытое окно меняется сразу, без показа.
+@MainActor func checkCaptureSetting() async {
+    let key = ClipboardPanelHost.hideFromCaptureKey
+    Kit.defaults.removeObject(forKey: key)
+    defer { Kit.defaults.removeObject(forKey: key) }
+    let controller = ClipboardController.shared
+    check(ClipboardPanelHost.hidesFromCapture && controller.hidesPanelFromCapture == true
+          && ClipboardPanelHost.makePanel(ClipboardPanelModel()).sharingType == .none, "по умолчанию панель не видна на снимках и записи экрана")
+    Kit.defaults.set("не bool", forKey: key)
+    check(ClipboardPanelHost.captureSharing == .none, "значение не читается как да/нет — скрывать")
+    Kit.defaults.removeObject(forKey: key)
+
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-capture-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    store.ingest(ClipSnapshot(types: [], text: "запись", sourceBundleID: "test.source", sourceName: "Источник"))
+    controller.attach(store)
+    defer { controller.detachStore() }
+    let stand = LeaveStand(wired: true)
+    stand.host.prewarm(controller: controller)
+    guard let panel = stand.panel else { return check(false, "прогрев создал окно стенда") }
+    check(panel.sharingType == .none && !panel.isVisible, "прогретое окно (скрытое) не видно на снимках")
+    controller.setHidesPanelFromCapture(false)
+    check(panel.sharingType == .readOnly && !panel.isVisible && stand.host.presentation == 0 && controller.hidesPanelFromCapture == false,
+          "выключили: прогретое скрытое окно сразу видно на снимках, без показа")
+    check(ClipboardPanelHost.makePanel(ClipboardPanelModel()).sharingType == .readOnly, "новое окно панели создаётся видимым на снимках")
+    stand.host.show(controller: controller)
+    await pause(0.3)
+    check(panel.sharingType == .readOnly && stand.host.isVisible, "открытая панель видна на снимках")
+    controller.setHidesPanelFromCapture(true)
+    check(panel.sharingType == .none, "включили обратно на открытой панели: снова не видна")
+    // Окно разошлось с настройкой мимо подписки: показ читает её заново.
+    stand.host.hide()
+    _ = await waitUntil(2) { stand.settledGone }
+    panel.sharingType = .readOnly
+    stand.host.show(controller: controller)
+    check(panel.sharingType == .none, "показ читает настройку сам")
+    stand.host.hide()
+    _ = await waitUntil(2) { stand.settledGone }
+    stand.close()
+}
+
+// MARK: - Превью файла из «спрашиваемой» папки
+
+/// Строки вида кнопки на карточке: карточка несёт `ClipFileAsk` значением, его текст виден только в его собственном `body`.
+@MainActor func askTexts(_ item: ClipItem, model: ClipboardPanelModel, concealed: Bool = false) -> [String] {
+    var tree = ""
+    dump(ClipCard(item: item, number: 1, selected: false, searching: false, theme: model.theme, spaces: [], now: Date(), model: model,
+                  concealed: concealed).body, to: &tree, maxDepth: 80)
+    // Значение, а не имя типа: имена типов ветвей видны в дереве и у невыбранной ветви.
+    guard tree.contains("ClipAskFolder."), let folder = model.askFolder(item) else { return [] }
+    var out = ""
+    dump(ClipFileAsk(item: item, folder: folder, shown: item.filePaths?.first ?? "", model: model, previews: model.filePreviews).body, to: &out, maxDepth: 80)
+    return out.split(separator: "\n").map(String.init).filter { $0.contains("verbatim:") }
+}
+
+/// Кнопка «Показать превью»: до нажатия файлы Рабочего стола, Документов и Загрузок не открываются и не разбираются ни
+/// при копировании, ни доделкой, ни при прогреве, показе и рисовании карточки. Нажатие читает ровно этот файл, флаг папки
+/// ставится только после записанной миниатюры, потом её файлы доделываются и при копировании читаются сами. Отказ macOS —
+/// кнопка и подсказка, флага нет; другая ошибка — значок без кнопки. Дом подставной во временной папке, доступ к файлам со
+/// счётчиками, «отказ macOS» подставной: настоящего дома, окон прав и настроек конфиденциальности проверка не касается.
+@MainActor func checkFilePreview(out: String) async {
+    let fm = FileManager.default
+    // Без /private в начале, как пути записывает счётчик: /var — ссылка на /private/var.
+    func normal(_ path: String) -> String { path.hasPrefix("/private/") ? String(path.dropFirst("/private".count)) : path }
+    let root = URL(fileURLWithPath: normal(fm.temporaryDirectory.appendingPathComponent("clip-ask-\(UUID().uuidString)").path))
+    defer { try? fm.removeItem(at: root) }
+    let home = root.appendingPathComponent("дом"), free = root.appendingPathComponent("свободно")
+    for folder in ["Desktop", "Documents", "Downloads", "Library/Caches"] {
+        try! fm.createDirectory(at: home.appendingPathComponent(folder), withIntermediateDirectories: true)
+    }
+    try! fm.createDirectory(at: free, withIntermediateDirectories: true)
+    let protected = ClipProtectedPaths(homes: [home.path])
+    let picture: Data = {
+        let context = CGContext(data: nil, width: 1600, height: 900, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.1, green: 0.8, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1600, height: 900))
+        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }()
+    func put(_ folder: URL, _ name: String) -> String {
+        let url = folder.appendingPathComponent(name)
+        try! picture.write(to: url)
+        return url.path
+    }
+    let desk = put(home.appendingPathComponent("Desktop"), "снимок.png"), deskOld = put(home.appendingPathComponent("Desktop"), "старый снимок.png")
+    let docsOld = put(home.appendingPathComponent("Documents"), "старый документ.png")
+    let docs = put(home.appendingPathComponent("Documents"), "документ.png"), downs = put(home.appendingPathComponent("Downloads"), "загрузка.png")
+    let downsGone = home.appendingPathComponent("Downloads/удалённый.png").path
+    let lib = put(home.appendingPathComponent("Library/Caches"), "кэш.png"), freeFile = put(free, "свободный.png")
+
+    final class Probe {
+        var opened: [String] = []
+        var links: [String] = []
+        var deny: [String] = []
+    }
+    let probe = Probe()
+    let controller = ClipboardController.shared
+    let realAccess = controller.fileAccess
+    controller.fileAccess = { granted in
+        let real = ClipFileAccess.system(granted: [])
+        return ClipFileAccess(protected: protected, granted: granted,
+                              readLink: { probe.links.append(normal($0)); return real.readLink($0) },
+                              open: { url in
+                                  let path = normal(url.path)
+                                  probe.opened.append(path)
+                                  return probe.deny.contains { path.hasPrefix($0) } ? .denied : real.open(url)
+                              })
+    }
+    let wasObserving = controller.observesSystem
+    defer {
+        controller.fileAccess = realAccess
+        controller.observesSystem = wasObserving
+        Kit.defaults.removeObject(forKey: ClipboardController.previewFoldersKey)
+    }
+    Kit.defaults.removeObject(forKey: ClipboardController.previewFoldersKey)
+    func touched(_ folders: [String]) -> [String] {
+        let roots = folders.map { home.appendingPathComponent($0).path }
+        return (probe.opened + probe.links).filter { path in roots.contains { path == $0 || path.hasPrefix($0 + "/") } }.map { ($0 as NSString).lastPathComponent }
+    }
+    let everyProtected = ["Desktop", "Documents", "Downloads", "Library"]
+
+    // Копирование: снимок буфера с доступом утилиты. Флагов нет — в защищённые папки ни шагу, у свободного файла миниатюра.
+    let dir = root.appendingPathComponent("история")
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    var boards: [NSPasteboard] = []
+    defer { boards.forEach { $0.releaseGlobally() } }
+    func copy(_ path: String) {
+        let pb = NSPasteboard(name: NSPasteboard.Name("local.utilitumus.clipask.\(UUID().uuidString)"))
+        boards.append(pb)
+        pb.clearContents()
+        pb.writeObjects([URL(fileURLWithPath: path) as NSURL])
+        var revoked: [ClipAskFolder] = []
+        var snap = ClipboardPasteboard.snapshot(of: pb, files: controller.fileAccess(controller.grantedFolders), denied: { revoked.append($0) })
+        revoked.forEach(controller.revokeFolder)
+        snap.sourceBundleID = "com.apple.finder"
+        store.ingest(snap)
+    }
+    for path in [lib, downsGone, downs, docsOld, docs, deskOld, freeFile, desk] { copy(path) }
+    store.ingest(ClipSnapshot(types: [], text: "текст сверху", sourceBundleID: "test.source", sourceName: "Источник"))
+    func item(_ path: String) -> ClipItem { store.items.first { $0.filePaths == [path] }! }
+    check(touched(everyProtected).isEmpty && store.items.first { $0.filePaths == [freeFile] }?.thumbnailFile != nil,
+          "копирование без флагов: свободный файл с миниатюрой, в защищённые папки ни шагу (\(touched(everyProtected)))")
+
+    // Доделка без флагов: защищённое не трогается.
+    controller.observesSystem = false
+    controller.attach(store)
+    defer { controller.detachStore() }
+    controller.fillThumbnails()
+    _ = await waitUntil(10) { !controller.isFillingThumbnails }
+    check(touched(everyProtected).isEmpty, "доделка без флагов: в защищённые папки ни шагу")
+
+    // Панель: прогрев, показ, рисование карточек. На карточках Рабочего стола, Документов и Загрузок кнопка, у Библиотеки нет.
+    let stand = LeaveStand(wired: true)
+    stand.model.protectedPaths = protected
+    /// Модель панели берёт записи и флаги при показе; здесь — явно, без показа.
+    func reload() {
+        stand.model.allItems = controller.items
+        stand.model.grantedFolders = controller.grantedFolders
+    }
+    var pasted = 0
+    stand.model.onPaste = { _ in pasted += 1 }
+    stand.model.onPasteMany = { _ in pasted += 1 }
+    stand.host.prewarm(controller: controller)
+    stand.host.show(controller: controller)
+    await pause(0.4)
+    check(stand.model.askFolder(item(desk)) == .desktop && stand.model.askFolder(item(docs)) == .documents && stand.model.askFolder(item(downs)) == .downloads
+          && stand.model.askFolder(item(lib)) == nil && stand.model.askFolder(item(freeFile)) == nil, "кнопка только у «спрашиваемых» папок без доступа")
+    for (path, folder) in [(desk, "Рабочий стол"), (docs, "Документы"), (downs, "Загрузки")] {
+        _ = await cardShot(item(path), spaces: [], model: stand.model, concealed: false, preview: false, now: Date())
+        let texts = askTexts(item(path), model: stand.model)
+        check(texts.contains { $0.contains("Показать превью") } && texts.contains { $0.contains("macOS один раз спросит доступ к папке «\(folder)»") },
+              "карточка «\(folder)»: значок, кнопка «Показать превью» и строка про окно macOS")
+    }
+    _ = await cardShot(item(lib), spaces: [], model: stand.model, concealed: false, preview: false, now: Date())
+    check(askTexts(item(lib), model: stand.model).isEmpty, "Библиотека: без кнопки, никогда не читается")
+    check(askTexts(item(desk), model: stand.model, concealed: true).isEmpty, "скрытая карточка: кнопки нет")
+    check(touched(everyProtected).isEmpty && probe.opened.count == 1, "прогрев, показ и карточки не тронули ни одного файла защищённых папок")
+    _ = await Stand.render(stand.model, "color-file-ask", out: out)
+
+    // Настоящий клик по кнопке второй карточки: выбор не меняется, вставки нет, читается ровно этот файл.
+    let host = Stand.host(stand.model, width: 1440)
+    await pause(0.45)
+    host.layoutSubtreeIfNeeded()
+    let shot = snapshot(host, out: out)
+    // Кнопка — плашка светлее фона карточки: строки, где её точек больше всего, по центру карточки.
+    let card = cardOrigin(1)
+    let rows = stride(from: card.y + ClipCard.headerHeight, to: card.y + ClipCard.headerHeight + ClipCard.pictureHeight, by: 1).filter { y in
+        shot.count(in: CGRect(x: card.x + 60, y: y, width: ClipCard.width - 120, height: 1)) { c in c.r > 0.2 && c.r < 0.4 && saturation(c) < 0.05 } > 60
+    }
+    let buttonY = rows.isEmpty ? card.y + 122 : (rows.first! + rows.last!) / 2
+    let selectedBefore = stand.model.selected
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+        let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: card.x + ClipCard.width / 2, y: ClipPanelMetrics.panelHeight - buttonY),
+                                       modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: Stand.window.windowNumber,
+                                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+        Stand.window.sendEvent(event!)
+    }
+    let made = await waitUntil(5) { controller.items.first { $0.filePaths == [desk] }?.thumbnailFile != nil }
+    Stand.window.contentView = nil
+    check(made && stand.model.selected == selectedBefore && pasted == 0,
+          "клик по кнопке (строки \(rows.first.map { Int($0) } ?? -1)…\(rows.last.map { Int($0) } ?? -1)): миниатюра сделана, выбор \(stand.model.selected) не сменился, вставок \(pasted)")
+    check(probe.opened.filter { $0 != freeFile } == [desk] && touched(["Documents", "Downloads", "Library"]).isEmpty,
+          "нажатие прочитало ровно этот файл: \(probe.opened.map { ($0 as NSString).lastPathComponent })")
+    check(controller.grantedFolders == [.desktop] && stand.model.grantedFolders == [.desktop] && stand.model.filePreviews.states[item(desk).id] == nil
+          && stand.model.askFolder(item(desk)) == nil, "флаг Рабочего стола поставлен после миниатюры, кнопки больше нет")
+    let thumbFile = item(desk).thumbnailFile ?? ""
+    let sealed = (try? Data(contentsOf: dir.appendingPathComponent(thumbFile))) ?? Data()
+    check(ClipboardStore.isFileThumbnail(thumbFile) && !sealed.isEmpty && sealed.range(of: Data([0xFF, 0xD8, 0xFF])) == nil
+          && (try? fm.attributesOfItem(atPath: dir.appendingPathComponent(thumbFile).path))?[.posixPermissions] as? Int == 0o600,
+          "миниатюра по кнопке зашифрована, 0600, в своём filefit-…bin")
+    check(Kit.defaults.stringArray(forKey: ClipboardController.previewFoldersKey) == ["desktop"], "флаг в настройках утилиты одним набором")
+
+    // После флага: старые записи Рабочего стола доделываются, Документы и Загрузки не трогаются.
+    probe.opened = []
+    probe.links = []
+    controller.fillThumbnails()
+    _ = await waitUntil(10) { !controller.isFillingThumbnails }
+    check(item(deskOld).thumbnailFile != nil && probe.opened == [deskOld] && touched(["Documents", "Downloads", "Library"]).isEmpty,
+          "доделка после флага: старая запись Рабочего стола доделана, другие папки не тронуты")
+    // Копирование после флага: с Рабочего стола миниатюра сразу, из Документов нет.
+    let deskNew = put(home.appendingPathComponent("Desktop"), "новый.png")
+    copy(deskNew)
+    copy(docs)
+    controller.attach(store)
+    reload()
+    check(item(deskNew).thumbnailFile != nil && item(docs).thumbnailFile == nil && touched(["Documents", "Downloads", "Library"]).isEmpty,
+          "копирование после флага: Рабочий стол с миниатюрой, Документы не тронуты")
+
+    // Кнопка Документов, а панель тем временем ушла (окно macOS скрывает её): чтение доходит, результат записан,
+    // и сразу же доделываются прежние записи Документов.
+    probe.opened = []
+    probe.links = []
+    controller.observesSystem = true
+    stand.model.requestFilePreview(item(docs))
+    check(stand.model.filePreviews.states[item(docs).id] == .reading, "пока читается, кнопка неактивна")
+    stand.host.hide()
+    let docsMade = await waitUntil(5) { store.items.first { $0.filePaths == [docs] }?.thumbnailFile != nil }
+    _ = await waitUntil(2) { stand.settledGone }
+    let oldDocsMade = await waitUntil(10) { store.items.first { $0.filePaths == [docsOld] }?.thumbnailFile != nil && !controller.isFillingThumbnails }
+    controller.observesSystem = false
+    check(docsMade && controller.grantedFolders == [.desktop, .documents] && probe.opened.first == docs && touched(["Downloads", "Library"]).isEmpty
+          && stand.model.filePreviews.states[item(docs).id] == nil, "кнопка Документов при ушедшей панели: прочитан этот файл, миниатюра и флаг на месте")
+    check(oldDocsMade && Set(probe.opened) == [docs, docsOld], "после флага Документов сразу доделана их прежняя запись: \(probe.opened.map { ($0 as NSString).lastPathComponent })")
+
+    // Отказ macOS: кнопка и подсказка, флага нет, пометок нет.
+    probe.deny = [home.appendingPathComponent("Downloads").path]
+    stand.model.requestFilePreview(item(downs))
+    _ = await waitUntil(5) { stand.model.filePreviews.states[item(downs).id] != .reading }
+    let deniedTexts = askTexts(item(downs), model: stand.model)
+    check(stand.model.filePreviews.states[item(downs).id] == .denied && !controller.grantedFolders.contains(.downloads) && item(downs).thumbnailFailed == nil
+          && deniedTexts.contains { $0.contains("Показать превью") } && deniedTexts.contains { $0.contains("нет доступа: Настройки → Конфиденциальность → Файлы и папки") },
+          "macOS отказала: кнопка остаётся, под ней «нет доступа…», флага нет")
+    // Другая ошибка: файла нет. Не «нет доступа»: значок без кнопки, флага нет.
+    probe.deny = []
+    stand.model.requestFilePreview(item(downsGone))
+    _ = await waitUntil(5) { stand.model.filePreviews.states[item(downsGone).id] != .reading }
+    let (goneShot, _) = await cardShot(item(downsGone), spaces: [], model: stand.model, concealed: false, preview: false, now: Date())
+    let goneTexts = askTexts(item(downsGone), model: stand.model)
+    let icon = CGRect(x: ClipCard.width / 2 - 32, y: ClipCard.headerHeight + 33, width: 64, height: 64)
+    check(stand.model.filePreviews.states[item(downsGone).id] == .failed && !controller.grantedFolders.contains(.downloads)
+          && !goneTexts.contains { $0.contains("Показать превью") || $0.contains("нет доступа") }
+          && goneShot.count(in: icon) { max($0.r, $0.g, $0.b) > 0.5 } > 200,
+          "файла нет: значок типа без кнопки, флага нет")
+    _ = await Stand.render(stand.model, "color-file-ask-states", out: out)
+
+    // Флаг стоит, а доступ сняли в Настройках: доделка получает отказ и снимает флаг, кнопка возвращается.
+    let deskLate = put(home.appendingPathComponent("Desktop"), "поздний.png")
+    store.ingest(ClipSnapshot(types: ["public.file-url"], filePaths: [deskLate], sourceBundleID: "com.apple.finder"))
+    controller.attach(store)
+    probe.deny = [home.appendingPathComponent("Desktop").path]
+    controller.fillThumbnails()
+    _ = await waitUntil(10) { !controller.isFillingThumbnails }
+    reload()
+    check(!controller.grantedFolders.contains(.desktop) && item(deskLate).thumbnailFile == nil && item(deskLate).thumbnailFailed == nil
+          && stand.model.askFolder(item(deskLate)) == .desktop, "доступ сняли: флаг Рабочего стола снят, на карточке снова кнопка")
+    probe.deny = []
+    stand.close()
+}
+
 @main
 enum Main {
     static func main() {
@@ -3011,6 +3382,9 @@ enum Main {
             await checkDrag()
             await checkCardThumbnail()
             await checkFileThumbnail(out: out)
+            await checkCardFit(out: out)
+            await checkCaptureSetting()
+            await checkFilePreview(out: out)
             await checkLiveEvents()
             checkDragSourceMask()
             await checkDropTarget()

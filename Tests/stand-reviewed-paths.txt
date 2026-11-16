@@ -22,6 +22,13 @@ Sources/Modules/Clipboard/ClipboardKeyResolver.swift|SecItem
 Sources/Modules/Clipboard/ClipboardStore.swift|SecItem
 Sources/Modules/Clipboard/ClipboardStore.swift|removeItem
 Sources/Modules/Clipboard/ClipboardStore.swift|urls(for:
+# Буфер, ClipProtectedPaths.homeNames: настоящий дом нужен только как ТЕКСТ, чтобы сравнить путь скопированного файла
+# с защищёнными папками (Рабочий стол, Документы, Загрузки, Библиотека); к диску по нему обращений нет. Стенд подменяет
+# HOME, а защищённым остаётся настоящий — поэтому getpwuid. Шов: в сборке KIT_TEST_DEFAULTS настоящий дом закрыт
+# целиком (ни чтения, ни кнопки «Показать превью»), «спрашиваемые» папки только в подставном доме; проверки передают
+# свои дома через ClipProtectedPaths(homes:).
+Sources/Modules/Clipboard/ClipboardThumbnail.swift|NSHomeDirectory
+Sources/Modules/Clipboard/ClipboardThumbnail.swift|getpwuid
 Sources/Modules/Fans/FanController.swift|.terminate()
 Sources/Modules/Fans/FanController.swift|homeDirectoryForCurrentUser
 Sources/Modules/Fans/FanController.swift|removeItem

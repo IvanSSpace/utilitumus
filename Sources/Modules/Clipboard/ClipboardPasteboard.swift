@@ -6,15 +6,19 @@ import UniformTypeIdentifiers
 enum ClipboardPasteboard {
     /// Снимок для опроса, вызывается вне главного потока. nil — буфер поменялся до конца чтения:
     /// содержимое уже другое, его прочитает следующий опрос.
-    static func snapshot(of pasteboard: NSPasteboard, change: Int, files: ClipFileAccess = .system) -> ClipSnapshot? {
+    static func snapshot(of pasteboard: NSPasteboard, change: Int, files: ClipFileAccess = .system(granted: []),
+                         denied: (ClipAskFolder) -> Void = { _ in }) -> ClipSnapshot? {
         guard pasteboard.changeCount == change else { return nil }
-        let snap = snapshot(of: pasteboard, files: files)
+        let snap = snapshot(of: pasteboard, files: files, denied: denied)
         return pasteboard.changeCount == change ? snap : nil
     }
 
     /// Снимок текущего содержимого. Скрытые типы попадают в `types`, дальше их отсеивает политика.
-    /// `files` — как открыть скопированный файл-картинку ради миниатюры; проверка подставляет свой счётчик.
-    static func snapshot(of pasteboard: NSPasteboard, files: ClipFileAccess = .system) -> ClipSnapshot {
+    /// `files` — как открыть скопированный файл-картинку ради миниатюры и к каким «спрашиваемым» папкам доступ уже дан;
+    /// проверка подставляет свой счётчик. По умолчанию ни к каким. `denied` — macOS отказала в доступе к разрешённой
+    /// раньше папке (его сняли в Настройках): утилита снимает свой флаг, чтобы не пробовать снова при каждом копировании.
+    static func snapshot(of pasteboard: NSPasteboard, files: ClipFileAccess = .system(granted: []),
+                         denied: (ClipAskFolder) -> Void = { _ in }) -> ClipSnapshot {
         var snap = ClipSnapshot()
         snap.types = (pasteboard.types ?? []).map(\.rawValue)
         if ClipboardPolicy.shouldSkip(types: snap.types) { return snap }
@@ -24,9 +28,9 @@ enum ClipboardPasteboard {
         snap.filePaths = fileURLs.map(\.path)
         // Миниатюра файла-картинки здесь же, вне главного потока: панель потом файла не касается.
         if let shown = ClipFileThumbnail.shownIndex(in: snap.filePaths) {
-            snap.fileThumbnail = ClipFileThumbnail.make(path: snap.filePaths[shown],
-                                                        icons: fileIcons(in: pasteboard, file: shown, of: snap.filePaths.count),
-                                                        files: files)
+            let made = ClipFileThumbnail.make(path: snap.filePaths[shown], files: files)
+            snap.fileThumbnail = made.data
+            if case .denied(let folder) = made { denied(folder) }
         }
         snap.text = pasteboard.string(forType: .string).map(ClipboardPolicy.trimmedText)
         // Настоящий текст с картинкой рядом (Word, Excel) остаётся текстом: картинку здесь даже не читаем.
@@ -50,19 +54,6 @@ enum ClipboardPasteboard {
         guard let tiff = pasteboard.data(forType: .tiff), imageFits(tiff), let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:]) else { return nil }
         return png.count <= ClipboardPolicy.maxImageBytes ? png : nil
-    }
-
-    /// Картинки, которые программа положила в буфер рядом с адресом файла: Finder кладёт значок файла. Только объявленные
-    /// типы элемента этого файла: `.tiff` из чужого формата система достраивала бы сама. Значок отдельным элементом без
-    /// адреса годится, только если файл один, иначе неясно, чей он. Размер проверяет `ClipFileThumbnail.bestIcon`.
-    private static func fileIcons(in pasteboard: NSPasteboard, file index: Int, of count: Int) -> [Data] {
-        let items = pasteboard.pasteboardItems ?? []
-        let withURL = items.filter { $0.types.contains(.fileURL) }
-        var holders = withURL.count == count && withURL.indices.contains(index) ? [withURL[index]] : []
-        if count == 1 { holders += items.filter { !$0.types.contains(.fileURL) } }
-        return holders.flatMap { holder in
-            holder.types.filter { UTType($0.rawValue)?.conforms(to: .image) == true }.compactMap { holder.data(forType: $0) }
-        }
     }
 
     /// Размер читается из заголовка, без декодирования: маленький файл может распаковаться в гигабайты.

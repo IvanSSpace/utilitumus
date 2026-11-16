@@ -20,6 +20,12 @@
 	<string>public.app-category.utilities</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Буфер покажет превью скопированных из этой папки картинок. Файлы не изменяются и не отправляются.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Буфер покажет превью скопированных из этой папки картинок. Файлы не изменяются и не отправляются.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Буфер покажет превью скопированных из этой папки картинок. Файлы не изменяются и не отправляются.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>UtilitumusSecurityEpoch</key>
