@@ -30,13 +30,7 @@ protocol ClipboardModel: ObservableObject, HotKeyTarget {
     func deleteSpace(_ id: UUID)
     func addExcluded(_ bundleID: String)
     func removeExcluded(_ bundleID: String)
-    /// Скрывать панель на снимках и записи экрана. nil — экран не может это менять (центр по связи): строки нет.
+    /// Скрывать панель на снимках и записи экрана. nil — значение неизвестно (утилита старше этой настройки): строки нет.
     var hidesPanelFromCapture: Bool? { get }
     func setHidesPanelFromCapture(_ on: Bool)
-}
-
-/// Договор связи с центром прежний: у модели центра этой настройки нет, строка видна только в окне утилиты.
-extension ClipboardModel {
-    var hidesPanelFromCapture: Bool? { nil }
-    func setHidesPanelFromCapture(_ on: Bool) {}
 }

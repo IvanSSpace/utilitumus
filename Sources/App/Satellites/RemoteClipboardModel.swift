@@ -35,6 +35,7 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
                        case .addExcluded(let id):
                            if !state.excludedApps.contains(id) { state.excludedApps.append(id) }
                        case .removeExcluded(let id): state.excludedApps.removeAll { $0 == id }
+                       case .setHidesPanelFromCapture(let on): state.hidesPanelFromCapture = on
                        default: break
                        }
                    })
@@ -95,6 +96,7 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
     var limit: Int { state.limit }
     var excludedApps: [String] { state.excludedApps }
     var axTrusted: Bool { state.axTrusted }
+    var hidesPanelFromCapture: Bool? { state.hidesPanelFromCapture }
 
     func togglePanel() { send(.togglePanel) }
     func refreshPermissions() { send(.refreshPermissions) }
@@ -112,4 +114,5 @@ final class RemoteClipboardModel: RemoteModuleModel<ClipboardState, ClipboardAct
     func resetHotKey() { send(.resetHotKey) }
     func suspendHotKey() { send(.suspendHotKey) }
     func resumeHotKey() { send(.resumeHotKey) }
+    func setHidesPanelFromCapture(_ on: Bool) { send(.setHidesPanelFromCapture(on: on)) }
 }
