@@ -39,7 +39,7 @@ done
 
 echo "== Имена логики"
 none "в Sources/App и папках UI нет имён логики" \
-  '[A-Z][a-z]+Controller|LoadStore|StashStore|BotsStore|AudioMonitor|VoiceModelStore|FanHelperInstaller' \
+  '[A-Z][a-z]+Controller|LoadStore|StashStore|BotsStore|AudioMonitor|VoiceModelStore|FanHelperInstaller|AVSpeechSynthesi|SpeechSynthesizing|AXSelectionReader|SelectionReading|SpeakHotKeyBinding|SpeakVoiceChooser' \
   Sources/App Sources/Modules/*/UI
 
 echo "== Сборочные скрипты"

@@ -173,6 +173,13 @@ struct StoreWithSidebar: View {
     check(UpdateBusy.reason(.bots, state: LinkWire.encoded(bots)) == nil, "боты свободны")
     bots.running = true
     check(UpdateBusy.reason(.bots, state: LinkWire.encoded(bots)) != nil, "боты: идёт команда")
+    var speak = SpeakState.stored()
+    check(UpdateBusy.readable(.speak, state: LinkWire.encoded(speak)) && UpdateBusy.reason(.speak, state: LinkWire.encoded(speak)) == nil, "озвучка свободна")
+    speak.phase = .speaking
+    check(UpdateBusy.reason(.speak, state: LinkWire.encoded(speak)) != nil, "озвучка: идёт чтение")
+    speak.phase = .paused
+    check(UpdateBusy.reason(.speak, state: LinkWire.encoded(speak)) != nil, "озвучка: на паузе тоже занята")
+    check(!UpdateBusy.readable(.speak, state: Data("мусор".utf8)), "озвучка: чужое состояние не разобралось")
     let stash = StashState(running: [], stubborn: [], stashed: [], usage: [:], scenarios: [], busy: nil, report: nil)
     check(UpdateBusy.reason(.stash, state: LinkWire.encoded(stash)) == nil, "стеш свободен")
     var stashBusy = stash

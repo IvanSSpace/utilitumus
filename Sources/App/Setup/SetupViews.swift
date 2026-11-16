@@ -7,7 +7,7 @@ private extension Module {
     /// «Заработала / заработал / заработали» по роду названия.
     var worksWord: String {
         switch self {
-        case .keyboard, .mouse, .load: return "заработала"
+        case .keyboard, .mouse, .load, .speak: return "заработала"
         case .fans: return "заработали"
         case .awake: return "заработало"
         case .sound, .stash, .mixer, .browser, .voice, .clipboard, .bots: return "заработал"

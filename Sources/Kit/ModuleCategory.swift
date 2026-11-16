@@ -26,7 +26,7 @@ struct ModuleCategory: Identifiable, Hashable {
         ModuleCategory(id: "handy", title: "Под рукой",
                        subtitle: "Пользуешься каждый день",
                        icon: "hand.point.up.fill",
-                       hue: 0.80, spread: 0.06, modules: [.stash, .voice, .clipboard, .mixer, .awake]),
+                       hue: 0.83, spread: 0.06, modules: [.stash, .voice, .clipboard, .mixer, .awake, .speak]),
         ModuleCategory(id: "ai", title: "С ИИ",
                        subtitle: "Когда агенты съедают память",
                        icon: "sparkles",

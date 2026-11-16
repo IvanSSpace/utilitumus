@@ -20,6 +20,7 @@ struct ModuleDetail: View {
             case .load: RemoteLoadPage()
             case .clipboard: RemoteClipboardPage()
             case .bots: RemoteBotsPage()
+            case .speak: RemoteSpeakPage()
             }
         } else {
             ModuleMissingPage(module: module)

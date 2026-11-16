@@ -22,7 +22,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/png" "$OUT/work" "$CACHE/src" "$CACHE/scoped" "$CACHE/plain"
 
 echo "== разбор: чьи файлы менялись"
-APPS=" awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots"
+APPS=" awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots speak:Speak"
 . scripts/dev-scope.sh
 classify() { dev_scope_classify <<<"$1"; echo "build=${PICK[*]:-} screens=$SCREENS kit=$KIT"; }
 same "файл утилиты: пересборка" "$(classify Sources/Apps/Mixer/main.swift)" "build=mixer screens= kit="

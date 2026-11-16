@@ -69,6 +69,8 @@ Sources/Modules/Mixer/UI/MixerView.swift|NSWorkspace.shared.open
 Sources/Modules/Mouse/MouseController.swift|NSWorkspace.shared.open
 Sources/Modules/Sound/AudioMonitor.swift|AudioObjectSetPropertyData
 Sources/Modules/Sound/UI/MicGuardMigration.swift|UserDefaults(suiteName
+# «Озвучка»: раздел Универсального доступа в Настройках открывается только по кнопке, в стенде requestAccessibility отказывает (Kit.standRefuses).
+Sources/Modules/Speak/SpeakController.swift|NSWorkspace.shared.open
 Sources/Modules/Stash/StashStore.swift|.terminate()
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.open
 Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.openApplication

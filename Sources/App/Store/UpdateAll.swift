@@ -15,6 +15,7 @@ enum UpdateBusy {
         case .load: return can(LoadState.self)
         case .stash: return can(StashState.self)
         case .bots: return can(BotsState.self)
+        case .speak: return can(SpeakState.self)
         case .sound, .fans, .mixer, .mouse, .browser, .clipboard, .keyboard: return true
         }
     }
@@ -41,6 +42,10 @@ enum UpdateBusy {
             return read(StashState.self)?.busy != nil ? "закрывает или возвращает программы" : nil
         case .bots:
             return read(BotsState.self)?.running == true ? "выполняется команда бота" : nil
+        case .speak:
+            // Пауза тоже занятость: перезапуск забыл бы недочитанный текст.
+            guard let speak = read(SpeakState.self) else { return nil }
+            return speak.phase == .idle ? nil : "идёт чтение вслух"
         case .sound, .fans, .mixer, .mouse, .browser, .clipboard, .keyboard:
             return nil
         }

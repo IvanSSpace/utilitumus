@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Озвучка</string>
+	<key>CFBundleExecutable</key>
+	<string>Speak</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.utilitumus.app.speak</string>
+	<key>CFBundleName</key>
+	<string>Speak</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.3.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.2.1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Прочитать вслух</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>readAloud</string>
+			<key>NSPortName</key>
+			<string>Speak</string>
+			<key>NSSendTypes</key>
+			<array>
+				<string>public.utf8-plain-text</string>
+				<string>NSStringPboardType</string>
+			</array>
+		</dict>
+	</array>
+	<key>UtilitumusSecurityEpoch</key>
+	<string>1</string>
+</dict>
+</plist>

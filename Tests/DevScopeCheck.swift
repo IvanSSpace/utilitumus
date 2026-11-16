@@ -187,7 +187,7 @@ func mentioned(_ text: String) -> Set<Module> {
     check(Set(modules.panelModules).isSubset(of: want), "дашборд идёт по panelModules: только набор")
     check(Set(modules.installedModules) == want, "установленные в панели: только набор")
     check(Set(modules.hiddenModules) == hiddenOnes.intersection(want), "hiddenModules: только набор")
-    // Обновлять можно только стоящую утилиту. В наборе awake,load их нет, а девять утилит вне набора обновление предлагают: фильтр виден и так.
+    // Обновлять можно только стоящую утилиту. В наборе awake,load их нет, а десять утилит вне набора обновление предлагают: фильтр виден и так.
     let updatable = want.subtracting(withoutUtility)
     check(Set(UpdateAll.shared.rows.map(\.module)) == updatable, "обновления: только набор, \(UpdateAll.shared.rows.map(\.module.rawValue))")
     check(Set(UpdateAll.shared.startable) == updatable, "«Обновить всё»: только набор")
@@ -240,7 +240,7 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
     check(ModuleScope.parse(mark) == [], "без знака равенства ничего не показывает")
 
     print("== \(label): страницы")
-    // У всех двенадцати подвал со счётчиком не помещается в обычную высоту и уходит под прокрутку.
+    // У всех тринадцати подвал со счётчиком не помещается в обычную высоту и уходит под прокрутку.
     let about = await render("\(label)-about", height: isAll ? 1800 : 900, AboutView { _ in })
     let store = await render("\(label)-store", StoreView())
     print("     текст О проекте: \(about.count) знаков, Стор: \(store.count) знаков")
