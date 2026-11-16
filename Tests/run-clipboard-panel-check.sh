@@ -56,6 +56,25 @@ SENDS="$(/usr/bin/grep -c 'sendPaste' Sources/Modules/Clipboard/ClipboardControl
   && [ "$SENDS" = 3 ] || fail "paste: ⌘V должен уходить только через pasteAfterLeaving и pasteSequence"
 echo "ok   paste шлёт ⌘V только после ухода панели"
 
+# Прогрев панели — один отложенный вызов, без повторяющихся таймеров. Повторяющихся в модуле ровно два: опрос буфера
+# (только пока утилита запущена) и шаг переноса (только пока несут карточку). Сам прогрев окно ключевым не делает,
+# мониторов не ставит и номер показа не трогает, а на экран выводит только прозрачным, мимо мыши и с уходом в том же
+# вызове; поведение проверяет checkPrewarm.
+REPEATS="$(cat Sources/Modules/Clipboard/*.swift Sources/Modules/Clipboard/UI/*.swift | /usr/bin/grep -cE 'repeats: *true|scheduledTimer|makeTimerSource')" || true
+[ "$REPEATS" = 2 ] || fail "повторяющихся таймеров в модуле $REPEATS, а должно быть 2: опрос буфера и шаг переноса"
+echo "ok   повторяющихся таймеров в модуле только два, прогрев не из них"
+PREWARM="$(/usr/bin/awk '/func prewarm\(/,/^    }$/' Sources/Modules/Clipboard/ClipboardPanel.swift)"
+[ -n "$PREWARM" ] || fail "не нашёл func prewarm в ClipboardPanel.swift"
+FOUND="$(printf '%s\n' "$PREWARM" | /usr/bin/grep -nE 'makeKey|orderFrontRegardless|activate|installMonitors|presentation|alphaValue = [^0]|ignoresMouseEvents = false|asyncAfter|main\.async' || true)"
+[ -z "$FOUND" ] || { echo "$FOUND"; fail "прогрев делает окно ключевым, видимым, ловящим мышь или откладывает уход"; }
+printf '%s\n' "$PREWARM" | /usr/bin/awk '/alphaValue = 0/{a=NR} /ignoresMouseEvents = true/{m=NR} /orderFront\(nil\)/{f=NR} /orderOut\(nil\)/{o=NR}
+  END { exit !(a && m && f && o && a < f && m < f && f < o) }' \
+  || fail "прогрев: альфа 0 и мимо мыши до orderFront, orderOut после него в том же вызове"
+echo "ok   прогрев выводит окно только прозрачным и мимо мыши и убирает в том же вызове"
+/usr/bin/grep -q 'DispatchQueue.main.asyncAfter(deadline: .now() + Self.panelPrepareDelay)' Sources/Modules/Clipboard/ClipboardController.swift \
+  || fail "прогрев панели должен запускаться одним отложенным вызовом"
+echo "ok   прогрев запускается одним отложенным вызовом"
+
 . Tests/lib/incremental.sh
 CACHE="$(incremental_cache clipboard-panel KIT_TEST_DEFAULTS)"
 mkdir -p "$CACHE/src"
@@ -63,7 +82,28 @@ for name in ClipboardPanelCheck ClipboardPanelFixture ClipboardPanelFilm; do
   cmp -s "Tests/$name.swift" "$CACHE/src/$name.swift" || cp "Tests/$name.swift" "$CACHE/src/$name.swift"
 done
 export KIT_TEST_SUITE="local.utilitumus.test.kit.clipboardpanel"
-trap 'defaults delete "$KIT_TEST_SUITE" 2>/dev/null || true; rm -f "$HOME/Library/Preferences/$KIT_TEST_SUITE.plist"' EXIT
+# Тестовые домены local.utilitumus.test.* — это сам шов, их стенд пишет по праву (Tests/stand-snapshot.sh, Kit.standForbiddenRoot).
+# Поэтому из настоящего ~/Library/Preferences удаляется только точное имя такого домена: без масок, каталогов и «..».
+# Имя не прошло проверку — ничего не удаляем, предупреждаем и проверку не роняем.
+cleanup_test_defaults() {
+  local suite="${KIT_TEST_SUITE:-}" prefix="local.utilitumus.test."
+  case "$suite" in
+    "$prefix"*) ;;
+    # Фигурные скобки обязательны: bash 3.2 в UTF-8 читает первый байт «»» как часть имени переменной.
+    *) echo "ПРЕДУПРЕЖДЕНИЕ: KIT_TEST_SUITE=«${suite}» не начинается с ${prefix} — тестовые настройки не удаляю" >&2; return 0 ;;
+  esac
+  case "${suite#"$prefix"}" in
+    "" | .* | *..* | *[![:alnum:]._-]*)
+      echo "ПРЕДУПРЕЖДЕНИЕ: в KIT_TEST_SUITE=«${suite}» пустой хвост, «..» или знак кроме букв, цифр, «.», «_», «-» — тестовые настройки не удаляю" >&2
+      return 0 ;;
+  esac
+  defaults delete "$suite" 2>/dev/null || true
+  case "${HOME:-}" in
+    /*) rm -f -- "$HOME/Library/Preferences/${suite}.plist" ;;
+    *) echo "ПРЕДУПРЕЖДЕНИЕ: HOME=«${HOME:-}» не абсолютный путь — файл ${suite}.plist не удаляю" >&2 ;;
+  esac
+}
+trap cleanup_test_defaults EXIT
 FILES=("$CACHE/src/ClipboardPanelCheck.swift" "$CACHE/src/ClipboardPanelFixture.swift" "$CACHE/src/ClipboardPanelFilm.swift")
 while IFS= read -r f; do FILES+=("$f"); done < <(find Sources/Modules/Clipboard Sources/Kit -name '*.swift' | sort)
 incremental_flags "$CACHE" "${FILES[@]}"

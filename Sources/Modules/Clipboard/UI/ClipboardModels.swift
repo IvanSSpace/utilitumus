@@ -36,6 +36,10 @@ struct ClipItem: Codable, Identifiable, Equatable {
     var title: String?
     /// Место внутри пространства: чем меньше, тем левее. Вне пространства его нет.
     var spaceRank: Int?
+    /// Зашифрованная миниатюра картинки для карточки панели. nil — её ещё нет: карточка берёт полный файл.
+    var thumbnailFile: String?
+    /// Миниатюру сделать не вышло (картинка не читается, не расшифровывается или не разжимается): больше не пробуем.
+    var thumbnailFailed: Bool?
 
     var host: String? {
         guard kind == .link, let text, let host = URL(string: text)?.host else { return nil }
@@ -58,6 +62,8 @@ struct ClipSnapshot: Sendable {
     var text: String?
     var filePaths: [String] = []
     var imagePNG: Data?
+    /// Миниатюра `imagePNG` для карточки, готовая до записи: хранилище её только шифрует и пишет.
+    var imageThumbnail: Data?
     var sourceBundleID: String?
     var sourceName: String?
 }
