@@ -81,16 +81,18 @@ do {
     let png = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 7, pixelsHigh: 5, bitsPerSample: 8, samplesPerPixel: 4,
                                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
         .representation(using: .png, properties: [:])!
-    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png, sourceBundleID: "x", sourceName: "x"))
+    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: png, imageThumbnail: ClipThumbnail.make(from: png), sourceBundleID: "x", sourceName: "x"))
     store.pin(store.items[1].id, to: space.id)
 
     let files = (try? FileManager.default.contentsOfDirectory(atPath: secretDir.path)) ?? []
     var leaked = false
     for f in files {
         let data = (try? Data(contentsOf: secretDir.appendingPathComponent(f))) ?? Data()
-        if data.range(of: Data("очень-секретная-строка".utf8)) != nil || data.range(of: Data("PNG".utf8)) != nil { leaked = true }
+        if data.range(of: Data("очень-секретная-строка".utf8)) != nil || data.range(of: Data("PNG".utf8)) != nil
+            || data.range(of: Data("JFIF".utf8)) != nil { leaked = true }
     }
-    check(!files.isEmpty && !leaked, "на диске нет открытого текста и PNG (\(files.count) файла)")
+    check(files.contains { $0.hasPrefix("thumb-") }, "миниатюра картинки лежит рядом с ней")
+    check(!files.isEmpty && !leaked, "на диске нет открытого текста, PNG и JPEG (\(files.count) файла)")
     let modes = files.compactMap { (try? FileManager.default.attributesOfItem(atPath: secretDir.appendingPathComponent($0).path))?[.posixPermissions] as? Int }
     check(!modes.isEmpty && modes.allSatisfy { $0 == 0o600 }, "файлы с правами 0600")
     let dirMode = (try? FileManager.default.attributesOfItem(atPath: secretDir.path))?[.posixPermissions] as? Int
@@ -808,6 +810,13 @@ do {
     check(store.items(in: space, query: "").map(\.id) == [b, c, d], "после сохранения порядок тот же")
     store.touch(d)
     check(store.items(in: space, query: "").map(\.id) == [b, c, d], "вставка не меняет порядок и у записи из старого индекса")
+    // Картинка старого индекса без миниатюры: в очереди доделки. Её файла нет — помечается и больше не пробуется.
+    let oldImage = store.items.first { $0.id == b }
+    check(oldImage?.thumbnailFile == nil && oldImage?.thumbnailFailed == nil && store.itemsWithoutThumbnail.map(\.id) == [b],
+          "картинка старого индекса без миниатюры, в очереди доделки")
+    ClipThumbnailBackfill(store: store).run(store.itemsWithoutThumbnail) { store.applyThumbnail($1, to: $0) }
+    store.saveThumbnails()
+    check(ClipboardStore(directory: oldDir, key: key).items.first { $0.id == b }?.thumbnailFailed == true, "картинки нет: пометка «не получилось» прочитана с диска")
     // Откат: новый файл читает старая версия.
     store.setTitle(b, "Снимок")
     store.setSpaceHidden(space, true)
@@ -823,7 +832,226 @@ do {
     fresh.ingest(snap("x"))
     _ = fresh.addSpace(name: "n", colorID: "red")
     let plain = String(data: read(root.appendingPathComponent("no-new-keys")), encoding: .utf8)!
-    check(!plain.contains("title") && !plain.contains("spaceRank") && !plain.contains("hidesContent"), "пока новым нечего хранить, в файле нет новых полей")
+    check(!plain.contains("title") && !plain.contains("spaceRank") && !plain.contains("hidesContent") && !plain.contains("thumbnail"),
+          "пока новым нечего хранить, в файле нет новых полей")
+}
+
+// 24. Миниатюры картинок: делаются при копировании, лежат зашифрованными рядом с картинкой, уходят вместе с записью,
+// старым картинкам их доделывает фоновая доделка по одной.
+do {
+    let fm = FileManager.default
+    func ms(_ work: () -> Void) -> Double {
+        let start = Date()
+        work()
+        return Date().timeIntervalSince(start) * 1000
+    }
+    /// Похоже на снимок экрана: светлый фон, тёмная колонка, градиент, строки текста. Канал альфы есть, прозрачных точек нет.
+    func screenshot(width: Int, height: Int, transparent: Bool = false) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        if !transparent {
+            NSColor(white: 0.97, alpha: 1).setFill()
+            NSRect(x: 0, y: 0, width: width, height: height).fill()
+        }
+        NSColor(calibratedRed: 0.2, green: 0.3, blue: 0.5, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: width / 6, height: height).fill()
+        NSGradient(starting: .systemBlue, ending: .systemPink)?.draw(in: NSRect(x: width / 5, y: height * 3 / 4, width: width / 2, height: height / 6), angle: 20)
+        let font: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: CGFloat(max(8, height / 60))), .foregroundColor: NSColor.black]
+        for line in 0..<40 {
+            ("Строка \(line): текст окна, code(\"x\") и 1234567890 " + String(repeating: "abc ", count: line % 7))
+                .draw(at: NSPoint(x: width / 5, y: line * height / 50), withAttributes: font)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        return rep.representation(using: .png, properties: [:])!
+    }
+    func noise(width: Int, height: Int) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: width * 4, bitsPerPixel: 32)!
+        arc4random_buf(rep.bitmapData!, width * height * 4)
+        return rep.representation(using: .png, properties: [:])!
+    }
+    /// Маленькая картинка своего цвета: у каждой свой хэш, повтором не считается.
+    func tiny(_ seed: Int) -> Data {
+        let context = CGContext(data: nil, width: 40, height: 30, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: CGFloat(seed % 10) / 10, green: CGFloat(seed / 10 % 10) / 10, blue: 0.5, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 40, height: 30))
+        let out = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(out, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, nil)
+        CGImageDestinationFinalize(destination)
+        return out as Data
+    }
+    struct Shape { let type: String; let width: Int; let height: Int; let transparent: Bool }
+    func shape(_ data: Data?) -> Shape? {
+        guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil), let type = CGImageSourceGetType(source),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        // Прозрачность по самим точкам: признак альфы в заголовке её не доказывает.
+        let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let bytes = context.data!.bindMemory(to: UInt8.self, capacity: image.width * image.height * 4)
+        let transparent = stride(from: 3, to: image.width * image.height * 4, by: 4).contains { bytes[$0] < 255 }
+        return Shape(type: type as String, width: image.width, height: image.height, transparent: transparent)
+    }
+    let aspect = ClipThumbnail.cardArea.width / ClipThumbnail.cardArea.height
+    func cardAspect(_ s: Shape?) -> Bool { s.map { abs(Double($0.width) / Double($0.height) - aspect) < 0.02 } ?? false }
+
+    // Сама миниатюра.
+    let shot = screenshot(width: 2880, height: 1800)
+    var thumb: Data?
+    _ = ClipThumbnail.make(from: shot)
+    let shotTime = ms { thumb = ClipThumbnail.make(from: shot) }
+    let shotShape = shape(thumb)
+    print("     снимок 2880×1800 (PNG \(shot.count / 1024) КБ): миниатюра \(shotShape?.type ?? "нет") \(shotShape?.width ?? 0)×\(shotShape?.height ?? 0), \(thumb.map { $0.count / 1024 } ?? 0) КБ, \(Int(shotTime)) мс")
+    check(shotShape?.type == "public.jpeg" && !(shotShape?.transparent ?? true), "непрозрачный снимок с каналом альфы: миниатюра JPEG")
+    check(shotShape?.width == 533 && shotShape?.height == 348, "снимок: миниатюра закрывает карточку на Retina с запасом (533×348)")
+    check((thumb?.count ?? .max) <= 80 * 1024, "снимок: миниатюра в десятки КБ (\(thumb.map { $0.count / 1024 } ?? -1) КБ)")
+
+    let clear = shape(ClipThumbnail.make(from: screenshot(width: 1200, height: 800, transparent: true)))
+    check(clear?.type == "public.png" && clear?.transparent == true, "прозрачная картинка: миниатюра PNG, прозрачность цела")
+
+    let loud = ClipThumbnail.make(from: noise(width: 1600, height: 1000))
+    let loudShape = shape(loud)
+    check(loud != nil && loud!.count <= ClipThumbnail.maxBytes && loudShape?.type == "public.png" && cardAspect(loudShape),
+          "прозрачный шум: PNG уменьшен до предела, а не пропущен (\(loud.map { $0.count / 1024 } ?? -1) КБ, \(loudShape?.width ?? 0)×\(loudShape?.height ?? 0))")
+
+    let page = shape(ClipThumbnail.make(from: screenshot(width: 1000, height: 10000)))
+    check(cardAspect(page) && (page?.width ?? .max) <= ClipThumbnail.maxSide, "длинная страница: середина в пропорции карточки (\(page?.width ?? 0)×\(page?.height ?? 0))")
+    let small = shape(ClipThumbnail.make(from: tiny(1)))
+    check(small?.width == 40, "маленькая картинка не растягивается: ширина \(small?.width ?? 0)")
+    check(ClipThumbnail.make(from: Data("не картинка".utf8)) == nil, "не картинка: миниатюры нет")
+    let gray = CGContext(data: nil, width: 9000, height: 8000, bitsPerComponent: 8, bytesPerRow: 9000, space: CGColorSpaceCreateDeviceGray(),
+                         bitmapInfo: CGImageAlphaInfo.none.rawValue)!
+    let bombOut = NSMutableData()
+    let bombDestination = CGImageDestinationCreateWithData(bombOut, "public.png" as CFString, 1, nil)!
+    CGImageDestinationAddImage(bombDestination, gray.makeImage()!, nil)
+    CGImageDestinationFinalize(bombDestination)
+    var bomb: Data? = Data()
+    let bombTime = ms { bomb = ClipThumbnail.make(from: bombOut as Data) }
+    check(bomb == nil && bombTime < 200, "72 Мпикс сверх предела точек: миниатюры нет, разжатия нет (\(Int(bombTime)) мс)")
+
+    // Запись: миниатюра зашифрована тем же ключом, рядом с картинкой, с теми же правами.
+    let thumbDir = root.appendingPathComponent("thumbs")
+    let store = ClipboardStore(directory: thumbDir, key: key, limit: 10)
+    check(store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: shot, imageThumbnail: thumb)), "картинка с миниатюрой записана")
+    let item = store.items[0]
+    let thumbURL = thumbDir.appendingPathComponent("thumb-\(item.id.uuidString).bin")
+    check(item.thumbnailFile == thumbURL.lastPathComponent && fm.fileExists(atPath: thumbURL.path), "миниатюра в thumb-<id>.bin рядом с img-<id>.bin")
+    let sealed = (try? Data(contentsOf: thumbURL)) ?? Data()
+    let opened = try? AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: key)
+    check(opened == thumb && sealed.count <= ClipThumbnail.maxBytes + 28, "файл миниатюры открывается ключом истории: те же байты, в пределе (\(sealed.count / 1024) КБ)")
+    let header = thumb!.prefix(16)
+    check(thumb!.starts(with: [0xFF, 0xD8, 0xFF]) && sealed.range(of: header) == nil && sealed.range(of: Data("JFIF".utf8)) == nil
+          && sealed.range(of: Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) == nil, "в файле миниатюры нет открытого JPEG и PNG")
+    let mode = (try? fm.attributesOfItem(atPath: thumbURL.path))?[.posixPermissions] as? Int
+    check(mode == 0o600, "файл миниатюры с правами 0600")
+    check(store.cardImageData(item) == thumb && store.imageData(item) == shot, "карточке миниатюра, вставке и переносу полный PNG байт в байт")
+    check(ClipboardStore(directory: thumbDir, key: key).items[0].thumbnailFile == item.thumbnailFile, "миниатюра прочитана из индекса")
+
+    check(store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(2))), "картинка без миниатюры записана")
+    check(store.items[0].thumbnailFile == nil && store.cardImageData(store.items[0]) == tiny(2), "без миниатюры карточке полный файл, как раньше")
+    try! fm.removeItem(at: thumbURL)
+    check(store.cardImageData(item) == shot, "файл миниатюры пропал: карточке полный файл")
+
+    // Удаление, обрезка по лимиту и «Очистить» уносят миниатюру: сирот нет.
+    func orphans(_ dir: URL) -> [String] {
+        let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter { $0.hasPrefix("thumb-") && !names.contains("img-" + $0.dropFirst(6)) }
+    }
+    func thumbs(_ dir: URL) -> Int { ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasPrefix("thumb-") }.count }
+    let wipeDir = root.appendingPathComponent("thumbs-wipe")
+    let wipe = ClipboardStore(directory: wipeDir, key: key, limit: 10)
+    for seed in 0..<12 { wipe.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(seed), imageThumbnail: ClipThumbnail.make(from: tiny(seed)))) }
+    check(wipe.items.count == 10 && thumbs(wipeDir) == 10 && orphans(wipeDir).isEmpty, "лимит 10: у вытесненных миниатюры удалены (\(thumbs(wipeDir)))")
+    let doomed = wipe.items[3]
+    wipe.delete(doomed.id)
+    check(!fm.fileExists(atPath: wipeDir.appendingPathComponent(doomed.thumbnailFile!).path) && thumbs(wipeDir) == 9, "удаление записи удаляет миниатюру")
+    let space = wipe.addSpace(name: "Оставить", colorID: "red")
+    wipe.pin(wipe.items[0].id, to: space.id)
+    wipe.clearHistory()
+    check(thumbs(wipeDir) == 1 && orphans(wipeDir).isEmpty, "«Очистить» удаляет миниатюры истории, у закреплённой остаётся")
+    // Доделка записала миниатюру, индекс о ней ещё не знает: удаление записи уносит и её, по имени картинки.
+    wipe.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(50)))
+    let late = wipe.items[0]
+    let made = wipe.makeThumbnail(for: late)
+    check(made == .made("thumb-\(late.id.uuidString).bin") && thumbs(wipeDir) == 2, "доделка записала миниатюру рядом с картинкой")
+    wipe.delete(late.id)
+    check(thumbs(wipeDir) == 1, "удаление записи уносит миниатюру, которой ещё нет в индексе")
+    // Запись удалили раньше, чем доделка дописала файл: применение результата его убирает.
+    try! Data("поздний файл".utf8).write(to: wipeDir.appendingPathComponent("thumb-\(late.id.uuidString).bin"))
+    wipe.applyThumbnail(made, to: late.id)
+    check(thumbs(wipeDir) == 1 && orphans(wipeDir).isEmpty, "применение к удалённой записи убирает её миниатюру")
+
+    // Доделка: по одной, битую пропускает с пометкой, по отмене останавливается и продолжает со следующего запуска.
+    let fillDir = root.appendingPathComponent("thumbs-fill")
+    var fill = ClipboardStore(directory: fillDir, key: key, limit: 100)
+    let broken = ["повреждён", "чужой ключ", "не картинка", "файла нет"]
+    for _ in broken { fill.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(fill.items.count + 60))) }
+    let brokenIDs = fill.items.map(\.id).reversed() as [UUID]
+    func imageURL(_ id: UUID) -> URL { fillDir.appendingPathComponent(fill.items.first { $0.id == id }!.imageFile!) }
+    var garbage = Data(count: 500)
+    garbage.withUnsafeMutableBytes { arc4random_buf($0.baseAddress!, 500) }
+    try! garbage.write(to: imageURL(brokenIDs[0]))
+    try! AES.GCM.seal(tiny(90), using: SymmetricKey(size: .bits256)).combined!.write(to: imageURL(brokenIDs[1]))
+    try! AES.GCM.seal(Data("не картинка".utf8), using: key).combined!.write(to: imageURL(brokenIDs[2]))
+    try! fm.removeItem(at: imageURL(brokenIDs[3]))
+    let good = 25
+    for seed in 0..<good { fill.ingest(ClipSnapshot(types: ["public.png"], imagePNG: tiny(seed))) }
+    try! Data("сирота".utf8).write(to: fillDir.appendingPathComponent("thumb-сирота.bin"))
+    check(fill.itemsWithoutThumbnail.count == good + broken.count, "в очереди все картинки без миниатюры: \(fill.itemsWithoutThumbnail.count)")
+
+    // Первый запуск: отмена после трёх. Между картинками отмена видна, четвёртой не будет.
+    let first = ClipThumbnailBackfill(store: fill)
+    var delivered: [UUID] = []
+    let pending = fill.itemsWithoutThumbnail
+    first.run(pending) { id, outcome in
+        delivered.append(id)
+        fill.applyThumbnail(outcome, to: id)
+        if delivered.count == 3 { first.cancel() }
+    }
+    check(delivered == pending.prefix(3).map(\.id), "по одной, по порядку очереди: сначала новые; отмена после трёх остановила доделку")
+    check(!fm.fileExists(atPath: fillDir.appendingPathComponent("thumb-сирота.bin").path), "миниатюра без своей картинки убрана")
+    fill.saveThumbnails()
+    fill = ClipboardStore(directory: fillDir, key: key, limit: 100)
+    check(fill.itemsWithoutThumbnail.count == good + broken.count - 3, "следующий запуск: в очереди только недоделанные (\(fill.itemsWithoutThumbnail.count))")
+
+    // Второй запуск: до конца. Индекс пишется раз в пачку, а не после каждой картинки.
+    let index = fillDir.appendingPathComponent("index.bin")
+    var writes = 0
+    var applied = 0
+    var lastIndex = try? Data(contentsOf: index)
+    var outcomes: [UUID: ClipThumbnailOutcome] = [:]
+    let second = ClipThumbnailBackfill(store: fill)
+    second.run(fill.itemsWithoutThumbnail) { id, outcome in
+        outcomes[id] = outcome
+        fill.applyThumbnail(outcome, to: id)
+        applied += 1
+        let now = try? Data(contentsOf: index)
+        if now != lastIndex { writes += 1 }
+        lastIndex = now
+    }
+    check(applied == good + broken.count - 3 && writes == applied / ClipboardStore.thumbnailSaveBatch,
+          "индекс пишется пачками по \(ClipboardStore.thumbnailSaveBatch): \(writes) раз на \(applied) картинок")
+    check(brokenIDs.allSatisfy { outcomes[$0] == .broken }, "повреждённый файл, чужой ключ, не картинка и пропавший файл — «не получилось»")
+    check(outcomes.values.filter { if case .made = $0 { return true } else { return false } }.count == good - 3, "остальные доделаны")
+    fill.saveThumbnails()
+    check(fill.itemsWithoutThumbnail.isEmpty, "после доделки очередь пуста")
+    var again = 0
+    ClipThumbnailBackfill(store: fill).run(fill.itemsWithoutThumbnail) { _, _ in again += 1 }
+    fill = ClipboardStore(directory: fillDir, key: key, limit: 100)
+    check(again == 0 && fill.itemsWithoutThumbnail.isEmpty, "битые не повторяются ни сразу, ни со следующего запуска")
+    check(brokenIDs.allSatisfy { id in fill.items.first { $0.id == id }?.thumbnailFailed == true }, "пометка «не получилось» в индексе")
+    check(fill.items.filter { $0.thumbnailFile != nil }.count == good && thumbs(fillDir) == good && orphans(fillDir).isEmpty,
+          "у каждой целой картинки своя миниатюра, лишних файлов нет")
+    let sample = fill.items.first { $0.thumbnailFile != nil }!
+    check(shape(fill.cardImageData(sample))?.type == "public.jpeg", "доделанная миниатюра читается карточкой")
+
+    // Хранилище без ключа: доделывать нечего.
+    let noKey = ClipboardStore(directory: fillDir, key: nil)
+    check(!noKey.isAvailable && noKey.itemsWithoutThumbnail.isEmpty, "без ключа очередь пуста, ничего не читается")
 }
 
 print(failures == 0 ? "ВСЕ ПРОВЕРКИ ПРОШЛИ" : "ПРОВАЛЕНО: \(failures)")

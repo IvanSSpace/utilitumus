@@ -664,11 +664,17 @@ final class StandPanel: NSPanel {
     var fakeKey = false
     /// Точный момент ухода: опрос из проверки опаздывает на свой шаг.
     var orderedOutAt = 0.0
+    /// Каждый вывод на экран: с какой альфой, ловило ли окно мышь, было ли ключевым.
+    var orders: [(alpha: CGFloat, mouse: Bool, key: Bool)] = []
     override var canBecomeKey: Bool { false }
     override var isKeyWindow: Bool { fakeKey }
     override func makeKeyAndOrderFront(_ sender: Any?) {
         fakeKey = true
         orderFront(sender)
+    }
+    override func order(_ place: NSWindow.OrderingMode, relativeTo otherWin: Int) {
+        if place != .out { orders.append((alphaValue, !ignoresMouseEvents, fakeKey)) }
+        super.order(place, relativeTo: otherWin)
     }
     override func orderOut(_ sender: Any?) {
         fakeKey = false
@@ -2664,6 +2670,211 @@ func titlePoint(card: Int) -> NSPoint {
     check(controller.wireState.recent.map(\.title).contains(secret), "сняли скрытие: строка снова с текстом")
 }
 
+// MARK: - Миниатюра карточки
+
+/// Карточка берёт миниатюру, а без неё полный файл; перенос наружу отдаёт полный PNG. Доделка на настоящем контроллере
+/// и временном хранилище: явный вызов, остановка посреди и продолжение.
+@MainActor func checkCardThumbnail() async {
+    let area = CGSize(width: ClipCard.width, height: ClipCard.height - ClipCard.headerHeight - ClipCard.footerHeight)
+    check(ClipThumbnail.cardArea == area, "миниатюра рассчитана на настоящую область картинки карточки: \(area)")
+
+    func png(_ red: CGFloat) -> Data {
+        let context = CGContext(data: nil, width: 1600, height: 900, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: red, green: 0.4, blue: 0.6, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 1600, height: 900))
+        context.setFillColor(CGColor(srgbRed: 1 - red, green: 0.9, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: 200, y: 100, width: 700, height: 500))
+        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-thumb-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let key = SymmetricKey(size: .bits256)
+    let store = ClipboardStore(directory: dir, key: key, limit: 100)
+    let olds = (1...4).map { png(CGFloat($0) / 10) }
+    for old in olds { store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: old)) }
+    let fresh = png(0.9)
+    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: fresh, imageThumbnail: ClipThumbnail.make(from: fresh)))
+    let controller = ClipboardController.shared
+    controller.attach(store)
+    defer { controller.detachStore() }
+    let model = ClipboardPanelHost.shared.makeModel(controller)
+    model.allItems = controller.items
+    let copied = model.allItems
+    func width(_ item: ClipItem) -> Int? { model.imageLoader(item)?.representations.first?.pixelsWide }
+    check(width(copied[0]) == 533, "карточке миниатюра: \(width(copied[0]) ?? 0) точек в ширину, а не 1600")
+    check(width(copied[1]) == 1600, "без миниатюры карточке полный файл, как раньше")
+    let drag = model.dragProvider(for: copied[0])
+    check(hex(await loaded(drag, UTType.png.identifier)) == hex(fresh), "перенос наружу отдаёт полный PNG, а не миниатюру")
+    check(!controller.isFillingThumbnails, "подставленное хранилище доделку само не запускает")
+
+    // Отпустили хранилище сразу после запуска: доделка остановлена, её результат в индекс не попадает.
+    controller.fillThumbnails()
+    check(controller.isFillingThumbnails, "доделка идёт")
+    controller.detachStore()
+    check(!controller.isFillingThumbnails, "отпустили хранилище: доделка остановлена")
+    // Новый запуск на той же очереди встаёт за остановленным: когда он кончится, кончился и тот.
+    controller.attach(store)
+    controller.fillThumbnails()
+    check(await waitUntil(10) { !controller.isFillingThumbnails }, "следующий запуск доделал остальное")
+    check(store.itemsWithoutThumbnail.isEmpty && width(copied[1]) == 533, "старой картинке тоже миниатюра, и даже по прежней копии списка панели")
+    let reread = ClipboardStore(directory: dir, key: key, limit: 100)
+    check(reread.items.allSatisfy { $0.thumbnailFile != nil }, "доделка записана в индекс")
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+    check(names.filter { $0.hasPrefix("thumb-") }.count == olds.count + 1, "по одной миниатюре на картинку, сирот нет")
+    model.forgetImages()
+}
+
+// MARK: - Прогрев панели
+
+/// Прогрев: окно и первая раскладка на настоящих записях заранее, а для показа панель «не показывалась, но готова».
+/// Контроллер настоящий, хранилище временное, ключ выдуманный, окна стенда за экраном и без настоящей клавиатуры.
+@MainActor func checkPrewarm(out: String) async {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clip-prewarm-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let store = ClipboardStore(directory: dir, key: SymmetricKey(size: .bits256), limit: 100)
+    let picture: Data = {
+        let context = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.2, green: 0.5, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }()
+    store.ingest(ClipSnapshot(types: ["public.png"], imagePNG: picture, imageThumbnail: ClipThumbnail.make(from: picture)))
+    for text in ["третья", "вторая", "первая"] {
+        store.ingest(ClipSnapshot(types: [], text: text, sourceBundleID: "test.source.\(text)", sourceName: "Источник"))
+    }
+    let controller = ClipboardController.shared
+    controller.observesSystem = false
+    controller.attach(store)
+    defer { controller.detachStore() }
+
+    // Явный прогрев на окне стенда.
+    let stand = LeaveStand(wired: true)
+    var made = 0
+    let maker = stand.host.panelMaker
+    stand.host.panelMaker = { made += 1; return maker($0) }
+    var loads = 0
+    let loader = stand.model.imageLoader
+    stand.model.imageLoader = { loads += 1; return loader($0) }
+    let wasActive = NSApp.isActive
+    let keyBefore = NSApp.keyWindow
+    let layouts = ClipPanelHostingView.layoutCount
+    stand.host.prewarm(controller: controller)
+    guard let panel = stand.panel else { return check(false, "прогрев создал окно стенда") }
+    check(made == 1 && stand.host.isPrepared, "прогрев создал окно один раз")
+    check(ClipPanelHostingView.layoutCount > layouts && stand.model.allItems.map(\.id) == controller.items.map(\.id),
+          "прогрев разложил настоящие записи")
+    check(loads == 0, "картинки при прогреве не расшифровывались (\(loads))")
+    check(!panel.orders.isEmpty && panel.orders.allSatisfy { $0.alpha == 0 && !$0.mouse && !$0.key },
+          "на экран окно выходило только прозрачным, мимо мыши и не ключевым: \(panel.orders)")
+    check(!panel.isVisible && !stand.host.isVisible, "к концу прогрева окна на экране уже нет")
+    check(!panel.fakeKey && NSApp.keyWindow === keyBefore && NSApp.isActive == wasActive, "клавиатуру не взяло, приложение не активировало")
+    check(panel.alphaValue == 0 && panel.ignoresMouseEvents, "окно прозрачное и мимо мыши")
+    check(!stand.host.monitorsInstalled, "мониторов клавиш и кликов нет")
+    check(stand.host.presentation == 0, "номер показа не тронут: \(stand.host.presentation)")
+    check(panel.frame.size == stand.frame.size, "кадр уже размера показа: показ только сдвинет окно (\(panel.frame.size))")
+    _ = stand.model.image(controller.items.first { $0.kind == .image }!)
+    check(loads == 1, "после прогрева карточка берёт картинку своим загрузчиком, кэш пуст")
+    stand.model.forgetImages()
+    let ordered = panel.orders.count
+    await pause(0.2)
+    check(panel.orders.count == ordered && !panel.isVisible && !stand.host.monitorsInstalled, "и после такта окно не на экране, мониторов нет")
+
+    stand.host.prewarm(controller: controller)
+    check(made == 1 && stand.host.presentation == 0, "повторный прогрев окно не пересоздаёт")
+
+    // Запись пришла после прогрева: показ берёт свежие данные, а не снимок прогрева.
+    store.ingest(ClipSnapshot(types: [], text: "после прогрева", sourceBundleID: "test.source.new", sourceName: "Источник"))
+    controller.attach(store)
+    stand.host.show(controller: controller)
+    await pause(0.3)
+    check(stand.settledOpen && stand.host.monitorsInstalled && panel.fakeKey && panel.orders.count > ordered, "первый показ после прогрева обычный: окно на месте, ключевое, мониторы стоят")
+    check(stand.host.presentation == 1 && made == 1, "показ первый по счёту, окно то же")
+    check(stand.model.visible.first?.text == "после прогрева" && stand.model.visible.count == controller.items.count, "показ берёт свежие записи")
+
+    // Тот же первый показ без прогрева рисует то же самое.
+    let plain = LeaveStand(wired: true)
+    plain.host.show(controller: controller)
+    await pause(0.3)
+    if let warmed = (panel.contentView?.subviews.first), let cold = plain.panel?.contentView?.subviews.first {
+        let a = snapshot(warmed, "prewarm-shown", out: out), b = snapshot(cold, "prewarm-plain", out: out)
+        let differ = changed(a, b, in: CGRect(x: 0, y: 0, width: warmed.bounds.width, height: warmed.bounds.height))
+        check(differ == 0, "первый показ после прогрева рисует то же, что без него (отличных точек \(differ))")
+    } else {
+        check(false, "снимки показа с прогревом и без")
+    }
+    // Хранилище отпустили при открытой панели: она досматривает свои записи и забывает их в конце ухода.
+    stand.host.forgetItems()
+    check(!stand.model.allItems.isEmpty, "открытая панель досматривает свои записи")
+    stand.host.hide()
+    plain.host.hide()
+    await pause(0.3)
+    check(stand.model.allItems.isEmpty && stand.model.spaces.isEmpty, "в конце ухода копия записей забыта")
+    stand.close()
+    plain.close()
+
+    // Утилита греет сама, один раз и только когда хранилище открыто; стенд без явного вызова не греет.
+    // Окно общей панели здесь тоже стенда: за экраном и без настоящей клавиатуры.
+    let shared = ClipboardPanelHost.shared
+    var sharedPanel: StandPanel?
+    var sharedModel: ClipboardPanelModel?
+    var sharedMade = 0
+    shared.standFrame = stand.frame
+    shared.hidesOnOutsideClick = false
+    shared.panelMaker = { model in
+        sharedMade += 1
+        sharedModel = model
+        let real = ClipboardPanelHost.makePanel(model)
+        let content = real.contentView
+        real.contentView = nil
+        let panel = StandPanel(contentRect: .zero, styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.isReleasedWhenClosed = false
+        panel.contentView = content
+        sharedPanel = panel
+        return panel
+    }
+    let wait = ClipboardController.panelPrepareDelay + 0.4
+    check(!shared.isPrepared, "до проверки общая панель не создана")
+    controller.start()
+    controller.attachOpened(store)
+    await pause(wait)
+    check(!shared.isPrepared && sharedMade == 0, "стенд (без слежения за системой) сам не греет")
+
+    // Утилиту остановили раньше срока: отложенный прогрев ничего не делает.
+    controller.observesSystem = true
+    controller.attachOpened(store)
+    controller.observesSystem = false
+    controller.stop()
+    controller.detachStore()
+    await pause(wait)
+    check(!shared.isPrepared && sharedMade == 0, "остановили до срока: прогрева нет")
+
+    controller.attach(store)
+    controller.start()
+    controller.observesSystem = true
+    controller.attachOpened(store)
+    controller.observesSystem = false
+    check(!shared.isPrepared, "прогрев не сразу, а отложенно")
+    let prepared = await waitUntil(wait + 1) { shared.isPrepared }
+    check(prepared && sharedMade == 1, "утилита греет панель после открытия хранилища")
+    check(sharedPanel?.orders.allSatisfy { $0.alpha == 0 && !$0.mouse && !$0.key } == true && sharedPanel?.isVisible == false
+            && sharedPanel?.fakeKey == false && !shared.monitorsInstalled && shared.presentation == 0,
+          "после прогрева утилиты окно не на экране, не ключевое, мониторов нет")
+    controller.observesSystem = true
+    controller.attachOpened(store)
+    controller.observesSystem = false
+    await pause(wait)
+    check(sharedMade == 1, "новое открытие хранилища не греет второй раз")
+    check(sharedModel?.allItems.isEmpty == false, "прогретая панель держит записи до показа")
+    controller.stop()
+    controller.detachStore()
+    check(sharedModel?.allItems.isEmpty == true && sharedModel?.spaces.isEmpty == true, "утилиту остановили: у прогретой панели записей не осталось")
+    sharedPanel?.contentView = nil
+}
+
 @main
 enum Main {
     static func main() {
@@ -2682,6 +2893,7 @@ enum Main {
             checkTint()
             checkGeometry()
             await checkDrag()
+            await checkCardThumbnail()
             await checkLiveEvents()
             checkDragSourceMask()
             await checkDropTarget()
@@ -2700,6 +2912,8 @@ enum Main {
             await checkTitle(out: out)
             await checkConcealment(out: out)
             await checkConcealedWire()
+            // Последней: оставляет общей панели окно стенда.
+            await checkPrewarm(out: out)
             print(failures == 0 ? "ГОТОВО: всё верно" : "ПРОВАЛОВ: \(failures)")
             exit(failures == 0 ? 0 : 1)
         }

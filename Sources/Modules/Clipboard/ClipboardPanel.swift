@@ -134,6 +134,7 @@ final class ClipboardPanelModel: ObservableObject {
     /// Лимит истории: для честной подписи при удалении пространства.
     var limit = ClipboardPolicy.defaultLimit
 
+    /// Картинка для карточки: миниатюра, пока её нет — полный файл.
     var imageLoader: (ClipItem) -> NSImage? = { _ in nil }
     /// Как достать сохранённые байты картинки для переноса наружу. Возвращает загрузчик: сама расшифровка только по запросу программы.
     var imageBytes: (ClipItem) -> @Sendable () -> Data? = { _ in { nil } }
@@ -1333,6 +1334,8 @@ final class ClipboardPanelHost {
     /// Панель уезжает: окно ещё на экране, но для всех она уже закрыта, и горячая клавиша откроет её снова.
     private var isLeaving = false
     private var leftCallbacks: [() -> Void] = []
+    /// Хранилище отпустили, пока панель была на экране: копия записей уходит в конце ухода.
+    private var forgetsItemsOnLeave = false
     /// Куда панель приезжает при показе. Уход считается от него: при закрытии посреди открытия текущий кадр ещё на полпути.
     private var shownFrame = CGRect.zero
     /// Номер показа. Завершение анимации сверяет его: закрытие, которое отменили новым показом, ничего не скрывает.
@@ -1340,18 +1343,55 @@ final class ClipboardPanelHost {
 
     var isVisible: Bool { panel?.isVisible == true && !isLeaving }
     var monitorsInstalled: Bool { keyMonitor != nil }
+    /// Окно уже есть: после прогрева или прошлого показа.
+    var isPrepared: Bool { panel != nil }
 
     func toggle(controller: ClipboardController) {
         isVisible ? hide() : show(controller: controller)
     }
 
     func show(controller: ClipboardController) {
+        present(load(controller))
+    }
+
+    /// Копия данных контроллера на момент показа.
+    private func load(_ controller: ClipboardController) -> ClipboardPanelModel {
         let model = self.model ?? makeModel(controller)
         model.allItems = controller.items
         model.spaces = controller.spaces
         model.storeError = controller.storeError
         model.limit = controller.limit
-        present(model)
+        return model
+    }
+
+    /// Прогрев один раз за процесс: окно, вид, первая раскладка на настоящих записях и первая отрисовка делаются заранее,
+    /// и первое открытие не платит за ленивое создание и первые кэши (значки, цвет шапки, текст карточек, слои).
+    /// Пользователь окна не видит, клавиатуру и мышь оно не берёт, приложение не активирует. Мониторы клавиш
+    /// не ставятся, номер показа не меняется: для `present` панель «не показывалась, но готова».
+    func prewarm(controller: ClipboardController) {
+        guard panel == nil else { return }
+        let model = load(controller)
+        model.reset()
+        model.refreshTheme()
+        // Картинки не расшифровываются: карточка рисует заглушку, миниатюру возьмёт показ. Первый показ от их расшифровки
+        // здесь не быстрее, а расшифрованная картинка лежала бы в слоях скрытого окна с самого запуска.
+        let loader = model.imageLoader
+        model.imageLoader = { _ in nil }
+        defer { model.imageLoader = loader }
+        let panel = panelMaker(model)
+        self.panel = panel
+        panel.ignoresMouseEvents = true
+        panel.alphaValue = 0
+        // Тот же кадр, с которого начинает показ: тогда показ только сдвигает окно, без новой раскладки.
+        panel.setFrame((standFrame ?? Self.frameOnCursorScreen()).offsetBy(dx: 0, dy: -Self.slideDistance), display: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        // Отрисовка и коммит слоёв идут только у окна на экране. Выходит оно так же, как в начале каждого показа:
+        // прозрачным, но ещё и мимо мыши и не ключевым (`orderFront` ключевое окно не меняет), и уходит в этом же вызове:
+        // событий между выводом и уходом нет. Без вывода первый показ остаётся вдвое дольше.
+        panel.orderFront(nil)
+        panel.displayIfNeeded()
+        CATransaction.flush()
+        panel.orderOut(nil)
     }
 
     /// Показать панель с готовой моделью. Панель одна на модель: другую модель сюда не подставляют.
@@ -1369,6 +1409,7 @@ final class ClipboardPanelHost {
         let resuming = isLeaving && frame == shownFrame
         presentation += 1
         isLeaving = false
+        forgetsItemsOnLeave = false
         // Панель никуда не ушла, значит ждать нечего. ⌘V теперь попал бы в неё саму.
         leftCallbacks = []
         shownFrame = frame
@@ -1460,16 +1501,38 @@ final class ClipboardPanelHost {
         panel.alphaValue = 0
         // Расшифрованным картинкам незачем лежать в памяти, пока панели нет.
         model?.forgetImages()
+        if forgetsItemsOnLeave { dropItems() }
         let callbacks = leftCallbacks
         leftCallbacks = []
         callbacks.forEach { $0() }
+    }
+
+    /// Хранилище отпустили: у скрытой панели (после показа или прогрева) не должно остаться копии записей.
+    /// Видимая или уезжающая досмотрит свои и забудет их в конце ухода.
+    func forgetItems() {
+        guard model != nil else { return }
+        if panel?.isVisible == true {
+            forgetsItemsOnLeave = true
+        } else {
+            dropItems()
+        }
+    }
+
+    /// Раскладка сразу: иначе скрытое окно держало бы прежние карточки до следующего показа.
+    private func dropItems() {
+        forgetsItemsOnLeave = false
+        model?.allItems = []
+        model?.spaces = []
+        panel?.contentView?.layoutSubtreeIfNeeded()
     }
 
     /// Панель держит копию данных; пока открыта, новые записи в ней не нужны.
     func makeModel(_ controller: ClipboardController) -> ClipboardPanelModel {
         let model = ClipboardPanelModel()
         self.model = model
-        model.imageLoader = { [weak controller] item in controller?.imageData(item).flatMap { NSImage(data: $0) } }
+        // Карточке хватает миниатюры: полный снимок разжимался бы на главном потоке при каждом открытии.
+        // Полный файл нужен только переносу наружу и вставке, они берут его сами и только по запросу.
+        model.imageLoader = { [weak controller] item in controller?.cardImageData(item).flatMap { NSImage(data: $0) } }
         model.imageBytes = { [weak controller] item in
             // Запрос придёт не обязательно на главном потоке. Хранилищу это не мешает: чтение файла и ключ неизменяемы.
             nonisolated(unsafe) let store = controller?.store

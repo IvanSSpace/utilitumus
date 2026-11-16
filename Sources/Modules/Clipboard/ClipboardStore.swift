@@ -134,7 +134,8 @@ enum ClipReorder {
 
 /// История буфера и пространства. Всё на диске зашифровано AES-GCM; без ключа из Keychain это шум.
 ///
-/// Индекс (`index.bin`) — JSON со всеми записями, картинки — отдельные файлы `img-<id>.bin`.
+/// Индекс (`index.bin`) — JSON со всеми записями, картинки — отдельные файлы `img-<id>.bin`, их миниатюры для карточек
+/// панели — `thumb-<id>.bin` тем же ключом.
 /// Не привязан к главному потоку и к AppKit, чтобы проверяться отдельным тестом.
 final class ClipboardStore {
     private(set) var items: [ClipItem] = []
@@ -149,6 +150,9 @@ final class ClipboardStore {
     private let key: SymmetricKey?
     private let directory: URL
     private let fm = FileManager.default
+    /// Доделанные миниатюры, ещё не записанные в индекс: он пишется пачками, а не после каждой картинки.
+    private var unsavedThumbnails = 0
+    static let thumbnailSaveBatch = 20
 
     private struct Index: Codable {
         var items: [ClipItem]
@@ -240,6 +244,11 @@ final class ClipboardStore {
             guard writeEncrypted(png, name: file) else { return false }
             item.imageFile = file
             (item.imageWidth, item.imageHeight) = Self.pngSize(png)
+            // Миниатюры нет или не записалась: карточка возьмёт полный файл, а доделка сделает её со следующего запуска.
+            if let thumbnail = snap.imageThumbnail {
+                let name = Self.thumbnailName(for: file)
+                if writeEncrypted(thumbnail, name: name) { item.thumbnailFile = name }
+            }
         }
         items.insert(item, at: 0)
         trim()
@@ -444,6 +453,67 @@ final class ClipboardStore {
         return readEncrypted(name: file)
     }
 
+    /// Картинка для карточки панели: миниатюра, а пока её нет — полный файл, как раньше. Запись берётся текущая:
+    /// доделка могла дописать миниатюру после того, как панель взяла свою копию списка.
+    func cardImageData(_ item: ClipItem) -> Data? {
+        let current = items.first { $0.id == item.id } ?? item
+        if let file = current.thumbnailFile, let thumbnail = readEncrypted(name: file) { return thumbnail }
+        return imageData(current)
+    }
+
+    // MARK: Миниатюры
+
+    /// Миниатюра лежит рядом с картинкой под её именем: `img-<id>.bin` → `thumb-<id>.bin`. По имени картинки её находят
+    /// удаление и уборка сирот, даже если индекс о ней ещё не знает.
+    static func thumbnailName(for imageFile: String) -> String {
+        "thumb-" + (imageFile.hasPrefix("img-") ? String(imageFile.dropFirst(4)) : imageFile)
+    }
+
+    /// Картинки, которым миниатюра ещё нужна, по порядку списка: сначала новые, их увидят первыми.
+    var itemsWithoutThumbnail: [ClipItem] {
+        items.filter { $0.kind == .image && $0.imageFile != nil && $0.thumbnailFile == nil && $0.thumbnailFailed != true }
+    }
+
+    /// Одна картинка: чтение, расшифровка, уменьшение, шифрование и запись миниатюры. Идёт вне главного потока
+    /// и трогает только неизменяемое (ключ, каталог), список записей не читает.
+    func makeThumbnail(for item: ClipItem) -> ClipThumbnailOutcome {
+        guard let file = item.imageFile, let thumbnail = imageData(item).flatMap({ ClipThumbnail.make(from: $0) }) else { return .broken }
+        let name = Self.thumbnailName(for: file)
+        return writeEncrypted(thumbnail, name: name) ? .made(name) : .notWritten
+    }
+
+    /// Результат доделки, на потоке хранилища. Индекс пишется раз в `thumbnailSaveBatch` картинок и в `saveThumbnails`.
+    func applyThumbnail(_ outcome: ClipThumbnailOutcome, to id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else {
+            // Запись удалили, пока делалась миниатюра: её файл не должен остаться сиротой.
+            if case .made(let name) = outcome { try? fm.removeItem(at: directory.appendingPathComponent(name)) }
+            return
+        }
+        guard items[index].thumbnailFile == nil, items[index].thumbnailFailed != true else { return }
+        switch outcome {
+        case .made(let name): items[index].thumbnailFile = name
+        case .broken: items[index].thumbnailFailed = true
+        case .notWritten: return
+        }
+        unsavedThumbnails += 1
+        if unsavedThumbnails >= Self.thumbnailSaveBatch { save() }
+    }
+
+    /// Записать в индекс доделанное с прошлого сохранения: в конце доделки и при её остановке.
+    func saveThumbnails() {
+        if unsavedThumbnails > 0 { save() }
+    }
+
+    /// Миниатюры без своей картинки: запись удалили, пока миниатюра делалась, или утилита закрылась в этот момент.
+    /// Миниатюры отложенной истории не трогаются: их картинки на месте.
+    func removeOrphanThumbnails() {
+        let names = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? []
+        let present = Set(names)
+        for name in names where name.hasPrefix("thumb-") && !present.contains("img-" + name.dropFirst(6)) {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
     // MARK: Диск
 
     private func prepareDirectory() {
@@ -507,6 +577,7 @@ final class ClipboardStore {
     }
 
     private func save() {
+        unsavedThumbnails = 0
         guard isAvailable, let plain = try? JSONEncoder().encode(Index(items: items, spaces: spaces)),
               let sealed = seal(plain) else { return }
         write(sealed, to: indexURL)
@@ -522,15 +593,16 @@ final class ClipboardStore {
         return try? AES.GCM.open(box, using: key)
     }
 
-    private func write(_ data: Data, to url: URL) {
-        guard (try? data.write(to: url, options: .atomic)) != nil else { return }
+    @discardableResult
+    private func write(_ data: Data, to url: URL) -> Bool {
+        guard (try? data.write(to: url, options: .atomic)) != nil else { return false }
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return true
     }
 
     private func writeEncrypted(_ data: Data, name: String) -> Bool {
         guard let sealed = seal(data) else { return false }
-        write(sealed, to: directory.appendingPathComponent(name))
-        return true
+        return write(sealed, to: directory.appendingPathComponent(name))
     }
 
     private func readEncrypted(name: String) -> Data? {
@@ -539,7 +611,10 @@ final class ClipboardStore {
     }
 
     private func removeFiles(_ item: ClipItem) {
-        if let file = item.imageFile { try? fm.removeItem(at: directory.appendingPathComponent(file)) }
+        guard let file = item.imageFile else { return }
+        try? fm.removeItem(at: directory.appendingPathComponent(file))
+        // По имени картинки, а не по полю: миниатюру могла уже записать доделка, которую индекс ещё не применил.
+        try? fm.removeItem(at: directory.appendingPathComponent(Self.thumbnailName(for: file)))
     }
 
     // MARK: Мелочи
@@ -556,5 +631,48 @@ final class ClipboardStore {
         guard data.count > 24 else { return (nil, nil) }
         func be(_ at: Int) -> Int { data[at..<at + 4].reduce(0) { $0 << 8 | Int($1) } }
         return (be(16), be(20))
+    }
+}
+
+/// Что вышло у доделки одной картинки.
+enum ClipThumbnailOutcome: Equatable, Sendable {
+    /// Миниатюра записана в этот файл.
+    case made(String)
+    /// Картинку не прочитать, не расшифровать или не разжать: запись помечается и больше не пробуется.
+    case broken
+    /// Миниатюра не записалась на диск: запись остаётся в очереди до следующего запуска.
+    case notWritten
+}
+
+/// Доделка миниатюр у картинок, сохранённых до них. По одной: в памяти не больше одной расшифрованной картинки.
+/// Отмена смотрится между картинками; что не успели, остаётся без миниатюры и доделывается со следующего запуска.
+final class ClipThumbnailBackfill: @unchecked Sendable {
+    /// Здесь хранилище только читает картинку и пишет миниатюру. Список записей меняет `deliver` на своём потоке.
+    private let store: ClipboardStore
+    private let lock = NSLock()
+    private var cancelled = false
+
+    init(store: ClipboardStore) { self.store = store }
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+
+    /// Идёт на фоновой очереди. `deliver` получает результат каждой картинки и переносит его на поток хранилища.
+    func run(_ pending: [ClipItem], deliver: (UUID, ClipThumbnailOutcome) -> Void) {
+        store.removeOrphanThumbnails()
+        for item in pending {
+            guard !isCancelled else { return }
+            // Своя граница освобождения на картинку: очередь GCD чистит её только в конце всей доделки.
+            deliver(item.id, autoreleasepool { store.makeThumbnail(for: item) })
+        }
     }
 }

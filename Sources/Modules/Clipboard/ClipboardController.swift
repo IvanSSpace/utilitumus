@@ -34,14 +34,19 @@ final class ClipboardController: ObservableObject {
 
     /// Последовательная: снимки приходят в том порядке, в каком буфер менялся.
     private static let readQueue = DispatchQueue(label: "local.utilitumus.clipboard.read", qos: .userInitiated)
+    /// Доделка миниатюр: по одной картинке, с низким приоритетом, открытию панели не мешает.
+    private static let thumbnailQueue = DispatchQueue(label: "local.utilitumus.clipboard.thumbnails", qos: .utility)
 
     private(set) var store: ClipboardStore?
     private(set) var isRunning = false
     /// Утилита открывает хранилище сама: ключ читается вне главного потока и по своему порядку.
     /// Встроенный модуль оставляет nil и берёт ключ из прежней записи.
     var storeOpener: (@MainActor () -> Void)?
-    /// false — ни опроса буфера, ни горячей клавиши: для стенда, которому чужой буфер и клавиши не нужны.
+    /// false — ни опроса буфера, ни горячей клавиши, ни доделки миниатюр в фоне: для стенда, которому чужой буфер
+    /// и клавиши не нужны. Доделку стенд и проверка зовут сами (`fillThumbnails`).
     var observesSystem = true
+    /// Идущая доделка миниатюр; nil — не идёт.
+    private var thumbnails: ClipThumbnailBackfill?
     private var timer: Timer?
     private var lastChange = 0
     /// changeCount после нашей собственной записи (вставка из панели): такую запись не запоминаем.
@@ -95,6 +100,7 @@ final class ClipboardController: ObservableObject {
     func stop() {
         guard isRunning else { return }
         isRunning = false
+        cancelThumbnails()
         timer?.invalidate()
         timer = nil
         if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
@@ -128,6 +134,10 @@ final class ClipboardController: ObservableObject {
         storeError = nil
         storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
         attach(opened)
+        if observesSystem {
+            fillThumbnails()
+            preparePanel()
+        }
     }
 
     /// Открытое утилитой хранилище; уведомление об отложенном индексе — как у встроенного.
@@ -139,28 +149,97 @@ final class ClipboardController: ObservableObject {
         storeError = nil
         storeNotice = opened.setAsideIndex.map { "Старая история не расшифровалась и отложена в файл \($0.lastPathComponent)" }
         attach(opened)
+        if observesSystem {
+            fillThumbnails()
+            preparePanel()
+        }
+    }
+
+    /// Пауза перед прогревом панели: запуск утилиты и связь с центром успевают закончиться.
+    static let panelPrepareDelay = 1.0
+
+    /// Прогреть панель один раз, когда хранилище открыто: первое открытие в процессе не платит за создание окна
+    /// и первую раскладку. Один отложенный вызов, без повторов; к его сроку утилиту могли остановить, а панель — уже
+    /// показать, тогда он ничего не делает. Утилита зовёт сама, стенд — явно.
+    func preparePanel() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.panelPrepareDelay) {
+            MainActor.assumeIsolated {
+                let controller = ClipboardController.shared
+                guard controller.isRunning, controller.store?.isAvailable == true else { return }
+                ClipboardPanelHost.shared.prewarm(controller: controller)
+            }
+        }
     }
 
     /// Хранилища не будет: история не ведётся, причина видна на экране.
     func storeUnavailable(_ message: String) {
+        cancelThumbnails()
         store = nil
         sync()
         storeError = message
+        ClipboardPanelHost.shared.forgetItems()
     }
 
     /// Отпустить хранилище: остановленная или пассивная утилита не держит историю в памяти,
-    /// иначе она перезаписала бы файл, которым за это время занялся другой владелец.
+    /// иначе она перезаписала бы файл, которым за это время занялся другой владелец. Копию у панели тоже.
     func detachStore() {
+        cancelThumbnails()
         store = nil
         storeError = nil
         storeNotice = nil
         sync()
+        ClipboardPanelHost.shared.forgetItems()
     }
 
     /// Подключить хранилище. Отдельно от `openStore`, чтобы стенд мог подставить своё, не трогая Keychain и диск.
     func attach(_ store: ClipboardStore) {
+        if store !== self.store { cancelThumbnails() }
         self.store = store
         sync()
+    }
+
+    // MARK: Миниатюры
+
+    /// Доделать миниатюры картинкам, сохранённым до них. Утилита зовёт сама после открытия хранилища, проверка — явно.
+    /// Картинки по одной на своей очереди; на главный поток приходит только результат, индекс пишется пачками.
+    func fillThumbnails() {
+        guard thumbnails == nil, let store, store.isAvailable else { return }
+        let run = ClipThumbnailBackfill(store: store)
+        thumbnails = run
+        let pending = store.itemsWithoutThumbnail
+        Self.thumbnailQueue.async {
+            run.run(pending) { id, outcome in
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { ClipboardController.shared.applyThumbnail(outcome, to: id, from: run) }
+                }
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { ClipboardController.shared.finishThumbnails(run) }
+            }
+        }
+    }
+
+    /// Идёт ли доделка: для проверки.
+    var isFillingThumbnails: Bool { thumbnails != nil }
+
+    /// Результат остановленной доделки не применяется: хранилище могли отпустить. Файл миниатюры тогда остаётся
+    /// без записи в индексе: картинка в очереди и при следующем запуске, а без картинки его убирает уборка сирот.
+    private func applyThumbnail(_ outcome: ClipThumbnailOutcome, to id: UUID, from run: ClipThumbnailBackfill) {
+        guard run === thumbnails else { return }
+        store?.applyThumbnail(outcome, to: id)
+    }
+
+    private func finishThumbnails(_ run: ClipThumbnailBackfill) {
+        guard run === thumbnails else { return }
+        thumbnails = nil
+        store?.saveThumbnails()
+    }
+
+    /// Остановить доделку между картинками и записать в индекс то, что уже доделано.
+    private func cancelThumbnails() {
+        thumbnails?.cancel()
+        thumbnails = nil
+        store?.saveThumbnails()
     }
 
     private func sync() {
@@ -187,6 +266,8 @@ final class ClipboardController: ObservableObject {
             guard var snap = ClipboardPasteboard.snapshot(of: Kit.pasteboard, change: count) else { return }
             snap.sourceBundleID = sourceID
             snap.sourceName = sourceName
+            // Миниатюра карточки здесь же, при копировании: панель потом не разжимает полный снимок при каждом открытии.
+            snap.imageThumbnail = snap.imagePNG.flatMap { ClipThumbnail.make(from: $0) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { ClipboardController.shared.finishRead(snap) }
             }
@@ -292,6 +373,7 @@ final class ClipboardController: ObservableObject {
     func deleteSpace(_ id: UUID) { store?.deleteSpace(id); sync() }
 
     func imageData(_ item: ClipItem) -> Data? { store?.imageData(item) }
+    func cardImageData(_ item: ClipItem) -> Data? { store?.cardImageData(item) }
 
     var historyCount: Int { items.filter { $0.spaceID == nil }.count }
 

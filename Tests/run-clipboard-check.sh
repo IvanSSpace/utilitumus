@@ -23,6 +23,7 @@ cmp -s Tests/ClipboardCheck.swift "$CACHE/src/main.swift" || cp Tests/ClipboardC
 FILES=("$CACHE/src/main.swift"
   Sources/Modules/Clipboard/UI/ClipboardModels.swift
   Sources/Modules/Clipboard/ClipboardStore.swift
+  Sources/Modules/Clipboard/ClipboardThumbnail.swift
   Sources/Modules/Clipboard/ClipboardPasteboard.swift
   Sources/Modules/Clipboard/ClipboardPreview.swift)
 incremental_flags "$CACHE" "${FILES[@]}"
