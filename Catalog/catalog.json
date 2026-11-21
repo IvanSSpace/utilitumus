@@ -71,13 +71,13 @@
     },
     {
       "id": "mixer",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "minHub": "0.6.0",
-      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.4.0/Mixer.zip",
-      "sha256": "88f5fd89a9ece9929fa73c84c95faa1d41aed8cd0170454b30139ce07e4c46e2",
+      "url": "https://github.com/IvanSSpace/utilitumus/releases/download/mixer-v1.4.1/Mixer.zip",
+      "sha256": "d36610687fa91657999d226250906c0f8b784c2b4c4e43aeda594547e106424d",
       "sizeMB": 2,
       "notes": [
-        "Эквалайзер на 10 полос и готовые режимы, у каждого приложения свой"
+        "Смена трека, пауза и переключение вкладок больше не дают звуку на мгновение пройти без громкости и эквалайзера"
       ]
     },
     {
