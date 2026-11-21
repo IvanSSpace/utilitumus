@@ -645,7 +645,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
     check(StudioController.storedFolder(defaults) == "", "по умолчанию папка пуста")
     check(send(.setFolder("не абсолютный"))?.error != nil && defaults.string(forKey: StudioKeys.folder) == nil, "кривой путь: отказ, настройка не записана")
     check(send(.setFolder("/a/../b"))?.error != nil, "путь с «..»: отказ")
-    check(send(.openInBrowser)?.error != nil && send(.newLogin)?.error != nil, "«В браузере» у остановленной: отказ")
+    check(send(.openInBrowser)?.error != nil, "«В браузере» у остановленной: отказ")
 
     // Выключенный модуль: папка сохраняется, сервер не стартует.
     check(send(.setFolder(folder.path))?.error == nil && defaults.string(forKey: StudioKeys.folder) == folder.path, "папка записана в настройки")
@@ -656,8 +656,9 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
     check(await settle(controller.state.phase == .running && controller.state.ownsServer), "включили: сервер работает")
     check(send(.openInBrowser)?.error == nil, "включён: «В браузере» принято")
     check(await settle(opened.count == 1), "адрес открыт утилитой")
-    check(send(.newLogin)?.error == nil, "прежнее имя действия (лаунчер 0.9.4) делает то же")
-    check(await settle(opened.count == 2), "и тоже открывает браузер")
+    check(send(.newLogin)?.error == "Экран Студии теперь родной: обнови лаунчер", "newLogin от лаунчера 0.9.4: отказ строкой")
+    try? await Task.sleep(for: .milliseconds(200))
+    check(opened.count == 1, "newLogin браузер не открывает (0.9.4 шлёт его сам, без нажатия)")
     check(!String(decoding: controller.handle(LinkWire.encoded(StudioAction.openInBrowser)), as: UTF8.self).contains("#b="), "в ответе на провод кода нет")
 
     // Смена папки: старый свой сервер остановлен, новый запущен в новой.

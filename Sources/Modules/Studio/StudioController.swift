@@ -84,10 +84,13 @@ final class StudioController {
             runner.stop()
             if running { runner.start() }
             return nil
-        case .openInBrowser, .newLogin:
+        case .openInBrowser:
             guard running, runner.state.phase == .running else { return "Студия не запущена" }
             runner.openInBrowser(openURL)
             return nil
+        case .newLogin:
+            // Лаунчер 0.9.4 шлёт его сам, как только показывает страницу: открывать по нему браузер нельзя, кода он больше не получит.
+            return "Экран Студии теперь родной: обнови лаунчер"
         case .reconnect:
             guard running else { return "Модуль сейчас не работает" }
             runner.stop()
