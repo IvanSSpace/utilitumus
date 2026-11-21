@@ -6,13 +6,42 @@ import Foundation
 @MainActor
 final class StudioController {
     let runner: StudioRunner
+    /// Опрос Студии и действия по утилитам: идёт, только пока открыт экран и сервер работает.
+    let board: StudioBoardLoader
     private let defaults: UserDefaults
     private(set) var running = false
+    private var screenIsOpen = false
+    private var phaseSub: AnyCancellable?
 
-    init(runner: StudioRunner? = nil, defaults: UserDefaults = Kit.defaults) {
+    /// Чем утилита открывает адрес в браузере. Проверки подставляют своё.
+    private let openURL: @MainActor (URL) -> Void
+
+    init(runner: StudioRunner? = nil, defaults: UserDefaults = Kit.defaults,
+         openURL: @escaping @MainActor (URL) -> Void = { StudioOpen.inBrowser($0) }) {
         self.defaults = defaults
-        self.runner = runner ?? StudioRunner(folder: Self.storedFolder(defaults), launcher: StudioProcessLauncher(),
-                                             network: StudioLiveNetwork(), system: StudioLiveSystem())
+        self.openURL = openURL
+        let runner = runner ?? StudioRunner(folder: Self.storedFolder(defaults), launcher: StudioProcessLauncher(),
+                                            network: StudioLiveNetwork(), system: StudioLiveSystem())
+        self.runner = runner
+        board = StudioBoardLoader(runner: runner)
+        // @Published сообщает до записи: фазу берём из самого сообщения, а состояние не трогаем (снимок при уходе сервера стирает раннер).
+        phaseSub = runner.$state.map(\.phase).removeDuplicates().sink { [weak self] phase in self?.syncPolling(phase, clear: false) }
+    }
+
+    /// Опрашиваем, пока открыт экран и сервер работает. Иначе опроса нет, а снимок утилит забыт.
+    private func syncPolling(_ phase: StudioPhase? = nil, clear: Bool = true) {
+        if running, screenIsOpen, (phase ?? runner.state.phase) == .running {
+            board.start()
+        } else {
+            board.reset()
+            if clear { runner.clearBoard() }
+        }
+    }
+
+    /// Экран открыт в центре или в своём окне (аренда экрана).
+    func screenOpen(_ open: Bool) {
+        screenIsOpen = open
+        syncPolling()
     }
 
     nonisolated static func storedFolder(_ defaults: UserDefaults) -> String {
@@ -31,16 +60,18 @@ final class StudioController {
     func stop() {
         running = false
         runner.stop()
+        syncPolling()
     }
 
     /// Выход процесса: сервер должен уйти раньше нас.
     func stopAndWait() {
         running = false
         runner.stopAndWait()
+        syncPolling()
     }
 
     func handle(_ data: Data) -> Data {
-        LinkWire.handle(data, as: StudioAction.self, limit: 2048, state: { state }) { perform($0) }
+        LinkWire.handle(data, as: StudioAction.self, limit: StudioAction.wireLimit, state: { state }) { perform($0) }
     }
 
     private func perform(_ action: StudioAction) -> String? {
@@ -53,10 +84,24 @@ final class StudioController {
             runner.stop()
             if running { runner.start() }
             return nil
-        case .newLogin:
+        case .openInBrowser, .newLogin:
             guard running, runner.state.phase == .running else { return "Студия не запущена" }
-            runner.newLogin()
+            runner.openInBrowser(openURL)
             return nil
+        case .reconnect:
+            guard running else { return "Модуль сейчас не работает" }
+            runner.stop()
+            runner.start()
+            return nil
+        case .select(let id):
+            guard StudioUnitID.isValid(id), runner.state.board?.unit(id) != nil else { return "Нет такой утилиты" }
+            board.select(id)
+            return nil
+        case .deselect:
+            board.select(nil)
+            return nil
+        default:
+            return board.perform(action)
         }
     }
 

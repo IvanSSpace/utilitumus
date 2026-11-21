@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Настоящий запуск: `Process` без шелла, ввод и вывод в /dev/null. Вывод не читается, поэтому и не копится:
 /// непрочитанная труба переполнилась бы и заморозила сервер.
@@ -70,18 +70,43 @@ extension StudioLiveSystem {
 /// Только `http://127.0.0.1:<порт>`: без прокси, без кеша и куки, редиректы не выполняются (токен не уйдёт дальше).
 final class StudioLiveNetwork: NSObject, StudioNetwork, URLSessionTaskDelegate, @unchecked Sendable {
     private var session: URLSession!
+    /// Для API: те же запрещения, но время на запрос задаёт вызывающий (действие мастера может идти минуты).
+    private var apiSession: URLSession!
 
     override init() {
         super.init()
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 3
-        configuration.timeoutIntervalForResource = 5
-        configuration.connectionProxyDictionary = [:]
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        func configuration(resource: TimeInterval) -> URLSessionConfiguration {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.timeoutIntervalForRequest = 3
+            configuration.timeoutIntervalForResource = resource
+            configuration.connectionProxyDictionary = [:]
+            configuration.httpCookieStorage = nil
+            configuration.httpShouldSetCookies = false
+            configuration.urlCache = nil
+            // Ни сохранённых паролей, ни ответа на вызов авторизации: токен единственный способ войти.
+            configuration.urlCredentialStorage = nil
+            configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+            return configuration
+        }
+        session = URLSession(configuration: configuration(resource: 5), delegate: self, delegateQueue: nil)
+        apiSession = URLSession(configuration: configuration(resource: 300), delegate: self, delegateQueue: nil)
+    }
+
+    /// Сервер Студии молчит, пока работает с Orca, и отвечает разом: пауза до первого байта и есть время запроса.
+    func request(method: String, port: Int, path: String, token: String, body: Data?, maxBytes: Int,
+                 timeout: TimeInterval) async throws -> StudioReply {
+        guard (1024...65535).contains(port), path.hasPrefix("/"), !path.contains("?"), !path.contains("#"),
+              let url = URL(string: "http://127.0.0.1:\(port)\(path)") else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        request.setValue(token, forHTTPHeaderField: "X-Studio-Token")
+        if method == "POST" {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body ?? Data("{}".utf8)
+        }
+        let (data, response) = try await Self.read(apiSession, request, maxBytes: maxBytes)
+        return StudioReply(status: response.statusCode, data: data)
     }
 
     func get(port: Int, path: String, token: String) async throws -> Data { try await send("GET", port, path, token) }
@@ -96,15 +121,40 @@ final class StudioLiveNetwork: NSObject, StudioNetwork, URLSessionTaskDelegate, 
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = Data("{}".utf8)
         }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200, data.count <= StudioRunner.maxReply else {
-            throw URLError(.badServerResponse)
-        }
+        let (data, response) = try await Self.read(session, request, maxBytes: StudioRunner.maxReply)
+        guard response.statusCode == 200 else { throw URLError(.badServerResponse) }
         return data
+    }
+
+    /// Тело читается потоком и обрывается на пределе: сервер, который пишут мастера, не раздует память утилиты.
+    private static func read(_ session: URLSession, _ request: URLRequest, maxBytes: Int) async throws -> (Data, HTTPURLResponse) {
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { bytes.task.cancel(); throw URLError(.badServerResponse) }
+        guard http.expectedContentLength <= Int64(maxBytes) else { bytes.task.cancel(); throw URLError(.dataLengthExceedsMaximum) }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < maxBytes else { bytes.task.cancel(); throw URLError(.dataLengthExceedsMaximum) }
+            data.append(byte)
+        }
+        return (data, http)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        completionHandler(.cancelAuthenticationChallenge, nil)
+    }
+}
+
+/// Открыть адрес в браузере по умолчанию. Только в утилите: адрес несёт одноразовый код, а лаунчеру код не положен.
+/// Стенд отказывает: из проверки настоящий браузер не запускается.
+enum StudioOpen {
+    @MainActor static func inBrowser(_ url: URL) {
+        guard !Kit.standRefuses("открыть адрес в браузере") else { return }
+        NSWorkspace.shared.open(url)
     }
 }

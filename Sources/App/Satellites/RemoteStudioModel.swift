@@ -1,33 +1,29 @@
-import AppKit
-import Combine
 import Foundation
 
-/// Модель вкладки «Студия», когда модуль ведёт утилита. Сервер, токен и папка у утилиты; у центра только состояние
-/// с адресом входа: токена здесь нет и получить его нечем.
+/// Модель вкладки «Студия», когда модуль ведёт утилита. Сервер, токен, код входа и папка у утилиты; у центра только снимок
+/// состояния: ни токена, ни кода, который на него меняется, здесь нет.
 @MainActor
 final class RemoteStudioModel: RemoteModuleModel<StudioState, StudioAction>, StudioModel {
-    private let handoff: StudioBrowserHandoff
-    private var sub: AnyCancellable?
-
-    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool,
-         openExternal: @escaping @MainActor (URL) -> Void = { StudioOpen.inBrowser($0) }) {
-        handoff = StudioBrowserHandoff(open: openExternal)
+    init(id: String, link: RemoteModuleLink? = nil, canRead: @escaping () -> Bool) {
         // До первого ответа — сохранённая папка: домен настроек у центра и утилиты один.
         super.init(id: id, initial: StudioState.stored(), link: link, canRead: canRead,
                    optimistic: { state, action in
                        // Сервером и кодом распоряжается утилита: показываем её ответ. Папка видна сразу, отказ откатит.
-                       if case .setFolder(let path) = action, let folder = StudioPath.validated(path) { state.folder = folder }
+                       switch action {
+                       case .setFolder(let path):
+                           if let folder = StudioPath.validated(path) { state.folder = folder }
+                       case .select(let id):
+                           // Выбранная утилита видна сразу; дело подгрузит утилита.
+                           state.board?.selected = id
+                           if state.board?.detail?.id != id { state.board?.detail = nil }
+                       case .deselect:
+                           state.board?.selected = nil
+                           state.board?.detail = nil
+                       default: break
+                       }
                    })
-        sub = $state.sink { [weak self] state in self?.handoff.observe(state) }
     }
-
-    var browserLogin: Int { handoff.claimed }
 
     func setFolder(_ path: String) { send(.setFolder(path)) }
-    func newLogin() { send(.newLogin) }
-
-    func openInBrowser() {
-        handoff.request(after: state.login)
-        send(.newLogin)
-    }
+    func openInBrowser() { send(.openInBrowser) }
 }
