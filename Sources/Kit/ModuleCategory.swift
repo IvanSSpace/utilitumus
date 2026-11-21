@@ -30,15 +30,20 @@ struct ModuleCategory: Identifiable, Hashable {
         ModuleCategory(id: "ai", title: "С ИИ",
                        subtitle: "Когда агенты съедают память",
                        icon: "sparkles",
-                       hue: 0.125, spread: 0.03, modules: [.load, .bots]),
+                       hue: 0.125, spread: 0.03, modules: [.load, .bots, .studio]),
     ]
 
     /// Оттенок модуля внутри гаммы категории.
     /// `base` — средний оттенок вместо штатного (у «Своей» темы).
+    ///
+    /// Личный модуль (`Module.isPersonal`) в счёт не идёт: у остальных людей его нет, и оттенки их модулей не должны
+    /// сдвигаться оттого, что он есть в таблице. Он занимает место сразу за общими.
     func hue(of module: Module, base: Double? = nil) -> Double {
         let center = base ?? hue
         guard let index = modules.firstIndex(of: module) else { return center }
-        let value = center + (Double(index) - Double(modules.count - 1) / 2) * spread
+        let shared = modules.filter { !$0.isPersonal }.count
+        let place = module.isPersonal ? shared : index
+        let value = center + (Double(place) - Double(shared - 1) / 2) * spread
         return value - value.rounded(.down)
     }
 

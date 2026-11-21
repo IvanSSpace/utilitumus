@@ -20,6 +20,7 @@ fix_checks_of() {
     sound) echo run-sound-remote-check run-sound-wire-check ;;
     speak) echo run-speak-copy-check run-speak-core-check run-speak-privacy-check run-speak-screen-check run-speak-service-check ;;
     stash) echo run-own-identity-check run-stash-module-check run-stash-remote-check run-stash-title-check run-stash-wire-check ;;
+    studio) echo run-studio-install-check run-studio-nav-check run-studio-runner-check run-studio-screen-check run-studio-wire-check ;;
     voice) echo run-voice-remote-check run-voice-remote-pure-check run-voice-security-check run-voice-wire-check ;;
     # Лаунчер (fix.sh hub): оболочка и следы утилит в ней, боковая панель, дашборд и меню-бар, значки меню (раздел настроек), Стор,
     # обновление центра и утилит, следы шва в бандле. Окна настроек целиком проверкой не охвачено: menu-icons снимает раздел «Значки в меню»,

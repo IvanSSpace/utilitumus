@@ -26,6 +26,8 @@ let arranged: [Module] = Module.allCases.reversed()
 let pinned: Set<Module> = [.sound, .mixer, .awake]
 let hiddenOnes: Set<Module> = [.fans, .load]
 let withoutUtility: Set<Module> = [.mixer, .awake, .load]
+/// Без явного набора личный модуль скрыт, даже когда его утилита стоит (`Module.isPersonal`, `ModuleScope`): бандл читается из настоящей папки, стенд её не читает.
+let shownByDefault: [Module] = Module.allCases.filter { !$0.isPersonal }
 
 /// Всё, что не должно меняться: порядок, выбранный модуль, значки, скрытые, включённость, передача утилите.
 func guardedSettings(_ defaults: UserDefaults) -> [String: String] {
@@ -316,9 +318,9 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
 /// Обычная сборка на настройках после дев-сборки: всё на месте.
 @MainActor func plain() async {
     let modules = ModuleManager.shared
-    await common(expected: Module.allCases, label: "обычная сборка")
-    check(modules.order == arranged, "порядок тот, что был")
-    check(SidebarModel.shared.layout().flattened.count == Module.allCases.count, "в панели снова все модули")
+    await common(expected: shownByDefault, label: "обычная сборка")
+    check(modules.order == arranged.filter { !$0.isPersonal }, "порядок тот, что был")
+    check(SidebarModel.shared.layout().flattened.count == shownByDefault.count, "в панели снова все модули")
     check(UserDefaults.standard.string(forKey: "SelectedModule") == Module.sound.rawValue, "SelectedModule прежний")
     check(ModuleScope.categories == ModuleCategory.all, "все категории")
     check(ModuleScope.emptyNote == nil, "подписи о пустой сборке нет")
@@ -345,7 +347,7 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
         #if KIT_DEV_SCOPE
         let isAll = expectedArg == "*"
         let ids = isAll ? Module.allCases.map(\.rawValue) : expectedArg.split(separator: ",").map(String.init)
-        await scoped(expected: Module.allCases.filter { ids.contains($0.rawValue) }, isAll: isAll, label: isAll ? "all" : (ids.isEmpty ? "hub" : ids.joined(separator: "-")))
+        await scoped(expected: (isAll ? shownByDefault : Module.allCases).filter { ids.contains($0.rawValue) }, isAll: isAll, label: isAll ? "all" : (ids.isEmpty ? "hub" : ids.joined(separator: "-")))
         #else
         check(false, "шаг \(stepName) только для сборки с набором")
         #endif

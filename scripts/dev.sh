@@ -40,7 +40,7 @@ matches "$DEV" '^/[A-Za-z0-9/._-]+$' || fail "В пути к папке разр
 [ -z "${UTILITUMUS_DEV_CACHE:-}" ] || fail "UTILITUMUS_DEV_CACHE задаёт сам dev.sh, снаружи его не нужно."
 
 # id:Имя. Утилиты, которых нет в этой ветке, пропускаются.
-ALL_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots speak:Speak"
+ALL_APPS="awake:Awake sound:Sound mouse:Mouse mixer:Mixer stash:Stash load:Load voice:Voice keyboard:Keyboard clipboard:Clipboard fans:Fans browser:Browser bots:Bots speak:Speak studio:Studio"
 APPS=""
 for pair in $ALL_APPS; do [ -d "Sources/Apps/${pair##*:}" ] && APPS="$APPS $pair"; done
 . scripts/dev-scope.sh

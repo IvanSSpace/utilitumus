@@ -154,8 +154,8 @@ func updateChecks() {
     check(SatelliteSelfUpdate.newer(in: catalog, id: "awake", than: "1.10.0") == nil, "обновление: своя новее — нет")
     check(SatelliteSelfUpdate.newer(in: catalog, id: "nope", than: "0") == nil, "обновление: чужой id — нет")
 
-    check(SatelliteCatalog.personOnly == ["fans", "clipboard"], "только по кнопке: Вентиляторы и Буфер, больше никто")
-    for id in ["fans", "clipboard"] {
+    check(SatelliteCatalog.personOnly == ["fans", "clipboard", "studio"], "только по кнопке: Вентиляторы, Буфер и личная Студия, больше никто")
+    for id in ["fans", "clipboard", "studio"] {
         let own = Catalog(schema: 1, apps: [app(id, "9.0.0")])
         check(!SatelliteSelfUpdate.mayUpdateItself(id: id), "обновление: \(id) сам себя не ставит")
         check(SatelliteSelfUpdate.newer(in: own, id: id, than: "1.0.0") == nil, "обновление: \(id) — нет, хотя в каталоге новее")

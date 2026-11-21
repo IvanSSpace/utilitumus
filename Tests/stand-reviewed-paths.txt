@@ -86,6 +86,19 @@ Sources/Modules/Stash/StashStore.swift|NSWorkspace.shared.openApplication
 Sources/Modules/Stash/StashStore.swift|Process()
 Sources/Modules/Stash/StashStore.swift|forceTerminate()
 Sources/Modules/Stash/StashStore.swift|kill(
+# «Студия»: Process() запускает только <папка>/studio, путь и папка проходят Kit.assertStandPath (настоящий дом и /Applications роняют стенд).
+# .terminate() и kill( — только свой запущенный процесс (isRunning перед сигналом). NSHomeDirectory только читается: уходит в окружение
+# сервера (в стенде вместо него временная папка). removeItem стирает только token и server.json убитого сервера и проходит Kit.assertStandPath.
+# Прежнее слово про дом: в окружение сервера в стенде уходит подставной дом. Открытие в браузере одно (StudioOpen.inBrowser) и в стенде отказывает через Kit.standRefuses.
+# Держат Tests/run-studio-runner-check.sh (подмены) и Tests/run-studio-screen-check.sh (временная папка, случайный порт).
+Sources/Modules/Studio/StudioLive.swift|.terminate()
+Sources/Modules/Studio/StudioLive.swift|Process()
+Sources/Modules/Studio/StudioLive.swift|kill(
+Sources/Modules/Studio/StudioRunner.swift|.terminate()
+Sources/Modules/Studio/StudioRunner.swift|NSHomeDirectory
+Sources/Modules/Studio/StudioRunner.swift|removeItem
+Sources/Modules/Studio/StudioRunner.swift|kill(
+Sources/Modules/Studio/UI/StudioModel.swift|NSWorkspace.shared.open
 Sources/Modules/Voice/VoiceController.swift|NSWorkspace.shared.open
 Sources/Modules/Voice/VoiceEngine.swift|.terminate()
 Sources/Modules/Voice/VoiceEngine.swift|Process()

@@ -103,11 +103,14 @@ release_state() { # тег, имя архива
 # --- 2. Таблица версий
 echo "== 2. Версии"
 IDS=(); NAMES=(); VERSIONS=(); TODO=(); STATES=()
+# Личные утилиты (Module.isPersonal): в каталог и в выпуски не идут никогда, ставятся локально scripts/install-personal.sh.
+PERSONAL=" studio "
 for manifest in Sources/Apps/*/manifest.json; do
   [ -e "$manifest" ] || continue
   dir="$(dirname "$manifest")"
   name="$(basename "$dir")"
   [ -f "$dir/Info.plist" ] || continue
+  [[ "$PERSONAL" != *" $(printf '%s' "$name" | tr '[:upper:]' '[:lower:]') "* ]] || continue
   if [ -n "$ONLY" ] && [[ "$ONLY" != *",$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]'),"* ]]; then continue; fi
   IDS+=("$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')")
   NAMES+=("$name")

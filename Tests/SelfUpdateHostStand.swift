@@ -87,7 +87,7 @@ func catalogData(_ id: String, version: String, manual: Bool = false) -> Data {
 }
 
 @MainActor func scenarios() async {
-    for id in ["fans", "clipboard"] {
+    for id in ["fans", "clipboard", "studio"] {
         let result = await run(id, catalog: catalogData(id, version: "2.0.0"), expecting: 0)
         check(result.reads == 0, "\(id): каталог не читается, есть новее или нет (чтений \(result.reads))")
         check(result.downloads == 0, "\(id): новая версия не скачивается (скачиваний \(result.downloads))")

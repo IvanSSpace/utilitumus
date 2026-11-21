@@ -42,6 +42,8 @@ enum RemoteModules {
         case .bots: return RemoteBotsModel.shared
         // speak
         case .speak: return RemoteSpeakModel.shared
+        // studio
+        case .studio: return RemoteStudioModel.shared
         }
     }
 

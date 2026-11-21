@@ -1,6 +1,6 @@
 import Foundation
 
-/// Какие модули показывает центр. Обычная сборка показывает все, и код фильтра в неё не попадает.
+/// Какие модули показывает центр. Обычная сборка показывает все, кроме личных без бандла (`Module.isPersonal`).
 /// Сборка `scripts/dev.sh` (флаг `KIT_DEV_SCOPE`) показывает только свой набор: `KitDevScope` лежит в папке разработки
 /// и зашит при компиляции. Других входов нет: ни настроек, ни окружения, ни аргументов.
 ///
@@ -18,29 +18,33 @@ enum ModuleScope {
     }
     #endif
 
+    /// Личные модули (`Module.isPersonal`), чей бандл лежит на диске. Читается один раз при запуске: поставили бандл —
+    /// центр увидит его при следующем запуске. У всех остальных людей бандла нет, и модуля нет ни в Сторе, ни в панели.
+    /// Стенд (`KIT_TEST_DEFAULTS`) настоящую папку программ не читает: набор пуст, пока проверка не задала его сама.
+    #if KIT_TEST_DEFAULTS
+    nonisolated(unsafe) static var personalPresent: Set<Module> = []
+    #else
+    private static let personalPresent: Set<Module> = Set(Module.allCases.filter {
+        $0.isPersonal && FileManager.default.fileExists(
+            atPath: SatellitePaths.live.appsDir.appendingPathComponent(SatelliteRegistry.bundleName($0) + ".app").path)
+    })
+    #endif
+
     static func shows(_ module: Module) -> Bool {
         #if KIT_DEV_SCOPE
-        ids?.contains(module.rawValue) ?? true
-        #else
-        true
+        // Набор назван явно: личный модуль в нём виден и без бандла на диске, иначе его не собрать на стенде.
+        if let ids { return ids.contains(module.rawValue) }
         #endif
+        return !module.isPersonal || personalPresent.contains(module)
     }
 
     static func shown(_ modules: [Module]) -> [Module] {
-        #if KIT_DEV_SCOPE
         modules.filter(shows)
-        #else
-        modules
-        #endif
     }
 
     /// Категории, в которых есть что показать. Состав категории остаётся полным: от него зависит цвет модуля.
     static var categories: [ModuleCategory] {
-        #if KIT_DEV_SCOPE
         ModuleCategory.all.filter { !shown($0.modules).isEmpty }
-        #else
-        ModuleCategory.all
-        #endif
     }
 
     /// Плитки «скоро» к модулям не относятся: в суженной сборке им делать нечего.
@@ -64,11 +68,7 @@ enum ModuleScope {
     /// Настоящий порядок после перестановки показанных: показанные занимают свои же места в новом порядке, остальные не двигаются.
     /// Без этого перенос строки в суженной панели записал бы в настройки порядок только из набора.
     static func merged(_ new: [Module], into full: [Module]) -> [Module] {
-        #if KIT_DEV_SCOPE
         var next = shown(new).makeIterator()
         return full.map { shows($0) ? next.next() ?? $0 : $0 }
-        #else
-        new
-        #endif
     }
 }

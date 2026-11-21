@@ -67,8 +67,9 @@ enum SatelliteCatalog {
     /// не введёт пароль (`FanHelperInstaller`). Плюс выход утилиты снимает выбранные человеком обороты.
     /// `clipboard` — ключ истории в файловой связке, подпись без Team ID: новый бинарник может вызвать окно пароля связки
     /// (`ClipboardKeyring`), а проверить это на настоящей связке нельзя.
+    /// `studio` — личный модуль: в каталоге его нет, ставится локально (`scripts/install-personal.sh`), искать обновления нечем.
     /// Строки, а не `Module`: этот файл собирается и без него. Опечатку ловит run-auto-update-check.
-    static let personOnly: Set<String> = ["fans", "clipboard"]
+    static let personOnly: Set<String> = ["fans", "clipboard", "studio"]
 
     /// Подмена адреса только флагом компилятора: окружение, аргументы и настройки здесь не читаются.
     /// `KitPilotCatalog` пишет scripts/build-pilot.sh, в обычной сборке этого имени нет.

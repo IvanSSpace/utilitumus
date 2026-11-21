@@ -119,13 +119,17 @@ mutate "отметка каталога не смотрится" "$UPDATE" \
   '$0.id == id && ' \
   "отметка"
 mutate "в списке нет Вентиляторов" "$CATALOG" \
-  'static let personOnly: Set<String> = ["fans", "clipboard"]' \
-  'static let personOnly: Set<String> = ["clipboard"]' \
+  'static let personOnly: Set<String> = ["fans", "clipboard", "studio"]' \
+  'static let personOnly: Set<String> = ["clipboard", "studio"]' \
   "fans"
 mutate "в списке нет Буфера" "$CATALOG" \
-  'static let personOnly: Set<String> = ["fans", "clipboard"]' \
-  'static let personOnly: Set<String> = ["fans"]' \
+  'static let personOnly: Set<String> = ["fans", "clipboard", "studio"]' \
+  'static let personOnly: Set<String> = ["fans", "studio"]' \
   "clipboard"
+mutate "в списке нет Студии" "$CATALOG" \
+  'static let personOnly: Set<String> = ["fans", "clipboard", "studio"]' \
+  'static let personOnly: Set<String> = ["fans", "clipboard"]' \
+  "studio"
 mutate "запрет на всех" "$UPDATE" \
   'static func mayUpdateItself(id: String) -> Bool { !SatelliteCatalog.personOnly.contains(id) }' \
   'static func mayUpdateItself(id: String) -> Bool { false }' \
