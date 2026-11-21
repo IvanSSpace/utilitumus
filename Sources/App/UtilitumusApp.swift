@@ -21,6 +21,7 @@ struct ModuleDetail: View {
             case .clipboard: RemoteClipboardPage()
             case .bots: RemoteBotsPage()
             case .speak: RemoteSpeakPage()
+            case .studio: RemoteStudioPage()
             }
         } else {
             ModuleMissingPage(module: module)

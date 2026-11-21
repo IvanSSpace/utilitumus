@@ -218,8 +218,8 @@ mutate "перезапуск при непонятном состоянии" Sou
   'if automatic, module.rawValue == "", await satellites.stateUnreadable(module) {' \
   "непонятное состояние"
 mutate "без защиты от пароля" Sources/Kit/SatelliteCatalog.swift \
-  'static let personOnly: Set<String> = ["fans", "clipboard"]' \
-  'static let personOnly: Set<String> = ["clipboard"]' \
+  'static let personOnly: Set<String> = ["fans", "clipboard", "studio"]' \
+  'static let personOnly: Set<String> = ["clipboard", "studio"]' \
   "только по кнопке"
 mutate "автообновление не смотрит на общий список" Sources/App/Store/AutoUpdate.swift \
   'static let personOnly = Set(Module.allCases.filter { SatelliteCatalog.personOnly.contains($0.rawValue) })' \

@@ -52,7 +52,7 @@ for dir in Sources/Apps/*/; do
 done
 . scripts/dev-scope.sh
 . scripts/fix-scope.sh
-same "утилит 13" "$(echo $APPS | wc -w | tr -d ' ')" 13
+same "утилит 14" "$(echo $APPS | wc -w | tr -d ' ')" 14
 for pair in $APPS; do
   id="${pair%%:*}"
   if ! row="$(fix_checks_of "$id")" || [ -z "$row" ]; then bad "нет строки для $id"; continue; fi

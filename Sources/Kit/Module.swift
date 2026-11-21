@@ -7,6 +7,7 @@ enum Module: String, CaseIterable, Identifiable {
     case awake
     case bots
     case speak
+    case studio
 
     var id: String { rawValue }
 
@@ -25,6 +26,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .awake: return "Не спать"
         case .bots: return "Боты"
         case .speak: return "Озвучка"
+        case .studio: return "Студия"
         }
     }
 
@@ -43,6 +45,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .awake: return "cup.and.saucer.fill"
         case .bots: return "paperplane.fill"
         case .speak: return "speaker.wave.2.fill"
+        case .studio: return "rectangle.on.rectangle.angled"
         }
     }
 
@@ -63,6 +66,7 @@ enum Module: String, CaseIterable, Identifiable {
         case .awake: return .brown
         case .bots: return .yellow
         case .speak: return .red
+        case .studio: return .orange
         }
     }
 
@@ -82,8 +86,13 @@ enum Module: String, CaseIterable, Identifiable {
         case .awake: return "Mac не засыпает, пока ты работаешь: на час, на несколько или пока не выключишь"
         case .bots: return "Боты на этом Mac одним списком: кто работает, сколько памяти, включить, выключить, перезапустить"
         case .speak: return "Читает вслух выделенный текст по сочетанию клавиш, скорость и голос настраиваются. Всё на этом Mac"
+        case .studio: return "Локальная панель по заданной папке: включил — сервер запущен, выключил — остановлен, страница прямо в окне"
         }
     }
+
+    /// Личный модуль: нет в каталоге, и центр показывает его, только пока на диске стоит его бандл (`ModuleScope`).
+    /// Устанавливается локально скриптом `scripts/install-personal.sh`, сам центр его не ставит и не обновляет.
+    var isPersonal: Bool { self == .studio }
 }
 
 /// Белый значок на цветной скруглённой плашке — один вид везде, где показан модуль.

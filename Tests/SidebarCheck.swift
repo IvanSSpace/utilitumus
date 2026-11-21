@@ -192,9 +192,9 @@ func pure() {
     await poll(.clipboard) { modules.isExternal(.clipboard) }
     launched.reconcile()
     check(modules.isExternal(.clipboard), "опрос: утилита стоит, модуль был выключен — модуль ведёт она")
-    check(modules.order == arranged, "первый опрос при запуске не меняет порядок, который расставил человек")
+    check(modules.order == ModuleScope.shown(arranged), "первый опрос при запуске не меняет порядок, который расставил человек")
     launched.reconcile()
-    check(modules.order == arranged, "и следующие пересчёты его не меняют")
+    check(modules.order == ModuleScope.shown(arranged), "и следующие пересчёты его не меняют")
     modules.setOn(.voice, false)
     await poll(.voice) { !modules.isExternal(.voice) }
     let running = SidebarModel(modules: modules, icons: icons, satellites: registry)
@@ -212,7 +212,7 @@ func pure() {
     await pause(0.1)
     let model = SidebarModel.shared
 
-    check(model.layout().pinned.isEmpty && model.layout().list.count == Module.allCases.count, "первый запуск: ничего не закреплено, все в списке")
+    check(model.layout().pinned.isEmpty && model.layout().list.count == ModuleScope.shown(Module.allCases).count, "первый запуск: ничего не закреплено, все показанные в списке")
     modules.setHidden(.mouse, true)
     check(model.layout().hidden == [.mouse], "уже скрытые модули — в «Скрытых»")
     defaults.set(false, forKey: MenuBarIcon.key(.fans))
@@ -242,6 +242,27 @@ func pure() {
     check(model.layout().hidden.contains(.sound) && modules.isOn(.sound), "скрытый продолжает работать")
     check(model.send(.sound, to: .list) && !modules.isHidden(.sound), "«показать» возвращает в список")
 
+    print("== личный модуль виден только с бандлом")
+    check(Module.studio.isPersonal && !Module.allCases.filter(\.isPersonal).contains(.sound), "личный только «Студия»")
+    check(!ModuleScope.shows(.studio) && !modules.order.contains(.studio) && !ModuleScope.shown(Module.allCases).contains(.studio),
+          "без бандла: нет ни в панели, ни в общем списке")
+    check(!ModuleScope.categories.flatMap { ModuleScope.shown($0.modules) }.contains(.studio), "без бандла: нет ни в одной группе Стора и дашборда")
+    check(ModuleScope.merged([.sound, .load], into: Module.allCases).contains(.studio), "порядок после перестановки не теряет скрытый модуль")
+    ModuleScope.personalPresent = [.studio]
+    check(ModuleScope.shows(.studio) && modules.order.contains(.studio) && ModuleScope.shown(Module.allCases).contains(.studio),
+          "бандл на месте: виден в панели и списке")
+    check(ModuleScope.categories.first { $0.id == "ai" }.map { ModuleScope.shown($0.modules).contains(.studio) } == true, "бандл на месте: в группе «С ИИ»")
+    ModuleScope.personalPresent = []
+    check(!ModuleScope.shows(.studio), "бандл убрали: снова скрыт")
+    let unmoved = ModuleCategory.all.first { $0.id == "ai" }!
+    check(abs(unmoved.hue(of: .load) - (unmoved.hue - 0.5 * unmoved.spread + 1).truncatingRemainder(dividingBy: 1)) < 1e-9
+          && abs(unmoved.hue(of: .bots) - (unmoved.hue + 0.5 * unmoved.spread)) < 1e-9, "оттенки «Нагрузки» и «Ботов» те же, что без личного модуля")
+
+    // Старый центр и старые утилиты не знают «studio»: чужая строка из настроек или каталога их не роняет.
+    check(Module(rawValue: "module-from-the-future") == nil && Module(rawValue: "studio") == .studio, "неизвестная строка модуля — nil, не падение")
+    check(ModuleManager.normalizedOrder(["module-from-the-future", "sound", "studio", "sound"]).prefix(2) == [.sound, .studio]
+          && !ModuleManager.normalizedOrder(["module-from-the-future"]).isEmpty, "порядок с неизвестной строкой разбирается, лишнее отбрасывается")
+
     print("== порядок сохраняется")
     modules.applyOrder(Module.allCases)
     model.send(.keyboard, to: .pinned); model.send(.stash, to: .pinned)
@@ -249,7 +270,7 @@ func pure() {
     check(l.pinned == [.keyboard, .stash], "новое закрепление встаёт в конец закреплённых")
     check(model.nudge(.stash, by: -1) && model.layout().pinned == [.stash, .keyboard], "⌘⌥↑ меняет порядок закреплённых")
     let stored = ModuleManager.normalizedOrder(UserDefaults.standard.stringArray(forKey: "ModuleOrder") ?? [])
-    check(stored == modules.order && stored.firstIndex(of: .stash)! < stored.firstIndex(of: .keyboard)!, "порядок записан в настройки")
+    check(ModuleScope.shown(stored) == modules.order && stored.firstIndex(of: .stash)! < stored.firstIndex(of: .keyboard)!, "порядок записан в настройки")
     l = model.layout()
     var moved = l
     check(moved.move(.load, to: .list, at: 0) && moved.list.first == .load, "перенос внутри списка")

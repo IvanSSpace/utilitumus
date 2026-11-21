@@ -213,7 +213,7 @@ final class SatelliteRegistry: NSObject, ObservableObject {
     /// Версия неизвестна (опроса ещё не было) — не старая: лишнего предупреждения не нужно.
     nonisolated static func isOutdated(_ module: Module, installed: String?) -> Bool {
         guard let installed else { return false }
-        return Kit.isNewer(module == .bots || module == .speak ? "1.0.0" : "1.1.0", than: installed)
+        return Kit.isNewer(module == .bots || module == .speak || module == .studio ? "1.0.0" : "1.1.0", than: installed)
     }
 
     func isOutdated(_ module: Module) -> Bool {
