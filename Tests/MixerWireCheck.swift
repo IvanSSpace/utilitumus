@@ -176,6 +176,28 @@ let sampleState = MixerState(
     otherApps: [MixerAppState(id: "com.g", name: "Заметки", volume: 0.5, muted: false)],
     permissionProblem: true, lastError: "Тап не получает звук")
 
+/// Пауза между треками при закрытом экране: снимок раз в 4 с, событие «вывод остановился» сразу.
+/// Тап держится, пока молчание короче 3 с, считая от остановки, а не от прошлого снимка.
+func pauseKeepsTap() {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
+    var last = at(-10), playing = false
+    func snapshot(_ now: Double, playing nowPlaying: Bool) {
+        last = MixerController.lastHeard(last, wasPlaying: playing, playing: nowPlaying, now: at(now))
+        playing = nowPlaying
+    }
+    snapshot(0, playing: true)
+    snapshot(3.5, playing: false)
+    check(!MixerController.expired(lastHeard: last, now: at(3.5)), "остановка через 3,5 с после снимка: тап не снимается")
+    snapshot(4, playing: true)
+    check(!MixerController.expired(lastHeard: last, now: at(4)), "звук вернулся через полсекунды: тап тот же")
+    snapshot(6, playing: false)
+    snapshot(6.1, playing: false)
+    check(!MixerController.expired(lastHeard: last, now: at(8.9)), "повторный снимок «молчит» метку не сдвигает назад: 2,9 с тишины")
+    snapshot(9.2, playing: false)
+    check(MixerController.expired(lastHeard: last, now: at(9.2)), "тишина 3,2 с: тап снимается, звук возвращается как был")
+}
+
 func wirePure() {
     for (name, state) in [("полное", sampleState),
                           ("пустое", MixerState(apps: [], idleApps: [], presetApps: [], otherApps: [], permissionProblem: false, lastError: nil))] {
@@ -726,6 +748,7 @@ enum Main {
                 finish()
             case "run":
                 wirePure()
+                pauseKeepsTap()
                 compatibility()
                 validations()
                 icons()

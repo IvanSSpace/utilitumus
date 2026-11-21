@@ -12,7 +12,7 @@ final class MixerController: MixerModel {
 
     /// Сколько приложение остаётся в списке после того, как замолчало: паузы
     /// между треками не должны дёргать строку и пересоздавать тап.
-    private static let lingerSeconds: TimeInterval = 3
+    private nonisolated static let lingerSeconds: TimeInterval = 3
     /// Тап без единого вызова IOProc за это время считается нерабочим.
     private static let healthSeconds: TimeInterval = 2
     private static let retrySeconds: TimeInterval = 30
@@ -48,6 +48,8 @@ final class MixerController: MixerModel {
         var icon: NSImage
         var objectIDs: Set<AudioObjectID> = []
         var lastPlaying = Date()
+        /// Играло в прошлом снимке: по переходу «играет → молчит» ставится метка `lastPlaying`.
+        var playing = false
         var tap: ProcessTap?
         var failedAt: Date?
         init(name: String, icon: NSImage) { self.name = name; self.icon = icon }
@@ -382,11 +384,12 @@ final class MixerController: MixerModel {
             if group.playing, !key.hasPrefix("exe:"), heard.insert(key).inserted {
                 Kit.defaults.set(Array(heard).sorted(), forKey: "MixerHeard")
             }
-            if group.playing { session.lastPlaying = now }
+            session.lastPlaying = Self.lastHeard(session.lastPlaying, wasPlaying: session.playing, playing: group.playing, now: now)
+            session.playing = group.playing
         }
 
         // Процесс закрылся или давно молчит: строку и тап убираем, звук возвращается.
-        for (key, session) in sessions where groups[key] == nil || now.timeIntervalSince(session.lastPlaying) > Self.lingerSeconds {
+        for (key, session) in sessions where groups[key] == nil || Self.expired(lastHeard: session.lastPlaying, now: now) {
             session.tap?.destroy()
             sessions[key] = nil
         }
@@ -412,6 +415,18 @@ final class MixerController: MixerModel {
         if likely != idleApps { idleApps = likely }
         if other != otherApps { otherApps = other }
         if preset != presetApps { presetApps = preset }
+    }
+
+    /// Когда приложение звучало последний раз. Снимок с закрытым экраном приходит раз в 4 с, а событие
+    /// «вывод остановился» — сразу: первый «молчит» после «играет» значит, что звук оборвался только что,
+    /// а не во время прошлого снимка. Иначе пауза между треками сносила тап, и новый звук шёл без громкости.
+    nonisolated static func lastHeard(_ previous: Date, wasPlaying: Bool, playing: Bool, now: Date) -> Date {
+        playing || wasPlaying ? now : previous
+    }
+
+    /// Молчит дольше `lingerSeconds`: строку и тап пора снимать.
+    nonisolated static func expired(lastHeard: Date, now: Date) -> Bool {
+        now.timeIntervalSince(lastHeard) > lingerSeconds
     }
 
     private var configuredIDs: Set<String> { Set(volumes.keys).union(muted).union(equalizers.filter(\.value.isActive).keys) }
