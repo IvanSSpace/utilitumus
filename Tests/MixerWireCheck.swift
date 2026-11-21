@@ -177,7 +177,7 @@ let sampleState = MixerState(
     permissionProblem: true, lastError: "Тап не получает звук")
 
 /// Пауза между треками при закрытом экране: снимок раз в 4 с, событие «вывод остановился» сразу.
-/// Тап держится, пока молчание короче 3 с, считая от остановки, а не от прошлого снимка.
+/// Строка держится, пока молчание короче 3 с, считая от остановки, а не от прошлого снимка; тап — минуту.
 func pauseKeepsTap() {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
     func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
@@ -188,14 +188,17 @@ func pauseKeepsTap() {
     }
     snapshot(0, playing: true)
     snapshot(3.5, playing: false)
-    check(!MixerController.expired(lastHeard: last, now: at(3.5)), "остановка через 3,5 с после снимка: тап не снимается")
+    check(!MixerController.expired(lastHeard: last, now: at(3.5), tapped: false), "остановка через 3,5 с после снимка: строка и тап остаются")
     snapshot(4, playing: true)
-    check(!MixerController.expired(lastHeard: last, now: at(4)), "звук вернулся через полсекунды: тап тот же")
+    check(!MixerController.expired(lastHeard: last, now: at(4), tapped: false), "звук вернулся через полсекунды: строка та же")
     snapshot(6, playing: false)
     snapshot(6.1, playing: false)
-    check(!MixerController.expired(lastHeard: last, now: at(8.9)), "повторный снимок «молчит» метку не сдвигает назад: 2,9 с тишины")
+    check(!MixerController.expired(lastHeard: last, now: at(8.9), tapped: false), "повторный снимок «молчит» метку не сдвигает назад: 2,9 с тишины")
     snapshot(9.2, playing: false)
-    check(MixerController.expired(lastHeard: last, now: at(9.2)), "тишина 3,2 с: тап снимается, звук возвращается как был")
+    check(MixerController.expired(lastHeard: last, now: at(9.2), tapped: false), "тишина 3,2 с: строка без тапа уходит")
+    check(!MixerController.expired(lastHeard: last, now: at(9.2), tapped: true), "а тап живёт: следующее видео сразу с громкостью и эквалайзером")
+    check(!MixerController.expired(lastHeard: last, now: at(66), tapped: true), "тишина ровно минуту: тап ещё держится")
+    check(MixerController.expired(lastHeard: last, now: at(66.5), tapped: true), "дольше минуты: тап снимается, звук возвращается как был")
 }
 
 func wirePure() {

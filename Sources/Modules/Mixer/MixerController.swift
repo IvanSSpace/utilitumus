@@ -13,6 +13,10 @@ final class MixerController: MixerModel {
     /// Сколько приложение остаётся в списке после того, как замолчало: паузы
     /// между треками не должны дёргать строку и пересоздавать тап.
     private nonisolated static let lingerSeconds: TimeInterval = 3
+    /// Сколько живёт тап после того, как приложение замолчало. Новый тап собирается доли секунды, и всё это время
+    /// звук идёт без громкости и эквалайзера: паузы между видео и вкладками он должен пережить. Цена — перехват
+    /// и устройство вывода работают это время вхолостую.
+    private nonisolated static let tapHoldSeconds: TimeInterval = 60
     /// Тап без единого вызова IOProc за это время считается нерабочим.
     private static let healthSeconds: TimeInterval = 2
     private static let retrySeconds: TimeInterval = 30
@@ -389,7 +393,7 @@ final class MixerController: MixerModel {
         }
 
         // Процесс закрылся или давно молчит: строку и тап убираем, звук возвращается.
-        for (key, session) in sessions where groups[key] == nil || Self.expired(lastHeard: session.lastPlaying, now: now) {
+        for (key, session) in sessions where groups[key] == nil || Self.expired(lastHeard: session.lastPlaying, now: now, tapped: session.tap != nil) {
             session.tap?.destroy()
             sessions[key] = nil
         }
@@ -398,7 +402,9 @@ final class MixerController: MixerModel {
         for (key, session) in sessions { apply(key, session, outputUID: outputUID, now: now) }
         clearPermissionProblemIfWorking()
 
-        let list = sessions.map { key, session in
+        // Строка уходит из «Играют» через 3 с, а тап может жить дольше: такие приложения уже в «Молчат».
+        let shown = sessions.filter { !Self.expired(lastHeard: $0.value.lastPlaying, now: now, tapped: false) }
+        let list = shown.map { key, session in
             MixerApp(id: key, name: session.name, icon: session.icon,
                      volume: volume(for: key), muted: muted.contains(key), eq: equalizer(for: key))
         }.sorted(by: Self.byName)
@@ -407,7 +413,7 @@ final class MixerController: MixerModel {
 
         // Молчащие и пресеты нужны только открытому экрану.
         guard screenVisible else { return }
-        let (quiet, preset) = quietApps(excluding: Set(sessions.keys), me: me)
+        let (quiet, preset) = quietApps(excluding: Set(shown.keys), me: me)
         let configured = configuredIDs
         let likely = quiet.filter { heard.contains($0.id) || configured.contains($0.id) || Self.isMediaApp($0.id) }
         let likelyIDs = Set(likely.map(\.id))
@@ -424,9 +430,9 @@ final class MixerController: MixerModel {
         playing || wasPlaying ? now : previous
     }
 
-    /// Молчит дольше `lingerSeconds`: строку и тап пора снимать.
-    nonisolated static func expired(lastHeard: Date, now: Date) -> Bool {
-        now.timeIntervalSince(lastHeard) > lingerSeconds
+    /// Молчит дольше срока: строку без тапа снимаем через `lingerSeconds`, с тапом — через `tapHoldSeconds`.
+    nonisolated static func expired(lastHeard: Date, now: Date, tapped: Bool) -> Bool {
+        now.timeIntervalSince(lastHeard) > (tapped ? tapHoldSeconds : lingerSeconds)
     }
 
     private var configuredIDs: Set<String> { Set(volumes.keys).union(muted).union(equalizers.filter(\.value.isActive).keys) }
