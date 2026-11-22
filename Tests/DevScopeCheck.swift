@@ -59,8 +59,9 @@ func guardedSettings(_ defaults: UserDefaults) -> [String: String] {
 
 /// Бандлы утилит в папке стенда: опрос видит их установленными, каталог предлагает обновление всем. У `withoutUtility` бандла нет:
 /// стоящей утилите центр передал бы модуль, что бы она ни ответила.
+/// На шаге `plain-nobundle` бандла личного модуля нет: обычная сборка решает по папке стенда, а не по настоящей.
 func installBundles(_ apps: URL) {
-    for module in Module.allCases where !withoutUtility.contains(module) {
+    for module in Module.allCases where !withoutUtility.contains(module) && !(module.isPersonal && stepName == "plain-nobundle") {
         let contents = apps.appendingPathComponent(SatelliteRegistry.bundleName(module) + ".app/Contents")
         try? FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         (["CFBundleShortVersionString": "1.1.0"] as NSDictionary).write(to: contents.appendingPathComponent("Info.plist"), atomically: true)
@@ -234,6 +235,13 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
     // Дальше настоящие виды: без фильтра они открыли бы экраны утилит вне набора и пошли бы к настоящим утилитам.
     guard failures == 0, stepName != "model" else { return }
 
+    print("== \(label): личный модуль по набору")
+    #if KIT_TEST_DEFAULTS
+    ModuleScope.personalPresent = [.studio]
+    check(ModuleScope.shows(.studio) == (isAll || want.contains(.studio)), "бандл Студии есть: видна, только если в наборе")
+    ModuleScope.personalPresent = []
+    #endif
+
     print("== \(label): разбор строки")
     let mark = "local.utilitumus.dev-" + "scope"
     check(ModuleScope.parse(mark + "=mixer,load") == ["mixer", "load"], "список")
@@ -315,12 +323,13 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
 }
 #endif
 
-/// Обычная сборка на настройках после дев-сборки: всё на месте.
+/// Обычная сборка на настройках после дев-сборки: всё на месте. Бандл Студии лежит в папке стенда, поэтому она видна.
 @MainActor func plain() async {
     let modules = ModuleManager.shared
-    await common(expected: shownByDefault, label: "обычная сборка")
-    check(modules.order == arranged.filter { !$0.isPersonal }, "порядок тот, что был")
-    check(SidebarModel.shared.layout().flattened.count == shownByDefault.count, "в панели снова все модули")
+    check(ModuleScope.shows(.studio), "обычная сборка: бандл Студии в папке стенда — видна")
+    await common(expected: Module.allCases, label: "обычная сборка")
+    check(modules.order == arranged, "порядок тот, что был")
+    check(SidebarModel.shared.layout().flattened.count == Module.allCases.count, "в панели снова все модули")
     check(UserDefaults.standard.string(forKey: "SelectedModule") == Module.sound.rawValue, "SelectedModule прежний")
     check(ModuleScope.categories == ModuleCategory.all, "все категории")
     check(ModuleScope.emptyNote == nil, "подписи о пустой сборке нет")
@@ -329,7 +338,7 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
 }
 
 @MainActor func run() async {
-    let apps = workRoot.appendingPathComponent("Apps")
+    let apps = workRoot.appendingPathComponent(stepName == "plain-nobundle" ? "AppsNoBundle" : "Apps")
     try? FileManager.default.createDirectory(at: apps, withIntermediateDirectories: true)
     installBundles(apps)
     if stepName == "seed" {
@@ -343,6 +352,10 @@ func difference(_ a: [String: String], _ b: [String: String]) -> [String] {
     switch stepName {
     case "plain":
         await plain()
+    case "plain-nobundle":
+        // Только решение о показе: без бандла центр стал бы снимать модуль, а это уже не про набор.
+        check(!ModuleScope.shows(.studio), "обычная сборка без бандла в папке стенда: Студия скрыта, настоящая папка не читается")
+        check(ModuleScope.shown(Module.allCases) == shownByDefault, "без бандла: в списке все, кроме личных")
     default:
         #if KIT_DEV_SCOPE
         let isAll = expectedArg == "*"

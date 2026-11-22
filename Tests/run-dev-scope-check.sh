@@ -120,6 +120,8 @@ swiftc ${INC_FLAGS[@]+"${INC_FLAGS[@]}"} -target "$TARGET" -module-name DevScope
 # Домен Kit у этой сборки — домен бинарника: значки переезжают туда, остальное уже там.
 for id in sound mixer awake; do defaults write "$BIN" "MenuBarIcon.$id" -bool true; done
 run_stand "*" plain
+# Тот же бинарник, своя папка утилит без бандла Студии: скрыта. Настоящая /Applications/Utilitumus не читается ни там, ни там.
+run_stand "*" plain-nobundle
 
 echo "== check-no-seam"
 if grep -qF "$MARK" "$OUT/$BIN"; then fail "метка набора в обычной сборке"; fi
