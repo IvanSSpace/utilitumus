@@ -1,7 +1,8 @@
 #!/bin/bash
-# «Студия» от начала до конца: настоящие запуск процесса, сеть до 127.0.0.1 и WKWebView, вместо Студии Tests/fake-studio.py
-# во временной папке на случайном порту. Включение запускает сервер, страница входит по одноразовому коду, «обновить» даёт новый,
-# file:// не открывается, выключение гасит свой сервер и не трогает чужой. Снимки экрана: <папка вывода>/png/*.png.
+# «Студия» от начала до конца: настоящие запуск процесса и сеть до 127.0.0.1, родной экран на SwiftUI, вместо Студии
+# Tests/fake-studio.py во временной папке на случайном порту. Опрос только при открытом экране, снимок утилит и значки, дело
+# выбранной, действия с телами страницы, отказы сервера строками, «В браузере» по одноразовому коду, выключение гасит свой сервер
+# и не трогает чужой. Снимки экрана: <папка вывода>/png/*.png.
 # Настоящая Студия, порт 47870 и её .cache не трогаются. Настройки только в своём тестовом suite.
 #   Tests/run-studio-screen-check.sh [папка-вывода]    по умолчанию $TMPDIR/studio-screen-check-out
 source "$(dirname "$0")/lib/check-limit.sh"
@@ -53,6 +54,6 @@ cp Tests/StudioScreenCheck.swift "$BIN/src/StudioScreenCheck.swift"
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$BIN/check" "$BIN/src/StudioScreenCheck.swift" \
   Sources/Modules/Studio/*.swift Sources/Modules/Studio/UI/*.swift \
   $(find Sources/Kit -name '*.swift' | LC_ALL=C sort) \
-  -framework SwiftUI -framework AppKit -framework WebKit
+  -framework SwiftUI -framework AppKit
 "$BIN/check" "$WORK" "$OUT/png" "$PORT"
 echo "Снимки: $OUT/png"

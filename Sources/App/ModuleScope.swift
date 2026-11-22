@@ -21,13 +21,17 @@ enum ModuleScope {
     /// Личные модули (`Module.isPersonal`), чей бандл лежит на диске. Читается один раз при запуске: поставили бандл —
     /// центр увидит его при следующем запуске. У всех остальных людей бандла нет, и модуля нет ни в Сторе, ни в панели.
     /// Стенд (`KIT_TEST_DEFAULTS`) настоящую папку программ не читает: набор пуст, пока проверка не задала его сама.
+    /// Обычная сборка смотрит туда же, куда реестр утилит: стенд, задавший `SatelliteRegistry.standEnvironment`,
+    /// получает свою временную папку, а не настоящую /Applications/Utilitumus.
     #if KIT_TEST_DEFAULTS
     nonisolated(unsafe) static var personalPresent: Set<Module> = []
     #else
-    private static let personalPresent: Set<Module> = Set(Module.allCases.filter {
-        $0.isPersonal && FileManager.default.fileExists(
-            atPath: SatellitePaths.live.appsDir.appendingPathComponent(SatelliteRegistry.bundleName($0) + ".app").path)
-    })
+    private static let personalPresent: Set<Module> = {
+        let apps = SatelliteRegistry.standEnvironment?.paths.appsDir ?? SatellitePaths.live.appsDir
+        return Set(Module.allCases.filter {
+            $0.isPersonal && FileManager.default.fileExists(atPath: apps.appendingPathComponent(SatelliteRegistry.bundleName($0) + ".app").path)
+        })
+    }()
     #endif
 
     static func shows(_ module: Module) -> Bool {

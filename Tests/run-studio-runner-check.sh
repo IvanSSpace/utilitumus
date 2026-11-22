@@ -25,6 +25,7 @@ mkdir -p "$OUT/src"
 cp Tests/StudioRunnerCheck.swift "$OUT/src/StudioRunnerCheck.swift"
 swiftc -parse-as-library -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/src/StudioRunnerCheck.swift" \
   Sources/Modules/Studio/StudioRunner.swift Sources/Modules/Studio/StudioController.swift Sources/Modules/Studio/StudioLive.swift \
+  Sources/Modules/Studio/StudioBoardLoader.swift Sources/Modules/Studio/StudioBoardParser.swift Sources/Modules/Studio/UI/StudioBoard.swift \
   Sources/Modules/Studio/UI/StudioWire.swift \
   $(find Sources/Kit -name '*.swift' | LC_ALL=C sort) \
   -framework SwiftUI -framework AppKit

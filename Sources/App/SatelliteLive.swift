@@ -28,6 +28,7 @@ extension SatelliteEnvironment {
 
 extension SatelliteRegistry {
     /// Стенд ставит своё до первого обращения к `shared`, иначе говорил бы с настоящими путями и утилитами.
-    static var standEnvironment: SatelliteEnvironment?
+    /// Пишется один раз в начале стенда; `ModuleScope` читает отсюда папку утилит и вне главного потока.
+    nonisolated(unsafe) static var standEnvironment: SatelliteEnvironment?
     static let shared = SatelliteRegistry(standEnvironment ?? .live())
 }

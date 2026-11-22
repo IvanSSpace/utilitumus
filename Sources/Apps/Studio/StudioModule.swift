@@ -46,6 +46,9 @@ final class StudioModule: SatelliteModule {
         termination = source
     }
 
+    /// Экран открыт: пока он виден, утилита опрашивает Студию; закрыт — опроса нет.
+    func screenOpen(_ open: Bool) { controller.screenOpen(open) }
+
     func statusLine(passiveReason: String?) -> String { controller.statusLine(passiveReason: passiveReason) }
 
     var attention: Bool { controller.state.phase == .failed }

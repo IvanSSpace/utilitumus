@@ -16,5 +16,5 @@ cp Tests/StudioNavCheck.swift "$OUT/src/main.swift"
 swiftc -target "$TARGET" -D KIT_TEST_DEFAULTS -o "$OUT/check" "$OUT/src/main.swift" \
   Sources/Modules/Studio/UI/*.swift \
   $(find Sources/Kit -name '*.swift' | LC_ALL=C sort) \
-  -framework SwiftUI -framework AppKit -framework WebKit
+  -framework SwiftUI -framework AppKit
 "$OUT/check"

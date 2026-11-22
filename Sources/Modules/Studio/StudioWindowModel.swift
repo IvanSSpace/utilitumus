@@ -5,24 +5,24 @@ import Combine
 @MainActor
 final class StudioWindowModel: StudioModel {
     private let controller: StudioController
-    private var handoff: StudioBrowserHandoff!
-    private var sub: AnyCancellable?
+    private var runnerSub: AnyCancellable?
+    @Published private(set) var actionError: String?
+    /// Состояние раннера лежит в контроллере: его смена перерисовывает и этот экран.
+    @Published private var revision = 0
 
     init(controller: StudioController) {
         self.controller = controller
-        handoff = StudioBrowserHandoff(open: { StudioOpen.inBrowser($0) })
-        sub = controller.runner.$state.sink { [weak self] state in self?.handoff.observe(state) }
+        runnerSub = controller.runner.objectWillChange.sink { [weak self] in self?.revision &+= 1 }
     }
 
-    var objectWillChange: ObservableObjectPublisher { controller.runner.objectWillChange }
     var state: StudioState { controller.state }
-    var browserLogin: Int { handoff.claimed }
 
-    func setFolder(_ path: String) { _ = controller.handle(LinkWire.encoded(StudioAction.setFolder(path))) }
-    func newLogin() { _ = controller.handle(LinkWire.encoded(StudioAction.newLogin)) }
+    func setFolder(_ path: String) { send(.setFolder(path)) }
 
-    func openInBrowser() {
-        handoff.request(after: controller.state.login)
-        newLogin()
+    func send(_ action: StudioAction) {
+        let reply = controller.handle(LinkWire.encoded(action))
+        actionError = (try? JSONDecoder().decode(LinkReply<StudioState>.self, from: reply))?.error
     }
+
+    func openInBrowser() { send(.openInBrowser) }
 }

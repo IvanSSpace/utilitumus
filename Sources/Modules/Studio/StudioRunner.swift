@@ -18,10 +18,47 @@ protocol StudioLauncher {
                 onExit: @escaping @Sendable (Int32) -> Void) throws -> StudioProcess
 }
 
+/// Ответ сервера Студии на запрос API: код и тело (не больше разрешённого предела).
+struct StudioReply: Sendable {
+    let status: Int
+    let data: Data
+}
+
 /// Сеть только до 127.0.0.1. Ответ больше `StudioRunner.maxReply` отвергается, редиректы не выполняются.
 protocol StudioNetwork: Sendable {
     func get(port: Int, path: String, token: String) async throws -> Data
     func post(port: Int, path: String, token: String) async throws -> Data
+    /// Запрос API Студии с телом JSON (или без) и своим пределом ответа и времени. Код ответа возвращается как есть:
+    /// отказ сервера (401, 409) — не сбой сети.
+    func request(method: String, port: Int, path: String, token: String, body: Data?, maxBytes: Int,
+                 timeout: TimeInterval) async throws -> StudioReply
+}
+
+extension StudioNetwork {
+    /// Подмены, которым API не нужен (проверка запуска), его не умеют.
+    func request(method: String, port: Int, path: String, token: String, body: Data?, maxBytes: Int,
+                 timeout: TimeInterval) async throws -> StudioReply {
+        throw URLError(.unsupportedURL)
+    }
+}
+
+/// Почему вызов API Студии не удался. Каждой причине — готовая строка для экрана.
+enum StudioAPIFailure: Error, Equatable, Sendable {
+    case notRunning, unauthorized, forbidden, timeout, unreachable, tooLong
+    /// Сервер отказал и сказал почему (409, 500): его собственная строка.
+    case refused(String)
+
+    var line: String {
+        switch self {
+        case .notRunning: return "Студия не запущена"
+        case .unauthorized: return "Студия перезапущена и не принимает прежний токен: нажми «Подключиться заново»"
+        case .forbidden: return "Студия отказала в доступе"
+        case .timeout: return "Студия не ответила вовремя"
+        case .unreachable: return "Студия не отвечает"
+        case .tooLong: return "Студия ответила слишком длинно"
+        case .refused(let text): return text
+        }
+    }
 }
 
 /// Что знает о процессах система. Подмена нужна проверкам: настоящие pid им не нужны.
@@ -107,6 +144,8 @@ final class StudioRunner: ObservableObject {
     /// Остановленный нами, но ещё не вышедший: новый запуск ждёт его, иначе подключился бы к умирающему.
     private var lingering: StudioProcess?
     private var folderURL: URL?
+    /// Сервер, к которому уже подключились: порт и токен для вызовов API. Токен остаётся в этом классе.
+    private var connected: Server?
 
     init(folder: String, config: Config = Config(), launcher: StudioLauncher, network: StudioNetwork, system: StudioSystem,
          sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
@@ -115,17 +154,21 @@ final class StudioRunner: ObservableObject {
         self.network = network
         self.system = system
         self.sleep = sleep
-        state = StudioState(folder: folder, phase: .stopped, message: nil, ownsServer: false, page: nil, login: 0)
+        state = StudioState(folder: folder, phase: .stopped, message: nil, ownsServer: false, login: 0)
     }
 
     // MARK: Состояние
 
-    private func set(_ phase: StudioPhase, message: String? = nil, owns: Bool = false, page: String? = nil) {
+    private func set(_ phase: StudioPhase, message: String? = nil, owns: Bool = false) {
         var next = state
         next.phase = phase
         next.message = message
         next.ownsServer = owns
-        next.page = page
+        if phase != .running {
+            // Без работающего сервера снимок утилит устарел, а токен бесполезен.
+            connected = nil
+            next.board = nil
+        }
         if next != state { state = next }
     }
 
@@ -207,13 +250,8 @@ final class StudioRunner: ObservableObject {
 
     private func finishStart(_ server: Server, owns: Bool, _ mine: Int) async {
         guard mine == generation else { return }
-        guard let page = await mint(server) else {
-            if owns { terminateOwn() }
-            return fail("Студия работает, но не выдала код входа", mine)
-        }
-        guard mine == generation else { return }
-        state.login += 1
-        set(.running, owns: owns, page: page)
+        connected = server
+        set(.running, owns: owns)
     }
 
     private func fail(_ message: String, _ mine: Int) {
@@ -291,23 +329,105 @@ final class StudioRunner: ObservableObject {
         return "http://127.0.0.1:\(server.port)/#b=\(code)"
     }
 
-    /// Новый код входа для «обновить» и «открыть в браузере». Сервер пропал — состояние это и говорит.
-    func newLogin() {
+    /// «Открыть в браузере»: свежий одноразовый код уходит прямо в браузер из утилиты. В состояние и на провод он не попадает:
+    /// код меняется на токен, а лаунчеру токен не положен. Номер `login` растёт на каждое открытие.
+    func openInBrowser(_ open: @escaping @MainActor (URL) -> Void) {
         guard state.phase == .running, let folder = folderURL else { return }
         let mine = generation
         let owns = state.ownsServer
         Task {
             // Файлы читаются заново: чужой сервер могли перезапустить, и токен у него уже другой.
-            if let server = await probe(folder, expectedPid: owns ? process?.pid : nil), let page = await mint(server) {
+            guard let server = await probe(folder, expectedPid: owns ? process?.pid : nil) else {
                 guard mine == generation, state.phase == .running else { return }
-                state.login += 1
-                set(.running, owns: owns, page: page)
-            } else {
-                guard mine == generation, state.phase == .running else { return }
+                return lostServer(mine)
+            }
+            let target = await mint(server).flatMap(StudioNavigation.loginURL)
+            guard mine == generation, state.phase == .running else { return }
+            connected = server
+            guard let target, target.port == server.port else {
                 if owns { terminateOwn() }
-                set(.failed, message: "Студия перестала отвечать")
+                return set(.failed, message: "Студия не выдала код входа")
+            }
+            state.login += 1
+            open(target.url)
+        }
+    }
+
+    // MARK: API Студии
+
+    /// Вызов API работающей Студии с токеном из `connected`. Токен не отдаётся наружу: вызывающий видит тело ответа и причину отказа.
+    /// 401 и обрыв соединения: файлы читаются заново (чужую Студию могли перезапустить), и вызов повторяется один раз.
+    /// Сервер, которого больше нет, переводит модуль в «ошибку»: экран покажет её и кнопку «Подключиться заново».
+    func api(_ method: String, _ path: String, body: Data? = nil, maxBytes: Int = 256 * 1024,
+             timeout: TimeInterval = 20) async -> Result<Data, StudioAPIFailure> {
+        let mine = generation
+        var retried = false
+        while true {
+            guard mine == generation, state.phase == .running, let server = connected, let folder = folderURL else {
+                return .failure(.notRunning)
+            }
+            let reply: StudioReply
+            do {
+                reply = try await network.request(method: method, port: server.port, path: path, token: server.token,
+                                                  body: body, maxBytes: maxBytes, timeout: timeout)
+            } catch {
+                guard mine == generation else { return .failure(.notRunning) }
+                let code = (error as? URLError)?.code
+                if code == .timedOut { return .failure(.timeout) }
+                if code == .dataLengthExceedsMaximum { return .failure(.tooLong) }
+                // POST не повторяем: сервер мог уже выполнить действие, повтор поставил бы задачу мастеру дважды.
+                // Перечитываем файлы только чтобы понять, жив ли сервер.
+                if retried || method != "GET" {
+                    if !(await reconnect(folder, mine)) { lostServer(mine) }
+                    return .failure(.unreachable)
+                }
+                retried = true
+                if await reconnect(folder, mine) { continue }
+                lostServer(mine)
+                return .failure(.unreachable)
+            }
+            guard mine == generation else { return .failure(.notRunning) }
+            switch reply.status {
+            case 200:
+                return .success(reply.data)
+            case 401:
+                if !retried {
+                    retried = true
+                    if await reconnect(folder, mine) { continue }
+                }
+                return .failure(.unauthorized)
+            case 403:
+                return .failure(.forbidden)
+            default:
+                let text = StudioBoardParser.message(from: reply.data, key: "error") ?? "Студия ответила ошибкой (\(reply.status))"
+                return .failure(.refused(text))
             }
         }
+    }
+
+    private func reconnect(_ folder: URL, _ mine: Int) async -> Bool {
+        guard let server = await probe(folder, expectedPid: state.ownsServer ? process?.pid : nil), mine == generation else { return false }
+        connected = server
+        return true
+    }
+
+    private func lostServer(_ mine: Int) {
+        guard mine == generation, state.phase == .running else { return }
+        if state.ownsServer { terminateOwn() }
+        set(.failed, message: "Студия перестала отвечать")
+    }
+
+    /// Правка снимка утилит (опрос, выбор, уведомления). Только пока сервер работает: иначе снимок не нужен.
+    func updateBoard(_ change: (inout StudioBoard) -> Void) {
+        guard state.phase == .running else { return }
+        var board = state.board ?? StudioBoard()
+        change(&board)
+        if board != state.board { state.board = board }
+    }
+
+    /// Экран закрыт: снимок утилит больше не нужен.
+    func clearBoard() {
+        if state.board != nil { state.board = nil }
     }
 
     // MARK: Остановка

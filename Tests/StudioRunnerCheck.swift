@@ -261,7 +261,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         check(r.runner.state.phase == .starting, "старт: сразу «запускается»")
         let up = await settle(r.runner.state.phase == .running)
         let state = r.runner.state
-        check(up && state.ownsServer && state.login == 1, "свой сервер: работает, запущен нами, код выдан")
+        check(up && state.ownsServer && state.login == 0, "свой сервер: работает, запущен нами, кода входа не брали")
         check(r.launcher.launches.count == 1 && r.launcher.launches[0].executable.path == folder.appendingPathComponent("studio").path
               && r.launcher.launches[0].directory.path == folder.path, "запущен именно <папка>/studio, из папки Студии")
         check(r.launcher.launches[0].environment["HOME"] != FileManager.default.homeDirectoryForCurrentUser.path,
@@ -269,24 +269,27 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         check(Set(r.launcher.launches[0].environment.keys) == ["PATH", "HOME", "LANG", "STUDIO_OPEN", "STUDIO_PORT"]
               && r.launcher.launches[0].environment["STUDIO_OPEN"] == "none" && r.launcher.launches[0].environment["STUDIO_PORT"] == String(port),
               "окружение минимальное и явное: STUDIO_OPEN=none, свой порт")
-        check(state.page?.hasPrefix("http://127.0.0.1:\(port)/#b=bootcode") == true, "адрес входа: 127.0.0.1, порт, код во фрагменте")
-        check(!json(state).contains(token1) && !(state.page ?? "").contains(token1) && !(state.message ?? "").contains(token1),
-              "токена нет ни в состоянии, ни в адресе")
-        check(r.network.requests.allSatisfy { $0.port == port && $0.token == token1 && ($0.path == "/api/ping" || $0.path == "/api/boot") },
-              "в сеть ушло только на свой порт и только ping и boot")
-        check(StudioNavigation.loginURL(state.page)?.port == port, "адрес принимает политика навигации")
+        check(!json(state).contains(token1) && !json(state).contains("#b=") && !(state.message ?? "").contains(token1),
+              "в состоянии нет ни токена, ни кода входа")
+        check(r.network.requests.allSatisfy { $0.port == port && $0.token == token1 && $0.path == "/api/ping" },
+              "в сеть ушло только на свой порт и только ping: код входа без просьбы не берётся")
 
-        // Новый код: другой адрес, номер вырос.
-        let before = state.page
-        r.runner.newLogin()
-        let fresh = await settle(r.runner.state.login == 2)
-        check(fresh && r.runner.state.page != before && r.runner.state.phase == .running, "«обновить»: новый код, номер вырос")
+        // «Открыть в браузере»: код уходит прямо в браузер, в состояние не попадает.
+        var opened: [URL] = []
+        r.runner.openInBrowser { opened.append($0) }
+        check(await settle(opened.count == 1), "«В браузере»: адрес открыт")
+        check(opened.first.flatMap { StudioNavigation.loginURL($0.absoluteString) }?.port == port
+              && opened.first?.absoluteString.hasPrefix("http://127.0.0.1:\(port)/#b=bootcode") == true, "адрес: 127.0.0.1, свой порт, код во фрагменте")
+        check(r.runner.state.login == 1 && !json(r.runner.state).contains("#b=") && !json(r.runner.state).contains("bootcode"),
+              "номер вырос, кода в состоянии нет")
+        r.runner.openInBrowser { opened.append($0) }
+        check(await settle(opened.count == 2) && opened[0] != opened[1] && r.runner.state.login == 2, "второе открытие: новый код")
 
         // 4. Выключение: свой процесс просим выйти.
         r.runner.stop()
         let process = r.launcher.processes[0]
-        check(process.terminated == 1 && r.runner.state.phase == .stopped && r.runner.state.page == nil && !r.runner.state.ownsServer,
-              "стоп: SIGTERM своему процессу, страницы нет")
+        check(process.terminated == 1 && r.runner.state.phase == .stopped && !r.runner.state.ownsServer,
+              "стоп: SIGTERM своему процессу")
         try? await Task.sleep(for: .milliseconds(300))
         check(process.killed == 0, "вышел сам: SIGKILL не нужен")
         check(r.runner.state.phase == .stopped, "после выхода процесса остаётся «остановлена», не ошибка")
@@ -322,7 +325,9 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         r.runner.start()
         let up = await settle(r.runner.state.phase == .running)
         check(up && !r.runner.state.ownsServer && r.launcher.launches.isEmpty, "чужая Студия: подключились, свой процесс не запускался")
-        check(r.runner.state.page?.hasPrefix("http://127.0.0.1:\(port)/#b=") == true, "чужая Студия: страница с кодом")
+        var opened: [URL] = []
+        r.runner.openInBrowser { opened.append($0) }
+        check(await settle(opened.first?.absoluteString.hasPrefix("http://127.0.0.1:\(port)/#b=") == true), "чужая Студия: в браузер по коду")
         r.runner.stop()
         check(r.launcher.processes.isEmpty && r.runner.state.phase == .stopped, "выключение: чужой процесс не трогается")
         // Включили снова — снова подключились.
@@ -444,7 +449,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         r.launcher.exitImmediately = 3
         r.runner.start()
         _ = await settle(r.runner.state.phase == .failed)
-        check(r.runner.state.phase == .failed && r.runner.state.message?.contains("3") == true && r.runner.state.page == nil,
+        check(r.runner.state.phase == .failed && r.runner.state.message?.contains("3") == true,
               "процесс вышел сразу: ошибка с кодом")
     }
     do {
@@ -493,7 +498,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         r.runner.stop()
     }
 
-    // 10. Код входа не годится: страницы нет.
+    // 10. Код входа не годится: браузер не открывается, ошибка.
     do {
         for (name, bad) in [("с пробелом", "boot code with space"), ("со слэшем", "bootcode/abcdefghijkl"), ("короткий", "abc"),
                             ("с ?", "bootcode?abcdefghijkl"), ("с #", "bootcode#abcdefghijkl"), ("с юникодом", "bootcodeабвгдежзийкл")] {
@@ -502,8 +507,11 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
             serveOnLaunch(r, port: port, token: token1)
             r.network.bootOverride = bad
             r.runner.start()
+            _ = await settle(r.runner.state.phase == .running)
+            var opened: [URL] = []
+            r.runner.openInBrowser { opened.append($0) }
             _ = await settle(r.runner.state.phase == .failed)
-            check(r.runner.state.phase == .failed && r.runner.state.page == nil, "код входа \(name): страницы нет, ошибка")
+            check(r.runner.state.phase == .failed && opened.isEmpty, "код входа \(name): браузер не открыт, ошибка")
             r.runner.stop()
         }
         let port = randomPort()
@@ -511,8 +519,11 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         serveOnLaunch(r, port: port, token: token1)
         r.network.bootBroken = true
         r.runner.start()
+        _ = await settle(r.runner.state.phase == .running)
+        var opened: [URL] = []
+        r.runner.openInBrowser { opened.append($0) }
         _ = await settle(r.runner.state.phase == .failed)
-        check(r.runner.state.phase == .failed && r.runner.state.page == nil, "boot вернул не JSON: страницы нет, ошибка")
+        check(r.runner.state.phase == .failed && opened.isEmpty, "boot вернул не JSON: браузер не открыт, ошибка")
         r.runner.stop()
     }
 
@@ -525,7 +536,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         _ = await settle(r.runner.state.phase == .running)
         r.launcher.processes[0].finish(9)
         let failed = await settle(r.runner.state.phase == .failed)
-        check(failed && r.runner.state.page == nil && r.runner.state.message?.contains("9") == true, "упал при работе: ошибка с кодом, страницы нет")
+        check(failed && r.runner.state.message?.contains("9") == true, "упал при работе: ошибка с кодом")
         // Запоздавший выход прошлого процесса не портит новый.
         r.runner.stop()
         r.runner.start()
@@ -546,7 +557,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         r.runner.start()
         r.runner.stop()
         try? await Task.sleep(for: .milliseconds(200))
-        check(r.runner.state.phase == .stopped && r.runner.state.page == nil, "выключили во время запуска: остановлена, страницы нет")
+        check(r.runner.state.phase == .stopped, "выключили во время запуска: остановлена")
         check(r.launcher.processes.allSatisfy { !$0.running }, "выключили во время запуска: процесса не осталось")
     }
 
@@ -580,12 +591,12 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
         // Чужую Студию перезапустили с другим токеном: берётся новый из файлов.
         writeServer(folder, port: port, pid: foreign, token: token2)
         r.network.serve(port: port, token: token2)
-        r.runner.newLogin()
-        check(await settle(r.runner.state.login == 2), "чужую перезапустили с новым токеном: «обновить» работает")
+        r.runner.openInBrowser { _ in }
+        check(await settle(r.runner.state.login == 1), "чужую перезапустили с новым токеном: «В браузере» работает")
         check(r.network.requests.contains { $0.token == token2 && $0.path == "/api/boot" }, "новый токен прочитан заново")
         removeServerFiles(folder)
         r.network.unserve(port: port)
-        r.runner.newLogin()
+        r.runner.openInBrowser { _ in }
         check(await settle(r.runner.state.phase == .failed), "сервер пропал: ошибка, не вечное «работает»")
         r.runner.stop()
     }
@@ -625,7 +636,8 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
     let folder = makeFolder()
     let r = rig(folder: folder, port: port)
     serveOnLaunch(r, port: port, token: token1)
-    let controller = StudioController(runner: r.runner, defaults: defaults)
+    var opened: [URL] = []
+    let controller = StudioController(runner: r.runner, defaults: defaults, openURL: { opened.append($0) })
 
     func send(_ action: StudioAction) -> LinkReply<StudioState>? {
         try? JSONDecoder().decode(LinkReply<StudioState>.self, from: controller.handle(LinkWire.encoded(action)))
@@ -633,7 +645,7 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
     check(StudioController.storedFolder(defaults) == "", "по умолчанию папка пуста")
     check(send(.setFolder("не абсолютный"))?.error != nil && defaults.string(forKey: StudioKeys.folder) == nil, "кривой путь: отказ, настройка не записана")
     check(send(.setFolder("/a/../b"))?.error != nil, "путь с «..»: отказ")
-    check(send(.newLogin)?.error != nil, "код входа у остановленной: отказ")
+    check(send(.openInBrowser)?.error != nil, "«В браузере» у остановленной: отказ")
 
     // Выключенный модуль: папка сохраняется, сервер не стартует.
     check(send(.setFolder(folder.path))?.error == nil && defaults.string(forKey: StudioKeys.folder) == folder.path, "папка записана в настройки")
@@ -642,9 +654,12 @@ func json(_ state: StudioState) -> String { String(decoding: LinkWire.encoded(st
     // Включили: старт.
     controller.start()
     check(await settle(controller.state.phase == .running && controller.state.ownsServer), "включили: сервер работает")
-    let page = controller.state.page
-    check(send(.newLogin)?.error == nil, "включён: новый код принят")
-    check(await settle(controller.state.page != page), "новый код выдан")
+    check(send(.openInBrowser)?.error == nil, "включён: «В браузере» принято")
+    check(await settle(opened.count == 1), "адрес открыт утилитой")
+    check(send(.newLogin)?.error == "Экран Студии теперь родной: обнови лаунчер", "newLogin от лаунчера 0.9.4: отказ строкой")
+    try? await Task.sleep(for: .milliseconds(200))
+    check(opened.count == 1, "newLogin браузер не открывает (0.9.4 шлёт его сам, без нажатия)")
+    check(!String(decoding: controller.handle(LinkWire.encoded(StudioAction.openInBrowser)), as: UTF8.self).contains("#b="), "в ответе на провод кода нет")
 
     // Смена папки: старый свой сервер остановлен, новый запущен в новой.
     let other = makeFolder()

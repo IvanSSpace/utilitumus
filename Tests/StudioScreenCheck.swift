@@ -1,10 +1,11 @@
 import AppKit
 import SwiftUI
-import WebKit
 
-// Экран «Студия» от начала до конца, без подмен процесса и сети: настоящий запуск `<папка>/studio`, настоящий URLSession до 127.0.0.1,
-// настоящий WKWebView. Вместо Студии — Tests/fake-studio.py во временной папке на случайном порту: те же файлы в .cache, тот же вход
-// по одноразовому коду. Настоящая Студия, порт 47870 и её .cache не трогаются. Снимки экрана — в <out>/png.
+// Экран «Студия» от начала до конца, без подмен процесса и сети: настоящий запуск `<папка>/studio`, настоящий URLSession до
+// 127.0.0.1, родной экран на SwiftUI. Вместо Студии — Tests/fake-studio.py во временной папке на случайном порту: те же файлы в
+// .cache, тот же JSON API. Опрос только при открытом экране, снимок утилит, значки, дело выбранной, действия с телами страницы,
+// отказы сервера строками, «Открыть в браузере» по одноразовому коду. Настоящая Студия, порт 47870 и её .cache не трогаются.
+// Снимки экрана — в <out>/png.
 // Запуск: Tests/run-studio-screen-check.sh
 
 var failures = 0
@@ -22,21 +23,11 @@ func check(_ ok: Bool, _ name: String) {
     return what()
 }
 
-func findWebView(_ view: NSView) -> WKWebView? {
-    if let web = view as? WKWebView { return web }
-    for sub in view.subviews { if let found = findWebView(sub) { return found } }
-    return nil
-}
-
-@MainActor func evaluate(_ web: WKWebView, _ js: String) async -> String? {
-    await withCheckedContinuation { continuation in
-        web.evaluateJavaScript(js) { value, _ in continuation.resume(returning: value as? String) }
-    }
-}
-
 @MainActor enum Stand {
+    static let size = NSSize(width: 1180, height: 960)
     static let window: NSWindow = {
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 900, height: 1010), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: size.width, height: size.height), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
         window.alphaValue = 0
         window.ignoresMouseEvents = true
         window.isReleasedWhenClosed = false
@@ -51,31 +42,20 @@ func findWebView(_ view: NSView) -> WKWebView? {
             .environment(\.dsTheme, theme)
             .preferredColorScheme(.dark)
             .ignoresSafeArea())
-        host.frame = NSRect(x: 0, y: 0, width: 900, height: 1010)
+        host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
         return host
     }
 
-    /// Оболочка экрана рисуется как есть, а содержимое WKWebView берётся его собственным снимком и кладётся на своё место:
-    /// cacheDisplay веб-содержимое не отдаёт.
     static func snapshot(_ host: NSView) async -> NSImage {
+        // SwiftUI рисует на следующем проходе: даём ему кадр.
+        try? await Task.sleep(for: .milliseconds(250))
         host.layoutSubtreeIfNeeded()
         let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds)!
         host.cacheDisplay(in: host.bounds, to: bitmap)
         let image = NSImage(size: host.bounds.size)
         image.addRepresentation(bitmap)
-        guard let web = findWebView(host) else { return image }
-        let config = WKSnapshotConfiguration()
-        let shot: NSImage? = await withCheckedContinuation { continuation in
-            web.takeSnapshot(with: config) { image, _ in continuation.resume(returning: image) }
-        }
-        guard let shot else { return image }
-        var frame = host.convert(web.bounds, from: web)
-        if host.isFlipped { frame.origin.y = host.bounds.height - frame.maxY }
-        image.lockFocus()
-        shot.draw(in: frame)
-        image.unlockFocus()
         return image
     }
 
@@ -89,6 +69,18 @@ func logLines(_ log: URL) -> [String] {
     ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
 }
 
+/// Тела POST, как их получил сервер: путь и разобранный JSON.
+func bodies(_ log: URL) -> [(path: String, body: [String: Any])] {
+    logLines(URL(fileURLWithPath: log.path + ".bodies")).compactMap { line in
+        guard let item = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any], let path = item["path"] as? String else { return nil }
+        return (path, item["body"] as? [String: Any] ?? [:])
+    }
+}
+
+@MainActor func send(_ controller: StudioController, _ action: StudioAction) -> String? {
+    (try? JSONDecoder().decode(LinkReply<StudioState>.self, from: controller.handle(LinkWire.encoded(action))))?.error
+}
+
 @MainActor func run(work: URL, out: URL, port: Int) async {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
@@ -98,21 +90,24 @@ func logLines(_ log: URL) -> [String] {
 
     let runner = StudioRunner(folder: folder.path, config: StudioRunner.Config(port: port, startTimeout: 20, pollInterval: 0.1, killAfter: 3),
                               launcher: StudioProcessLauncher(), network: StudioLiveNetwork(), system: StudioLiveSystem())
-    let controller = StudioController(runner: runner, defaults: Kit.defaults)
+    // Браузер подменён: на стенде настоящий не открывается, а адрес нужно проверить.
+    var opened: [URL] = []
+    let controller = StudioController(runner: runner, defaults: Kit.defaults, openURL: { opened.append($0) })
+    controller.board.interval = 0.3
     let model = StudioWindowModel(controller: controller)
     let host = Stand.host(StudioView(model: model), theme)
+    let board = { controller.state.board }
 
     // Выключено: папка задана, сервер не идёт.
-    _ = controller.handle(LinkWire.encoded(StudioAction.setFolder(folder.path)))
+    check(send(controller, .setFolder(folder.path)) == nil, "папка принята")
     try? await Task.sleep(for: .milliseconds(300))
     check(controller.state.phase == .stopped && controller.state.folder == folder.path, "папка из экрана сохранена, сервер не запущен")
     Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-stopped.png"))
 
-    // Включили: настоящий процесс, настоящий вход.
+    // Включили: настоящий процесс.
     controller.start()
     let up = await settle(controller.state.phase == .running)
     check(up && controller.state.ownsServer, "включили: Студия запущена этой утилитой")
-    check(controller.state.page.flatMap { StudioNavigation.loginURL($0) }?.port == port, "адрес входа: 127.0.0.1 и свой порт")
     let tokenPath = folder.appendingPathComponent(".cache/token")
     let serverPath = folder.appendingPathComponent(".cache/server.json")
     let pid = ((try? Data(contentsOf: serverPath)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["pid"] as? Int ?? 0
@@ -120,50 +115,102 @@ func logLines(_ log: URL) -> [String] {
     var mode = stat()
     check(stat(tokenPath.path, &mode) == 0 && mode.st_mode & 0o077 == 0, "токен в .cache с правами 0600")
     let token = (try? String(contentsOf: tokenPath, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    check(!token.isEmpty && !(controller.state.page ?? "").contains(token) && !String(decoding: controller.handle(LinkWire.encoded(StudioAction.newLogin)), as: UTF8.self).contains(token),
-          "токена нет ни в адресе, ни в ответе по проводу")
 
-    // Страница загрузилась в WKWebView и вошла по коду.
-    let web = await { () -> WKWebView? in
-        _ = await settle(findWebView(host) != nil)
-        return findWebView(host)
-    }()
-    check(web != nil, "страница Студии показана в WKWebView внутри экрана")
-    guard let web else { return finish(pid) }
-    let entered = await settle({ logLines(log).contains("POST /api/session 200") }())
-    check(entered, "страница вошла по одноразовому коду (/api/session)")
-    var who: String?
-    _ = await settle({ false }(), seconds: 0.5)
-    for _ in 0..<40 {
-        who = await evaluate(web, "document.getElementById('who') && document.getElementById('who').textContent")
-        if who == "вход выполнен" { break }
-        try? await Task.sleep(for: .milliseconds(100))
-    }
-    check(who == "вход выполнен", "в самой странице видно «вход выполнен» (\(who ?? "nil"))")
-    check(web.url?.absoluteString == "http://127.0.0.1:\(port)/", "адрес после входа без кода: \(web.url?.absoluteString ?? "nil")")
-    let lines = logLines(log)
-    check(lines.contains("GET /api/ping 200") && lines.contains("POST /api/boot 200") && lines.contains("GET / 200"), "сервер видел ping, boot и страницу")
-    Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-running.png"))
+    // Экран закрыт: /api/state не опрашивается.
+    try? await Task.sleep(for: .milliseconds(1000))
+    check(!logLines(log).contains { $0.hasPrefix("GET /api/state") }, "экран закрыт: опроса нет")
+    check(board() == nil, "экран закрыт: снимка нет")
 
-    // «Обновить»: новый код, страница грузится заново и входит снова.
-    let sessionsBefore = logLines(log).filter { $0 == "POST /api/session 200" }.count
-    model.newLogin()
-    let refreshed = await settle(logLines(log).filter { $0 == "POST /api/session 200" }.count > sessionsBefore)
-    check(refreshed, "«обновить»: новый код входа, страница вошла снова")
+    // Открыли экран: снимок, значки.
+    controller.screenOpen(true)
+    check(await settle(board()?.units.count == 8), "экран открыт: снимок из /api/state (\(board()?.units.count ?? 0) записей)")
+    check(await settle(board()?.icons["mixer"] != nil && board()?.icons["fans"] != nil), "значки mixer и fans пришли")
+    check((board()?.icons.values.map(\.count).max() ?? .max) <= StudioBoardParser.maxIconBytes, "значки в пределе провода")
+    let wire = String(decoding: LinkWire.encoded(controller.state), as: UTF8.self)
+    check(!token.isEmpty && !wire.contains(token), "на проводе нет токена")
+    check(wire.utf8.count < 200_000, "состояние на проводе компактное (\(wire.utf8.count) байт)")
+    check(logLines(log).contains("GET /api/state 200") && !logLines(log).contains { $0.contains(" 401") }, "запросы к API с токеном, без 401")
+    Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-board.png"))
 
-    // Страница не может уйти с адреса Студии: file:// не открывается.
-    _ = await evaluate(web, "location.href = 'file:///etc/hosts'; 'ok'")
-    try? await Task.sleep(for: .milliseconds(800))
-    check(web.url?.scheme == "http" && web.url?.host == "127.0.0.1", "переход на file:// отменён: страница на месте (\(web.url?.absoluteString ?? "nil"))")
+    // Выбрали утилиту: дело и очередь.
+    check(send(controller, .select("mixer")) == nil, "выбрали mixer")
+    check(await settle(board()?.detail?.id == "mixer" && board()?.detail?.caseText.isEmpty == false), "дело mixer пришло")
+    check(logLines(log).contains("GET /api/unit/mixer 200"), "дело только выбранной: /api/unit/mixer")
+    check(!logLines(log).contains("GET /api/unit/fans 200"), "дело невыбранной не просим")
+    Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-detail.png"))
+
+    // Действия: тела как у страницы.
+    func lastBody(_ path: String) -> [String: Any]? { bodies(log).last { $0.path == path }?.body }
+    check(send(controller, .task(unit: "mixer", text: "Превью скриншотов\nс Рабочего стола")) == nil, "задача мастеру отправлена")
+    check(await settle(lastBody("/api/unit/mixer/task")?["text"] as? String == "Превью скриншотов\nс Рабочего стола"),
+          "сервер получил {text} с переводом строки")
+    check(await settle(board()?.notice?.text.hasPrefix("Задача №") == true && board()?.notice?.isError == false), "ответ сервера уведомлением")
+    check(await settle(board()?.detail?.queue.contains { $0.text.hasPrefix("Превью скриншотов") } == true), "задача видна в очереди")
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .handToHub(unit: "mixer", text: "Общий выпуск иконок")) == nil, "«Отдать хабу» отправлено")
+    check(await settle(lastBody("/api/unit/mixer/hub")?["text"] as? String == "Общий выпуск иконок"), "сервер получил /hub с {text}")
+    check(await settle(board()?.hubTasks.contains { $0.name == "Общий выпуск иконок" } == true), "задача появилась у хаба")
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .rotate("mixer")) == nil, "смена мастера отправлена")
+    check(await settle(board()?.unit("mixer")?.rotation?.running == true), "смена мастера идёт: видно в снимке")
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .stand("mixer")) == nil, "стенд отправлен")
+    check(await settle(board()?.notice?.text == "Стенд собирается в терминале Orca"), "стенд: ответ сервера")
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .release("mixer")) == nil, "патч отправлен")
+    check(await settle(board()?.notice?.text.hasPrefix("Просьба о патче") == true), "патч: ответ сервера")
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .commitCases) == nil, "«Записать дела» отправлено")
+    check(await settle(board()?.notice?.text == "Записал дела: mixer"), "«Записать дела»: ответ сервера")
+    check(["/api/unit/mixer/rotate", "/api/unit/mixer/stand", "/api/unit/mixer/release", "/api/commit"].allSatisfy { path in
+        bodies(log).contains { $0.path == path && $0.body.isEmpty }
+    }, "действия без текста: тело {} как у страницы")
+
+    // Отказы сервера — его строкой, без падений.
+    check(send(controller, .openSession("fans")) == nil, "открыть сессию fans отправлено")
+    check(await settle(board()?.notice?.text == "Мастер ждёт ответа в своём терминале: сначала ответь ему" && board()?.notice?.isError == true),
+          "409: строка сервера как ошибка")
+    Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-error.png"))
+    _ = await settle(board()?.working.isEmpty == true)
+    check(send(controller, .task(unit: "fans", text: "БУМ")) == nil, "задача, на которой сервер падает")
+    check(await settle(board()?.notice?.text == "Внутренняя ошибка Studio: подробности в её терминале"), "500: строка сервера")
+    check(send(controller, .task(unit: "fans", text: " \n ")) == "Напиши задачу", "пустая задача: отказ на месте, до сервера не идёт")
+    check(controller.state.phase == .running, "после отказов модуль работает")
+
+    // Открыть в браузере: одноразовый код берёт и открывает утилита, на провод он не попадает.
+    check(!logLines(log).contains { $0.hasPrefix("POST /api/boot") }, "без «В браузере» код входа не берётся вовсе")
+    model.openInBrowser()
+    check(await settle(opened.count == 1 && logLines(log).contains("POST /api/boot 200")), "«В браузере»: утилита взяла код и открыла адрес")
+    check(opened.first.flatMap { StudioNavigation.loginURL($0.absoluteString) }?.port == port && opened.first?.absoluteString.contains(token) == false,
+          "адрес для браузера: 127.0.0.1, свой порт, код вместо токена")
+    let fragment = opened.first?.fragment ?? "нет"
+    check(!String(decoding: LinkWire.encoded(controller.state), as: UTF8.self).contains(fragment), "кода входа на проводе нет")
+
+    // Настоящая сеть: длинный ответ обрывается на пределе, а не читается целиком.
+    let live = StudioLiveNetwork()
+    var cut: URLError.Code?
+    do { _ = try await live.request(method: "GET", port: port, path: "/icons/mixer.png", token: "", body: nil, maxBytes: 64, timeout: 5) }
+    catch { cut = (error as? URLError)?.code }
+    check(cut == .dataLengthExceedsMaximum, "длинный ответ оборван на пределе (\(cut.map { "\($0.rawValue)" } ?? "прочитан"))")
+    let whole = try? await live.request(method: "GET", port: port, path: "/icons/mixer.png", token: "", body: nil, maxBytes: 512 * 1024, timeout: 5)
+    check(whole?.status == 200 && whole?.data.starts(with: [0x89, 0x50]) == true, "в пределе — читается целиком")
+
+    // Закрыли экран: опрос остановлен.
+    controller.screenOpen(false)
+    try? await Task.sleep(for: .milliseconds(400))
+    let polls = logLines(log).filter { $0.hasPrefix("GET /api/state") }.count
+    try? await Task.sleep(for: .milliseconds(1200))
+    check(logLines(log).filter { $0.hasPrefix("GET /api/state") }.count == polls, "экран закрыт: опрос остановлен")
+    check(board() == nil, "экран закрыт: снимок забыт")
 
     // Выключили: свой сервер ушёл, файлы стёрты.
+    controller.screenOpen(true)
+    _ = await settle(board() != nil)
     controller.stop()
     let gone = await settle(kill(pid_t(pid), 0) != 0, seconds: 8)
     check(gone, "выключили: процесс сервера завершился")
     check(!FileManager.default.fileExists(atPath: tokenPath.path) && !FileManager.default.fileExists(atPath: serverPath.path), "токен и server.json стёрты самим сервером")
-    check(controller.state.phase == .stopped && controller.state.page == nil, "состояние: остановлена, страницы нет")
-    try? await Task.sleep(for: .milliseconds(200))
-    check(findWebView(host) == nil, "страница убрана с экрана")
+    check(controller.state.phase == .stopped && board() == nil, "состояние: остановлена, снимка нет")
     Stand.write(await Stand.snapshot(host), to: out.appendingPathComponent("studio-after-stop.png"))
 
     // Чужой сервер: запускаем как «кого-то другого», утилита подключается и при выключении не убивает.
@@ -179,16 +226,12 @@ func logLines(_ log: URL) -> [String] {
     controller.start()
     let joined = await settle(controller.state.phase == .running)
     check(joined && !controller.state.ownsServer, "чужая Студия: подключились, не запускали своё")
+    check(await settle(board()?.units.isEmpty == false), "с чужой Студией экран тоже показывает утилиты")
     controller.stop()
     try? await Task.sleep(for: .milliseconds(500))
     check(foreign.isRunning, "выключение чужую Студию не убивает")
     foreign.terminate()
     foreign.waitUntilExit()
-}
-
-/// Если проверка оборвалась: сервер не оставляем.
-@MainActor func finish(_ pid: Int) {
-    if pid > 0, kill(pid_t(pid), 0) == 0 { kill(pid_t(pid), SIGTERM) }
 }
 
 @main
