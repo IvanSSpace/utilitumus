@@ -30,12 +30,22 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
                            state.outputChoice = .system
                        case .setBluetoothLocked(let locked):
                            state.isBluetoothLocked = locked
+                       case .setInputLevel(let uid, let value):
+                           guard state.currentInputLevel?.uid == uid, state.currentInputLevel?.value != nil,
+                                 !(state.currentInputIsBluetooth && state.isBluetoothLocked),
+                                 SoundInputLevel.range.contains(value) else { return }
+                           state.currentInputLevel?.value = value
                        }
+                   },
+                   coalesceKey: { action in
+                       if case .setInputLevel(let uid, _) = action { return uid }
+                       return nil
                    })
     }
 
     var currentInputName: String { state.currentInputName }
     var currentInputIsBluetooth: Bool { state.currentInputIsBluetooth }
+    var currentInputLevel: SoundInputLevel? { state.currentInputLevel }
     var currentOutputName: String { state.currentOutputName }
     var displayInputs: [DisplayDevice] { state.displayInputs }
     var displayOutputs: [DisplayDevice] { state.displayOutputs }
@@ -49,6 +59,7 @@ final class RemoteSoundModel: RemoteModuleModel<SoundState, SoundAction>, SoundM
     func selectInput(uid: String) { send(.selectInput(uid)) }
     func selectOutput(uid: String) { send(.selectOutput(uid)) }
     func selectSystemOutput() { send(.selectSystemOutput) }
+    func setInputLevel(uid: String, value: Double) { send(.setInputLevel(uid: uid, value: value)) }
 
     // Карточка та же, что у встроенного: имя микрофона берётся из состояния, оно меняется со сменой устройства.
     override func dashboardState(base: DashState, status: LinkStatus?) -> DashState {

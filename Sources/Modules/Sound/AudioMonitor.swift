@@ -1,10 +1,12 @@
 import Foundation
+import AudioToolbox
 import CoreAudio
 
 final class MonitorState: ObservableObject {
     static let shared = MonitorState()
     @Published var currentInputName: String = "—"
     @Published var currentInputIsBluetooth: Bool = false
+    @Published var currentInputLevel: SoundInputLevel?
     @Published var currentOutputName: String = "—"
     @Published var displayInputs: [DisplayDevice] = []
     @Published var displayOutputs: [DisplayDevice] = []
@@ -101,6 +103,28 @@ final class AudioMonitor {
         }
     }
 
+    /// Вызывается контроллером на main. Фоновый проход сам синхронно заходит на main за состоянием.
+    func setInputLevel(uid: String, value: Double, bluetoothLocked: Bool) -> Double? {
+        #if KIT_TEST_DEFAULTS
+        return nil
+        #else
+        guard isActive, SoundInputLevel.range.contains(value),
+              let id = defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice),
+              rawDeviceUID(id) == uid else { return nil }
+        let transport = transportType(id)
+        guard transport.isPhysical, !(bluetoothLocked && transport == .bluetooth),
+              let control = inputLevelControl(id),
+              defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice) == id,
+              rawDeviceUID(id) == uid else { return nil }
+        var property = control.address
+        var scalar = Float32(value)
+        if Double(scalar) == control.value { return control.value }
+        let size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectSetPropertyData(id, &property, 0, nil, size, &scalar) == noErr else { return nil }
+        return readInputLevel(id, address: &property)
+        #endif
+    }
+
     // MARK: - Policy (выполняется только на `queue`)
 
     private func enforcePolicyOnQueue() {
@@ -121,14 +145,20 @@ final class AudioMonitor {
             func assign<T: Equatable>(_ keyPath: ReferenceWritableKeyPath<MonitorState, T>, _ value: T) {
                 if state[keyPath: keyPath] != value { state[keyPath: keyPath] = value }
             }
+            let locked = LockState.shared.isLocked
+            var inputLevel: SoundInputLevel?
             if let currentInput = inputs.first(where: { $0.id == currentInputID }) {
                 assign(\.currentInputName, currentInput.name)
                 assign(\.currentInputIsBluetooth, currentInput.transport == .bluetooth)
+                if currentInput.transport.isPhysical, !(locked && currentInput.transport == .bluetooth),
+                   let uid = rawDeviceUID(currentInput.id) {
+                    inputLevel = SoundInputLevel(uid: uid, value: inputLevelControl(currentInput.id)?.value)
+                }
             }
+            assign(\.currentInputLevel, inputLevel)
             if let current = outputs.first(where: { $0.id == currentOutputID }) {
                 assign(\.currentOutputName, current.name)
             }
-            let locked = LockState.shared.isLocked
             PrimaryInputStore.shared.migrateIfNeeded(connected: inputs, bluetoothLocked: locked)
             KnownDeviceStore.inputs.sync(from: inputs)
             KnownDeviceStore.outputs.sync(from: outputs)
@@ -218,12 +248,59 @@ final class AudioMonitor {
     /// основное устройство и список известных. Номер USB-порта из UID выкинут (см. DeviceIdentity).
     /// nil — у устройства нет UID: запомнить его всё равно не по чему.
     private func deviceUID(_ id: AudioDeviceID) -> String? {
+        rawDeviceUID(id).map(DeviceIdentity.stableKey)
+    }
+
+    private func rawDeviceUID(_ id: AudioDeviceID) -> String? {
         var addr = address(kAudioDevicePropertyDeviceUID)
         var uid: Unmanaged<CFString>? = nil
         var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
         let status = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &uid)
         guard status == noErr, let cfUID = uid?.takeRetainedValue() else { return nil }
-        return DeviceIdentity.stableKey(cfUID as String)
+        return cfUID as String
+    }
+
+    /// Сначала общий регулятор. VirtualMain сохраняет баланс каналов у устройств, где драйвер его предоставляет.
+    private func inputLevelControl(_ id: AudioDeviceID) -> (address: AudioObjectPropertyAddress, value: Double)? {
+        func control(_ property: AudioObjectPropertyAddress) -> (AudioObjectPropertyAddress, Double)? {
+            var property = property
+            var writable = DarwinBoolean(false)
+            guard AudioObjectHasProperty(id, &property),
+                  AudioObjectIsPropertySettable(id, &property, &writable) == noErr, writable.boolValue,
+                  let value = readInputLevel(id, address: &property) else { return nil }
+            return (property, value)
+        }
+
+        let scalar = address(kAudioDevicePropertyVolumeScalar, scope: kAudioObjectPropertyScopeInput)
+        if let main = control(scalar) { return main }
+        let virtual = address(kAudioHardwareServiceDeviceProperty_VirtualMainVolume, scope: kAudioObjectPropertyScopeInput)
+        if let main = control(virtual) { return main }
+        // Если драйвер даёт только поканальное управление, один слайдер подходит для моно-входа.
+        guard inputChannelCount(id) == 1 else { return nil }
+        var mono = scalar
+        mono.mElement = 1
+        return control(mono)
+    }
+
+    private func readInputLevel(_ id: AudioDeviceID, address: inout AudioObjectPropertyAddress) -> Double? {
+        var value: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value) == noErr,
+              size == MemoryLayout<Float32>.size, SoundInputLevel.range.contains(Double(value)) else { return nil }
+        return Double(value)
+    }
+
+    private func inputChannelCount(_ id: AudioDeviceID) -> Int? {
+        var addr = address(kAudioDevicePropertyStreamConfiguration, scope: kAudioObjectPropertyScopeInput)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size) == noErr,
+              size >= MemoryLayout<AudioBufferList>.size else { return nil }
+        let storage = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { storage.deallocate() }
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, storage) == noErr,
+              size >= MemoryLayout<AudioBufferList>.size else { return nil }
+        let list = UnsafeMutableAudioBufferListPointer(storage.assumingMemoryBound(to: AudioBufferList.self))
+        return list.reduce(0) { $0 + Int($1.mNumberChannels) }
     }
 
     private func transportType(_ id: AudioDeviceID) -> Transport {

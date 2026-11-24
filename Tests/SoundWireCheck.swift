@@ -38,6 +38,7 @@ func fixture(primary: String? = nil, output: OutputChoice = .builtIn, locked: Bo
     let monitor = MonitorState.shared
     monitor.currentInputName = state.currentInputName
     monitor.currentInputIsBluetooth = state.currentInputIsBluetooth
+    monitor.currentInputLevel = state.currentInputLevel
     monitor.currentOutputName = state.currentOutputName
     monitor.displayInputs = state.displayInputs
     monitor.displayOutputs = state.displayOutputs
@@ -53,6 +54,7 @@ func fixture(primary: String? = nil, output: OutputChoice = .builtIn, locked: Bo
 
     var currentInputName: String { state.currentInputName }
     var currentInputIsBluetooth: Bool { state.currentInputIsBluetooth }
+    var currentInputLevel: SoundInputLevel? { state.currentInputLevel }
     var currentOutputName: String { state.currentOutputName }
     var displayInputs: [DisplayDevice] { state.displayInputs }
     var displayOutputs: [DisplayDevice] { state.displayOutputs }
@@ -65,6 +67,7 @@ func fixture(primary: String? = nil, output: OutputChoice = .builtIn, locked: Bo
     func selectInput(uid: String) { calls.append(.selectInput(uid)) }
     func selectOutput(uid: String) { calls.append(.selectOutput(uid)) }
     func selectSystemOutput() { calls.append(.selectSystemOutput) }
+    func setInputLevel(uid: String, value: Double) { calls.append(.setInputLevel(uid: uid, value: value)) }
 }
 
 // MARK: - Кодирование
@@ -83,8 +86,11 @@ func acceptedAction(_ text: String) -> SoundAction? {
 }
 
 func wirePure() {
+    var adjustable = fixture()
+    adjustable.currentInputLevel = SoundInputLevel(uid: "BuiltInMicrophoneDevice", value: 0.5)
     let states = [
         fixture(),
+        adjustable,
         fixture(primary: "usb-mic", output: .device("lg-display"), locked: false, inputBluetooth: true),
         fixture(primary: "old-mic", output: .system),
     ]
@@ -98,6 +104,7 @@ func wirePure() {
         (.selectOutput("lg-display"), #"{"selectOutput":{"_0":"lg-display"}}"#),
         (.selectSystemOutput, #"{"selectSystemOutput":{}}"#),
         (.setBluetoothLocked(false), #"{"setBluetoothLocked":{"_0":false}}"#),
+        (.setInputLevel(uid: "usb-mic", value: 0.75), #"{"setInputLevel":{"uid":"usb-mic","value":0.75}}"#),
     ]
     for (action, text) in actions {
         check(String(decoding: encoded(action), as: UTF8.self) == text, "\(action) кодируется как \(text)")
@@ -110,10 +117,14 @@ func wirePure() {
         #"{"selectSystemOutput":{},"x":1}"#, #"{"selectSystemOutput":{"x":1}}"#,
         #"{"selectInput":{"_0":"usb-mic","x":1}}"#,
         #"{"selectInput":{"_0":"a"},"selectInput":{"_0":"b"}}"#,
+        #"{"setInputLevel":{"uid":"usb-mic"}}"#,
+        #"{"setInputLevel":{"uid":"usb-mic","value":0.5,"x":1}}"#,
     ]
     for text in foreign { check(acceptedAction(text) == nil, "отвергнуто: \(text)") }
 
     let text = String(decoding: encoded(fixture()), as: UTF8.self)
+    check(!text.contains("currentInputLevel") && (try? JSONDecoder().decode(SoundState.self, from: Data(text.utf8))) == fixture(),
+          "состояние прежней версии читается без поля громкости")
     let future = text.replacingOccurrences(of: #"{"currentInputIsBluetooth""#, with: #"{"future":1,"currentInputIsBluetooth""#)
     check(future != text && (try? JSONDecoder().decode(SoundState.self, from: Data(future.utf8))) == fixture(), "новое поле от утилиты не ломает чтение")
     let warp = text.replacingOccurrences(of: #""transport":"usb""#, with: #""transport":"warp""#)
@@ -124,7 +135,11 @@ func wirePure() {
 
 @MainActor func validations() {
     var enforced = 0
-    let controller = SoundController(enforcePolicy: { enforced += 1 })
+    var levelWrites = 0
+    let controller = SoundController(enforcePolicy: { enforced += 1 }, writeInputLevel: { _, value, _ in
+        levelWrites += 1
+        return value == 0.75 ? 0.74 : nil
+    })
     var published = 0
     let watch = controller.objectWillChange.sink { published += 1 }
     defer { watch.cancel() }
@@ -169,6 +184,24 @@ func wirePure() {
     empty.displayOutputs = []
     refused(empty, .selectInput("usb-mic"), "вход: монитор ещё не прошёл, списка нет")
     refused(empty, .selectOutput("lg-display"), "выход: монитор ещё не прошёл, списка нет")
+
+    var adjustable = open
+    adjustable.currentInputLevel = SoundInputLevel(uid: micBuiltIn.uid, value: 0.5)
+    refused(adjustable, .setInputLevel(uid: micUSB.uid, value: 0.75), "громкость: микрофон сменился")
+    refused(adjustable, .setInputLevel(uid: micBuiltIn.uid, value: 1.01), "громкость: выше диапазона")
+    refused(adjustable, .setInputLevel(uid: micBuiltIn.uid, value: .nan), "громкость: NaN")
+    var unsupported = adjustable
+    unsupported.currentInputLevel?.value = nil
+    refused(unsupported, .setInputLevel(uid: micBuiltIn.uid, value: 0.75), "громкость: недоступна")
+    var lockedBluetooth = fixture(inputBluetooth: true)
+    lockedBluetooth.currentInputLevel = SoundInputLevel(uid: micBluetooth.uid, value: 0.5)
+    refused(lockedBluetooth, .setInputLevel(uid: micBluetooth.uid, value: 0.75), "громкость: Bluetooth заблокирован")
+    check(levelWrites == 0, "ошибочные команды не дошли до регулятора")
+    refused(adjustable, .setInputLevel(uid: micBuiltIn.uid, value: 0.8), "громкость: отказ драйвера")
+    published = 0
+    controller.setInputLevel(uid: micBuiltIn.uid, value: 0.75)
+    check(levelWrites == 2 && controller.currentInputLevel?.value == 0.74 && enforced == 0 && published > 0,
+          "громкость: на экране подтверждённый уровень драйвера без смены устройств")
 
     accepted(open, .selectInput("usb-mic"), "вход: USB") { $0.primaryInputUID = "usb-mic" }
     accepted(open, .selectInput("old-mic"), "вход: не подключён, как на экране") { $0.primaryInputUID = "old-mic" }
@@ -292,6 +325,9 @@ func differingPixels(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Int {
         check(differingPixels(before, Stand.snapshot(view)) > 0, "экран обновился: \(name)")
     }
     await changed("монитор") { MonitorState.shared.currentOutputName = "Другое имя" }
+    await changed("громкость микрофона") {
+        MonitorState.shared.currentInputLevel = SoundInputLevel(uid: micBuiltIn.uid, value: 0.5)
+    }
     await changed("блокировка") { LockState.shared.isLocked = false }
     await changed("выбранный микрофон") { PrimaryInputStore.shared.select("usb-mic") }
     await changed("выбранный выход") { PrimaryOutputStore.shared.select(.system) }

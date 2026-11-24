@@ -41,6 +41,7 @@ let notOneAction: [(String, String)] = [
     let monitor = MonitorState.shared
     monitor.currentInputName = state.currentInputName
     monitor.currentInputIsBluetooth = state.currentInputIsBluetooth
+    monitor.currentInputLevel = state.currentInputLevel
     monitor.currentOutputName = state.currentOutputName
     monitor.displayInputs = state.displayInputs
     monitor.displayOutputs = state.displayOutputs
@@ -52,6 +53,7 @@ let notOneAction: [(String, String)] = [
 @MainActor func garbage() async {
     await checkBadActions(SoundState.self, id: moduleID, extra: notOneAction.map { ($0.0, Data($0.1.utf8)) } + [
         ("неизвестный микрофон", LinkWire.encoded(SoundAction.selectInput("нет-такого"))),
+        ("громкость чужого микрофона", LinkWire.encoded(SoundAction.setInputLevel(uid: "нет-такого", value: 0.5))),
         ("неизвестный выход", LinkWire.encoded(SoundAction.selectOutput("нет-такого"))),
     ])
 }
@@ -66,6 +68,9 @@ let notOneAction: [(String, String)] = [
     check(model.isBluetoothLocked, "и вернули")
     await model.perform(.selectInput("нет-такого"))
     check(model.actionError != nil && model.primaryInputUID == nil, "несуществующий микрофон: текст ошибки, выбор прежний")
+    let levelBefore = model.currentInputLevel
+    await model.perform(.setInputLevel(uid: "нет-такого", value: 0.5))
+    check(model.actionError != nil && model.currentInputLevel == levelBefore, "громкость чужого микрофона отклонена через XPC")
     await model.perform(.selectSystemOutput)
     check(model.outputChoice == .system && model.actionError == nil, "«Как решит macOS» принят")
     let builtIn = physical(model.displayOutputs, SoundPolicy.speakerMarker).builtIn

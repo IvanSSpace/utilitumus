@@ -5,6 +5,7 @@ import Foundation
 protocol SoundModel: ObservableObject {
     var currentInputName: String { get }
     var currentInputIsBluetooth: Bool { get }
+    var currentInputLevel: SoundInputLevel? { get }
     var currentOutputName: String { get }
     var displayInputs: [DisplayDevice] { get }
     var displayOutputs: [DisplayDevice] { get }
@@ -15,4 +16,5 @@ protocol SoundModel: ObservableObject {
     func selectInput(uid: String)
     func selectOutput(uid: String)
     func selectSystemOutput()
+    func setInputLevel(uid: String, value: Double)
 }

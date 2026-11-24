@@ -4,7 +4,8 @@ extension SoundController {
     var wireState: SoundState {
         SoundState(currentInputName: currentInputName, currentInputIsBluetooth: currentInputIsBluetooth,
                    currentOutputName: currentOutputName, displayInputs: displayInputs, displayOutputs: displayOutputs,
-                   primaryInputUID: primaryInputUID, outputChoice: outputChoice, isBluetoothLocked: isBluetoothLocked)
+                   primaryInputUID: primaryInputUID, outputChoice: outputChoice, isBluetoothLocked: isBluetoothLocked,
+                   currentInputLevel: currentInputLevel)
     }
 }
 

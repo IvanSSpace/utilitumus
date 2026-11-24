@@ -118,6 +118,7 @@ private struct ChoiceRow: View {
 /// Экран модуля «Звук»: основной микрофон и основной выход.
 struct SoundView<Model: SoundModel>: View {
     @ObservedObject var model: Model
+    @Environment(\.dsTint) private var tint
 
     /// Реальные микрофоны — то, что физически выбирают как вход.
     private var physicalInputs: [DisplayDevice] {
@@ -214,6 +215,36 @@ struct SoundView<Model: SoundModel>: View {
         }
     }
 
+    private func inputLevelRow(_ input: SoundInputLevel) -> some View {
+        HStack(spacing: 10) {
+            Text("Громкость микрофона").font(DS.rowTitle)
+            if let value = input.value, SoundInputLevel.range.contains(value) {
+                let percent = Int((value * 100).rounded())
+                Slider(value: Binding(
+                    get: { model.currentInputLevel?.uid == input.uid ? model.currentInputLevel?.value ?? value : value },
+                    set: { model.setInputLevel(uid: input.uid, value: ($0 * 100).rounded() / 100) }
+                ), in: SoundInputLevel.range)
+                .tint(tint)
+                .controlSize(.small)
+                .accessibilityLabel("Громкость микрофона")
+                .accessibilityValue("\(percent)%")
+                Text("\(percent)%")
+                    .font(DS.rowSubtitle.monospacedDigit())
+                    .frame(width: 36, alignment: .trailing)
+                    .accessibilityHidden(true)
+            } else {
+                Spacer(minLength: 4)
+                Text("Недоступна").font(DS.rowSubtitle)
+            }
+        }
+        .foregroundStyle(.white.opacity(0.75))
+        .padding(.horizontal, 12)
+        .frame(minHeight: 38)
+        .overlay(alignment: .top) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1).padding(.horizontal, 12)
+        }
+    }
+
     var body: some View {
         DSPage(module: .sound) {
             // Что делает — одной строкой; подробности в «Как это работает».
@@ -230,6 +261,10 @@ struct SoundView<Model: SoundModel>: View {
                               title: model.currentInputName, note: "микрофон", inline: true) { EmptyView() }
                     DeviceRow(style: DeviceStyle(symbol: "speaker.wave.2.fill", tint: .blue),
                               title: model.currentOutputName, note: "выход", inline: true) { EmptyView() }
+                }
+                if let input = model.currentInputLevel,
+                   !(model.currentInputIsBluetooth && model.isBluetoothLocked) {
+                    inputLevelRow(input).id(input.uid)
                 }
             }
 
